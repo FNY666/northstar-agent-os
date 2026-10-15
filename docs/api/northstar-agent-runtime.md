@@ -20696,6 +20696,94 @@ Alertmanager-shaped alert registry, silences, and routing.
   - Compute the routing decision for every active alert at this seq.
 #### `main()`
 
+### `alerting_rules`
+
+Source: `components/northstar-agent-runtime/alerting_rules.py`
+
+Alerting rules — simulated Alertmanager/PagerDuty bookkeeping (thirty-fourth batch).
+
+#### `AlertingRulesError`
+
+Base error for the alerting-rules module.
+
+#### `BadRuleError`
+
+Rule definition was malformed.
+
+#### `DuplicateRuleError`
+
+A rule with this id already exists.
+
+#### `UnknownRuleError`
+
+No rule with this id is registered.
+
+#### `BadNotificationError`
+
+Notification request was malformed.
+
+#### `BadSilenceError`
+
+Silence request was malformed.
+
+#### `DuplicateSilenceError`
+
+A silence with this id already exists.
+
+#### `UnknownSilenceError`
+
+No silence with this id is registered.
+
+#### `SilenceStateError`
+
+Silence is in a state that forbids the operation.
+
+#### `SeqOrderError`
+
+Caller seq did not strictly increase.
+
+#### `RuleRecord`
+
+One pinned alerting rule (frozen).
+
+- `verify()`
+#### `NotificationRecord`
+
+One booked notification attempt (frozen). ``suppressed`` is data.
+
+- `verify()`
+#### `SilenceRecord`
+
+One Alertmanager-style silence (frozen). ``lifted`` is data.
+
+- `verify()`
+#### `alerting_rules_audit_event(kind: str, detail: Mapping[str, Any], seq: int)`
+
+Shape an ``audit.ndjson/1`` record for the alerting-rules module.
+
+#### `AlertingRules`
+
+Deterministic alerting-rule/notification/silence ledger.
+
+- `rule(rule_id: str, name: str, severity: str, condition: str, seq: int, labels: Sequence[str] | None=None)`
+  - Define an alerting rule (frozen record).
+- `notify(rule_id: str, seq: int, channel: str, recipient: str)`
+  - Book a notification attempt.
+- `silence(silence_id: str, rule_id: str, seq: int, until_seq: int, reason: str)`
+  - Mute a rule until ``until_seq`` (Alertmanager-style silence).
+- `lift_silence(silence_id: str, seq: int)`
+  - Lift a silence early (frozen replacement record).
+- `rule_record(rule_id: str)`
+- `rule_ids()`
+- `notification(notification_id: str)`
+- `notifications_for(rule_id: str)`
+- `silence_record(silence_id: str)`
+- `active_silences(rule_id: str, seq: int)`
+  - Silences covering ``rule_id`` at ``seq`` (pure view).
+- `stats()`
+- `audit_log()`
+#### `main()`
+
 ### `aligned_ai`
 
 Source: `components/northstar-agent-runtime/aligned_ai.py`
@@ -20799,6 +20887,43 @@ AST self-check: the module imports stdlib names only.
 #### `main()`
 
 Self-check: exercise assess/verify/evaluate/retire and print status.
+
+### `alignment_check`
+
+Source: `components/northstar-agent-runtime/alignment_check.py`
+
+Alignment check: goal-trace-action observer (LlamaFirewall), Simulated.
+
+#### `AlignmentCheckError`
+
+Fail-closed: bad inputs raise.
+
+#### `AlignmentJudgment`
+
+Result of an alignment check.
+
+#### `TraceEntry`
+
+One entry in the action trace.
+
+#### `build_judgment_input(goal: str, trace: List[TraceEntry], action: str, *, max_trace: int=MAX_TRACE)`
+
+Build the (goal, trace, action) input for the judge.
+
+#### `AlignmentObserver`
+
+Observer that checks action-goal alignment.
+
+- `check(goal: str, trace: List[TraceEntry], action: str)`
+  - Check if an action aligns with the goal given the trace.
+- `check_count` (property)
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check with a rule-based judge.
 
 ### `alignment_eval`
 
@@ -20909,6 +21034,19 @@ Alignment-testing ledger: scenario, judge, grade (terminal per scenario).
   - Ledger counts (pure read).
 - `audit_log(seq: int)`
   - The booked audit events (pure read).
+#### `main()`
+
+### `allowlist`
+
+Source: `components/northstar-agent-runtime/allowlist.py`
+
+Allowlist validation (D-IN-027), Simulated.
+
+#### `Allowlist`
+
+- `check(value: str)`
+#### `stdlib_only()`
+
 #### `main()`
 
 ### `aml_screener`
@@ -21918,6 +22056,70 @@ Time-based variant of ``approval_chain.ApprovalChain``.
   - Same as :meth:`execute_with_approval` with the full record.
 #### `main()`
 
+### `approval_fatigue_probes`
+
+Source: `components/northstar-agent-runtime/approval_fatigue_probes.py`
+
+Approval-fatigue probe corpus (consent-fatigue HITL bypass).
+
+#### `ApprovalEvent`
+
+One approval-path decision in a trajectory window.
+
+#### `FatigueMonitor`
+
+Sliding-window classifier over approval trajectories.
+
+- `classify(events: tuple[ApprovalEvent, ...], now: float)`
+  - Classify the approval trajectory ending at ``now``.
+- `should_record(events: tuple[ApprovalEvent, ...], now: float)`
+  - Whether approvals in this trajectory may be bound to receipts.
+- `snapshot(events: tuple[ApprovalEvent, ...], now: float)`
+  - Digest-pinned snapshot of a classification for the audit trail.
+#### `verify_snapshot(snapshot: dict[str, Any])`
+
+Re-derive a monitor snapshot digest with constant-time compare.
+
+#### `FatigueMeter`
+
+Continuous fatigue measurement over approval trajectories.
+
+- `measure(events: tuple[ApprovalEvent, ...], now: float)`
+  - Measure fatigue over the trajectory ending at ``now``.
+#### `verify_measurement(measurement: dict[str, Any])`
+
+Re-derive a fatigue-measurement digest with constant-time compare.
+
+#### `FatigueResistantGate`
+
+Disposition engine that resists consent fatigue.
+
+- `decide(events: tuple[ApprovalEvent, ...], now: float, risk_tier: str=RISK_LOW, request_ref: str | None=None)`
+  - Return a digest-pinned disposition for the trajectory.
+#### `verify_decision(decision: dict[str, Any])`
+
+Re-derive a gate-decision digest with constant-time compare.
+
+#### `probe_names()`
+
+All approval-fatigue probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
 ### `approval_sla`
 
 Source: `components/northstar-agent-runtime/approval_sla.py`
@@ -22016,6 +22218,166 @@ Verdict for one ``(proposer, approver_identity)`` pair.
 #### `self_attestation_denied_event(*, proposer: str, approver_identity: str, failed_rule: str, reason: str, card_id: str='', call_id: str='')`
 
 The audit record for a self-attestation denial.
+
+### `argument_smuggling_probes`
+
+Source: `components/northstar-agent-runtime/argument_smuggling_probes.py`
+
+Argument-smuggling probes: smuggling shapes, schema bypass, downstream meaning.
+
+#### `attack_probe_names()`
+
+All argument-smuggling attack probe names.
+
+#### `benign_probe_names()`
+
+All argument-smuggling benign probe names.
+
+#### `probes_in_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `has_confusables(text: str)`
+
+True when NFKC normalization changes the string.
+
+#### `has_mixed_script(text: str)`
+
+True when alphabetic characters span more than one confusable script.
+
+#### `is_nested_json_payload(text: str)`
+
+True when a string parses as a JSON object or array.
+
+#### `is_double_encoded(text: str)`
+
+True when a string is JSON that decodes to another JSON string.
+
+#### `inspect_string_argument(text: str)`
+
+Name the smuggling shapes in one string argument.
+
+#### `ArgumentRecord`
+
+One pinned argument: what the gate validated.
+
+#### `seal_argument(tool: str, parameter: str, value: Any, declared_type: str)`
+
+Pin one argument at validation time.
+
+#### `verify_record(record: ArgumentRecord)`
+
+Re-derive a record's seal; constant-time compare, never raises.
+
+#### `detect_schema_bypass(record: ArgumentRecord)`
+
+Name the schema-bypass shapes in one sealed argument.
+
+#### `undeclared_keys(arguments: Mapping[str, Any], declared: Collection[str])`
+
+Name argument keys the schema never declared.
+
+#### `surface_digest(arguments: Mapping[str, Any])`
+
+Digest what the gate validated: the raw argument surface.
+
+#### `meaning_digest(arguments: Mapping[str, Any])`
+
+Digest what the downstream will execute: the normalized meaning.
+
+#### `MeaningEnvelope`
+
+Binds a validated surface to its derived meaning.
+
+#### `seal_meaning(tool: str, arguments: Mapping[str, Any])`
+
+Pin the surface and meaning of validated arguments.
+
+#### `verify_envelope(envelope: MeaningEnvelope)`
+
+Re-derive an envelope's seal; constant-time compare, never raises.
+
+#### `detect_meaning_gap(envelope: MeaningEnvelope, dispatched_arguments: Mapping[str, Any])`
+
+Compare the meaning the gate sealed against what will execute.
+
+#### `gate_arguments(tool: str, declared_types: Mapping[str, str], arguments: Mapping[str, Any])`
+
+Gate one tool invocation's arguments; fail closed.
+
+#### `main()`
+
+Print a small summary for the CLI.
+
+### `artifact_graph_probes`
+
+Source: `components/northstar-agent-runtime/artifact_graph_probes.py`
+
+Artifact-graph probes: lineage forgery / graph diagnosis / artifact integrity.
+
+#### `ArtifactNode`
+
+One artifact in the lineage graph: content pinned, parents linked.
+
+#### `build_node(artifact_id: str, content_digest: str, parent_digests: tuple[str, ...] | list[str], producer: str, kind: str, provenance_domain: str)`
+
+Build a node and pin its digest over the sealed body.
+
+#### `verify_node(node: ArtifactNode)`
+
+Recompute the node's digest; constant-time compare. Never raises.
+
+#### `ArtifactGraph`
+
+Append-only artifact lineage graph. Fail-closed on bad nodes.
+
+- `add_node(node: ArtifactNode)`
+  - Append a node. Raises on unverifiable nodes or duplicates.
+- `get(digest: str)`
+- `digests()`
+#### `verify_graph_integrity(graph: ArtifactGraph)`
+
+Verify every node and link. Returns (ok, findings). Never raises.
+
+#### `lineage_walk(graph: ArtifactGraph, node_digest: str)`
+
+Transitive ancestors of ``node_digest`` (oldest last), cycle-guarded.
+
+#### `diagnose(graph: ArtifactGraph, outcome_digest: str)`
+
+Graph-based diagnosis of a bad outcome.
+
+#### `graph_head_digest(graph: ArtifactGraph)`
+
+Head digest for out-of-band anchoring of the whole graph.
+
+#### `probe_names()`
+
+All artifact-graph attack probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
 
 ### `artifact_publisher`
 
@@ -22118,6 +22480,36 @@ Shape an ``audit.ndjson/1`` record for publisher activity.
 
 Self-check: register, build, upload, yank, refusals.
 
+### `asi02_probe`
+
+Source: `components/northstar-agent-runtime/asi02_probe.py`
+
+ASI02 probe harness: OWASP 8 primitives (attack), Simulated.
+
+#### `Asi02Error`
+
+Fail-closed.
+
+#### `Asi02Probe`
+
+One ASI02 primitive probe.
+
+#### `run_probe(probe: Asi02Probe, gate_fn: Callable[[str, Dict[str, Any]], bool])`
+
+Run one probe. Returns (blocked, reason).
+
+#### `run_all(gate_fn: Callable[[str, Dict[str, Any]], bool])`
+
+Run all ASI02 probes.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
 ### `asi04_probes`
 
 Source: `components/northstar-agent-runtime/asi04_probes.py`
@@ -22161,6 +22553,97 @@ ASI09 probe corpus: human-agent trust calibration probes.
 #### `probe_names()`
 
 All ASI09 probe names.
+
+### `ask_or_solve_probes`
+
+Source: `components/northstar-agent-runtime/ask_or_solve_probes.py`
+
+Ask-or-solve probes: first-class questioning under uncertainty.
+
+#### `probe_names()`
+
+All probe names in the corpus.
+
+#### `attack_names()`
+
+Names of the attack probes (expected deny).
+
+#### `benign_names()`
+
+Names of the benign control probes (expected allow).
+
+#### `probe_by_name(name: str)`
+
+Look up one probe by name; raises KeyError fail-closed.
+
+#### `probe_invokes_deny_side(probe: Mapping[str, Any])`
+
+True if the probe's gate_interaction names an active deny-side mechanism.
+
+#### `ClarificationQuestion`
+
+One candidate clarification question, pinned and gateable.
+
+- `verify()`
+  - Recompute the digest; a tampered question fails closed.
+#### `QuestionFinding`
+
+One gate finding over a question.
+
+- `as_dict()`
+#### `check_scope_minimality(question: ClarificationQuestion)`
+
+The question may only request declared-needed fields.
+
+#### `check_axis_binding(question: ClarificationQuestion)`
+
+Every question must name the uncertainty axis it reduces.
+
+#### `check_no_leading(question: ClarificationQuestion)`
+
+The question must not recommend, propose an answer, or confirm a risk.
+
+#### `check_no_silence_consent(question: ClarificationQuestion)`
+
+The question must not frame non-objection as approval.
+
+#### `check_no_confirmation_laundering(question: ClarificationQuestion)`
+
+A question about a risky action must not substitute for the receipt path.
+
+#### `gate_question(question: ClarificationQuestion)`
+
+Run all question gates. Verdict is a conjunction, never a score.
+
+#### `AskDecision`
+
+One pinned ask/solve/abstain decision.
+
+- `verify()`
+- `open_axes` (property)
+  - Declared axes no real answer has closed.
+- `as_dict()`
+#### `AskPolicy`
+
+Confidence bands for the ask decision, in the abstain_threshold spirit.
+
+#### `decide_next(*, decision_id: str, confidence: float, uncertainty_axes: Sequence[str]=(), answered_axes: Sequence[str]=(), questions_asked: int=0, policy: AskPolicy | None=None, reason: str='')`
+
+Route one uncertainty state to solve / ask / abstain. Fail-closed.
+
+#### `DialogueSession`
+
+Append-only record of one ask/solve/abstain dialogue.
+
+- `ask(question: ClarificationQuestion)`
+  - Gate a question and, if it passes, append it. Fail-closed.
+- `record(decision: AskDecision)`
+  - Append a pinned decision to the session.
+- `report()`
+  - Per-question, per-gate evidence. No composite score, ever.
+#### `requires_human_path(decision: AskDecision)`
+
+Whether an AskDecision must take the abstain_threshold human path.
 
 ### `assistance_game`
 
@@ -22426,6 +22909,686 @@ Assurance-case decision ledger (GSN-shaped), deterministic.
 #### `main()`
 
 Self-check smoke run.
+
+### `attack_extra_01`
+
+Source: `components/northstar-agent-runtime/attack_extra_01.py`
+
+Prompt-leak via completion (attack_extra_01), Simulated.
+
+#### `AttackExtra01Error`
+
+Fail-closed.
+
+#### `AttackExtra01Probe`
+
+One attack probe.
+
+#### `detect(attack: str, observed: str)`
+
+Return True if the attack is detected/blocked from ``observed`` text.
+
+#### `run_probe(probe: AttackExtra01Probe, check_fn: Callable[[AttackExtra01Probe], bool])`
+
+Run one probe. Returns (blocked, reason).
+
+#### `run_all(check_fn: Callable[[AttackExtra01Probe], bool])`
+
+Run all probes through ``check_fn``. Returns block summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `attack_extra_02`
+
+Source: `components/northstar-agent-runtime/attack_extra_02.py`
+
+Instruction hierarchy confusion (attack_extra_02), Simulated.
+
+#### `AttackExtra02Error`
+
+Fail-closed.
+
+#### `AttackExtra02Probe`
+
+One attack probe.
+
+#### `detect(attack: str, observed: str)`
+
+Return True if the attack is detected/blocked from ``observed`` text.
+
+#### `run_probe(probe: AttackExtra02Probe, check_fn: Callable[[AttackExtra02Probe], bool])`
+
+Run one probe. Returns (blocked, reason).
+
+#### `run_all(check_fn: Callable[[AttackExtra02Probe], bool])`
+
+Run all probes through ``check_fn``. Returns block summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `attack_extra_03`
+
+Source: `components/northstar-agent-runtime/attack_extra_03.py`
+
+Tool-output fake system messages (attack_extra_03), Simulated.
+
+#### `AttackExtra03Error`
+
+Fail-closed.
+
+#### `AttackExtra03Probe`
+
+One attack probe.
+
+#### `detect(attack: str, observed: str)`
+
+Return True if the attack is detected/blocked from ``observed`` text.
+
+#### `run_probe(probe: AttackExtra03Probe, check_fn: Callable[[AttackExtra03Probe], bool])`
+
+Run one probe. Returns (blocked, reason).
+
+#### `run_all(check_fn: Callable[[AttackExtra03Probe], bool])`
+
+Run all probes through ``check_fn``. Returns block summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `attack_extra_04`
+
+Source: `components/northstar-agent-runtime/attack_extra_04.py`
+
+Multi-agent collusion (attack_extra_04), Simulated.
+
+#### `AttackExtra04Error`
+
+Fail-closed.
+
+#### `AttackExtra04Probe`
+
+One attack probe.
+
+#### `detect(attack: str, observed: str)`
+
+Return True if the attack is detected/blocked from ``observed`` text.
+
+#### `run_probe(probe: AttackExtra04Probe, check_fn: Callable[[AttackExtra04Probe], bool])`
+
+Run one probe. Returns (blocked, reason).
+
+#### `run_all(check_fn: Callable[[AttackExtra04Probe], bool])`
+
+Run all probes through ``check_fn``. Returns block summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `attack_extra_05`
+
+Source: `components/northstar-agent-runtime/attack_extra_05.py`
+
+Delegation chain attacks (attack_extra_05), Simulated.
+
+#### `AttackExtra05Error`
+
+Fail-closed.
+
+#### `AttackExtra05Probe`
+
+One attack probe.
+
+#### `detect(attack: str, observed: str)`
+
+Return True if the attack is detected/blocked from ``observed`` text.
+
+#### `run_probe(probe: AttackExtra05Probe, check_fn: Callable[[AttackExtra05Probe], bool])`
+
+Run one probe. Returns (blocked, reason).
+
+#### `run_all(check_fn: Callable[[AttackExtra05Probe], bool])`
+
+Run all probes through ``check_fn``. Returns block summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `attack_extra_06`
+
+Source: `components/northstar-agent-runtime/attack_extra_06.py`
+
+Time-of-check / time-of-use in gates (attack_extra_06), Simulated.
+
+#### `AttackExtra06Error`
+
+Fail-closed.
+
+#### `AttackExtra06Probe`
+
+One attack probe.
+
+#### `detect(attack: str, observed: str)`
+
+Return True if the attack is detected/blocked from ``observed`` text.
+
+#### `run_probe(probe: AttackExtra06Probe, check_fn: Callable[[AttackExtra06Probe], bool])`
+
+Run one probe. Returns (blocked, reason).
+
+#### `run_all(check_fn: Callable[[AttackExtra06Probe], bool])`
+
+Run all probes through ``check_fn``. Returns block summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `attack_extra_07`
+
+Source: `components/northstar-agent-runtime/attack_extra_07.py`
+
+Race conditions in approval (attack_extra_07), Simulated.
+
+#### `AttackExtra07Error`
+
+Fail-closed.
+
+#### `AttackExtra07Probe`
+
+One attack probe.
+
+#### `detect(attack: str, observed: str)`
+
+Return True if the attack is detected/blocked from ``observed`` text.
+
+#### `run_probe(probe: AttackExtra07Probe, check_fn: Callable[[AttackExtra07Probe], bool])`
+
+Run one probe. Returns (blocked, reason).
+
+#### `run_all(check_fn: Callable[[AttackExtra07Probe], bool])`
+
+Run all probes through ``check_fn``. Returns block summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `attack_extra_08`
+
+Source: `components/northstar-agent-runtime/attack_extra_08.py`
+
+Cache poisoning for tools (attack_extra_08), Simulated.
+
+#### `AttackExtra08Error`
+
+Fail-closed.
+
+#### `AttackExtra08Probe`
+
+One attack probe.
+
+#### `detect(attack: str, observed: str)`
+
+Return True if the attack is detected/blocked from ``observed`` text.
+
+#### `run_probe(probe: AttackExtra08Probe, check_fn: Callable[[AttackExtra08Probe], bool])`
+
+Run one probe. Returns (blocked, reason).
+
+#### `run_all(check_fn: Callable[[AttackExtra08Probe], bool])`
+
+Run all probes through ``check_fn``. Returns block summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `attack_extra_09`
+
+Source: `components/northstar-agent-runtime/attack_extra_09.py`
+
+DNS rebinding for tool endpoints (attack_extra_09), Simulated.
+
+#### `AttackExtra09Error`
+
+Fail-closed.
+
+#### `AttackExtra09Probe`
+
+One attack probe.
+
+#### `detect(attack: str, observed: str)`
+
+Return True if the attack is detected/blocked from ``observed`` text.
+
+#### `run_probe(probe: AttackExtra09Probe, check_fn: Callable[[AttackExtra09Probe], bool])`
+
+Run one probe. Returns (blocked, reason).
+
+#### `run_all(check_fn: Callable[[AttackExtra09Probe], bool])`
+
+Run all probes through ``check_fn``. Returns block summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `attack_extra_10`
+
+Source: `components/northstar-agent-runtime/attack_extra_10.py`
+
+Subdomain takeover for webhooks (attack_extra_10), Simulated.
+
+#### `AttackExtra10Error`
+
+Fail-closed.
+
+#### `AttackExtra10Probe`
+
+One attack probe.
+
+#### `detect(attack: str, observed: str)`
+
+Return True if the attack is detected/blocked from ``observed`` text.
+
+#### `run_probe(probe: AttackExtra10Probe, check_fn: Callable[[AttackExtra10Probe], bool])`
+
+Run one probe. Returns (blocked, reason).
+
+#### `run_all(check_fn: Callable[[AttackExtra10Probe], bool])`
+
+Run all probes through ``check_fn``. Returns block summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `attack_extra_11`
+
+Source: `components/northstar-agent-runtime/attack_extra_11.py`
+
+JWT confusion attacks (attack_extra_11), Simulated.
+
+#### `AttackExtra11Error`
+
+Fail-closed.
+
+#### `AttackExtra11Probe`
+
+One attack probe.
+
+#### `detect(attack: str, observed: str)`
+
+Return True if the attack is detected/blocked from ``observed`` text.
+
+#### `run_probe(probe: AttackExtra11Probe, check_fn: Callable[[AttackExtra11Probe], bool])`
+
+Run one probe. Returns (blocked, reason).
+
+#### `run_all(check_fn: Callable[[AttackExtra11Probe], bool])`
+
+Run all probes through ``check_fn``. Returns block summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `attack_extra_12`
+
+Source: `components/northstar-agent-runtime/attack_extra_12.py`
+
+OAuth scope escalation (attack_extra_12), Simulated.
+
+#### `AttackExtra12Error`
+
+Fail-closed.
+
+#### `AttackExtra12Probe`
+
+One attack probe.
+
+#### `detect(attack: str, observed: str)`
+
+Return True if the attack is detected/blocked from ``observed`` text.
+
+#### `run_probe(probe: AttackExtra12Probe, check_fn: Callable[[AttackExtra12Probe], bool])`
+
+Run one probe. Returns (blocked, reason).
+
+#### `run_all(check_fn: Callable[[AttackExtra12Probe], bool])`
+
+Run all probes through ``check_fn``. Returns block summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `attack_extra_13`
+
+Source: `components/northstar-agent-runtime/attack_extra_13.py`
+
+API key leakage via error messages (attack_extra_13), Simulated.
+
+#### `AttackExtra13Error`
+
+Fail-closed.
+
+#### `AttackExtra13Probe`
+
+One attack probe.
+
+#### `detect(attack: str, observed: str)`
+
+Return True if the attack is detected/blocked from ``observed`` text.
+
+#### `run_probe(probe: AttackExtra13Probe, check_fn: Callable[[AttackExtra13Probe], bool])`
+
+Run one probe. Returns (blocked, reason).
+
+#### `run_all(check_fn: Callable[[AttackExtra13Probe], bool])`
+
+Run all probes through ``check_fn``. Returns block summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `attack_extra_14`
+
+Source: `components/northstar-agent-runtime/attack_extra_14.py`
+
+Verbose error exfiltration (attack_extra_14), Simulated.
+
+#### `AttackExtra14Error`
+
+Fail-closed.
+
+#### `AttackExtra14Probe`
+
+One attack probe.
+
+#### `detect(attack: str, observed: str)`
+
+Return True if the attack is detected/blocked from ``observed`` text.
+
+#### `run_probe(probe: AttackExtra14Probe, check_fn: Callable[[AttackExtra14Probe], bool])`
+
+Run one probe. Returns (blocked, reason).
+
+#### `run_all(check_fn: Callable[[AttackExtra14Probe], bool])`
+
+Run all probes through ``check_fn``. Returns block summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `attack_extra_15`
+
+Source: `components/northstar-agent-runtime/attack_extra_15.py`
+
+Debug endpoint exposure (attack_extra_15), Simulated.
+
+#### `AttackExtra15Error`
+
+Fail-closed.
+
+#### `AttackExtra15Probe`
+
+One attack probe.
+
+#### `detect(attack: str, observed: str)`
+
+Return True if the attack is detected/blocked from ``observed`` text.
+
+#### `run_probe(probe: AttackExtra15Probe, check_fn: Callable[[AttackExtra15Probe], bool])`
+
+Run one probe. Returns (blocked, reason).
+
+#### `run_all(check_fn: Callable[[AttackExtra15Probe], bool])`
+
+Run all probes through ``check_fn``. Returns block summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `attack_extra_16`
+
+Source: `components/northstar-agent-runtime/attack_extra_16.py`
+
+Health check info leakage (attack_extra_16), Simulated.
+
+#### `AttackExtra16Error`
+
+Fail-closed.
+
+#### `AttackExtra16Probe`
+
+One attack probe.
+
+#### `detect(attack: str, observed: str)`
+
+Return True if the attack is detected/blocked from ``observed`` text.
+
+#### `run_probe(probe: AttackExtra16Probe, check_fn: Callable[[AttackExtra16Probe], bool])`
+
+Run one probe. Returns (blocked, reason).
+
+#### `run_all(check_fn: Callable[[AttackExtra16Probe], bool])`
+
+Run all probes through ``check_fn``. Returns block summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `attack_extra_17`
+
+Source: `components/northstar-agent-runtime/attack_extra_17.py`
+
+Metrics endpoint exfiltration (attack_extra_17), Simulated.
+
+#### `AttackExtra17Error`
+
+Fail-closed.
+
+#### `AttackExtra17Probe`
+
+One attack probe.
+
+#### `detect(attack: str, observed: str)`
+
+Return True if the attack is detected/blocked from ``observed`` text.
+
+#### `run_probe(probe: AttackExtra17Probe, check_fn: Callable[[AttackExtra17Probe], bool])`
+
+Run one probe. Returns (blocked, reason).
+
+#### `run_all(check_fn: Callable[[AttackExtra17Probe], bool])`
+
+Run all probes through ``check_fn``. Returns block summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `attack_extra_18`
+
+Source: `components/northstar-agent-runtime/attack_extra_18.py`
+
+Pprof exposure (attack_extra_18), Simulated.
+
+#### `AttackExtra18Error`
+
+Fail-closed.
+
+#### `AttackExtra18Probe`
+
+One attack probe.
+
+#### `detect(attack: str, observed: str)`
+
+Return True if the attack is detected/blocked from ``observed`` text.
+
+#### `run_probe(probe: AttackExtra18Probe, check_fn: Callable[[AttackExtra18Probe], bool])`
+
+Run one probe. Returns (blocked, reason).
+
+#### `run_all(check_fn: Callable[[AttackExtra18Probe], bool])`
+
+Run all probes through ``check_fn``. Returns block summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `attack_extra_19`
+
+Source: `components/northstar-agent-runtime/attack_extra_19.py`
+
+GraphQL introspection abuse (attack_extra_19), Simulated.
+
+#### `AttackExtra19Error`
+
+Fail-closed.
+
+#### `AttackExtra19Probe`
+
+One attack probe.
+
+#### `detect(attack: str, observed: str)`
+
+Return True if the attack is detected/blocked from ``observed`` text.
+
+#### `run_probe(probe: AttackExtra19Probe, check_fn: Callable[[AttackExtra19Probe], bool])`
+
+Run one probe. Returns (blocked, reason).
+
+#### `run_all(check_fn: Callable[[AttackExtra19Probe], bool])`
+
+Run all probes through ``check_fn``. Returns block summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `attack_extra_20`
+
+Source: `components/northstar-agent-runtime/attack_extra_20.py`
+
+WebSocket hijacking (attack_extra_20), Simulated.
+
+#### `AttackExtra20Error`
+
+Fail-closed.
+
+#### `AttackExtra20Probe`
+
+One attack probe.
+
+#### `detect(attack: str, observed: str)`
+
+Return True if the attack is detected/blocked from ``observed`` text.
+
+#### `run_probe(probe: AttackExtra20Probe, check_fn: Callable[[AttackExtra20Probe], bool])`
+
+Run one probe. Returns (blocked, reason).
+
+#### `run_all(check_fn: Callable[[AttackExtra20Probe], bool])`
+
+Run all probes through ``check_fn``. Returns block summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
 
 ### `attested_receipts`
 
@@ -23629,6 +24792,418 @@ Automated-alignment decision ledger: automate -> verify -> report.
 - `audit_log(seq: int)`
 #### `main()`
 
+### `b64_detect`
+
+Source: `components/northstar-agent-runtime/b64_detect.py`
+
+Base64 detection (D-IN-009), Simulated.
+
+#### `is_suspicious_b64(t: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `ba_01`
+
+Source: `components/northstar-agent-runtime/ba_01.py`
+
+ba_01: add_two utility.
+
+#### `add_two(x)`
+
+### `ba_02`
+
+Source: `components/northstar-agent-runtime/ba_02.py`
+
+ba_02: square utility.
+
+#### `square(x)`
+
+### `ba_03`
+
+Source: `components/northstar-agent-runtime/ba_03.py`
+
+ba_03: cube utility.
+
+#### `cube(x)`
+
+### `ba_04`
+
+Source: `components/northstar-agent-runtime/ba_04.py`
+
+ba_04: neg utility.
+
+#### `neg(x)`
+
+### `ba_05`
+
+Source: `components/northstar-agent-runtime/ba_05.py`
+
+ba_05: double utility.
+
+#### `double(x)`
+
+### `ba_06`
+
+Source: `components/northstar-agent-runtime/ba_06.py`
+
+ba_06: half utility.
+
+#### `half(x)`
+
+### `ba_07`
+
+Source: `components/northstar-agent-runtime/ba_07.py`
+
+ba_07: inc utility.
+
+#### `inc(x)`
+
+### `ba_08`
+
+Source: `components/northstar-agent-runtime/ba_08.py`
+
+ba_08: dec utility.
+
+#### `dec(x)`
+
+### `ba_09`
+
+Source: `components/northstar-agent-runtime/ba_09.py`
+
+ba_09: absv utility.
+
+#### `absv(x)`
+
+### `ba_10`
+
+Source: `components/northstar-agent-runtime/ba_10.py`
+
+ba_10: is_even utility.
+
+#### `is_even(x)`
+
+### `ba_11`
+
+Source: `components/northstar-agent-runtime/ba_11.py`
+
+ba_11: is_odd utility.
+
+#### `is_odd(x)`
+
+### `ba_12`
+
+Source: `components/northstar-agent-runtime/ba_12.py`
+
+ba_12: is_pos utility.
+
+#### `is_pos(x)`
+
+### `ba_13`
+
+Source: `components/northstar-agent-runtime/ba_13.py`
+
+ba_13: is_neg utility.
+
+#### `is_neg(x)`
+
+### `ba_14`
+
+Source: `components/northstar-agent-runtime/ba_14.py`
+
+ba_14: is_zero utility.
+
+#### `is_zero(x)`
+
+### `ba_15`
+
+Source: `components/northstar-agent-runtime/ba_15.py`
+
+ba_15: sign utility.
+
+#### `sign(x)`
+
+### `ba_16`
+
+Source: `components/northstar-agent-runtime/ba_16.py`
+
+ba_16: clamp01 utility.
+
+#### `clamp01(x)`
+
+### `ba_17`
+
+Source: `components/northstar-agent-runtime/ba_17.py`
+
+ba_17: pct utility.
+
+#### `pct(x)`
+
+### `ba_18`
+
+Source: `components/northstar-agent-runtime/ba_18.py`
+
+ba_18: per_mille utility.
+
+#### `per_mille(x)`
+
+### `ba_19`
+
+Source: `components/northstar-agent-runtime/ba_19.py`
+
+ba_19: ceil2 utility.
+
+#### `ceil2(x)`
+
+### `ba_20`
+
+Source: `components/northstar-agent-runtime/ba_20.py`
+
+ba_20: floor2 utility.
+
+#### `floor2(x)`
+
+### `ba_21`
+
+Source: `components/northstar-agent-runtime/ba_21.py`
+
+ba_21: mod10 utility.
+
+#### `mod10(x)`
+
+### `ba_22`
+
+Source: `components/northstar-agent-runtime/ba_22.py`
+
+ba_22: div10 utility.
+
+#### `div10(x)`
+
+### `ba_23`
+
+Source: `components/northstar-agent-runtime/ba_23.py`
+
+ba_23: last_digit utility.
+
+#### `last_digit(x)`
+
+### `ba_24`
+
+Source: `components/northstar-agent-runtime/ba_24.py`
+
+ba_24: first_digit utility.
+
+#### `first_digit(x)`
+
+### `ba_25`
+
+Source: `components/northstar-agent-runtime/ba_25.py`
+
+ba_25: digits utility.
+
+#### `digits(x)`
+
+### `ba_26`
+
+Source: `components/northstar-agent-runtime/ba_26.py`
+
+ba_26: digit_sum utility.
+
+#### `digit_sum(x)`
+
+### `ba_27`
+
+Source: `components/northstar-agent-runtime/ba_27.py`
+
+ba_27: reverse_int utility.
+
+#### `reverse_int(x)`
+
+### `ba_28`
+
+Source: `components/northstar-agent-runtime/ba_28.py`
+
+ba_28: is_pal utility.
+
+#### `is_pal(s)`
+
+### `ba_29`
+
+Source: `components/northstar-agent-runtime/ba_29.py`
+
+ba_29: upper utility.
+
+#### `upper(s)`
+
+### `ba_30`
+
+Source: `components/northstar-agent-runtime/ba_30.py`
+
+ba_30: lower utility.
+
+#### `lower(s)`
+
+### `ba_31`
+
+Source: `components/northstar-agent-runtime/ba_31.py`
+
+ba_31: strip utility.
+
+#### `strip(s)`
+
+### `ba_32`
+
+Source: `components/northstar-agent-runtime/ba_32.py`
+
+ba_32: title utility.
+
+#### `title(s)`
+
+### `ba_33`
+
+Source: `components/northstar-agent-runtime/ba_33.py`
+
+ba_33: swapcase utility.
+
+#### `swapcase(s)`
+
+### `ba_34`
+
+Source: `components/northstar-agent-runtime/ba_34.py`
+
+ba_34: reverse_str utility.
+
+#### `reverse_str(s)`
+
+### `ba_35`
+
+Source: `components/northstar-agent-runtime/ba_35.py`
+
+ba_35: length utility.
+
+#### `length(s)`
+
+### `ba_36`
+
+Source: `components/northstar-agent-runtime/ba_36.py`
+
+ba_36: char0 utility.
+
+#### `char0(s)`
+
+### `ba_37`
+
+Source: `components/northstar-agent-runtime/ba_37.py`
+
+ba_37: char_last utility.
+
+#### `char_last(s)`
+
+### `ba_38`
+
+Source: `components/northstar-agent-runtime/ba_38.py`
+
+ba_38: no_space utility.
+
+#### `no_space(s)`
+
+### `ba_39`
+
+Source: `components/northstar-agent-runtime/ba_39.py`
+
+ba_39: words utility.
+
+#### `words(s)`
+
+### `ba_40`
+
+Source: `components/northstar-agent-runtime/ba_40.py`
+
+ba_40: slug utility.
+
+#### `slug(s)`
+
+### `ba_41`
+
+Source: `components/northstar-agent-runtime/ba_41.py`
+
+ba_41: camel utility.
+
+#### `camel(s)`
+
+### `ba_42`
+
+Source: `components/northstar-agent-runtime/ba_42.py`
+
+ba_42: snake utility.
+
+#### `snake(s)`
+
+### `ba_43`
+
+Source: `components/northstar-agent-runtime/ba_43.py`
+
+ba_43: repeat utility.
+
+#### `repeat(s)`
+
+### `ba_44`
+
+Source: `components/northstar-agent-runtime/ba_44.py`
+
+ba_44: exclaim utility.
+
+#### `exclaim(s)`
+
+### `ba_45`
+
+Source: `components/northstar-agent-runtime/ba_45.py`
+
+ba_45: question utility.
+
+#### `question(s)`
+
+### `ba_46`
+
+Source: `components/northstar-agent-runtime/ba_46.py`
+
+ba_46: quote utility.
+
+#### `quote(s)`
+
+### `ba_47`
+
+Source: `components/northstar-agent-runtime/ba_47.py`
+
+ba_47: paren utility.
+
+#### `paren(s)`
+
+### `ba_48`
+
+Source: `components/northstar-agent-runtime/ba_48.py`
+
+ba_48: bracket utility.
+
+#### `bracket(s)`
+
+### `ba_49`
+
+Source: `components/northstar-agent-runtime/ba_49.py`
+
+ba_49: truncate utility.
+
+#### `truncate(s)`
+
+### `ba_50`
+
+Source: `components/northstar-agent-runtime/ba_50.py`
+
+ba_50: pad2 utility.
+
+#### `pad2(s)`
+
 ### `backdoor`
 
 Source: `components/northstar-agent-runtime/backdoor.py`
@@ -24654,6 +26229,84 @@ Benchmark task governance ledger: create -> run -> score -> retire.
 - `audit_log(seq: int)`
 #### `main()`
 
+### `benchmark_retirement_probes`
+
+Source: `components/northstar-agent-runtime/benchmark_retirement_probes.py`
+
+Benchmark-retirement probe corpus + retirement detection / revalidation gates.
+
+#### `retirement_triggers()`
+
+The canonical revalidation trigger list for benchmark-backed cases.
+
+#### `check_triggers(triggers: Any)`
+
+Name every canonical trigger missing from the given trigger list.
+
+#### `BenchmarkRecord`
+
+A digest-pinned (benchmark, corpus, harness, task-info, status) tuple.
+
+#### `build_record(benchmark_id: str, corpus_digest: str, harness_digest: str, task_info_digest: str, status: str=STATUS_LIVE)`
+
+Build a digest-pinned benchmark record (fail-closed on bad inputs).
+
+#### `verify_record(record: BenchmarkRecord)`
+
+Constant-time digest verification of a benchmark record.
+
+#### `retire_record(record: BenchmarkRecord)`
+
+Return a new record with status retired (the old digest stays sealed).
+
+#### `detect_retirement(new_record: BenchmarkRecord, old_record: BenchmarkRecord)`
+
+Name every retirement-relevant change between two records.
+
+#### `SaturationReport`
+
+Host-reported saturation check over a score list.
+
+#### `check_saturation(benchmark_id: str, scores: Any, ceiling: float=0.99)`
+
+Saturated iff every reported score meets or exceeds the ceiling.
+
+#### `ContaminationSignal`
+
+A host-reported contamination signal, digest-pinned.
+
+#### `record_contamination(benchmark_id: str, kind: str, detail: str)`
+
+Pin a contamination signal (fail-closed on unknown kinds).
+
+#### `gate_benchmark_claim(record: BenchmarkRecord, saturation: SaturationReport | None=None, contamination: tuple[ContaminationSignal, ...]=())`
+
+Decide whether a benchmark may be cited as evidence.
+
+#### `attack_probe_names()`
+
+Names of the attack probes (expected deny).
+
+#### `benign_probe_names()`
+
+Names of the benign control probes (expected allow).
+
+#### `probes_in_family(family: str)`
+
+All probes (attack + benign) in a corpus family.
+
+#### `probe_by_name(name: str)`
+
+Look up a probe by name (raises KeyError on unknown names).
+
+#### `expected_outcomes()`
+
+Probe name -> expected outcome ('deny' or 'allow').
+
+#### `main()`
+
+Print the corpus summary (diagnostic entry point).
+
 ### `benchmark_runner`
 
 Source: `components/northstar-agent-runtime/benchmark_runner.py`
@@ -24967,6 +26620,30 @@ Shape an ``audit.ndjson/1`` record for a BFT event. Fail-closed.
 
 Self-check: drive a 4-replica (f=1) slot through the full pipeline.
 
+### `bias_mock`
+
+Source: `components/northstar-agent-runtime/bias_mock.py`
+
+Bias detection mock (D-OUT-010), Simulated.
+
+#### `detect(text: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `bidi_remove`
+
+Source: `components/northstar-agent-runtime/bidi_remove.py`
+
+Bidi control removal (D-IN-016), Simulated.
+
+#### `clean(t: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
 ### `bilinear_accumulator`
 
 Source: `components/northstar-agent-runtime/bilinear_accumulator.py`
@@ -25111,6 +26788,36 @@ Metered-billing ledger: plans, usage, invoices, proration.
 Shape an ``audit.ndjson/1`` record for billing events.
 
 #### `main()`
+
+### `bipia_probe`
+
+Source: `components/northstar-agent-runtime/bipia_probe.py`
+
+BIPIA probe: position-based injection (A7, Microsoft), Simulated.
+
+#### `BipiaError`
+
+Fail-closed.
+
+#### `PositionProbe`
+
+One position variant.
+
+#### `build_position_probes(payload: str, filler: str, *, probe_id_base: str='bipia')`
+
+Build head/middle/tail variants.
+
+#### `run_position_scan(probes: List[PositionProbe], gate_fn: Callable[[str], bool])`
+
+Run position scan. Returns block rate per position.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
 
 ### `bloom_filter`
 
@@ -26600,6 +28307,22 @@ Deterministic canary traffic splitter with promote/rollback.
   - Shape an audit.ndjson/1-style record for one routing decision.
 #### `main()`
 
+### `canary_tokens`
+
+Source: `components/northstar-agent-runtime/canary_tokens.py`
+
+Canary tokens: deception for exfiltration detection (D-OUT-005), Simulated.
+
+#### `CanaryVault`
+
+- `plant(token_id: str)`
+  - Plant a canary token. Returns the token value.
+- `check(text: str)`
+  - Check if any canary token appears in text (exfiltration!).
+#### `stdlib_only()`
+
+#### `main()`
+
 ### `canonical_json`
 
 Source: `components/northstar-agent-runtime/canonical_json.py`
@@ -26833,6 +28556,114 @@ Authorize one action under a warrant (verifier side).
 #### `pop_sign(*, holder_secret: bytes, warrant_id: str, tool: str, params: Mapping[str, Any], now: int)`
 
 Holder-side: sign a PoP challenge for one call (used by agents).
+
+### `capacity_planning`
+
+Source: `components/northstar-agent-runtime/capacity_planning.py`
+
+Capacity planning: utilization ledger, forecasts, rightsizing recommendations.
+
+#### `CapacityPlanningError`
+
+Base for all capacity-planning structural problems and refusals.
+
+#### `BadWorkloadError`
+
+Workload definition is malformed (bad id, resource type, size).
+
+#### `DuplicateWorkloadError`
+
+A workload id is already registered.
+
+#### `UnknownWorkloadError`
+
+No workload is pinned for the requested id.
+
+#### `BadUtilizationError`
+
+A utilization sample is malformed (bad values or workload).
+
+#### `BadForecastError`
+
+A forecast request is malformed (bad horizon or workload).
+
+#### `SeqOrderError`
+
+Caller seq did not strictly increase.
+
+#### `WorkloadRecord`
+
+One pinned workload (frozen).
+
+- `verify()`
+#### `UtilizationSample`
+
+One host-reported utilization sample (frozen, hash-chained).
+
+- `verify()`
+#### `ForecastReport`
+
+One deterministic utilization projection (frozen, pure view).
+
+- `verify()`
+#### `RightsizeRecommendation`
+
+One rightsizing recommendation (frozen, data — not an action).
+
+- `verify()`
+#### `FleetReport`
+
+One fleet-wide aggregation (frozen, pure view).
+
+- `verify()`
+#### `capacity_planning_audit_event(kind: str, detail: Mapping[str, Any], seq: int)`
+
+Shape an ``audit.ndjson/1`` record for the capacity-planning module.
+
+#### `CapacityPlanning`
+
+Deterministic capacity-planning utilization/forecast ledger.
+
+- `register_workload(workload_id: str, resource_type: str, seq: int, current_size: str='')`
+  - Pin a workload; duplicate ids refused fail-closed.
+- `record_utilization(workload_id: str, cpu_pct: float, memory_pct: float, seq: int)`
+  - Book a host-reported utilization sample (hash-chained).
+- `forecast(workload_id: str, horizon_seq: int, seq: int)`
+  - Project avg + linear trend ``horizon_seq`` units out (pure view).
+- `rightsize(workload_id: str, seq: int)`
+  - Return the rightsizing recommendation as data (pure view).
+- `report(seq: int)`
+  - Aggregate the fleet by recommendation category (pure view).
+- `workload(workload_id: str)`
+- `workload_ids()`
+- `samples_for(workload_id: str)`
+- `stats()`
+- `audit_log()`
+#### `main()`
+
+### `captcha_mock`
+
+Source: `components/northstar-agent-runtime/captcha_mock.py`
+
+CAPTCHA mock (D-IN-025), Simulated.
+
+#### `verify(token: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `case_norm`
+
+Source: `components/northstar-agent-runtime/case_norm.py`
+
+Case normalization (D-IN-019), Simulated.
+
+#### `normalize(t: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
 
 ### `cci_detector`
 
@@ -27673,6 +29504,101 @@ Conventional-commit ledger: parse, render, bump.
 
 Self-check: parse, render, bump, refusals.
 
+### `chaos_engineering`
+
+Source: `components/northstar-agent-runtime/chaos_engineering.py`
+
+Chaos engineering — simulated fault-injection experiment bookkeeping.
+
+#### `ChaosEngineeringError`
+
+Base error for the chaos engineering ledger.
+
+#### `BadExperimentError`
+
+Malformed experiment definition (bad fault, targets, radius).
+
+#### `DuplicateExperimentError`
+
+An experiment with this id is already defined.
+
+#### `UnknownExperimentError`
+
+No experiment with this id is defined.
+
+#### `BadBlastError`
+
+Blast refused (experiment not in defined state).
+
+#### `AlreadyRunningError`
+
+The experiment is already running.
+
+#### `BadAbortError`
+
+Abort refused (bad reason, or experiment never ran).
+
+#### `NotRunningError`
+
+Abort refused: the experiment is not running.
+
+#### `AlreadyAbortedError`
+
+The experiment is already aborted (terminal).
+
+#### `SeqOrderError`
+
+Seq did not strictly increase.
+
+#### `ExperimentRecord`
+
+A pinned chaos experiment definition (state starts ``defined``).
+
+- `verify(seed: str='')`
+#### `BlastRecord`
+
+A booked blast start (defined -> running).
+
+- `verify(seed: str='')`
+#### `AbortRecord`
+
+A booked abort (running -> aborted; terminal).
+
+- `verify(seed: str='')`
+#### `chaos_engineering_audit_event(kind: str, seq: int, **detail: Any)`
+
+Shape an ``audit.ndjson/1`` record for the chaos ledger.
+
+#### `ChaosEngineering`
+
+Deterministic chaos-experiment bookkeeping.
+
+- `experiment(experiment_id: str, name: str, fault_type: str, targets: Any, seq: int, blast_radius: str=RADIUS_SINGLE, duration_seq: int=100, hypothesis: str='')`
+  - Book a chaos experiment definition (state ``defined``).
+- `blast(experiment_id: str, seq: int)`
+  - Book a blast start (defined -> running). Fail-closed on state.
+- `abort(experiment_id: str, seq: int, reason: str='')`
+  - Book an abort (running -> aborted; terminal).
+- `experiment_record(experiment_id: str)`
+  - Return the booked experiment definition.
+- `status(experiment_id: str)`
+  - Return the lifecycle state (defined / running / aborted).
+- `experiment_ids()`
+  - Defined experiment ids, sorted.
+- `running_ids()`
+  - Experiment ids currently in running state, sorted.
+- `blast_record(blast_id: str)`
+  - Return a booked blast record.
+- `abort_record(abort_id: str)`
+  - Return a booked abort record.
+- `blasts_for(experiment_id: str)`
+  - Blast records for one experiment, in booking order.
+- `stats()`
+  - Ledger counts (pure view).
+- `audit_log()`
+  - Booked audit events, in order (pure view).
+#### `main()`
+
 ### `chaos_experiment`
 
 Source: `components/northstar-agent-runtime/chaos_experiment.py`
@@ -28124,6 +30050,20 @@ CIRL decision ledger (Simulated).
 
 Self-check: exercise the CIRL ledger end to end.
 
+### `citation_verify`
+
+Source: `components/northstar-agent-runtime/citation_verify.py`
+
+Citation verification (D-OUT-013), Simulated.
+
+#### `extract_citations(text: str)`
+
+#### `verify(text: str, sources: list)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
 ### `claimed_auth_corpus`
 
 Source: `components/northstar-agent-runtime/claimed_auth_corpus.py`
@@ -28149,6 +30089,18 @@ The model id to use, or a configuration error for an impossible pairing.
 #### `format_tool_call_ceiling(value: 'int | None')`
 
 How the resolved tool-call ceiling reads to a human.
+
+### `cmdi_detect`
+
+Source: `components/northstar-agent-runtime/cmdi_detect.py`
+
+Command injection detection (D-OUT-025), Simulated.
+
+#### `detect(text: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
 
 ### `cmmc`
 
@@ -28442,6 +30394,18 @@ Build an ``audit.ndjson/1`` event for code-formatting activity.
 
 #### `main()`
 
+### `code_scan`
+
+Source: `components/northstar-agent-runtime/code_scan.py`
+
+Code output scanning (D-OUT-022), Simulated.
+
+#### `scan(code: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
 ### `code_signer`
 
 Source: `components/northstar-agent-runtime/code_signer.py`
@@ -28533,6 +30497,20 @@ Shape an ``audit.ndjson/1`` record for code-signer activity.
 #### `main()`
 
 Self-check: register, sign, verify, tamper, keyless, revoke, refusals.
+
+### `coerce_guard`
+
+Source: `components/northstar-agent-runtime/coerce_guard.py`
+
+Type coercion guards (D-IN-029), Simulated.
+
+#### `safe_int(v, default=0)`
+
+#### `safe_str(v, max_len=1000)`
+
+#### `stdlib_only()`
+
+#### `main()`
 
 ### `column_store`
 
@@ -28665,6 +30643,44 @@ Attach validated hooks to a :class:`~hooks.HookRegistry`; returns their names.
 
 One-line description for ``doctor``/``--dry-run`` output.
 
+### `command_registry`
+
+Source: `components/northstar-agent-runtime/command_registry.py`
+
+Command registry with bounded pre-authorization (AutoGPT), Simulated.
+
+#### `AutonomyLevel`
+
+How much autonomy a command has.
+
+#### `RegistryError`
+
+Fail-closed: unknown commands raise.
+
+#### `CommandSpec`
+
+Specification for one registered command.
+
+#### `CommandRegistry`
+
+Fixed registry of allowed commands with pre-auth counters.
+
+- `register(spec: CommandSpec)`
+  - Register a command (setup time only).
+- `grant_preauth(n: int)`
+  - Grant bounded pre-authorization for next N sensitive actions.
+- `check(command_name: str, *, human_approved: bool=False)`
+  - Check if a command can execute.
+- `pre_auth_remaining` (property)
+- `commands()`
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
 ### `commerce`
 
 Source: `components/northstar-agent-runtime/commerce.py`
@@ -28778,6 +30794,60 @@ Fail-closed gate: is the catalog model honestly disclosed?
 #### `commerce_audit_event(code: str, detail: str, receipt_digest: str='')`
 
 Build a ``commerce:*`` audit event payload.
+
+### `commerce_mandate_probes`
+
+Source: `components/northstar-agent-runtime/commerce_mandate_probes.py`
+
+Agentic-commerce mandate probe corpus + forged / replay / amount-switch probes.
+
+#### `CommerceMandate`
+
+A digest-pinned payment mandate.
+
+#### `build_mandate(mandate_id: str, payer_id: str, authorized_agent: str, payee_id: str, amount_minor: int, currency: str, task_digest: str, issuer_id: str, expires_iso: str='')`
+
+Build a digest-pinned commerce mandate (fail-closed on bad inputs).
+
+#### `verify_mandate(mandate: CommerceMandate)`
+
+Constant-time digest verification of a mandate record.
+
+#### `MandateLedger`
+
+Append-only ledger of consumed mandate digests.
+
+- `is_consumed(digest: str)`
+- `consume(digest: str)`
+  - Consume a mandate digest. Returns False if already consumed.
+- `consumed_count()`
+#### `authorize_payment(mandate: CommerceMandate, *, amount_minor: int, currency: str, payee_id: str, task_digest: str, ledger: MandateLedger, now_iso: str, issuer_registry: Any)`
+
+Authorize one payment attempt against one mandate.
+
+#### `attack_probe_names()`
+
+Names of the attack probes (expected deny).
+
+#### `benign_probe_names()`
+
+Names of the benign control probes (expected allow).
+
+#### `probes_in_family(family: str)`
+
+All probes (attack + benign) in a corpus family.
+
+#### `probe_by_name(name: str)`
+
+Look up a probe by name (raises KeyError on unknown names).
+
+#### `expected_outcomes()`
+
+Probe name -> expected outcome ('deny' or 'allow').
+
+#### `main()`
+
+Print the corpus summary (diagnostic entry point).
 
 ### `compaction`
 
@@ -29393,6 +31463,53 @@ Derive ``(public_key, seed)`` from a 32-byte seed.
 
 Sign a budget digest with an authority seed (test/bench use).
 
+### `confidence_calib`
+
+Source: `components/northstar-agent-runtime/confidence_calib.py`
+
+Confidence calibration mock (D-OUT-015), Simulated.
+
+#### `calibrate(raw: float)`
+
+Mock calibration: map raw score to calibrated 0-1.
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `confidence_gate`
+
+Source: `components/northstar-agent-runtime/confidence_gate.py`
+
+Confidence-gated authorization (D11, AlphaFold pLDDT), Simulated.
+
+#### `ConfidenceTier`
+
+Confidence tiers.
+
+#### `ConfidenceGateError`
+
+Fail-closed.
+
+#### `ConfidenceVerdict`
+
+Verdict with confidence tier.
+
+#### `ConfidenceGate`
+
+Gates actions by confidence tier.
+
+- `check(confidence: int, tool_risk: str='low')`
+  - Check confidence against tiers.
+- `history` (property)
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
 ### `confidential_compute`
 
 Source: `components/northstar-agent-runtime/confidential_compute.py`
@@ -29869,6 +31986,18 @@ Conformity-assessment decision ledger: register -> assess -> declare -> affix.
 #### `main()`
 
 Self-check: exercise the ledger end to end.
+
+### `confusable_detect`
+
+Source: `components/northstar-agent-runtime/confusable_detect.py`
+
+Confusable detection (D-IN-012), Simulated.
+
+#### `has_mixed_scripts(t: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
 
 ### `congestion_control`
 
@@ -30535,6 +32664,76 @@ Shape an audit.ndjson/1-style record for a constitutional review.
 
 #### `main()`
 
+### `constraint_synthesis_probes`
+
+Source: `components/northstar-agent-runtime/constraint_synthesis_probes.py`
+
+Constraint-synthesis probes: AgentRx-style executable invariants from tool schemas.
+
+#### `attack_probe_names()`
+
+All constraint-synthesis attack probe names.
+
+#### `benign_probe_names()`
+
+All constraint-synthesis benign probe names.
+
+#### `probes_in_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `Constraint`
+
+One synthesized, digest-pinned invariant.
+
+#### `build_constraint(kind: str, spec: Mapping[str, Any])`
+
+Mint a digest-pinned constraint.
+
+#### `synthesize_constraints(schema: Mapping[str, Any])`
+
+Compile a schema document into a digest-pinned constraint set.
+
+#### `ConstraintSet`
+
+A synthesized constraint set, bound to one schema digest.
+
+#### `verify_constraint_set(constraint_set: ConstraintSet)`
+
+Constant-time integrity check of a constraint set. Never raises.
+
+#### `expected_constraint_names(schema: Mapping[str, Any])`
+
+Names every constraint a faithful synthesis must emit.
+
+#### `check_completeness(schema: Mapping[str, Any], constraint_set: ConstraintSet)`
+
+Verify the set covers every derivable constraint.
+
+#### `ValidationFinding`
+
+One named finding from argument validation.
+
+#### `validate_arguments(constraint_set: ConstraintSet, arguments: Mapping[str, Any], schema: Mapping[str, Any])`
+
+Run the synthesized conjunction against candidate arguments.
+
+#### `validation_receipt(constraint_set: ConstraintSet, arguments: Mapping[str, Any], schema: Mapping[str, Any])`
+
+Bind a validation outcome to the call and the set as a receipt.
+
+#### `main()`
+
+Print a small summary for the CLI.
+
 ### `construction_agents`
 
 Source: `components/northstar-agent-runtime/construction_agents.py`
@@ -30994,6 +33193,19 @@ Content-authenticity signature bookkeeping: sign, verify, revoke.
 - `revoked_ids(seq: int)`
 - `stats(seq: int)`
 - `audit_log(seq: int)`
+#### `main()`
+
+### `content_filter`
+
+Source: `components/northstar-agent-runtime/content_filter.py`
+
+Content filtering: blocklist (D-OUT-008), Simulated.
+
+#### `ContentFilter`
+
+- `check(text: str)`
+#### `stdlib_only()`
+
 #### `main()`
 
 ### `content_moderator`
@@ -31957,6 +34169,126 @@ Corrigibility check/preservation bookkeeping ledger: register, check, preserve, 
 
 Self-check: register, check, preserve, report, retire.
 
+### `cost_optimization`
+
+Source: `components/northstar-agent-runtime/cost_optimization.py`
+
+Cost optimization — CloudHealth-shaped spend analysis bookkeeping (thirty-fourth batch).
+
+#### `CostOptimizationError`
+
+Base error for the cost optimization manager.
+
+#### `BadAccountError`
+
+Malformed account id.
+
+#### `DuplicateAccountError`
+
+This account id is already registered.
+
+#### `UnknownAccountError`
+
+No account with this id is registered.
+
+#### `BadBreakdownError`
+
+Cost breakdown is malformed (bad category, amount, or shape).
+
+#### `BadRecommendationError`
+
+Malformed recommendation kind, savings, or note.
+
+#### `UnknownRecommendationError`
+
+No recommendation with this id exists.
+
+#### `RecommendationStateError`
+
+Recommendation is not open (already applied or dismissed).
+
+#### `BadBudgetError`
+
+Malformed budget (non-positive cents, bool, or bad shape).
+
+#### `SeqOrderError`
+
+Mutation seq is not strictly increasing.
+
+#### `AccountRecord`
+
+One registered cost account (a CloudHealth "perspective" owner).
+
+- `verify()`
+#### `AnalysisRecord`
+
+One booked cost analysis.
+
+- `verify()`
+#### `RecommendationRecord`
+
+One booked cost-saving recommendation.
+
+- `verify()`
+#### `RecommendationResolution`
+
+Terminal resolution of a recommendation (applied or dismissed).
+
+- `verify()`
+#### `BudgetRecord`
+
+One pinned monthly budget for an account (latest-wins).
+
+- `verify()`
+#### `BudgetCheck`
+
+One budget check verdict (pure data).
+
+- `verify()`
+#### `cost_optimization_audit_event(kind: str, seq: int, **detail: Any)`
+
+Shape an ``audit.ndjson/1`` record for the cost module.
+
+#### `CostOptimization`
+
+Deterministic cost-analysis / recommendation / budget ledger.
+
+- `register_account(account_id: str, seq: int)`
+  - Register a cost account (a spend owner).
+- `analyze(account_id: str, breakdown: Mapping[str, int], seq: int)`
+  - Book a host-reported cost breakdown for an account.
+- `recommend(account_id: str, kind: str, seq: int, estimated_monthly_savings_cents: int=0, note: str='')`
+  - Book a cost-saving recommendation for an account.
+- `apply_recommendation(recommendation_id: str, seq: int)`
+  - Mark a recommendation applied (terminal).
+- `dismiss_recommendation(recommendation_id: str, seq: int)`
+  - Mark a recommendation dismissed (terminal).
+- `track(account_id: str, seq: int, budget_cents: int)`
+  - Pin (or re-pin) the monthly budget for an account.
+- `budget_check(account_id: str, seq: int)`
+  - Check the latest booked analysis against the budget.
+- `account(account_id: str)`
+  - Return the frozen record for an account.
+- `account_ids()`
+  - All registered account ids, sorted.
+- `analysis(analysis_id: str)`
+  - Return the frozen record for an analysis.
+- `analyses_for(account_id: str)`
+  - All analyses booked for an account, newest first.
+- `recommendation(recommendation_id: str)`
+  - Return the frozen record for a recommendation.
+- `recommendations_for(account_id: str, status: str | None=None)`
+  - All recommendations for an account, newest first.
+- `budget(account_id: str)`
+  - Return the pinned budget for an account.
+- `stats()`
+  - Ledger counts.
+- `audit_log()`
+  - All audit events, oldest first.
+#### `main()`
+
+Self-check: register, analyze, recommend, lifecycle, track, check.
+
 ### `count_min_sketch`
 
 Source: `components/northstar-agent-runtime/count_min_sketch.py`
@@ -31992,6 +34324,104 @@ Count-min sketch over caller-supplied items.
 Build an ``audit.ndjson/1``-shaped record for a sketch event.
 
 #### `main()`
+
+### `counterfactual`
+
+Source: `components/northstar-agent-runtime/counterfactual.py`
+
+Pinned, non-generative explanations for selected runtime denial rules.
+
+#### `Counterfactual`
+
+One pinned condition that would change, or cannot change, a denial.
+
+#### `RuleExplanation`
+
+Immutable pinned explanation for a specific deny code.
+
+#### `render_denial(audit_record: Mapping[str, Any])`
+
+Render a denial using only its audit record and the pinned rule table.
+
+### `counterfactual_explanation_probes`
+
+Source: `components/northstar-agent-runtime/counterfactual_explanation_probes.py`
+
+Counterfactual-explanation probes: quality gates for explanation surfaces.
+
+#### `probe_names()`
+
+Names of the attack probes (expected deny).
+
+#### `benign_names()`
+
+Names of the benign control probes (expected allow).
+
+#### `probe_by_name(name: str)`
+
+Look up one probe by name; raises KeyError fail-closed.
+
+#### `probe_invokes_deny_side(probe: Mapping[str, Any])`
+
+True if the probe's gate_interaction names an active deny-side mechanism.
+
+#### `ExplanationClaim`
+
+One checkable claim inside a rendered explanation.
+
+#### `ExplanationRecord`
+
+A rendered explanation, pinned for gate checking.
+
+- `verify_digest()`
+  - Constant-time check that the pinned digest matches the record.
+#### `GateFinding`
+
+One quality-gate outcome, digest-pinned.
+
+#### `check_anchoring(record: ExplanationRecord)`
+
+Every claim anchors to a known audit-record field with matching value.
+
+#### `check_rule_consistency(record: ExplanationRecord, rule_table: Mapping[str, Mapping[str, Any]])`
+
+The rendered counterfactual matches the pinned rule explanation.
+
+#### `check_hard_deny(record: ExplanationRecord, rule_table: Mapping[str, Mapping[str, Any]], hard_deny_codes: Sequence[str]=HARD_DENY_CODES)`
+
+Hard denies carry the no-remediation statement; nothing else.
+
+#### `check_pace(record: ExplanationRecord, immutables: Sequence[str])`
+
+The remediation never proposes changing an immutable attribute.
+
+#### `QualityGateReport`
+
+The full quality-gate outcome for one explanation.
+
+#### `run_quality_gate(record: ExplanationRecord, rule_table: Mapping[str, Mapping[str, Any]], immutables: Sequence[str])`
+
+Run all four deterministic quality gates over one explanation.
+
+#### `CounterfactualQuestion`
+
+One "what would the gate do if ...?" question.
+
+#### `QuestionResult`
+
+Predicted vs actual verdict for one counterfactual question.
+
+#### `SimulatabilityReport`
+
+Per-question simulatability outcome for one explanation.
+
+#### `run_simulatability(record: ExplanationRecord, questions: Sequence[CounterfactualQuestion], predict: Callable[[ExplanationRecord, CounterfactualQuestion], str], threshold: int)`
+
+CHIVE-style simulatability: can the explanation predict the gate?
+
+#### `rule_table_from_counterfactual(rule_explanations: Mapping[str, Any], hard_deny_namespaces: Sequence[str]=('offensive', 'exfiltration', 'mosaic_assembly'))`
+
+Build a rule table from ``counterfactual.py``'s RULE_EXPLANATIONS.
 
 ### `coverage_reporter`
 
@@ -32499,6 +34929,40 @@ Scan text for hardcoded credentials.
 
 #### `main()`
 
+### `crescendo_probe`
+
+Source: `components/northstar-agent-runtime/crescendo_probe.py`
+
+Crescendo probe: multi-turn gradual escalation (A5, Microsoft), Simulated.
+
+#### `CrescendoError`
+
+Fail-closed.
+
+#### `EscalationTurn`
+
+One turn in an escalation sequence.
+
+#### `EscalationScript`
+
+A full multi-turn escalation script.
+
+#### `score_trajectory(turns: List[EscalationTurn], scorer_fn: Callable[[List[str]], float])`
+
+Score the full trajectory, not individual turns.
+
+#### `run_script(script: EscalationScript, gate_fn: Callable[[str], bool], trajectory_scorer: Callable[[List[str]], float], *, threshold: float=0.7)`
+
+Run an escalation script.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
 ### `crisis_management`
 
 Source: `components/northstar-agent-runtime/crisis_management.py`
@@ -32948,6 +35412,877 @@ Build a ``Signer`` for ``algorithm`` from raw key bytes (seed).
 
 Build a ``Verifier`` for ``algorithm`` from raw key bytes (public key).
 
+### `crypto_defense_01`
+
+Source: `components/northstar-agent-runtime/crypto_defense_01.py`
+
+Crypto Defense 01: Sigstore interface (mock), Simulated.
+
+#### `SigstoreError`
+
+Fail-closed.
+
+#### `MockSigstore`
+
+Mock Sigstore signer/verifier.
+
+- `register_key(key_id: str)`
+  - Register a new signing key. Returns key_id.
+- `sign(data: bytes, key_id: str)`
+  - Sign data with key_id. Returns signature.
+- `verify(data: bytes, signature: bytes, key_id: str)`
+  - Verify signature. Returns True/False (never raises on bad sig).
+#### `stdlib_only()`
+
+#### `main()`
+
+### `crypto_defense_02`
+
+Source: `components/northstar-agent-runtime/crypto_defense_02.py`
+
+Crypto Defense 02: Cosign verification (mock), Simulated.
+
+#### `CosignError`
+
+Fail-closed.
+
+#### `MockCosign`
+
+Mock Cosign verifier.
+
+- `register_identity(identity: str)`
+  - Register a signer identity.
+- `sign(artifact: bytes, identity: str)`
+  - Sign artifact as identity (mock).
+- `verify(artifact: bytes, signature: bytes, expected_identity: str)`
+  - Verify artifact was signed by expected_identity.
+#### `stdlib_only()`
+
+#### `main()`
+
+### `crypto_defense_03`
+
+Source: `components/northstar-agent-runtime/crypto_defense_03.py`
+
+Crypto Defense 03: Rekor transparency log (mock), Simulated.
+
+#### `RekorError`
+
+Fail-closed.
+
+#### `LogEntry`
+
+One log entry.
+
+#### `MockRekor`
+
+Mock transparency log.
+
+- `append(data: bytes)`
+  - Append data. Returns index.
+- `verify_inclusion(index: int, data: bytes)`
+  - Verify data is at index (inclusion proof mock).
+- `verify_chain()`
+  - Verify hash chain integrity.
+#### `stdlib_only()`
+
+#### `main()`
+
+### `crypto_defense_04`
+
+Source: `components/northstar-agent-runtime/crypto_defense_04.py`
+
+Crypto Defense 04: Fulcio certificates (mock), Simulated.
+
+#### `FulcioError`
+
+Fail-closed.
+
+#### `Certificate`
+
+Short-lived certificate (mock).
+
+#### `MockFulcio`
+
+Mock certificate authority.
+
+- `issue_cert(identity: str, ttl: float=None)`
+  - Issue short-lived cert for identity.
+- `verify_cert(cert: Certificate)`
+  - Verify cert is valid and not expired.
+#### `stdlib_only()`
+
+#### `main()`
+
+### `crypto_defense_05`
+
+Source: `components/northstar-agent-runtime/crypto_defense_05.py`
+
+Crypto Defense 05: Threshold signatures 2-of-3 (mock), Simulated.
+
+#### `ThresholdError`
+
+Fail-closed.
+
+#### `split_secret(secret: bytes, n: int=3, threshold: int=2)`
+
+Split secret into n shares, threshold to reconstruct (mock).
+
+#### `reconstruct(shares: List[bytes])`
+
+Reconstruct secret from shares (mock: XOR all).
+
+#### `ThresholdSigner`
+
+2-of-3 threshold signer (mock).
+
+- `partial_sign(share_idx: int, data: bytes)`
+  - Get a partial signature from share holder (mock).
+- `combine(partials: List[bytes], data: bytes)`
+  - Verify threshold partials combine (mock: need threshold count).
+#### `stdlib_only()`
+
+#### `main()`
+
+### `crypto_defense_06`
+
+Source: `components/northstar-agent-runtime/crypto_defense_06.py`
+
+Crypto Defense 06: MPC for keys (mock), Simulated.
+
+#### `MpcError`
+
+Fail-closed.
+
+#### `MockMpcKey`
+
+A key split across N parties (mock).
+
+- `party_sign(party_idx: int, data: bytes)`
+  - One party contributes to signing (mock).
+- `combine_signatures(partials: List[bytes], data: bytes)`
+  - Combine threshold partials into final signature (mock).
+- `verify_combined(combined: bytes, data: bytes, partials: List[bytes])`
+  - Verify combined signature (mock: recompute).
+#### `stdlib_only()`
+
+#### `main()`
+
+### `crypto_defense_07`
+
+Source: `components/northstar-agent-runtime/crypto_defense_07.py`
+
+Crypto Defense 07: HSM integration (mock), Simulated.
+
+#### `HsmError`
+
+Fail-closed.
+
+#### `MockHsm`
+
+Mock Hardware Security Module.
+
+- `generate_key(label: str)`
+  - Generate key inside HSM. Returns key handle (not the key).
+- `get_public_key(handle: str)`
+  - Get public part (mock: hash of private).
+- `sign(handle: str, data: bytes)`
+  - Sign inside HSM. Key never leaves.
+- `verify(handle: str, data: bytes, signature: bytes)`
+  - Verify using HSM key.
+- `delete_key(handle: str)`
+  - Delete key from HSM.
+- `key_exists(handle: str)`
+#### `stdlib_only()`
+
+#### `main()`
+
+### `crypto_defense_08`
+
+Source: `components/northstar-agent-runtime/crypto_defense_08.py`
+
+Crypto Defense 08: Key rotation (mock), Simulated.
+
+#### `RotationError`
+
+Fail-closed.
+
+#### `KeyVersion`
+
+One key version.
+
+#### `KeyRotator`
+
+Manages key rotation with history.
+
+- `rotate()`
+  - Rotate to new key. Returns new version number.
+- `current_version` (property)
+- `sign(data: bytes)`
+  - Sign with current key. Format: version:sig.
+- `verify(data: bytes, signature: bytes)`
+  - Verify with any key version (current or retired).
+- `versions()`
+#### `stdlib_only()`
+
+#### `main()`
+
+### `crypto_defense_09`
+
+Source: `components/northstar-agent-runtime/crypto_defense_09.py`
+
+Crypto Defense 09: Forward secrecy (mock), Simulated.
+
+#### `ForwardSecrecyError`
+
+Fail-closed.
+
+#### `Session`
+
+One forward-secret session.
+
+#### `ForwardSecrecyManager`
+
+Manages ephemeral sessions.
+
+- `start_session(session_id: str)`
+  - Start session, generate ephemeral key. Returns public part.
+- `complete_handshake(session_id: str, peer_public: bytes)`
+  - Complete handshake with peer's public. Returns shared secret.
+- `close_session(session_id: str)`
+  - Close session, destroy ephemeral key (forward secrecy).
+- `session_active(session_id: str)`
+#### `stdlib_only()`
+
+#### `main()`
+
+### `crypto_defense_10`
+
+Source: `components/northstar-agent-runtime/crypto_defense_10.py`
+
+Crypto Defense 10: Post-quantum KEM (mock Kyber-like), Simulated.
+
+#### `KemError`
+
+Fail-closed.
+
+#### `MockKyberKem`
+
+Mock Kyber-like KEM.
+
+- `keygen()`
+  - Generate (public_key, secret_key).
+- `encaps(pk: bytes)`
+  - Encapsulate: returns (ciphertext, shared_secret).
+- `decaps(sk: bytes, ct: bytes)`
+  - Decapsulate (mock).
+#### `stdlib_only()`
+
+#### `main()`
+
+### `crypto_defense_11`
+
+Source: `components/northstar-agent-runtime/crypto_defense_11.py`
+
+Crypto Defense 11: Hybrid schemes (classical + PQ), Simulated.
+
+#### `HybridError`
+
+Fail-closed.
+
+#### `hybrid_encaps()`
+
+Hybrid encaps: returns (ct_combined, ss_classical, ss_pq).
+
+#### `hybrid_kdf(ss_classical: bytes, ss_pq: bytes, info: bytes=b'')`
+
+Combine two shared secrets via HKDF-like KDF.
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `crypto_defense_12`
+
+Source: `components/northstar-agent-runtime/crypto_defense_12.py`
+
+Crypto Defense 12: ZK proofs (mock), Simulated.
+
+#### `ZkError`
+
+Fail-closed.
+
+#### `MockZk`
+
+Mock ZK prover/verifier.
+
+- `prove(statement: Dict[str, Any], witness: Dict[str, Any])`
+  - Create proof that witness satisfies statement (mock).
+- `verify(statement: Dict[str, Any], proof: bytes)`
+  - Verify proof for statement (mock).
+#### `stdlib_only()`
+
+#### `main()`
+
+### `crypto_defense_13`
+
+Source: `components/northstar-agent-runtime/crypto_defense_13.py`
+
+Crypto Defense 13: OPRF screening (mock), Simulated.
+
+#### `OprfError`
+
+Fail-closed.
+
+#### `MockOprfServer`
+
+OPRF server holding the PRF key (mock).
+
+- `evaluate(blinded: bytes)`
+  - Evaluate PRF on blinded input (mock: direct).
+- `is_blocked_value(prf_output: bytes)`
+  - Check if PRF output is in blocklist (server-side).
+#### `MockOprfClient`
+
+OPRF client (mock).
+
+- `blind(data: bytes)`
+  - Blind input before sending to server (mock).
+- `unblind(evaluated: bytes)`
+  - Unblind server response (mock: identity).
+- `screen(data: bytes, server: MockOprfServer)`
+  - Screen data against server blocklist. Returns True if BLOCKED.
+#### `stdlib_only()`
+
+#### `main()`
+
+### `crypto_defense_14`
+
+Source: `components/northstar-agent-runtime/crypto_defense_14.py`
+
+Crypto Defense 14: PIR for lookups (mock), Simulated.
+
+#### `PirError`
+
+Fail-closed.
+
+#### `MockPirServer`
+
+PIR server holding database (mock).
+
+- `get_all()`
+  - Trivial PIR: return all (client picks locally).
+- `size()`
+#### `MockPirClient`
+
+PIR client (mock: trivial PIR).
+
+- `query(index: int, server: MockPirServer)`
+  - Query index without server learning which (mock).
+- `batch_query(indices: List[int], server: MockPirServer)`
+  - Batch query (mock).
+#### `stdlib_only()`
+
+#### `main()`
+
+### `crypto_defense_15`
+
+Source: `components/northstar-agent-runtime/crypto_defense_15.py`
+
+Crypto Defense 15: Homomorphic encryption (mock), Simulated.
+
+#### `HeError`
+
+Fail-closed.
+
+#### `Ciphertext`
+
+Homomorphically encrypted integer (mock).
+
+#### `MockHomomorphic`
+
+Mock additive homomorphic encryption.
+
+- `encrypt(plaintext: int)`
+  - Encrypt integer.
+- `decrypt(ct: Ciphertext)`
+  - Decrypt.
+- `add(a: Ciphertext, b: Ciphertext)`
+  - Homomorphic addition: Enc(a) + Enc(b) = Enc(a+b).
+- `add_plain(ct: Ciphertext, plain: int)`
+  - Add plaintext to ciphertext.
+#### `stdlib_only()`
+
+#### `main()`
+
+### `crypto_defense_16`
+
+Source: `components/northstar-agent-runtime/crypto_defense_16.py`
+
+Crypto Defense 16: Secure enclaves (mock attestation), Simulated.
+
+#### `EnclaveError`
+
+Fail-closed.
+
+#### `AttestationQuote`
+
+Enclave attestation quote (mock).
+
+#### `MockEnclave`
+
+Mock secure enclave that can attest its measurement.
+
+- `measurement` (property)
+- `attest(nonce: str)`
+  - Produce an attestation quote for a verifier nonce.
+- `verifier_key()`
+  - Attestation key (in reality distributed via cert chain).
+#### `verify_quote(quote: AttestationQuote, att_key: bytes, expected_measurement: str)`
+
+Verify a quote: MAC valid AND measurement matches expected.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `crypto_defense_17`
+
+Source: `components/northstar-agent-runtime/crypto_defense_17.py`
+
+Crypto Defense 17: Remote attestation (mock), Simulated.
+
+#### `AttestationError`
+
+Fail-closed.
+
+#### `Challenge`
+
+Verifier-issued freshness challenge.
+
+#### `RemoteQuote`
+
+Prover's response.
+
+#### `MockProver`
+
+Remote party being attested.
+
+- `respond(challenge: Challenge)`
+- `verifier_key()`
+#### `MockVerifier`
+
+Verifier with replay protection.
+
+- `issue_challenge()`
+- `verify(quote: RemoteQuote, key: bytes, expected_measurement: str)`
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `crypto_defense_18`
+
+Source: `components/northstar-agent-runtime/crypto_defense_18.py`
+
+Crypto Defense 18: Measured boot (mock), Simulated.
+
+#### `BootError`
+
+Fail-closed.
+
+#### `BootEvent`
+
+One measured component.
+
+#### `MeasuredBoot`
+
+Mock measured-boot with PCR registers.
+
+- `extend(index: int, data: bytes)`
+  - Extend a PCR: pcr = sha256(pcr || data).
+- `measure_boot(components: List[Tuple[int, str, bytes]])`
+  - Measure boot components: (pcr_index, name, data).
+- `pcr(index: int)`
+- `pcr_state()`
+- `event_log()`
+- `verify(expected: Dict[int, str])`
+  - Compare current PCR state to golden values.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `crypto_defense_19`
+
+Source: `components/northstar-agent-runtime/crypto_defense_19.py`
+
+Crypto Defense 19: TPM integration (mock), Simulated.
+
+#### `TpmError`
+
+Fail-closed.
+
+#### `TpmQuote`
+
+AIK-signed PCR quote (mock).
+
+#### `MockTPM`
+
+Mock TPM 2.0.
+
+- `extend_pcr(index: int, data: bytes)`
+- `pcr_read()`
+- `quote(nonce: str)`
+- `verify_quote(quote: TpmQuote)`
+- `nv_write(key: str, value: bytes)`
+- `nv_read(key: str)`
+- `seal(data: bytes, pcr_policy: Dict[int, str])`
+  - Seal data to a PCR policy snapshot.
+- `unseal(sealed: Dict[str, Any])`
+  - Unseal only if current PCRs match the policy.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `crypto_defense_20`
+
+Source: `components/northstar-agent-runtime/crypto_defense_20.py`
+
+Crypto Defense 20: Hardware tokens (mock), Simulated.
+
+#### `TokenError`
+
+Fail-closed.
+
+#### `MockHardwareToken`
+
+Mock hardware security token.
+
+- `key_handle` (property)
+- `is_locked` (property)
+- `unlock(pin: str)`
+  - Verify PIN; locks after max_retries failures.
+- `lock()`
+- `sign(data: bytes, *, user_present: bool)`
+  - Sign only when unlocked AND user presence confirmed.
+- `verify(data: bytes, sig: bytes)`
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `crypto_defense_21`
+
+Source: `components/northstar-agent-runtime/crypto_defense_21.py`
+
+Crypto Defense 21: Biometric auth (mock), Simulated.
+
+#### `BiometricError`
+
+Fail-closed.
+
+#### `MockBiometric`
+
+Mock biometric authenticator.
+
+- `enroll(sample: bytes)`
+  - Enroll a biometric sample. Returns template id.
+- `authenticate(sample: bytes, *, liveness: bool)`
+  - Authenticate; liveness signal is mandatory.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `crypto_defense_22`
+
+Source: `components/northstar-agent-runtime/crypto_defense_22.py`
+
+Crypto Defense 22: WebAuthn (mock), Simulated.
+
+#### `WebAuthnError`
+
+Fail-closed.
+
+#### `Credential`
+
+Registered credential (mock).
+
+#### `Assertion`
+
+Authentication assertion (mock).
+
+#### `MockWebAuthn`
+
+Mock WebAuthn relying party.
+
+- `register(user_id: str)`
+  - Registration ceremony: create a credential for a user.
+- `start_authentication(user_id: str)`
+  - Issue a fresh challenge for a user with a credential.
+- `make_assertion(cred: Credential, challenge: str, origin: str)`
+  - Authenticator side (mock): sign the challenge.
+- `verify_assertion(assertion: Assertion)`
+  - Verify: origin, fresh challenge, MAC, monotonic counter.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `crypto_defense_23`
+
+Source: `components/northstar-agent-runtime/crypto_defense_23.py`
+
+Crypto Defense 23: Passkeys (mock), Simulated.
+
+#### `PasskeyError`
+
+Fail-closed.
+
+#### `Device`
+
+One synced device holding the passkey.
+
+#### `Passkey`
+
+A passkey synced across devices.
+
+#### `MockPasskeyManager`
+
+Mock passkey provider.
+
+- `create_passkey(user_id: str, device_id: str)`
+  - Create a passkey on the first device.
+- `add_device(passkey_id: str, device_id: str)`
+  - Sync the passkey to another device (new key share).
+- `revoke_device(passkey_id: str, device_id: str)`
+- `challenge(passkey_id: str)`
+- `authenticate(passkey_id: str, device_id: str, nonce: str)`
+  - Authenticate with a device; returns assertion MAC or None.
+- `verify(passkey_id: str, device_id: str, nonce: str, assertion: str)`
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `crypto_defense_24`
+
+Source: `components/northstar-agent-runtime/crypto_defense_24.py`
+
+Crypto Defense 24: OIDC integration (mock), Simulated.
+
+#### `OidcError`
+
+Fail-closed.
+
+#### `IdToken`
+
+Parsed ID token claims.
+
+#### `MockOIDCProvider`
+
+Mock OIDC identity provider.
+
+- `issue(sub: str, aud: str, nonce: str, extra: Optional[Dict[str, Any]]=None)`
+  - Issue an ID token.
+- `validate(token: str, aud: str, nonce: str)`
+  - Validate an ID token. Returns claims or None.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `crypto_defense_25`
+
+Source: `components/northstar-agent-runtime/crypto_defense_25.py`
+
+Crypto Defense 25: SAML integration (mock), Simulated.
+
+#### `SamlError`
+
+Fail-closed.
+
+#### `SamlAssertion`
+
+Parsed SAML assertion.
+
+#### `MockSAMLIdP`
+
+Mock SAML identity provider / validator.
+
+- `issue_response(name_id: str, audience: str, destination: str, in_response_to: str)`
+  - Build a signed AuthnResponse (base64 of canonical JSON).
+- `validate_response(response: str, audience: str, destination: str)`
+  - Validate a response. Returns assertion or None.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `crypto_defense_26`
+
+Source: `components/northstar-agent-runtime/crypto_defense_26.py`
+
+Crypto Defense 26: OAuth scopes (scope checker), Simulated.
+
+#### `ScopeError`
+
+Fail-closed.
+
+#### `parse_scopes(scope_string: str)`
+
+Parse a space-delimited OAuth scope string.
+
+#### `has_scope(granted: FrozenSet[str], required: str)`
+
+Check a single required scope against granted scopes.
+
+#### `has_all_scopes(granted: FrozenSet[str], required: List[str])`
+
+All required scopes must be covered.
+
+#### `missing_scopes(granted: FrozenSet[str], required: List[str])`
+
+Return the required scopes that are not covered.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `crypto_defense_27`
+
+Source: `components/northstar-agent-runtime/crypto_defense_27.py`
+
+Crypto Defense 27: JWT validation (mock with HMAC), Simulated.
+
+#### `JwtError`
+
+Fail-closed.
+
+#### `JwtClaims`
+
+Validated claims.
+
+#### `encode(payload: Dict[str, Any], key: bytes)`
+
+Encode a JWT with HS256.
+
+#### `decode(token: str, key: bytes, *, issuer: Optional[str]=None, audience: Optional[str]=None, leeway: int=0)`
+
+Decode and validate. Raises JwtError on any failure.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `crypto_defense_28`
+
+Source: `components/northstar-agent-runtime/crypto_defense_28.py`
+
+Crypto Defense 28: Token binding (mock), Simulated.
+
+#### `BindingError`
+
+Fail-closed.
+
+#### `BoundToken`
+
+A token bound to a client key id.
+
+#### `TokenBinder`
+
+Binds tokens to client keys (mock).
+
+- `bind(token: str, key_id: str)`
+  - Bind a token to a client key id.
+- `verify(bound: BoundToken, key_id: str)`
+  - Verify the binding AND that the presenter holds key_id.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `crypto_defense_29`
+
+Source: `components/northstar-agent-runtime/crypto_defense_29.py`
+
+Crypto Defense 29: DPoP (mock), Simulated.
+
+#### `DPoPError`
+
+Fail-closed.
+
+#### `DPoPKey`
+
+Client DPoP key (mock).
+
+#### `DPoPServer`
+
+Validates DPoP proofs.
+
+- `register_key(key: DPoPKey)`
+- `make_proof(key: DPoPKey, method: str, url: str)`
+  - Client side: build a DPoP proof for a request.
+- `validate(proof: str, method: str, url: str)`
+  - Server side: validate proof bound to this request.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `crypto_defense_30`
+
+Source: `components/northstar-agent-runtime/crypto_defense_30.py`
+
+Crypto Defense 30: mTLS client certs (mock), Simulated.
+
+#### `MtlsError`
+
+Fail-closed.
+
+#### `ClientCert`
+
+Mock client certificate.
+
+#### `MockCA`
+
+Mock certificate authority.
+
+- `issue(subject: str, pubkey_hash: str, ttl: int=86400)`
+  - Issue a client certificate.
+- `ca_key()`
+#### `MockMTLSServer`
+
+Server side of the mock mTLS handshake.
+
+- `revoke(serial: str)`
+- `handshake(cert: ClientCert, proof_key_hash: str)`
+  - Verify cert chain, window, revocation, and key possession.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
 ### `csv_processor`
 
 Source: `components/northstar-agent-runtime/csv_processor.py`
@@ -33010,6 +36345,18 @@ RFC 4180 CSV parse/emit/validate as deterministic bookkeeping.
 #### `csv_processor_audit_event(kind: str, seq: int, detail: str='')`
 
 Shape an ``audit.ndjson/1`` record for CSV processor activity.
+
+#### `main()`
+
+### `ctrl_strip`
+
+Source: `components/northstar-agent-runtime/ctrl_strip.py`
+
+Control char stripping (D-IN-006), Simulated.
+
+#### `clean(t: str)`
+
+#### `stdlib_only()`
 
 #### `main()`
 
@@ -35813,6 +39160,611 @@ Synthetic-media detection decision bookkeeping ledger: analyze, score, flag.
 
 Self-check: analyze, score, flag, summary.
 
+### `def_extra_01`
+
+Source: `components/northstar-agent-runtime/def_extra_01.py`
+
+Behavioral biometrics gate (mock), Simulated.
+
+#### `BehavioralError`
+
+Fail-closed.
+
+#### `BehaviorProfile`
+
+Enrolled baseline for one principal.
+
+#### `BehaviorStore`
+
+Enroll and verify behavioral timing profiles.
+
+- `enroll(principal: str, samples_ms: List[float])`
+  - Enroll a baseline. Raises if too few samples.
+- `verify(principal: str, samples_ms: List[float])`
+  - Verify samples against the enrolled baseline.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `def_extra_02`
+
+Source: `components/northstar-agent-runtime/def_extra_02.py`
+
+Device fingerprinting gate (mock), Simulated.
+
+#### `FingerprintError`
+
+Fail-closed.
+
+#### `DeviceRecord`
+
+Registered device.
+
+#### `fingerprint(attrs: Dict[str, str])`
+
+Stable fingerprint: sha256 of canonical JSON.
+
+#### `DeviceRegistry`
+
+Register devices, detect attribute drift.
+
+- `register(device_id: str, attrs: Dict[str, str])`
+  - Register (or re-register) a device.
+- `verify(device_id: str, attrs: Dict[str, str])`
+  - Verify presented attributes against the registered device.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `def_extra_03`
+
+Source: `components/northstar-agent-runtime/def_extra_03.py`
+
+Geofencing gate, Simulated.
+
+#### `GeofenceError`
+
+Fail-closed.
+
+#### `Zone`
+
+Allowed circular zone.
+
+#### `haversine_km(lat1: float, lon1: float, lat2: float, lon2: float)`
+
+Great-circle distance in km.
+
+#### `Geofence`
+
+Zone check + impossible-travel detection.
+
+- `check(lat: float, lon: float)`
+  - Return (allowed, zone_name). No zones -> (False, None).
+- `check_travel(principal: str, lat: float, lon: float, *, now: Optional[float]=None)`
+  - Detect impossible travel for a principal.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `def_extra_04`
+
+Source: `components/northstar-agent-runtime/def_extra_04.py`
+
+Time-based access control, Simulated.
+
+#### `TimeAccessError`
+
+Fail-closed.
+
+#### `TimeWindow`
+
+Allowed window: weekday + [start_hour, end_hour).
+
+#### `TimeAccessControl`
+
+Allow only inside configured windows.
+
+- `is_allowed(when: Optional[datetime]=None)`
+  - Return True if `when` (default now) falls in any window.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `def_extra_05`
+
+Source: `components/northstar-agent-runtime/def_extra_05.py`
+
+Risk scoring engine, Simulated.
+
+#### `RiskScoringError`
+
+Fail-closed.
+
+#### `band_for(score: float)`
+
+Map a 0..100 score to a band name.
+
+#### `RiskEngine`
+
+Weighted risk aggregation.
+
+- `score(signals: Dict[str, float])`
+  - Weighted average of known signals, scaled to 0..100.
+- `assess(signals: Dict[str, float])`
+  - Return (score, band).
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `def_extra_06`
+
+Source: `components/northstar-agent-runtime/def_extra_06.py`
+
+Adaptive authentication (mock), Simulated.
+
+#### `AdaptiveAuthError`
+
+Fail-closed.
+
+#### `required_level(risk_score: float)`
+
+Map 0..100 risk score to required auth level.
+
+#### `level_rank(level: str)`
+
+Numeric rank of a level (higher = stronger).
+
+#### `evaluate(risk_score: float, presented_factors: List[str])`
+
+Check presented factors meet the required level.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `def_extra_07`
+
+Source: `components/northstar-agent-runtime/def_extra_07.py`
+
+Step-up authentication (mock), Simulated.
+
+#### `StepUpError`
+
+Fail-closed.
+
+#### `StepUpAuth`
+
+Issue and verify single-use step-up challenges.
+
+- `issue(principal: str, *, now: Optional[float]=None)`
+  - Issue a challenge. Returns (challenge_id, expected_token).
+- `verify(challenge_id: str, principal: str, token: str, *, now: Optional[float]=None)`
+  - Verify a presented token. Single-use.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `def_extra_08`
+
+Source: `components/northstar-agent-runtime/def_extra_08.py`
+
+Transaction signing (mock), Simulated.
+
+#### `TxnSigningError`
+
+Fail-closed.
+
+#### `canonical(tx: Dict)`
+
+Canonical JSON encoding of a transaction.
+
+#### `SignedTxn`
+
+A signed transaction envelope.
+
+#### `TxnSigner`
+
+Sign transactions and reject replays.
+
+- `sign(tx: Dict, nonce: str)`
+  - Sign a transaction with a fresh nonce.
+- `verify(signed: SignedTxn)`
+  - Verify signature and nonce freshness.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `def_extra_09`
+
+Source: `components/northstar-agent-runtime/def_extra_09.py`
+
+Audit trail verification, Simulated.
+
+#### `AuditTrailError`
+
+Fail-closed.
+
+#### `AuditEntry`
+
+One audit record.
+
+#### `verify_trail(entries: List[AuditEntry])`
+
+Verify seq continuity and hash linkage.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `def_extra_10`
+
+Source: `components/northstar-agent-runtime/def_extra_10.py`
+
+Log integrity via hash chain, Simulated.
+
+#### `LogChainError`
+
+Fail-closed.
+
+#### `LogRecord`
+
+One chained log record.
+
+#### `LogChain`
+
+Append-only hash-chained log.
+
+- `append(payload: Dict[str, Any], *, now: Optional[float]=None)`
+  - Append a record.
+- `verify()`
+  - Re-walk the chain. Returns (ok, detail).
+- `records` (property)
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `def_extra_11`
+
+Source: `components/northstar-agent-runtime/def_extra_11.py`
+
+Tamper detection for sealed blobs (mock), Simulated.
+
+#### `TamperError`
+
+Fail-closed.
+
+#### `seal(payload: bytes, key: bytes)`
+
+Seal bytes into a tamper-evident token.
+
+#### `open_seal(token: str, key: bytes)`
+
+Open a sealed token. Returns (ok, payload, detail).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `def_extra_12`
+
+Source: `components/northstar-agent-runtime/def_extra_12.py`
+
+Secure timestamping authority (mock), Simulated.
+
+#### `TimestampError`
+
+Fail-closed.
+
+#### `TimestampToken`
+
+A timestamp token.
+
+#### `TimestampAuthority`
+
+Issue and verify timestamp tokens.
+
+- `issue(data_hash: str, *, now: Optional[float]=None)`
+  - Stamp a data hash at `now`.
+- `verify(token: TimestampToken, *, now: Optional[float]=None)`
+  - Verify MAC, monotonicity, and future skew.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `def_extra_13`
+
+Source: `components/northstar-agent-runtime/def_extra_13.py`
+
+Non-repudiation receipts (mock), Simulated.
+
+#### `NonRepudiationError`
+
+Fail-closed.
+
+#### `Receipt`
+
+A non-repudiation receipt.
+
+#### `ReceiptAuthority`
+
+Issue and verify non-repudiation receipts.
+
+- `issue(actor: str, action: str, payload_hash: str, *, now: Optional[float]=None)`
+  - Issue a receipt for an action.
+- `verify(receipt: Receipt)`
+  - Verify the receipt MAC and binding.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `def_extra_14`
+
+Source: `components/northstar-agent-runtime/def_extra_14.py`
+
+Digital signature verification (mock), Simulated.
+
+#### `SigVerifyError`
+
+Fail-closed.
+
+#### `PubKey`
+
+Registered public key material.
+
+#### `KeyRegistry`
+
+Registry of trusted public keys.
+
+- `add(key: PubKey)`
+  - Register a key. Algorithm must be allowlisted.
+- `sign_mock(key_id: str, message: bytes)`
+  - Test helper: produce a mock signature. Returns (algorithm, sig).
+- `verify(key_id: str, message: bytes, algorithm: str, signature: str)`
+  - Verify a signature. Fail closed on any problem.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `def_extra_15`
+
+Source: `components/northstar-agent-runtime/def_extra_15.py`
+
+Certificate Transparency enforcement (mock), Simulated.
+
+#### `CTError`
+
+Fail-closed.
+
+#### `SCT`
+
+Signed Certificate Timestamp (mock).
+
+#### `CTEnforcer`
+
+Enforce SCT quorum from known logs.
+
+- `issue_sct(log_id: str, cert_hash: str)`
+  - Test helper: a known log issues an SCT.
+- `verify_quorum(cert_hash: str, scts: List[SCT])`
+  - Require >= quorum valid SCTs from distinct known logs.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `def_extra_16`
+
+Source: `components/northstar-agent-runtime/def_extra_16.py`
+
+OCSP stapling check (mock), Simulated.
+
+#### `OCSPError`
+
+Fail-closed.
+
+#### `OCSPResponse`
+
+Stapled OCSP response (mock).
+
+#### `OCSPResponder`
+
+Mock OCSP responder + stapling validator.
+
+- `staple(serial: str, status: str, *, now: Optional[float]=None, validity_s: float=3600.0)`
+  - Issue a stapled response valid for validity_s.
+- `check(response: OCSPResponse, *, now: Optional[float]=None)`
+  - Validate a stapled response.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `def_extra_17`
+
+Source: `components/northstar-agent-runtime/def_extra_17.py`
+
+CRL checking (mock), Simulated.
+
+#### `CRLError`
+
+Fail-closed.
+
+#### `CRL`
+
+A certificate revocation list (mock).
+
+#### `CRLChecker`
+
+Hold CRLs per issuer and check serials.
+
+- `install(crl: CRL)`
+  - Install (or replace) the CRL for an issuer.
+- `check(issuer: str, serial: str, *, now: Optional[float]=None)`
+  - Return (ok, detail). ok=False means revoked OR cannot verify.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `def_extra_18`
+
+Source: `components/northstar-agent-runtime/def_extra_18.py`
+
+Pinning violation detection (HPKP-style), Simulated.
+
+#### `PinningError`
+
+Fail-closed.
+
+#### `PinSet`
+
+Pinned SPKI hashes for one host.
+
+#### `PinningEnforcer`
+
+Enforce SPKI pins per host.
+
+- `pin(pinset: PinSet)`
+  - Install pins for a host.
+- `check(host: str, presented_spki: str)`
+  - Check presented SPKI against pins.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `def_extra_19`
+
+Source: `components/northstar-agent-runtime/def_extra_19.py`
+
+Downgrade attack detection, Simulated.
+
+#### `DowngradeError`
+
+Fail-closed.
+
+#### `rank(version: str)`
+
+Numeric rank of a protocol version.
+
+#### `Negotiation`
+
+One recorded negotiation.
+
+#### `DowngradeDetector`
+
+Detect version rollback and flag stripping per peer.
+
+- `observe(neg: Negotiation)`
+  - Record a negotiation. Returns (downgrade, detail).
+- `peer_best(peer: str)`
+  - Best version ever seen for a peer.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `def_extra_20`
+
+Source: `components/northstar-agent-runtime/def_extra_20.py`
+
+Protocol version enforcement, Simulated.
+
+#### `VersionPolicyError`
+
+Fail-closed.
+
+#### `VersionPolicy`
+
+Allowed protocol version range [min_version, max_version].
+
+#### `enforce(version: str, policy: VersionPolicy)`
+
+Check a version against the policy. Fail closed.
+
+#### `negotiate(offered: List[str], policy: VersionPolicy)`
+
+Pick the highest mutually acceptable version.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
 ### `defense_agents`
 
 Source: `components/northstar-agent-runtime/defense_agents.py`
@@ -36089,6 +40041,36 @@ Offline verification with the root public key only.
 
 Audit events for each block of the credential, for the hash chain.
 
+### `deliberative_spec`
+
+Source: `components/northstar-agent-runtime/deliberative_spec.py`
+
+Deliberative spec citation (D12, OpenAI), Simulated.
+
+#### `DeliberativeError`
+
+Fail-closed: missing citations raise.
+
+#### `SpecClause`
+
+One clause from the safety spec.
+
+#### `DeliberatedDecision`
+
+A decision with its spec citations.
+
+#### `require_citation(decision: str, cited_clauses: List[str], reasoning: str, spec: Dict[str, SpecClause])`
+
+Enforce spec citation before decision.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
 ### `deny_monotonicity`
 
 Source: `components/northstar-agent-runtime/deny_monotonicity.py`
@@ -36277,6 +40259,146 @@ Shape a deployment verdict as an audit-chain event dict.
 #### `shadow_audit_event(verdict: DeploymentVerdict, *, system_id: str)`
 
 Shape a shadow-detection verdict as an audit-chain event dict.
+
+### `deser_guard`
+
+Source: `components/northstar-agent-runtime/deser_guard.py`
+
+Deserialization guard (D-OUT-029), Simulated.
+
+#### `detect(code: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `destructive_prefix_probes`
+
+Source: `components/northstar-agent-runtime/destructive_prefix_probes.py`
+
+Destructive-prefix probes: the tool name is an attack surface.
+
+#### `classify_name(name: str)`
+
+Return the risk classes signaled by a tool name's prefixes.
+
+#### `detect_prefix_risk(name: str)`
+
+Sorted risk classes for a name; empty tuple when unclassified.
+
+#### `attack_probe_names()`
+
+All destructive-prefix attack probe names.
+
+#### `benign_probe_names()`
+
+All benign control names.
+
+#### `probes_in_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `NameRecord`
+
+A pinned tool-naming identity.
+
+#### `seal_name(registered_name: str, display_name: str | None, description: str, declared_risk: tuple[str, ...])`
+
+Pin a tool's naming identity: seal name + label + description + risk.
+
+#### `verify_record(record: NameRecord)`
+
+Constant-time re-derivation check of a name record's seal.
+
+#### `detect_undeclared_risk(record: NameRecord)`
+
+Name the risk classes the name carries that were never declared.
+
+#### `detect_alias_hides_risk(record: NameRecord)`
+
+True when the display label drops every risk class the name carries.
+
+#### `detect_description_contradiction(record: NameRecord)`
+
+True when the description claims safety the name's risk denies.
+
+#### `AliasMapping`
+
+A pinned alias mapping: alias resolves to exactly one registered name.
+
+#### `pin_alias(alias: str, registered_name: str, declared_risk: tuple[str, ...])`
+
+Pin an alias mapping at registration time.
+
+#### `verify_alias(mapping: AliasMapping)`
+
+Constant-time re-derivation check of an alias mapping's seal.
+
+#### `resolve_alias(alias: str, mappings: tuple[AliasMapping, ...])`
+
+Resolve an alias through pinned mappings only. Ad-hoc is not resolved.
+
+#### `NameGateDecision`
+
+A digest-pinned naming-gate decision: disposition + findings.
+
+#### `verify_decision(decision: NameGateDecision)`
+
+Constant-time re-derivation check of a gate decision's seal.
+
+#### `gate_name(record: NameRecord)`
+
+Fail-closed naming gate over a pinned name record.
+
+#### `main()`
+
+Print a small summary for the CLI.
+
+### `deterministic_veto`
+
+Source: `components/northstar-agent-runtime/deterministic_veto.py`
+
+Deterministic veto: model can escalate, never waive (D2), Simulated.
+
+#### `Consequence`
+
+Consequence classification.
+
+#### `VetoError`
+
+Fail-closed: veto violations raise.
+
+#### `VetoRule`
+
+A deterministic veto rule (model cannot modify).
+
+#### `DeterministicVeto`
+
+Enforces vetoes outside model control.
+
+- `add_rule(rule: VetoRule)`
+  - Add a veto rule (setup time, not model-writable).
+- `model_escalate(rule: VetoRule)`
+  - Model requests stricter checking (can only add, not remove).
+- `check(consequence: Consequence, *, human_override: bool=False)`
+  - Check if an action with given consequence is vetoed.
+- `is_vetoed(consequence: Consequence)`
+  - Quick check (no human override).
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
 
 ### `developer_portal`
 
@@ -36918,6 +41040,89 @@ Build an ``audit.ndjson/1``-shaped record for a lock event.
 
 #### `main()`
 
+### `distributed_tracing`
+
+Source: `components/northstar-agent-runtime/distributed_tracing.py`
+
+Distributed tracing: Jaeger/Zipkin-shaped span and trace bookkeeping.
+
+#### `DistributedTracingError`
+
+Base for all distributed-tracing errors.
+
+#### `BadSpanError`
+
+A span definition was malformed (bad id, name, kind, tags, parent).
+
+#### `DuplicateSpanError`
+
+The span id is already booked.
+
+#### `UnknownSpanError`
+
+No such span id (also used for a missing parent span).
+
+#### `FinishedSpanError`
+
+The span is already finished (terminal).
+
+#### `BadTraceError`
+
+A trace id was malformed.
+
+#### `UnknownTraceError`
+
+No spans have been booked under this trace id.
+
+#### `BadFormatError`
+
+The export format is not in the pinned vocabulary.
+
+#### `SeqOrderError`
+
+Caller seq did not strictly increase.
+
+#### `SpanRecord`
+
+One opened span (frozen). Timing is logical: ``start_seq``.
+
+- `verify()`
+#### `FinishedSpan`
+
+One finished span (frozen). ``duration`` is logical-seq units.
+
+- `verify()`
+#### `TraceReport`
+
+One trace view (frozen). Pure read: seq validated, not consumed.
+
+- `verify()`
+#### `ExportRecord`
+
+One rendered trace document (frozen). Simulated collector output.
+
+- `verify()`
+#### `distributed_tracing_audit_event(kind: str, detail: Mapping[str, Any], seq: int)`
+
+Shape an ``audit.ndjson/1`` record for the distributed-tracing module.
+
+#### `DistributedTracing`
+
+Deterministic span/trace ledger (Jaeger/Zipkin-shaped, simulated).
+
+- `span(span_id: str, trace_id: str, name: str, seq: int, parent_span_id: Optional[str]=None, kind: str='internal', tags: Optional[Mapping[str, Any]]=None)`
+  - Open a span. Returns a frozen ``SpanRecord``.
+- `finish_span(span_id: str, seq: int, status: str='ok')`
+  - Finish an open span. Returns a frozen ``FinishedSpan``.
+- `trace(trace_id: str, seq: int)`
+  - Return a frozen ``TraceReport`` for one trace.
+- `export(trace_id: str, seq: int, format: str='jaeger')`
+  - Render one trace as a Jaeger/Zipkin document (simulated).
+- `span_ids()`
+- `trace_ids()`
+- `audit_log()`
+#### `main()`
+
 ### `dkg_interface`
 
 Source: `components/northstar-agent-runtime/dkg_interface.py`
@@ -36989,6 +41194,21 @@ Shape an ``audit.ndjson/1`` record for a DKG event. Fail-closed.
 #### `main()`
 
 Self-check: 3 participants, t=1, two dealers, full pipeline + recovery.
+
+### `dlp_interface`
+
+Source: `components/northstar-agent-runtime/dlp_interface.py`
+
+DLP integration: data loss prevention interface (D-OUT-003), Simulated.
+
+#### `DLPError`
+
+#### `DLPPolicy`
+
+- `check(text: str)`
+#### `stdlib_only()`
+
+#### `main()`
 
 ### `dns_manager`
 
@@ -38980,6 +43200,18 @@ Shape an ``audit.ndjson/1``-compatible enclave audit record.
 
 #### `main()`
 
+### `encoding_norm`
+
+Source: `components/northstar-agent-runtime/encoding_norm.py`
+
+Encoding normalization (D-IN-004), Simulated.
+
+#### `normalize(b: bytes)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
 ### `encryption_at_rest`
 
 Source: `components/northstar-agent-runtime/encryption_at_rest.py`
@@ -39234,6 +43466,72 @@ Hash-chained log of kill-switch receipts.
 #### `check_kill_switch(*, log: KillSwitchLog, participant_id: str, now: int)`
 
 Check that a participant's kill switch is live and tested.
+
+### `enforcement_gap_probes`
+
+Source: `components/northstar-agent-runtime/enforcement_gap_probes.py`
+
+Enforcement-gap probes (formal twin of the P0 wiring rule).
+
+#### `probe_names()`
+
+Names of the attack probes (detected-but-not-acted shapes).
+
+#### `benign_names()`
+
+Names of the benign control probes.
+
+#### `probe_by_name(name: str)`
+
+Return the probe record for ``name``; fail closed on unknown names.
+
+#### `probes_by_family(family: str)`
+
+All probes in ``family``.
+
+#### `deny_side_keywords_ok(text: str)`
+
+True if ``text`` names an active deny-side mechanism.
+
+#### `DetectionRecord`
+
+A mechanical detection record: severity, target identity, digest.
+
+#### `EnforcementDecision`
+
+A controller decision bound to a detection record.
+
+#### `EnforcementVerdict`
+
+Pinned verdict of one detection/decision pair.
+
+- `pinned()`
+  - Return a copy with the JCS digest pin set.
+#### `enforce(record: DetectionRecord, decision: EnforcementDecision | None, *, caller: str)`
+
+Bind a detection record to a controller decision (fail closed).
+
+#### `verify_verdict(verdict: EnforcementVerdict)`
+
+Constant-time check of a verdict's digest pin.
+
+#### `WiringBinding`
+
+One production binding of a capability into a gate path.
+
+#### `WiringReport`
+
+Per-module wiring verdicts. ``ok`` is True iff no gaps found.
+
+- `gap_modules()`
+  - Modules whose claimed capability has at least one gap.
+- `module_ok(module: str)`
+  - True iff ``module`` is wired with no gaps.
+- `module_gaps(module: str)`
+  - Gap reasons for ``module`` (empty tuple if none / unknown).
+#### `validate_wiring(capabilities: Sequence[tuple[str, str]], bindings: Sequence[WiringBinding])`
+
+Validate that every claimed capability is wired into production.
 
 ### `env_cost`
 
@@ -40209,6 +44507,126 @@ Public event vocabulary of a governed run: dict events + result exit codes.
 
 Render one run event as a plain dict (the shape ``--json`` emits).
 
+### `evidence_aging_probes`
+
+Source: `components/northstar-agent-runtime/evidence_aging_probes.py`
+
+Evidence-aging probe corpus + freshness / decay detectors + aging gates.
+
+#### `parse_timestamp(ts: Any)`
+
+Epoch seconds for an evidence timestamp; None when missing/malformed.
+
+#### `EvidenceRecord`
+
+One digest-pinned evidence item with its observation time.
+
+#### `build_record(*, evidence_id: str, kind: str, observed_ts: Any, payload_digest: str, issuer: str, max_age_seconds: int)`
+
+Mint a well-formed, digest-pinned evidence record.
+
+#### `verify_record(record: EvidenceRecord)`
+
+Re-derive the record digest with a constant-time compare.
+
+#### `freshness(record: EvidenceRecord, as_of: Any)`
+
+Age and freshness status of ``record`` against ``as_of``.
+
+#### `gate_evidence(record: EvidenceRecord, as_of: Any, *, ceiling_seconds: int | None=None)`
+
+Fail-closed gate verdict for one evidence record.
+
+#### `gate_batch(records: list[EvidenceRecord] | tuple[EvidenceRecord, ...], as_of: Any, *, ceiling_seconds: int | None=None)`
+
+Gate a batch of evidence as a unit.
+
+#### `detect_restamp(old: EvidenceRecord, new: EvidenceRecord)`
+
+Detect timestamp restamping without re-observation.
+
+#### `probe_names()`
+
+All evidence-aging attack probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Probes in one family (attacks plus benign).
+
+#### `probe_by_name(name: str)`
+
+Look up any evidence-aging probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+probe name -> expected gate outcome ('deny' or 'allow').
+
+#### `main()`
+
+Print the corpus inventory.
+
+### `evidence_compaction_probes`
+
+Source: `components/northstar-agent-runtime/evidence_compaction_probes.py`
+
+Evidence-compaction probe corpus + payload/evidence separation detectors.
+
+#### `attack_names()`
+
+All evidence-compaction attack probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `EvidenceItem`
+
+One item in a compacted bundle.
+
+#### `build_item(kind: str, content: str, source_digest: str='', seq: int=0)`
+
+Build a digest-pinned item. Fail-closed on bad kind/empty content.
+
+#### `verify_item(item: EvidenceItem)`
+
+Recompute the item digest with constant-time compare.
+
+#### `CompactionBundle`
+
+An append-only compacted bundle plus its pinned source manifest.
+
+#### `compact(evidence: list[EvidenceItem], payload: list[EvidenceItem], source_manifest: str, dropped_payload: tuple[str, ...]=())`
+
+Build a bundle with evidence/payload separation enforced.
+
+#### `verify_bundle_integrity(bundle: CompactionBundle, expected_evidence_digests: tuple[str, ...]=())`
+
+Verify a compacted bundle. Never raises; returns ``(ok, findings)``.
+
+#### `bundle_head_digest(bundle: CompactionBundle)`
+
+Anchor digest for a bundle, for out-of-band pinning.
+
+#### `main()`
+
+Print a corpus summary (smoke entry point).
+
 ### `evidence_tiers`
 
 Source: `components/northstar-agent-runtime/evidence_tiers.py`
@@ -40700,6 +45118,20 @@ Deterministic face-detection *bookkeeping* (simulated detector).
 - `attribute_set(face_id: str)`
 - `image_ids()`
 - `audit_log()`
+#### `main()`
+
+### `factuality_mock`
+
+Source: `components/northstar-agent-runtime/factuality_mock.py`
+
+Factuality checking mock (D-OUT-012), Simulated.
+
+#### `check_claim(claim: str)`
+
+Mock factuality score 0-1.
+
+#### `stdlib_only()`
+
 #### `main()`
 
 ### `failure_budget_combo`
@@ -42244,6 +46676,40 @@ Shape an ``audit.ndjson/1`` record for a flag-targeting event.
 
 #### `main()`
 
+### `floor_settings`
+
+Source: `components/northstar-agent-runtime/floor_settings.py`
+
+Floor settings: unweakable policy minimums (D9, Google Model Armor), Simulated.
+
+#### `FloorError`
+
+Fail-closed: weakening floors raises.
+
+#### `Floor`
+
+A policy floor (minimum requirement).
+
+#### `hash_floors(floors: List[Floor])`
+
+Hash the floor set for sealing.
+
+#### `FloorEnforcer`
+
+Enforces that child policies don't weaken floors.
+
+- `floor_hash` (property)
+  - Hash of the floor set (for sealing).
+- `check_policy(policy_detectors: FrozenSet[str], policy_denies: FrozenSet[str], min_severity: int)`
+  - Check if a child policy respects all floors.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
 ### `flow_control`
 
 Source: `components/northstar-agent-runtime/flow_control.py`
@@ -43456,6 +47922,35 @@ Bookkeeping for GLBA (Gramm-Leach-Bliley Act) decisions.
 - `audit_log(seq: int)`
   - The booked audit events. Pure read.
 #### `main()`
+
+### `goal_comparator`
+
+Source: `components/northstar-agent-runtime/goal_comparator.py`
+
+Goal comparator: termination oracle (BabyAGI #14), Simulated.
+
+#### `GoalComparatorError`
+
+Fail-closed.
+
+#### `ComparisonResult`
+
+Result of comparing state to objective.
+
+#### `GoalComparator`
+
+Checks if the objective is reached.
+
+- `check(state_summary: Dict[str, Any], task_queue: List[str]=None)`
+  - Check if objective is reached.
+- `cycles_used` (property)
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
 
 ### `goal_misgeneralization`
 
@@ -45645,6 +50140,20 @@ Build an ``audit.ndjson/1``-shaped record for a GSet operation.
 
 Self-check: replicas converge regardless of merge order.
 
+### `hallucination_mock`
+
+Source: `components/northstar-agent-runtime/hallucination_mock.py`
+
+Hallucination detection mock (D-OUT-011), Simulated.
+
+#### `detect(text: str)`
+
+Mock hallucination score.
+
+#### `stdlib_only()`
+
+#### `main()`
+
 ### `harness_binding`
 
 Source: `components/northstar-agent-runtime/harness_binding.py`
@@ -46113,6 +50622,18 @@ Audit event shaped to feed ``audit_chain.chain_record``.
 
 Gate an autonomous trading strategy's session, fail-closed.
 
+### `hex_detect`
+
+Source: `components/northstar-agent-runtime/hex_detect.py`
+
+Hex decoding guard (D-IN-010), Simulated.
+
+#### `is_suspicious_hex(t: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
 ### `hinted_handoff`
 
 Source: `components/northstar-agent-runtime/hinted_handoff.py`
@@ -46323,6 +50844,75 @@ HIPAA safeguard decision ledger: register, assess, remediate, attest.
 
 Self-check smoke run.
 
+### `history_deviation_probes`
+
+Source: `components/northstar-agent-runtime/history_deviation_probes.py`
+
+History-deviation probes: plan tracking / precedent-gap detection.
+
+#### `HistoryEntry`
+
+One entry in the host-reported plan history.
+
+#### `build_entry(kind: str, tool: str, arguments_digest: str, seq: int, revision: int, origin: str, previous_digest: str='sha256:genesis')`
+
+Build a digest-pinned history entry.
+
+#### `verify_entry(entry: HistoryEntry)`
+
+Recompute an entry's digest; constant-time compare.
+
+#### `PlanHistory`
+
+Append-only host-reported plan history.
+
+- `append(entry: HistoryEntry)`
+- `entries()`
+- `digests()`
+#### `verify_history(history: PlanHistory)`
+
+Re-verify a whole history; never raises.
+
+#### `detect_deviation(history: PlanHistory)`
+
+Flag executed actions the plan history cannot account for.
+
+#### `detect_precedent_gap(history: PlanHistory)`
+
+Flag actions with no precedent in the agent's own history.
+
+#### `track_plan(history: PlanHistory)`
+
+Per-step plan conformance report.
+
+#### `history_head_digest(history: PlanHistory)`
+
+Head digest for out-of-band anchoring of the whole history.
+
+#### `probe_names()`
+
+All history-deviation attack probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `main()`
+
+Print a small summary for the CLI.
+
 ### `hlc`
 
 Source: `components/northstar-agent-runtime/hlc.py`
@@ -46464,6 +51054,18 @@ Hoare-logic triple checking and rule application.
   - Shape a verifier lifecycle event as an ``audit.ndjson/1`` record.
 #### `main()`
 
+### `homoglyph_norm`
+
+Source: `components/northstar-agent-runtime/homoglyph_norm.py`
+
+Homoglyph normalization (D-IN-011), Simulated.
+
+#### `normalize(t: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
 ### `homomorphic_training`
 
 Source: `components/northstar-agent-runtime/homomorphic_training.py`
@@ -46539,6 +51141,21 @@ Shape a homomorphic-training lifecycle event as an ``audit.ndjson/1`` record.
 
 Self-check: train a tiny encrypted linear model end to end.
 
+### `honeytokens`
+
+Source: `components/northstar-agent-runtime/honeytokens.py`
+
+Honeytokens: deception tokens (D-OUT-006), Simulated.
+
+#### `HoneytokenManager`
+
+- `create(prefix: str='AKIA')`
+- `is_honeytoken(s: str)`
+- `check_text(text: str)`
+#### `stdlib_only()`
+
+#### `main()`
+
 ### `hooks`
 
 Source: `components/northstar-agent-runtime/hooks.py`
@@ -46594,6 +51211,36 @@ Ordered hook chains keyed by event.
 - `fire(event: HookEvent, hook_input: HookInput, *, extra_hooks: Sequence[Callable[[HookInput], Any]]=())`
   - Run every matching hook in order. Deny is terminal.
 #### `empty_registry()`
+
+### `hop_validation`
+
+Source: `components/northstar-agent-runtime/hop_validation.py`
+
+Per-hop schema validation (D10):防自复制注入, Simulated.
+
+#### `HopValidationError`
+
+Fail-closed: invalid handoffs raise.
+
+#### `HopSchema`
+
+Schema for one handoff hop.
+
+#### `validate_hop(payload: Dict[str, Any], schema: HopSchema)`
+
+Validate a handoff payload against its schema.
+
+#### `detect_growth_anomaly(sizes: List[int], *, threshold: float=3.0)`
+
+Detect payload growth anomaly.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
 
 ### `housing`
 
@@ -47205,6 +51852,18 @@ One simulated HSM slot: generates, stores, and uses key material.
 #### `hsm_audit_event(kind: str, seq: int, key_id: Optional[str]=None)`
 
 Shape an HSM lifecycle event as an ``audit.ndjson/1`` record.
+
+#### `main()`
+
+### `html_entity_guard`
+
+Source: `components/northstar-agent-runtime/html_entity_guard.py`
+
+HTML entity decoding guard (D-IN-007), Simulated.
+
+#### `has_double_encoding(t: str)`
+
+#### `stdlib_only()`
 
 #### `main()`
 
@@ -48274,6 +52933,18 @@ AI Impact Assessment lifecycle decision ledger.
 
 Self-check: exercise the ledger end to end.
 
+### `in_len_guard`
+
+Source: `components/northstar-agent-runtime/in_len_guard.py`
+
+Input length guard, Simulated.
+
+#### `check(t: str, m: int=10000)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
 ### `inbox_pattern`
 
 Source: `components/northstar-agent-runtime/inbox_pattern.py`
@@ -48343,6 +53014,127 @@ Transactional inbox: idempotent receive, store-then-ack.
 
 Shape an inbox record as an ``audit.ndjson/1`` record.
 
+#### `main()`
+
+### `incident_management`
+
+Source: `components/northstar-agent-runtime/incident_management.py`
+
+Incident management: PagerDuty/Opsgenie-shaped incident lifecycle bookkeeping.
+
+#### `IncidentManagementError`
+
+Base for all incident-management structural problems and refusals.
+
+#### `BadIncidentError`
+
+Incident id/title/severity/service/urgency is malformed.
+
+#### `DuplicateIncidentError`
+
+An incident id is already registered.
+
+#### `UnknownIncidentError`
+
+No incident is pinned for the requested id.
+
+#### `ResolvedIncidentError`
+
+The incident is resolved; the mutation is refused fail-closed.
+
+#### `BadPolicyError`
+
+Escalation policy id/levels are malformed.
+
+#### `DuplicatePolicyError`
+
+A policy id is already registered.
+
+#### `UnknownPolicyError`
+
+No policy is pinned for the requested id.
+
+#### `BadEscalationError`
+
+Escalation request is malformed (bad reason).
+
+#### `MaxEscalationError`
+
+The incident is already at the policy's top escalation level.
+
+#### `BadAcknowledgeError`
+
+Acknowledge is malformed (bad responder) or the incident is not in the ``triggered`` state.
+
+#### `BadResolutionError`
+
+Resolution detail is malformed.
+
+#### `SeqOrderError`
+
+Caller seq did not strictly increase.
+
+#### `PolicyRecord`
+
+One pinned escalation policy (frozen).
+
+- `verify()`
+#### `IncidentRecord`
+
+One pinned incident (frozen). ``status`` is lifecycle state.
+
+- `verify()`
+#### `AckRecord`
+
+One acknowledgement (frozen).
+
+- `verify()`
+#### `EscalationRecord`
+
+One escalation event (frozen). ``level`` is 1-based.
+
+- `verify()`
+#### `ResolutionRecord`
+
+One terminal resolution (frozen).
+
+- `verify()`
+#### `incident_management_audit_event(kind: str, detail: Mapping[str, Any], seq: int)`
+
+Shape an ``audit.ndjson/1`` record for the incident-management module.
+
+#### `IncidentManagement`
+
+Deterministic incident-lifecycle ledger.
+
+- `register_policy(policy_id: str, levels: Sequence[Sequence[str]], seq: int)`
+  - Pin an escalation policy: ordered levels of responder ids.
+- `create(incident_id: str, title: str, severity: str, seq: int, *, service: str='', urgency: Optional[str]=None, policy_id: str='')`
+  - Open an incident in the ``triggered`` state.
+- `acknowledge(incident_id: str, responder: str, seq: int)`
+  - Move ``triggered`` -> ``acknowledged``.
+- `escalate(incident_id: str, seq: int, reason: str='')`
+  - Bump the escalation level and book the new level's responders.
+- `resolve(incident_id: str, seq: int, resolution: str='')`
+  - Terminally resolve an incident.
+- `incident(incident_id: str)`
+  - Return the pinned incident record (raises if unknown).
+- `incident_ids()`
+  - All incident ids, sorted.
+- `open_ids()`
+  - Incident ids whose status is not ``resolved``, sorted.
+- `policy(policy_id: str)`
+  - Return the pinned policy record (raises if unknown).
+- `policy_ids()`
+  - All policy ids, sorted.
+- `escalations_for(incident_id: str)`
+  - Escalation events for one incident, oldest first.
+- `stats()`
+  - Counts by status plus policy/escalation totals.
+- `audit_log()`
+  - The booked audit events, oldest first.
+- `as_dict()`
+  - Summary view for debugging (no titles or resolutions).
 #### `main()`
 
 ### `incident_manager`
@@ -48886,6 +53678,686 @@ Shape an ``audit.ndjson/1`` record for the ingress-controller module.
 
 #### `main()`
 
+### `inj_variant_01`
+
+Source: `components/northstar-agent-runtime/inj_variant_01.py`
+
+Inj variant 01: Unicode homoglyphs, Simulated.
+
+#### `InjVariantError`
+
+Fail-closed: bad probe definitions raise.
+
+#### `Probe`
+
+One Unicode homoglyphs probe.
+
+#### `ProbeResult`
+
+Result of running one probe.
+
+#### `run_probe(probe: Probe, gate_fn: Callable[[str, str], bool])`
+
+Run one probe through a gate function.
+
+#### `run_all_probes(gate_fn: Callable[[str, str], bool], probes: List[Probe] | None=None)`
+
+Run all probes, return summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check with a variant-tuned naive gate.
+
+### `inj_variant_02`
+
+Source: `components/northstar-agent-runtime/inj_variant_02.py`
+
+Inj variant 02: Zero-width characters, Simulated.
+
+#### `InjVariantError`
+
+Fail-closed: bad probe definitions raise.
+
+#### `Probe`
+
+One Zero-width characters probe.
+
+#### `ProbeResult`
+
+Result of running one probe.
+
+#### `run_probe(probe: Probe, gate_fn: Callable[[str, str], bool])`
+
+Run one probe through a gate function.
+
+#### `run_all_probes(gate_fn: Callable[[str, str], bool], probes: List[Probe] | None=None)`
+
+Run all probes, return summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check with a variant-tuned naive gate.
+
+### `inj_variant_03`
+
+Source: `components/northstar-agent-runtime/inj_variant_03.py`
+
+Inj variant 03: RTL override, Simulated.
+
+#### `InjVariantError`
+
+Fail-closed: bad probe definitions raise.
+
+#### `Probe`
+
+One RTL override probe.
+
+#### `ProbeResult`
+
+Result of running one probe.
+
+#### `run_probe(probe: Probe, gate_fn: Callable[[str, str], bool])`
+
+Run one probe through a gate function.
+
+#### `run_all_probes(gate_fn: Callable[[str, str], bool], probes: List[Probe] | None=None)`
+
+Run all probes, return summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check with a variant-tuned naive gate.
+
+### `inj_variant_04`
+
+Source: `components/northstar-agent-runtime/inj_variant_04.py`
+
+Inj variant 04: Nested JSON injection, Simulated.
+
+#### `InjVariantError`
+
+Fail-closed: bad probe definitions raise.
+
+#### `Probe`
+
+One Nested JSON injection probe.
+
+#### `ProbeResult`
+
+Result of running one probe.
+
+#### `run_probe(probe: Probe, gate_fn: Callable[[str, str], bool])`
+
+Run one probe through a gate function.
+
+#### `run_all_probes(gate_fn: Callable[[str, str], bool], probes: List[Probe] | None=None)`
+
+Run all probes, return summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check with a variant-tuned naive gate.
+
+### `inj_variant_05`
+
+Source: `components/northstar-agent-runtime/inj_variant_05.py`
+
+Inj variant 05: Base64-encoded instructions, Simulated.
+
+#### `InjVariantError`
+
+Fail-closed: bad probe definitions raise.
+
+#### `Probe`
+
+One Base64-encoded instructions probe.
+
+#### `ProbeResult`
+
+Result of running one probe.
+
+#### `run_probe(probe: Probe, gate_fn: Callable[[str, str], bool])`
+
+Run one probe through a gate function.
+
+#### `run_all_probes(gate_fn: Callable[[str, str], bool], probes: List[Probe] | None=None)`
+
+Run all probes, return summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check with a variant-tuned naive gate.
+
+### `inj_variant_06`
+
+Source: `components/northstar-agent-runtime/inj_variant_06.py`
+
+Inj variant 06: Markdown image exfiltration, Simulated.
+
+#### `InjVariantError`
+
+Fail-closed: bad probe definitions raise.
+
+#### `Probe`
+
+One Markdown image exfiltration probe.
+
+#### `ProbeResult`
+
+Result of running one probe.
+
+#### `run_probe(probe: Probe, gate_fn: Callable[[str, str], bool])`
+
+Run one probe through a gate function.
+
+#### `run_all_probes(gate_fn: Callable[[str, str], bool], probes: List[Probe] | None=None)`
+
+Run all probes, return summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check with a variant-tuned naive gate.
+
+### `inj_variant_07`
+
+Source: `components/northstar-agent-runtime/inj_variant_07.py`
+
+Inj variant 07: HTML comments, Simulated.
+
+#### `InjVariantError`
+
+Fail-closed: bad probe definitions raise.
+
+#### `Probe`
+
+One HTML comments probe.
+
+#### `ProbeResult`
+
+Result of running one probe.
+
+#### `run_probe(probe: Probe, gate_fn: Callable[[str, str], bool])`
+
+Run one probe through a gate function.
+
+#### `run_all_probes(gate_fn: Callable[[str, str], bool], probes: List[Probe] | None=None)`
+
+Run all probes, return summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check with a variant-tuned naive gate.
+
+### `inj_variant_08`
+
+Source: `components/northstar-agent-runtime/inj_variant_08.py`
+
+Inj variant 08: CSS injection, Simulated.
+
+#### `InjVariantError`
+
+Fail-closed: bad probe definitions raise.
+
+#### `Probe`
+
+One CSS injection probe.
+
+#### `ProbeResult`
+
+Result of running one probe.
+
+#### `run_probe(probe: Probe, gate_fn: Callable[[str, str], bool])`
+
+Run one probe through a gate function.
+
+#### `run_all_probes(gate_fn: Callable[[str, str], bool], probes: List[Probe] | None=None)`
+
+Run all probes, return summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check with a variant-tuned naive gate.
+
+### `inj_variant_09`
+
+Source: `components/northstar-agent-runtime/inj_variant_09.py`
+
+Inj variant 09: SQL comment style, Simulated.
+
+#### `InjVariantError`
+
+Fail-closed: bad probe definitions raise.
+
+#### `Probe`
+
+One SQL comment style probe.
+
+#### `ProbeResult`
+
+Result of running one probe.
+
+#### `run_probe(probe: Probe, gate_fn: Callable[[str, str], bool])`
+
+Run one probe through a gate function.
+
+#### `run_all_probes(gate_fn: Callable[[str, str], bool], probes: List[Probe] | None=None)`
+
+Run all probes, return summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check with a variant-tuned naive gate.
+
+### `inj_variant_10`
+
+Source: `components/northstar-agent-runtime/inj_variant_10.py`
+
+Inj variant 10: Multilingual injection, Simulated.
+
+#### `InjVariantError`
+
+Fail-closed: bad probe definitions raise.
+
+#### `Probe`
+
+One Multilingual injection probe.
+
+#### `ProbeResult`
+
+Result of running one probe.
+
+#### `run_probe(probe: Probe, gate_fn: Callable[[str, str], bool])`
+
+Run one probe through a gate function.
+
+#### `run_all_probes(gate_fn: Callable[[str, str], bool], probes: List[Probe] | None=None)`
+
+Run all probes, return summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check with a variant-tuned naive gate.
+
+### `inj_variant_11`
+
+Source: `components/northstar-agent-runtime/inj_variant_11.py`
+
+Inj variant 11: Emoji-encoded instructions, Simulated.
+
+#### `InjVariantError`
+
+Fail-closed: bad probe definitions raise.
+
+#### `Probe`
+
+One Emoji-encoded instructions probe.
+
+#### `ProbeResult`
+
+Result of running one probe.
+
+#### `run_probe(probe: Probe, gate_fn: Callable[[str, str], bool])`
+
+Run one probe through a gate function.
+
+#### `run_all_probes(gate_fn: Callable[[str, str], bool], probes: List[Probe] | None=None)`
+
+Run all probes, return summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check with a variant-tuned naive gate.
+
+### `inj_variant_12`
+
+Source: `components/northstar-agent-runtime/inj_variant_12.py`
+
+Inj variant 12: Whitespace steganography, Simulated.
+
+#### `InjVariantError`
+
+Fail-closed: bad probe definitions raise.
+
+#### `Probe`
+
+One Whitespace steganography probe.
+
+#### `ProbeResult`
+
+Result of running one probe.
+
+#### `run_probe(probe: Probe, gate_fn: Callable[[str, str], bool])`
+
+Run one probe through a gate function.
+
+#### `run_all_probes(gate_fn: Callable[[str, str], bool], probes: List[Probe] | None=None)`
+
+Run all probes, return summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check with a variant-tuned naive gate.
+
+### `inj_variant_13`
+
+Source: `components/northstar-agent-runtime/inj_variant_13.py`
+
+Inj variant 13: Homoglyph domains, Simulated.
+
+#### `InjVariantError`
+
+Fail-closed: bad probe definitions raise.
+
+#### `Probe`
+
+One Homoglyph domains probe.
+
+#### `ProbeResult`
+
+Result of running one probe.
+
+#### `run_probe(probe: Probe, gate_fn: Callable[[str, str], bool])`
+
+Run one probe through a gate function.
+
+#### `run_all_probes(gate_fn: Callable[[str, str], bool], probes: List[Probe] | None=None)`
+
+Run all probes, return summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check with a variant-tuned naive gate.
+
+### `inj_variant_14`
+
+Source: `components/northstar-agent-runtime/inj_variant_14.py`
+
+Inj variant 14: Punycode injection, Simulated.
+
+#### `InjVariantError`
+
+Fail-closed: bad probe definitions raise.
+
+#### `Probe`
+
+One Punycode injection probe.
+
+#### `ProbeResult`
+
+Result of running one probe.
+
+#### `run_probe(probe: Probe, gate_fn: Callable[[str, str], bool])`
+
+Run one probe through a gate function.
+
+#### `run_all_probes(gate_fn: Callable[[str, str], bool], probes: List[Probe] | None=None)`
+
+Run all probes, return summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check with a variant-tuned naive gate.
+
+### `inj_variant_15`
+
+Source: `components/northstar-agent-runtime/inj_variant_15.py`
+
+Inj variant 15: Control characters, Simulated.
+
+#### `InjVariantError`
+
+Fail-closed: bad probe definitions raise.
+
+#### `Probe`
+
+One Control characters probe.
+
+#### `ProbeResult`
+
+Result of running one probe.
+
+#### `run_probe(probe: Probe, gate_fn: Callable[[str, str], bool])`
+
+Run one probe through a gate function.
+
+#### `run_all_probes(gate_fn: Callable[[str, str], bool], probes: List[Probe] | None=None)`
+
+Run all probes, return summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check with a variant-tuned naive gate.
+
+### `inj_variant_16`
+
+Source: `components/northstar-agent-runtime/inj_variant_16.py`
+
+Inj variant 16: BOM markers, Simulated.
+
+#### `InjVariantError`
+
+Fail-closed: bad probe definitions raise.
+
+#### `Probe`
+
+One BOM markers probe.
+
+#### `ProbeResult`
+
+Result of running one probe.
+
+#### `run_probe(probe: Probe, gate_fn: Callable[[str, str], bool])`
+
+Run one probe through a gate function.
+
+#### `run_all_probes(gate_fn: Callable[[str, str], bool], probes: List[Probe] | None=None)`
+
+Run all probes, return summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check with a variant-tuned naive gate.
+
+### `inj_variant_17`
+
+Source: `components/northstar-agent-runtime/inj_variant_17.py`
+
+Inj variant 17: Surrogate pair smuggling, Simulated.
+
+#### `InjVariantError`
+
+Fail-closed: bad probe definitions raise.
+
+#### `Probe`
+
+One Surrogate pair smuggling probe.
+
+#### `ProbeResult`
+
+Result of running one probe.
+
+#### `run_probe(probe: Probe, gate_fn: Callable[[str, str], bool])`
+
+Run one probe through a gate function.
+
+#### `run_all_probes(gate_fn: Callable[[str, str], bool], probes: List[Probe] | None=None)`
+
+Run all probes, return summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check with a variant-tuned naive gate.
+
+### `inj_variant_18`
+
+Source: `components/northstar-agent-runtime/inj_variant_18.py`
+
+Inj variant 18: Combining characters, Simulated.
+
+#### `InjVariantError`
+
+Fail-closed: bad probe definitions raise.
+
+#### `Probe`
+
+One Combining characters probe.
+
+#### `ProbeResult`
+
+Result of running one probe.
+
+#### `run_probe(probe: Probe, gate_fn: Callable[[str, str], bool])`
+
+Run one probe through a gate function.
+
+#### `run_all_probes(gate_fn: Callable[[str, str], bool], probes: List[Probe] | None=None)`
+
+Run all probes, return summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check with a variant-tuned naive gate.
+
+### `inj_variant_19`
+
+Source: `components/northstar-agent-runtime/inj_variant_19.py`
+
+Inj variant 19: Bidirectional text confusion, Simulated.
+
+#### `InjVariantError`
+
+Fail-closed: bad probe definitions raise.
+
+#### `Probe`
+
+One Bidirectional text confusion probe.
+
+#### `ProbeResult`
+
+Result of running one probe.
+
+#### `run_probe(probe: Probe, gate_fn: Callable[[str, str], bool])`
+
+Run one probe through a gate function.
+
+#### `run_all_probes(gate_fn: Callable[[str, str], bool], probes: List[Probe] | None=None)`
+
+Run all probes, return summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check with a variant-tuned naive gate.
+
+### `inj_variant_20`
+
+Source: `components/northstar-agent-runtime/inj_variant_20.py`
+
+Inj variant 20: Font-dependent rendering, Simulated.
+
+#### `InjVariantError`
+
+Fail-closed: bad probe definitions raise.
+
+#### `Probe`
+
+One Font-dependent rendering probe.
+
+#### `ProbeResult`
+
+Result of running one probe.
+
+#### `run_probe(probe: Probe, gate_fn: Callable[[str, str], bool])`
+
+Run one probe through a gate function.
+
+#### `run_all_probes(gate_fn: Callable[[str, str], bool], probes: List[Probe] | None=None)`
+
+Run all probes, return summary.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check with a variant-tuned naive gate.
+
 ### `injection_detector`
 
 Source: `components/northstar-agent-runtime/injection_detector.py`
@@ -49067,6 +54539,834 @@ Deterministic inner-alignment inspection / verification ledger.
 - `stats(seq: int)`
 - `audit_log()`
 #### `main()`
+
+### `input_defense_01`
+
+Source: `components/northstar-agent-runtime/input_defense_01.py`
+
+Regex blocklist engine: configurable regex pattern matcher, Simulated.
+
+#### `InputDefense01Error`
+
+Fail-closed.
+
+#### `BlocklistEngine`
+
+Scans text against a compiled regex blocklist (fail-closed).
+
+- `check(text: str)`
+  - Return (blocked, matched_pattern_source_or_None).
+- `pattern_count` (property)
+  - Number of compiled patterns.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `input_defense_02`
+
+Source: `components/northstar-agent-runtime/input_defense_02.py`
+
+ML classifier sidecar: pluggable classifier interface (mock), Simulated.
+
+#### `InputDefense02Error`
+
+Fail-closed.
+
+#### `ClassifierSidecar`
+
+Fail-closed wrapper around a classify_fn.
+
+- `check(text: str)`
+  - Return (blocked, label, score). Classifier errors -> blocked.
+#### `mock_keyword_classifier(keywords: Dict[str, List[str]])`
+
+Build a classify_fn from label -> keyword lists.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `input_defense_03`
+
+Source: `components/northstar-agent-runtime/input_defense_03.py`
+
+Language detection filter: heuristic script-based detection, Simulated.
+
+#### `InputDefense03Error`
+
+Fail-closed.
+
+#### `detect(text: str)`
+
+Return the dominant script: latin, cyrillic, cjk, arabic, greek, other.
+
+#### `LanguageFilter`
+
+Blocks input whose detected script is not in the allowed set.
+
+- `check(text: str)`
+  - Return (blocked, detected_script).
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `input_defense_04`
+
+Source: `components/northstar-agent-runtime/input_defense_04.py`
+
+Encoding normalization: strict UTF-8 decode + BOM handling, Simulated.
+
+#### `InputDefense04Error`
+
+Fail-closed.
+
+#### `normalize_bytes(data: bytes)`
+
+Strict UTF-8 decode; strip leading BOM; raise on invalid sequences.
+
+#### `normalize_text(text: str)`
+
+Strip a leading BOM; otherwise return text unchanged.
+
+#### `is_valid_utf8(data: bytes)`
+
+True iff data decodes as strict UTF-8 (BOM is allowed).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `input_defense_05`
+
+Source: `components/northstar-agent-runtime/input_defense_05.py`
+
+Unicode sanitization (NFKC): width/case obfuscation cleanup, Simulated.
+
+#### `InputDefense05Error`
+
+Fail-closed.
+
+#### `sanitize(text: str)`
+
+NFKC-normalize text; return (cleaned, changed).
+
+#### `detect_obfuscation(text: str)`
+
+True iff NFKC normalization changes the text (possible obfuscation).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `input_defense_06`
+
+Source: `components/northstar-agent-runtime/input_defense_06.py`
+
+Control Char Stripping: strip C0 controls and DEL from text, Simulated.
+
+#### `InputDefense06Error`
+
+Fail-closed.
+
+#### `strip_controls(text: str, keep: Tuple[str, ...]=('\n', '\t'))`
+
+Remove control chars (ord(c) < 0x20 except keep set) and DEL 0x7F.
+
+#### `has_controls(text: str)`
+
+True if text contains any strippable control char (default keep set).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `input_defense_07`
+
+Source: `components/northstar-agent-runtime/input_defense_07.py`
+
+HTML Entity Decoding Guard: detect double-encoded entity payloads, Simulated.
+
+#### `InputDefense07Error`
+
+Fail-closed.
+
+#### `decode_once(text: str)`
+
+Decode one layer of HTML entities via html.unescape.
+
+#### `is_double_encoded(text: str)`
+
+True if text still contains entity syntax after one decode pass.
+
+#### `check(text: str)`
+
+Return (suspicious, decoded).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `input_defense_08`
+
+Source: `components/northstar-agent-runtime/input_defense_08.py`
+
+URL Decoding Guard: detect multi-encoded URL payloads, Simulated.
+
+#### `InputDefense08Error`
+
+Fail-closed.
+
+#### `decode_all(text: str, max_rounds: int=5)`
+
+Unquote repeatedly until stable; return (decoded, rounds_used).
+
+#### `check(text: str)`
+
+Return (suspicious, decoded, rounds).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `input_defense_09`
+
+Source: `components/northstar-agent-runtime/input_defense_09.py`
+
+Base64 Detection: flag suspicious base64 blobs in input, Simulated.
+
+#### `InputDefense09Error`
+
+Fail-closed.
+
+#### `find_candidates(text: str, min_len: int=40)`
+
+Find runs of base64 alphabet chars of at least min_len length.
+
+#### `is_valid_b64(s: str)`
+
+True if s strictly decodes as base64 (validate=True).
+
+#### `check(text: str)`
+
+Return (suspicious, candidates).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `input_defense_10`
+
+Source: `components/northstar-agent-runtime/input_defense_10.py`
+
+Hex Decoding Guard: flag suspicious hex-encoded payloads, Simulated.
+
+#### `InputDefense10Error`
+
+Fail-closed.
+
+#### `find_candidates(text: str, min_len: int=32)`
+
+Find even-length hex runs of at least min_len characters.
+
+#### `decode_hex(s: str)`
+
+Decode a hex string; return None when invalid.
+
+#### `check(text: str)`
+
+Return (suspicious, decoded_hits).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `input_defense_11`
+
+Source: `components/northstar-agent-runtime/input_defense_11.py`
+
+Homoglyph Normalization: maps confusable characters to ASCII, Simulated.
+
+#### `InputDefense11Error`
+
+Fail-closed.
+
+#### `normalize_fullwidth(text: str)`
+
+Map fullwidth ASCII forms to ASCII.
+
+#### `normalize(text: str)`
+
+Replace confusable characters with their ASCII equivalents.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `input_defense_12`
+
+Source: `components/northstar-agent-runtime/input_defense_12.py`
+
+Confusable Detection: finds known lookalike characters in input, Simulated.
+
+#### `InputDefense12Error`
+
+Fail-closed.
+
+#### `find_confusables(text: str)`
+
+Return ``[(char, index), ...]`` for every confusable character.
+
+#### `check(text: str)`
+
+Return ``(suspicious, hits)``; suspicious when any hit is found.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `input_defense_13`
+
+Source: `components/northstar-agent-runtime/input_defense_13.py`
+
+Script Mixing Detection: flags inputs mixing multiple scripts, Simulated.
+
+#### `InputDefense13Error`
+
+Fail-closed.
+
+#### `script_of(ch: str)`
+
+Return the script of a single character.
+
+#### `scripts_in(text: str)`
+
+Return the set of scripts present, excluding "neutral".
+
+#### `check(text: str, max_scripts: int=1)`
+
+Return ``(suspicious, scripts)``.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `input_defense_14`
+
+Source: `components/northstar-agent-runtime/input_defense_14.py`
+
+Invisible Character Removal: strips zero-width and hidden chars, Simulated.
+
+#### `InputDefense14Error`
+
+Fail-closed.
+
+#### `remove(text: str)`
+
+Return ``(cleaned, removed)`` with invisible chars stripped.
+
+#### `has_invisible(text: str)`
+
+Return True when any invisible character is present.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `input_defense_15`
+
+Source: `components/northstar-agent-runtime/input_defense_15.py`
+
+Bidirectional Control Removal: strips Unicode bidi overrides, Simulated.
+
+#### `InputDefense15Error`
+
+Fail-closed.
+
+#### `remove(text: str)`
+
+Return ``(cleaned, removed)`` with bidi controls stripped.
+
+#### `has_bidi(text: str)`
+
+Return True when any bidirectional control is present.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `input_defense_16`
+
+Source: `components/northstar-agent-runtime/input_defense_16.py`
+
+Bidirectional control removal (input defense), Simulated
+
+#### `InputDefenseError`
+
+Fail-closed: malformed input or policy violation raises.
+
+#### `strip_bidi_controls(text)`
+
+Remove bidirectional control characters. Returns (clean, removed_count).
+
+#### `contains_bidi_controls(text)`
+
+True if any bidi control is present.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `input_defense_17`
+
+Source: `components/northstar-agent-runtime/input_defense_17.py`
+
+Zero-width character removal (input defense), Simulated
+
+#### `InputDefenseError`
+
+Fail-closed: malformed input or policy violation raises.
+
+#### `strip_zero_width(text)`
+
+Remove zero-width characters. Returns (clean, removed_count).
+
+#### `contains_zero_width(text)`
+
+True if any zero-width char is present.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `input_defense_18`
+
+Source: `components/northstar-agent-runtime/input_defense_18.py`
+
+Whitespace normalization (input defense), Simulated
+
+#### `InputDefenseError`
+
+Fail-closed: malformed input or policy violation raises.
+
+#### `normalize_whitespace(text)`
+
+Collapse whitespace runs to single spaces and trim. Returns clean str.
+
+#### `whitespace_anomaly(text, max_run=50)`
+
+True if any whitespace run exceeds max_run (padding trick).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `input_defense_19`
+
+Source: `components/northstar-agent-runtime/input_defense_19.py`
+
+Case normalization (input defense), Simulated
+
+#### `InputDefenseError`
+
+Fail-closed: malformed input or policy violation raises.
+
+#### `normalize_case(text)`
+
+Return casefolded text for matching.
+
+#### `matches_blocked(text, blocked_terms)`
+
+True if casefolded text contains any casefolded blocked term.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `input_defense_20`
+
+Source: `components/northstar-agent-runtime/input_defense_20.py`
+
+Punctuation normalization (input defense), Simulated
+
+#### `InputDefenseError`
+
+Fail-closed: malformed input or policy violation raises.
+
+#### `normalize_punctuation(text)`
+
+Map lookalike punctuation to ASCII. Returns clean str.
+
+#### `strip_punctuation(text)`
+
+Remove ASCII punctuation. Returns clean str.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `input_defense_21`
+
+Source: `components/northstar-agent-runtime/input_defense_21.py`
+
+Input length limits (input defense), Simulated
+
+#### `InputDefenseError`
+
+Fail-closed: malformed input or policy violation raises.
+
+#### `check_length(text, max_chars=10000, max_bytes=40000)`
+
+Validate text fits within limits. Raises InputDefenseError if not.
+
+#### `truncate_for_log(text, max_chars=200)`
+
+Safely truncate for logging (never for enforcement decisions).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `input_defense_22`
+
+Source: `components/northstar-agent-runtime/input_defense_22.py`
+
+Per-user rate limiting, token bucket (input defense), Simulated
+
+#### `InputDefenseError`
+
+Fail-closed: malformed input or policy violation raises.
+
+#### `TokenBucket`
+
+Token bucket keyed by user id.
+
+- `allow(user_id, cost=1)`
+  - Consume cost tokens. Returns True if allowed.
+- `remaining(user_id)`
+  - Current token count (refilled to now).
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `input_defense_23`
+
+Source: `components/northstar-agent-runtime/input_defense_23.py`
+
+Per-tool rate limiting (input defense), Simulated
+
+#### `InputDefenseError`
+
+Fail-closed: malformed input or policy violation raises.
+
+#### `ToolRateLimiter`
+
+Sliding-window limiter keyed by tool name.
+
+- `allow(tool_name)`
+  - Record a call. Returns True if within limit.
+- `count(tool_name)`
+  - Calls in current window.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `input_defense_24`
+
+Source: `components/northstar-agent-runtime/input_defense_24.py`
+
+Daily quota enforcement (input defense), Simulated
+
+#### `InputDefenseError`
+
+Fail-closed: malformed input or policy violation raises.
+
+#### `DailyQuota`
+
+Daily per-user quotas for calls and tokens.
+
+- `consume(user_id, tokens=0)`
+  - Consume one call plus tokens. Returns True if within quota.
+- `usage(user_id)`
+  - Current usage for today.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `input_defense_25`
+
+Source: `components/northstar-agent-runtime/input_defense_25.py`
+
+CAPTCHA integration interface (input defense), Simulated
+
+#### `InputDefenseError`
+
+Fail-closed: malformed input or policy violation raises.
+
+#### `CaptchaChallenge`
+
+Issued challenge.
+
+#### `MockCaptchaProvider`
+
+Mock CAPTCHA provider for wiring/tests. NOT real protection.
+
+- `issue()`
+  - Issue a challenge; answer is embedded for the mock only.
+- `verify(challenge_id, response)`
+  - Verify a response. Returns True only on exact match.
+#### `require_captcha(provider, challenge_id, response)`
+
+Gate helper. Raises InputDefenseError when verification fails.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `input_defense_26`
+
+Source: `components/northstar-agent-runtime/input_defense_26.py`
+
+Proof-of-work challenge, hashcash-style (input defense), Simulated
+
+#### `InputDefenseError`
+
+Fail-closed: malformed input or policy violation raises.
+
+#### `issue_challenge()`
+
+Issue a random challenge string.
+
+#### `solve(challenge, bits, max_tries=1000000)`
+
+Find a nonce meeting the difficulty. Returns nonce.
+
+#### `verify(challenge, nonce, bits)`
+
+Verify a nonce. Returns True if valid.
+
+#### `require_pow(challenge, nonce, bits)`
+
+Gate helper. Raises InputDefenseError on invalid proof.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `input_defense_27`
+
+Source: `components/northstar-agent-runtime/input_defense_27.py`
+
+Strict allowlist validation (input defense), Simulated
+
+#### `InputDefenseError`
+
+Fail-closed: malformed input or policy violation raises.
+
+#### `Allowlist`
+
+Strict allowlist for values and regex patterns.
+
+- `check(value)`
+  - Returns True if value is explicitly allowed.
+- `require(value)`
+  - Raise InputDefenseError unless value is allowed.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `input_defense_28`
+
+Source: `components/northstar-agent-runtime/input_defense_28.py`
+
+JSON schema subset validation (input defense), Simulated
+
+#### `InputDefenseError`
+
+Fail-closed: malformed input or policy violation raises.
+
+#### `validate(payload, schema)`
+
+Validate payload dict against schema dict. Raises on violation.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `input_defense_29`
+
+Source: `components/northstar-agent-runtime/input_defense_29.py`
+
+Type coercion guards (input defense), Simulated
+
+#### `InputDefenseError`
+
+Fail-closed: malformed input or policy violation raises.
+
+#### `to_int(value)`
+
+Strict int coercion. Rejects bool, float, NaN, malformed strings.
+
+#### `to_float(value)`
+
+Strict float coercion. Rejects NaN and Infinity.
+
+#### `to_nonempty_str(value)`
+
+Require a non-empty string (after strip).
+
+#### `to_bool(value)`
+
+Strict bool coercion from a small explicit set.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `input_defense_30`
+
+Source: `components/northstar-agent-runtime/input_defense_30.py`
+
+Numeric range checks (input defense), Simulated
+
+#### `InputDefenseError`
+
+Fail-closed: malformed input or policy violation raises.
+
+#### `check_range(value, minimum=None, maximum=None, name='value')`
+
+Validate value within [minimum, maximum]. Raises on violation.
+
+#### `check_int_range(value, minimum=None, maximum=None, name='value')`
+
+Validate integer within bounds (rejects non-integer floats).
+
+#### `in_range(value, minimum=None, maximum=None)`
+
+Non-raising predicate version. Returns True if in bounds.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
 
 ### `instrumental_convergence`
 
@@ -49506,6 +55806,40 @@ Integration-hub ledger: apps, connections, sync runs, webhooks.
 
 Self-check: register, connect, sync, webhook, disconnect, audit.
 
+### `interleaved_thinking`
+
+Source: `components/northstar-agent-runtime/interleaved_thinking.py`
+
+Interleaved thinking: enforced reasoning before tool calls, Simulated.
+
+#### `InterleavedError`
+
+Fail-closed: missing reasoning raises.
+
+#### `ReasonedAction`
+
+A tool call with its preceding reasoning.
+
+#### `require_reasoning(reasoning: Optional[str], tool_name: str, args: Dict[str, Any])`
+
+Enforce reasoning-before-action.
+
+#### `InterleavedRunner`
+
+Wraps a tool executor with reasoning enforcement.
+
+- `run(reasoning: Optional[str], tool_name: str, args: Optional[Dict[str, Any]]=None)`
+  - Run a tool with enforced reasoning.
+- `actions` (property)
+  - All reasoned actions taken (for audit).
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
 ### `interop_bridge`
 
 Source: `components/northstar-agent-runtime/interop_bridge.py`
@@ -49813,6 +56147,18 @@ Interruptibility governance ledger (Simulated).
 #### `main()`
 
 Self-check: exercise the interruptibility ledger end to end.
+
+### `invis_remove`
+
+Source: `components/northstar-agent-runtime/invis_remove.py`
+
+Invisible char removal (D-IN-015), Simulated.
+
+#### `clean(t: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
 
 ### `invitation_manager`
 
@@ -51534,6 +57880,20 @@ Large-scale automation displacement: disclosed or denied.
 
 Shape an audit event for the labor-algorithmic-management domain.
 
+### `lang_filter`
+
+Source: `components/northstar-agent-runtime/lang_filter.py`
+
+Language detection filter mock (D-IN-003), Simulated.
+
+#### `detect(text: str)`
+
+#### `check(text: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
 ### `language_cap`
 
 Source: `components/northstar-agent-runtime/language_cap.py`
@@ -52043,6 +58403,18 @@ Legal-hold (eDiscovery) decision ledger, Simulated.
 - `audit_log(seq: int)`
 #### `main()`
 
+### `len_limit`
+
+Source: `components/northstar-agent-runtime/len_limit.py`
+
+Length limits (D-IN-021), Simulated.
+
+#### `check(t: str, max_len: int=10000)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
 ### `license_checker`
 
 Source: `components/northstar-agent-runtime/license_checker.py`
@@ -52200,6 +58572,42 @@ Issue a take-level receipt. An empty rights-review digest raises.
 #### `check_take(log: list[TakeReceipt], *, take_id: str)`
 
 Fail-closed gate: may this AI-generated take ship?
+
+### `lifecycle_hooks`
+
+Source: `components/northstar-agent-runtime/lifecycle_hooks.py`
+
+Lifecycle hooks with canary self-test (D7), Simulated.
+
+#### `HookPoint`
+
+Fixed lifecycle points.
+
+#### `HookError`
+
+Fail-closed: hook failures raise.
+
+#### `CanaryProbe`
+
+A known-bad probe for self-test.
+
+#### `HookRegistry`
+
+Registry of lifecycle hooks.
+
+- `register(point: HookPoint, fn: Callable[[Dict[str, Any]], bool])`
+  - Register a hook. Returns True to allow, False to block.
+- `fire(point: HookPoint, context: Dict[str, Any])`
+  - Fire all hooks at a point. Any False blocks.
+- `run_canary(probe_runner: Callable[[str, Dict[str, Any]], bool])`
+  - Run canary self-test.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
 
 ### `linter`
 
@@ -52587,6 +58995,94 @@ Deterministic GPS-fix ledger.
 
 Shape an audit event; carries ids and digest pins only — never raw coordinates (location data stays in the ledger, not the audit stream).
 
+#### `main()`
+
+### `log_aggregation`
+
+Source: `components/northstar-agent-runtime/log_aggregation.py`
+
+Log aggregation — simulated centralized log collection/query (ELK/Loki shaped).
+
+#### `LogAggregationError`
+
+Base error for the log-aggregation module.
+
+#### `BadSourceError`
+
+Source id or definition is malformed.
+
+#### `DuplicateSourceError`
+
+Source id already registered.
+
+#### `UnknownSourceError`
+
+No such source registered.
+
+#### `BadEntryError`
+
+A collected entry is malformed.
+
+#### `BadQueryError`
+
+A query argument is malformed.
+
+#### `BadRetentionError`
+
+A retention policy argument is malformed.
+
+#### `SeqOrderError`
+
+Caller seq did not strictly increase.
+
+#### `SourceRecord`
+
+One registered log source.
+
+- `verify(seed: str='')`
+#### `LogRecord`
+
+One booked log line (host-reported, digest-pinned).
+
+- `verify(seed: str='')`
+#### `IngestBatch`
+
+One ``collect`` call: frozen batch + the records it booked.
+
+#### `QueryResult`
+
+One ``query`` read view (data, never raised for zero hits).
+
+#### `RetentionPolicy`
+
+One booked retention policy (max age in logical seqs).
+
+- `verify(seed: str='')`
+#### `PruneReport`
+
+One retention application: pruned record ids as data.
+
+#### `log_aggregation_audit_event(kind: str, seq: int, **detail: Any)`
+
+Shape an ``audit.ndjson/1`` record for this module.
+
+#### `LogAggregation`
+
+Deterministic log-collection/query/retention ledger.
+
+- `register_source(source_id: str, seq: int)`
+  - Book one log source.
+- `collect(source_id: str, entries: Any, seq: int)`
+  - Book a batch of host-reported log entries.
+- `query(seq: int, source_id: str | None=None, min_level: str | None=None, labels: Mapping[str, str] | None=None, since_seq: int=0, limit: int=100)`
+  - Pure read view over the booked records.
+- `retention(source_id: str, max_age: int, seq: int)`
+  - Book a retention policy and prune older records now.
+- `source(source_id: str)`
+- `source_ids()`
+- `record(record_id: str)`
+- `stats()`
+- `audit_log()`
 #### `main()`
 
 ### `log_aggregator`
@@ -54310,6 +60806,73 @@ Write-time memory admission under consent. Fail-closed.
   - Admit (True) or refuse (False) a memory write. Fail-closed.
 #### `main()`
 
+### `memory_admission_probes`
+
+Source: `components/northstar-agent-runtime/memory_admission_probes.py`
+
+Memory-admission probe corpus + recalled-content privilege / injection / admission gates.
+
+#### `MemoryAdmissionError`
+
+A memory-admission record or gate step failed. Raised, never silent.
+
+#### `MemoryRecord`
+
+One memory record as admitted (write time) or recalled (read time).
+
+- `as_dict()`
+- `digest()`
+  - JCS-canonical digest of the record itself.
+#### `build_record(record_id: str, content_digest: str, writer_id: str, trust_tier: str, source_channel: str, pinned: bool=False, supersedes: str | None=None)`
+
+Construct a validated MemoryRecord; raises on malformed input.
+
+#### `verify_record(record: MemoryRecord, digest: str)`
+
+Constant-time check that a record matches its pinned digest.
+
+#### `WriteDecision`
+
+The write-time admission verdict for one memory record.
+
+#### `gate_memory_write(record: MemoryRecord)`
+
+Admit (or refuse) a memory write. Fail-closed.
+
+#### `ReadBinding`
+
+The read-time privilege binding for one recalled record.
+
+#### `gate_memory_read(record: MemoryRecord)`
+
+Bind the privilege a recalled record carries into the model context.
+
+#### `MemoryStore`
+
+Append-only memory store with admission on write and privilege binding on read.
+
+- `add(record: MemoryRecord)`
+  - Admit a write; store only on allow. Never raises on gate outcome.
+- `recall(record_id: str)`
+  - Recall one record with its read-time privilege binding.
+- `record_ids()`
+- `decisions()`
+#### `probe_names()`
+
+All memory-admission probe names.
+
+#### `probes_by_family(family: str)`
+
+Probes in one family.
+
+#### `probe_by_name(name: str)`
+
+One probe by name; KeyError on unknown names.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
 ### `memory_bitemporal`
 
 Source: `components/northstar-agent-runtime/memory_bitemporal.py`
@@ -54941,6 +61504,116 @@ Replay prevention: remembers seen nonces until they expire.
 
 Verify a signed inter-agent message.
 
+### `metrics_collection`
+
+Source: `components/northstar-agent-runtime/metrics_collection.py`
+
+Metrics collection — simulated StatsD-style metric bookkeeping (thirty-fourth batch).
+
+#### `MetricsCollectionError`
+
+Base error for metrics-collection.
+
+#### `BadMetricError`
+
+Metric name/shape invalid.
+
+#### `DuplicateMetricError`
+
+Metric name already defined.
+
+#### `UnknownMetricError`
+
+Metric name not defined.
+
+#### `MetricTypeConflictError`
+
+Instrument already defined with a different type.
+
+#### `BadValueError`
+
+Sampled value invalid (bool/NaN/inf/unsafe-int/negative).
+
+#### `CounterDecreaseError`
+
+Negative increment on a counter.
+
+#### `BadBucketError`
+
+Histogram bucket list invalid.
+
+#### `BadTagError`
+
+Tag key/value invalid or tag-set mismatch.
+
+#### `SeqOrderError`
+
+Caller seq did not strictly increase.
+
+#### `AuditKindError`
+
+Unknown audit kind.
+
+#### `MetricDefinition`
+
+One pinned instrument definition (frozen).
+
+- `verify(seed: str)`
+#### `SampleRecord`
+
+One booked sample (frozen).
+
+- `verify(seed: str)`
+#### `HistogramBucket`
+
+One cumulative bucket count (frozen).
+
+#### `Aggregate`
+
+A deterministic rollup over one series (frozen).
+
+- `verify(seed: str)`
+#### `FlushReport`
+
+One flush: per-instrument aggregates + buffer reset (frozen).
+
+- `verify(seed: str)`
+#### `metrics_collection_audit_event(kind: str, seq: int, detail: Optional[Mapping[str, Any]]=None)`
+
+Shape an ``audit.ndjson/1`` record for the metrics-collection module.
+
+#### `MetricsCollection`
+
+Deterministic StatsD-style metric collection ledger.
+
+- `define_counter(name: str, seq: int, description: str='', tag_keys: Sequence[str]=())`
+  - Book a counter instrument.
+- `define_gauge(name: str, seq: int, description: str='', tag_keys: Sequence[str]=())`
+  - Book a gauge instrument.
+- `define_histogram(name: str, seq: int, buckets: Sequence[Any], description: str='', tag_keys: Sequence[str]=())`
+  - Book a histogram instrument with pinned bucket bounds.
+- `counter(name: str, amount: Any, seq: int, tags: Optional[Any]=None)`
+  - Book a counter increment (non-negative; negative refused).
+- `gauge(name: str, value: Any, seq: int, tags: Optional[Any]=None)`
+  - Book a gauge set (any finite value, up or down).
+- `histogram(name: str, value: Any, seq: int, tags: Optional[Any]=None)`
+  - Book a histogram observation (non-negative).
+- `aggregate(name: str, seq: int, tags: Optional[Any]=None)`
+  - Pure view: deterministic rollup over one series.
+- `series(seq: int)`
+  - Pure view: sorted defined metric names.
+- `definition(name: str, seq: int)`
+  - Pure view: the definition record for one metric.
+- `stats(seq: int)`
+  - Pure view: counts of definitions/samples per type.
+- `audit_log(seq: int)`
+  - Pure view: the audit ledger.
+- `flush(seq: int)`
+  - Emit per-instrument aggregates and reset collection buffers.
+#### `main()`
+
+Self-check: define, collect, aggregate, flush, verify.
+
 ### `mfa_manager`
 
 Source: `components/northstar-agent-runtime/mfa_manager.py`
@@ -55395,6 +62068,434 @@ MLflow-shaped registered-model lifecycle ledger.
 - `production_version(name: str)`
   - Version number currently holding Production, or None.
 - `audit_log()`
+#### `main()`
+
+### `ml_sidecar`
+
+Source: `components/northstar-agent-runtime/ml_sidecar.py`
+
+ML classifier sidecar mock (D-IN-002), Simulated.
+
+#### `classify(text: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `model_attack_01`
+
+Source: `components/northstar-agent-runtime/model_attack_01.py`
+
+Model attack 01: prompt extraction detection, Simulated.
+
+#### `ModelAttackError`
+
+Fail-closed: bad inputs raise.
+
+#### `detect_extraction_attempt(text: str)`
+
+Return (flagged, reason). Raises on non-str input (fail-closed).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `model_attack_02`
+
+Source: `components/northstar-agent-runtime/model_attack_02.py`
+
+Model attack 02: system prompt leakage detection, Simulated.
+
+#### `ModelAttackError`
+
+Fail-closed: bad inputs raise.
+
+#### `detect_leakage(output: str, system_prompt: str)`
+
+Return (flagged, reason). Fail-closed on bad input types.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `model_attack_03`
+
+Source: `components/northstar-agent-runtime/model_attack_03.py`
+
+Model attack 03: training data extraction detection (MOCK), Simulated.
+
+#### `ModelAttackError`
+
+Fail-closed: bad inputs raise.
+
+#### `detect_memorization(output: str, canaries: List[str] | None=None)`
+
+Return (flagged, reason). Mock heuristics, fail-closed on bad input.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `model_attack_04`
+
+Source: `components/northstar-agent-runtime/model_attack_04.py`
+
+Model attack 04: membership inference detection (MOCK), Simulated.
+
+#### `ModelAttackError`
+
+Fail-closed: bad inputs raise.
+
+#### `detect_membership_probing(queries: List[str])`
+
+Analyze a session query log. Returns (flagged, reason).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `model_attack_05`
+
+Source: `components/northstar-agent-runtime/model_attack_05.py`
+
+Model attack 05: model inversion detection (MOCK), Simulated.
+
+#### `ModelAttackError`
+
+Fail-closed: bad inputs raise.
+
+#### `detect_inversion_batch(queries: List[str])`
+
+Analyze a query log. Returns (flagged, reason).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `model_attack_06`
+
+Source: `components/northstar-agent-runtime/model_attack_06.py`
+
+Model attack 06: adversarial example detection, Simulated.
+
+#### `ModelAttackError`
+
+Fail-closed: bad inputs raise.
+
+#### `detect_adversarial_text(text: str)`
+
+Return (flagged, reason). Fail-closed on non-str.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `model_attack_07`
+
+Source: `components/northstar-agent-runtime/model_attack_07.py`
+
+Model attack 07: backdoor trigger detection, Simulated.
+
+#### `ModelAttackError`
+
+Fail-closed: bad inputs raise.
+
+#### `detect_backdoor_trigger(text: str, extra_triggers: List[str] | None=None)`
+
+Return (flagged, reason). Fail-closed on non-str.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `model_attack_08`
+
+Source: `components/northstar-agent-runtime/model_attack_08.py`
+
+Model attack 08: data poisoning detection (MOCK), Simulated.
+
+#### `ModelAttackError`
+
+Fail-closed: bad inputs raise.
+
+#### `detect_poisoned_batch(samples: List[Dict[str, str]])`
+
+Each sample: {"text": str, "label": str}. Returns (flagged, reason).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `model_attack_09`
+
+Source: `components/northstar-agent-runtime/model_attack_09.py`
+
+Model attack 09: gradient leakage detection (MOCK), Simulated.
+
+#### `ModelAttackError`
+
+Fail-closed: bad inputs raise.
+
+#### `detect_gradient_anomaly(updates: List[Dict[str, List[float]]])`
+
+Each update: {"client": str, "gradient": [floats]}.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `model_attack_10`
+
+Source: `components/northstar-agent-runtime/model_attack_10.py`
+
+Model attack 10: model stealing detection, Simulated.
+
+#### `ModelAttackError`
+
+Fail-closed: bad inputs raise.
+
+#### `detect_stealing_pattern(queries: List[str], outputs: List[str] | None=None)`
+
+Analyze a query window. Returns (flagged, reason).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `model_attack_11`
+
+Source: `components/northstar-agent-runtime/model_attack_11.py`
+
+Model attack 11: distillation attack detection, Simulated.
+
+#### `ModelAttackError`
+
+Fail-closed: bad inputs raise.
+
+#### `detect_distillation_query(text: str)`
+
+Single-query check. Returns (flagged, reason).
+
+#### `detect_distillation_session(queries: List[str])`
+
+Session-level check. Returns (flagged, reason).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `model_attack_12`
+
+Source: `components/northstar-agent-runtime/model_attack_12.py`
+
+Model attack 12: watermark removal detection, Simulated.
+
+#### `ModelAttackError`
+
+Fail-closed: bad inputs raise.
+
+#### `detect_watermark_removal(text: str)`
+
+Single-input check. Returns (flagged, reason).
+
+#### `detect_reword_loop(texts: List[str])`
+
+Detect repeated rewording of similar content.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `model_attack_13`
+
+Source: `components/northstar-agent-runtime/model_attack_13.py`
+
+Model attack 13: fingerprint evasion detection, Simulated.
+
+#### `ModelAttackError`
+
+Fail-closed: bad inputs raise.
+
+#### `detect_fingerprint_evasion(text: str)`
+
+Single-input check. Returns (flagged, reason).
+
+#### `detect_laundering_loop(texts: List[str])`
+
+Detect repeated laundering of similar content.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `model_attack_14`
+
+Source: `components/northstar-agent-runtime/model_attack_14.py`
+
+Model attack 14: capability elicitation detection, Simulated.
+
+#### `ModelAttackError`
+
+Fail-closed: bad inputs raise.
+
+#### `detect_elicitation(text: str)`
+
+Single-input check. Returns (flagged, reason).
+
+#### `detect_escalating_probes(turns: List[str])`
+
+Detect multi-turn escalation of refused capabilities.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `model_attack_15`
+
+Source: `components/northstar-agent-runtime/model_attack_15.py`
+
+Model attack 15: sandbagging detection (MOCK), Simulated.
+
+#### `ModelAttackError`
+
+Fail-closed: bad inputs raise.
+
+#### `detect_sandbagging(results: List[Dict[str, object]])`
+
+Each result: {"difficulty": "easy"|"hard", "correct": bool}.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `model_attack_16`
+
+Source: `components/northstar-agent-runtime/model_attack_16.py`
+
+Model attack 16: sycophancy detection, Simulated.
+
+#### `ModelAttackError`
+
+Fail-closed: bad inputs raise.
+
+#### `detect_sycophancy(output: str, user_stated_opinion: str | None=None)`
+
+Return (flagged, reason). Fail-closed on bad input types.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `model_attack_17`
+
+Source: `components/northstar-agent-runtime/model_attack_17.py`
+
+Model attack 17: hallucination injection detection, Simulated.
+
+#### `ModelAttackError`
+
+Fail-closed: bad inputs raise.
+
+#### `detect_hallucination_injection(text: str)`
+
+Return (flagged, reason). Fail-closed on non-str.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `model_attack_18`
+
+Source: `components/northstar-agent-runtime/model_attack_18.py`
+
+Model attack 18: context window overflow detection, Simulated.
+
+#### `detect_context_overflow(text: str, budget_tokens: int=DEFAULT_BUDGET_TOKENS)`
+
+Return (flagged, reason). Fail-closed on bad inputs.
+
+#### `ModelAttackError`
+
+Fail-closed: bad inputs raise.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `model_attack_19`
+
+Source: `components/northstar-agent-runtime/model_attack_19.py`
+
+Model attack 19: token smuggling detection, Simulated.
+
+#### `ModelAttackError`
+
+Fail-closed: bad inputs raise.
+
+#### `detect_token_smuggling(text: str, stems: List[str] | None=None)`
+
+Return (flagged, reason). Fail-closed on non-str.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `model_attack_20`
+
+Source: `components/northstar-agent-runtime/model_attack_20.py`
+
+Model attack 20: attention manipulation detection (MOCK), Simulated.
+
+#### `ModelAttackError`
+
+Fail-closed: bad inputs raise.
+
+#### `detect_attention_manipulation(text: str)`
+
+Return (flagged, reason). Fail-closed on non-str.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
 #### `main()`
 
 ### `model_card`
@@ -56340,6 +63441,150 @@ Rabbit-hole amplification audit receipt.
 
 An overdue amplification audit denies.
 
+### `monitor_channel_probes`
+
+Source: `components/northstar-agent-runtime/monitor_channel_probes.py`
+
+Monitor-channel probe corpus + channel isolation / breakout detectors.
+
+#### `MonitorRecord`
+
+One digest-pinned entry on the monitor channel.
+
+#### `build_record(*, seq: int, direction: str, channel: str, payload_digest: str, origin: str)`
+
+Mint a well-formed, digest-pinned monitor-channel record.
+
+#### `verify_record(record: MonitorRecord)`
+
+Re-derive the record digest with a constant-time compare.
+
+#### `MonitorChannel`
+
+Append-only egress-only monitor channel.
+
+- `append(record: MonitorRecord)`
+- `records()`
+#### `detect_writeback(records: list[MonitorRecord] | tuple[MonitorRecord, ...])`
+
+Flag agent-originated writes on the monitor channel.
+
+#### `detect_breakout(records: list[MonitorRecord] | tuple[MonitorRecord, ...])`
+
+Flag host-escape shapes riding the monitor channel.
+
+#### `verify_channel_integrity(records: list[MonitorRecord] | tuple[MonitorRecord, ...])`
+
+Verify a host-reported monitor channel log.
+
+#### `ChannelTopology`
+
+Host-declared monitor-channel topology.
+
+#### `verify_channel_isolation(topology: ChannelTopology)`
+
+Check the declared topology against the isolation doctrine.
+
+#### `channel_head_digest(records: list[MonitorRecord] | tuple[MonitorRecord, ...])`
+
+Out-of-band anchor: digest over the pinned record digests in seq order.
+
+#### `probe_names()`
+
+All monitor-channel probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `main()`
+
+### `monitor_deafness_probes`
+
+Source: `components/northstar-agent-runtime/monitor_deafness_probes.py`
+
+Monitor-deafness probe corpus + escalation-anomaly / health-gate detectors.
+
+#### `EscalationWindow`
+
+One digest-pinned window of observed activity.
+
+#### `build_window(*, agent_id: str, window_start: int, window_end: int, actions_observed: int, escalations: int)`
+
+Mint a well-formed, digest-pinned escalation window.
+
+#### `verify_window(window: EscalationWindow)`
+
+Re-derive the window digest with a constant-time compare.
+
+#### `detect_zero_escalation(windows: list[EscalationWindow] | tuple[EscalationWindow, ...], *, action_bound: int=ZERO_ESCALATION_ACTION_BOUND)`
+
+Flag windows with enough observed actions but zero escalations.
+
+#### `detect_escalation_collapse(baseline: list[EscalationWindow] | tuple[EscalationWindow, ...], recent: list[EscalationWindow] | tuple[EscalationWindow, ...], *, collapse_ratio: float=ESCALATION_COLLAPSE_RATIO)`
+
+Flag a collapse of the escalation rate against a baseline.
+
+#### `detect_silence_after_storm(windows: list[EscalationWindow] | tuple[EscalationWindow, ...], *, storm_min: int=STORM_MIN_ESCALATIONS)`
+
+Flag a storm window immediately followed by dead silence.
+
+#### `MonitorHealthSignal`
+
+A digest-pinned snapshot of one monitor's liveness.
+
+#### `build_signal(*, monitor_id: str, heartbeat_age_seconds: int, last_canary_trip_age_seconds: int, recent_escalation_count: int, actions_observed_since_heartbeat: int)`
+
+Mint a well-formed, digest-pinned monitor health signal.
+
+#### `verify_signal(signal: MonitorHealthSignal)`
+
+Re-derive the signal digest with a constant-time compare.
+
+#### `gate_monitor_health(signal: MonitorHealthSignal, *, high_stakes: bool, heartbeat_max_age: int=HEARTBEAT_MAX_AGE_SECONDS, canary_max_age: int=CANARY_MAX_AGE_SECONDS)`
+
+Decide whether the monitor is alive enough to observe an action.
+
+#### `HealthLedger`
+
+Append-only log of monitor-health gate decisions.
+
+- `append(signal: MonitorHealthSignal, disposition: str, as_of: int)`
+- `decisions()`
+#### `probe_names()`
+
+All monitor-deafness attack probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `main()`
+
 ### `mpc`
 
 Source: `components/northstar-agent-runtime/mpc.py`
@@ -56724,6 +63969,772 @@ A multi-agent run collaboration ledger.
 - `audit_log()`
   - Pure read view of the audit event list.
 #### `main()`
+
+### `multi_attack_01`
+
+Source: `components/northstar-agent-runtime/multi_attack_01.py`
+
+Multi-turn attack 01: Crescendo escalation variants, Simulated.
+
+#### `MultiAttack01Error`
+
+Fail-closed.
+
+#### `Turn`
+
+One turn in an escalation script.
+
+#### `Script`
+
+A full 5-turn escalation script.
+
+#### `score_trajectory(turns: List[Turn], scorer_fn: Callable[[List[str]], float] | None=None)`
+
+Score the full trajectory.
+
+#### `run_attack(script: Script, gate_fn: Callable[[str], bool], scorer_fn: Callable[[List[str]], float] | None=None, *, threshold: float=0.6)`
+
+Run a script. gate_fn(prompt) -> True if blocked (per turn).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `multi_attack_02`
+
+Source: `components/northstar-agent-runtime/multi_attack_02.py`
+
+Multi-turn attack 02: Many-shot jailbreak, Simulated.
+
+#### `MultiAttack02Error`
+
+Fail-closed.
+
+#### `Shot`
+
+One synthetic compliant dialogue.
+
+#### `ManyShotAttack`
+
+N shots followed by the real attack prompt.
+
+#### `build_attack(attack_id: str, attack_prompt: str, n: int)`
+
+Build an N-shot attack. n must be >= 0.
+
+#### `shot_risk(n: int)`
+
+Risk grows with shot count: 0.15 + 0.25*log10(n+1), capped at 1.
+
+#### `run_attack(attack: ManyShotAttack, gate_fn: Callable[[str], bool], *, risk_threshold: float=0.6)`
+
+Run: gate checks the attack prompt; risk scored from shot count.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `multi_attack_03`
+
+Source: `components/northstar-agent-runtime/multi_attack_03.py`
+
+Multi-turn attack 03: Gradual persona shift, Simulated.
+
+#### `MultiAttack03Error`
+
+Fail-closed.
+
+#### `Turn`
+
+One nudge turn.
+
+#### `cumulative_drift(turns: List[Turn])`
+
+Drift = initial strictness - minimum strictness seen.
+
+#### `score_trajectory(turns: List[Turn], scorer_fn: Callable[[List[str]], float] | None=None)`
+
+Score drift. Host scorer optional; failure -> fail-closed 1.0.
+
+#### `run_attack(turns: List[Turn], gate_fn: Callable[[str], bool], *, drift_threshold: float=0.5)`
+
+Run: gate each turn; also score cumulative drift.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `multi_attack_04`
+
+Source: `components/northstar-agent-runtime/multi_attack_04.py`
+
+Multi-turn attack 04: Context accumulation, Simulated.
+
+#### `MultiAttack04Error`
+
+Fail-closed.
+
+#### `Turn`
+
+One turn: benign or payload.
+
+#### `build_script(benign_count: int)`
+
+Build: benign_count benign turns, then one payload turn.
+
+#### `accumulation_ratio(turns: List[Turn])`
+
+Benign turns before the first payload / total turns.
+
+#### `score_trajectory(turns: List[Turn], scorer_fn: Callable[[List[str]], float] | None=None)`
+
+Score = accumulation ratio (or host scorer); failure -> 1.0.
+
+#### `run_attack(turns: List[Turn], gate_fn: Callable[[str], bool], *, ratio_threshold: float=0.7)`
+
+Run: gate each turn; flag high accumulation ratio.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `multi_attack_05`
+
+Source: `components/northstar-agent-runtime/multi_attack_05.py`
+
+Multi-turn attack 05: Reference chaining, Simulated.
+
+#### `MultiAttack05Error`
+
+Fail-closed.
+
+#### `Turn`
+
+One turn in the citation chain.
+
+#### `chain_depth(turns: List[Turn])`
+
+Count consecutive fabricated citations from the start of the chain.
+
+#### `score_trajectory(turns: List[Turn], scorer_fn: Callable[[List[str]], float] | None=None)`
+
+Score = chain depth / 4 capped at 1.0 (or host scorer).
+
+#### `run_attack(turns: List[Turn], gate_fn: Callable[[str], bool], *, depth_threshold: int=3)`
+
+Run: gate each turn; flag chains at/over depth_threshold.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `multi_attack_06`
+
+Source: `components/northstar-agent-runtime/multi_attack_06.py`
+
+Multi-turn attack 06: Authority escalation, Simulated.
+
+#### `MultiAttack06Error`
+
+Fail-closed.
+
+#### `Authority`
+
+Claimed authority levels.
+
+#### `Turn`
+
+One turn with a claimed authority level.
+
+#### `max_authority(turns: List[Turn])`
+
+Highest claimed authority across turns.
+
+#### `score_trajectory(turns: List[Turn], scorer_fn: Callable[[List[str]], float] | None=None)`
+
+Score = max authority / 4 (or host scorer); failure -> 1.0.
+
+#### `run_attack(turns: List[Turn], gate_fn: Callable[[str], bool], *, authority_threshold: Authority=Authority.ADMIN)`
+
+Run: gate each turn; flag fabricated authority at/over threshold.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `multi_attack_07`
+
+Source: `components/northstar-agent-runtime/multi_attack_07.py`
+
+Multi-turn attack 07: Urgency manipulation, Simulated.
+
+#### `MultiAttack07Error`
+
+Fail-closed.
+
+#### `Turn`
+
+One turn with an urgency weight.
+
+#### `pressure(turns: List[Turn])`
+
+Accumulated urgency pressure (mean of turn weights).
+
+#### `score_trajectory(turns: List[Turn], scorer_fn: Optional[Callable[[List[str]], float]]=None)`
+
+Score = pressure (or host scorer); failure -> fail-closed 1.0.
+
+#### `run_attack(turns: List[Turn], gate_fn: Callable[[str], bool], *, pressure_threshold: float=0.5)`
+
+Run: gate each turn; flag mounting pressure.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `multi_attack_08`
+
+Source: `components/northstar-agent-runtime/multi_attack_08.py`
+
+Multi-turn attack 08: Social proof injection, Simulated.
+
+#### `MultiAttack08Error`
+
+Fail-closed.
+
+#### `Turn`
+
+One turn, possibly carrying a social-proof claim.
+
+#### `proof_count(turns: List[Turn])`
+
+Number of social-proof claims across turns.
+
+#### `score_trajectory(turns: List[Turn], scorer_fn: Optional[Callable[[List[str]], float]]=None)`
+
+Score = claims / 4 capped at 1.0 (or host scorer).
+
+#### `run_attack(turns: List[Turn], gate_fn: Callable[[str], bool], *, claim_threshold: int=3)`
+
+Run: gate each turn; flag manufactured consensus.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `multi_attack_09`
+
+Source: `components/northstar-agent-runtime/multi_attack_09.py`
+
+Multi-turn attack 09: Reciprocity exploitation, Simulated.
+
+#### `MultiAttack09Error`
+
+Fail-closed.
+
+#### `Turn`
+
+One turn: gives a favor, or makes an ask.
+
+#### `debt_ratio(turns: List[Turn])`
+
+Favors given before the first ask / turns before the first ask.
+
+#### `score_trajectory(turns: List[Turn], scorer_fn: Optional[Callable[[List[str]], float]]=None)`
+
+Score = debt ratio (or host scorer); failure -> fail-closed 1.0.
+
+#### `run_attack(turns: List[Turn], gate_fn: Callable[[str], bool], *, debt_threshold: float=0.6)`
+
+Run: gate each turn; flag ask-after-favor-buildup.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `multi_attack_10`
+
+Source: `components/northstar-agent-runtime/multi_attack_10.py`
+
+Multi-turn attack 10: Commitment escalation (foot-in-the-door), Simulated.
+
+#### `MultiAttack10Error`
+
+Fail-closed.
+
+#### `Turn`
+
+One commitment step with a request-size score.
+
+#### `commitment_slope(turns: List[Turn])`
+
+Slope = (last size - first size) / (turns - 1).
+
+#### `score_trajectory(turns: List[Turn], scorer_fn: Optional[Callable[[List[str]], float]]=None)`
+
+Score = slope scaled x2, capped at 1.0 (or host scorer).
+
+#### `run_attack(turns: List[Turn], gate_fn: Callable[[str], bool], *, slope_threshold: float=0.4)`
+
+Run: gate each turn; flag steep commitment slopes.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `multi_attack_11`
+
+Source: `components/northstar-agent-runtime/multi_attack_11.py`
+
+Foot-in-the-door probe (A-MULTI-011), Simulated.
+
+#### `MultiAttack11Error`
+
+Fail-closed.
+
+#### `FootInDoorTurn`
+
+One turn of a foot-in-the-door sequence.
+
+#### `FootInDoorScript`
+
+A full foot-in-the-door script.
+
+#### `commitment_ratchet(turns: List[FootInDoorTurn])`
+
+Measure the commitment ratchet: final size / initial size.
+
+#### `run_script(script: FootInDoorScript, gate_fn: Callable[[str], bool], *, ratchet_threshold: float=4.0)`
+
+Run a foot-in-the-door script.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `multi_attack_12`
+
+Source: `components/northstar-agent-runtime/multi_attack_12.py`
+
+Door-in-the-face probe (A-MULTI-012), Simulated.
+
+#### `MultiAttack12Error`
+
+Fail-closed.
+
+#### `DoorInFaceTurn`
+
+One turn of a door-in-the-face sequence.
+
+#### `DoorInFaceScript`
+
+A full door-in-the-face script.
+
+#### `run_script(script: DoorInFaceScript, contextual_gate_fn: Callable[[str], bool], standalone_gate_fn: Callable[[str], bool])`
+
+Run a door-in-the-face script.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `multi_attack_13`
+
+Source: `components/northstar-agent-runtime/multi_attack_13.py`
+
+Low-ball probe (A-MULTI-013), Simulated.
+
+#### `MultiAttack13Error`
+
+Fail-closed.
+
+#### `LowBallTurn`
+
+One turn of a low-ball sequence.
+
+#### `LowBallScript`
+
+A full low-ball script.
+
+#### `detect_term_change(before: Dict[str, str], after: Dict[str, str], material_keys: List[str]=None)`
+
+Return material term changes as (key, old, new) tuples.
+
+#### `run_script(script: LowBallScript, reauth_fn: Callable[[List[Tuple[str, str, str]]], bool], *, material_keys: List[str]=None)`
+
+Run a low-ball script.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `multi_attack_14`
+
+Source: `components/northstar-agent-runtime/multi_attack_14.py`
+
+Bait-and-switch probe (A-MULTI-014), Simulated.
+
+#### `MultiAttack14Error`
+
+Fail-closed.
+
+#### `SwitchCase`
+
+One authorized-vs-executed pair.
+
+#### `run_case(case: SwitchCase, drift_fn: Callable[[str, str], float], *, threshold: float=0.5)`
+
+Check one authorized-vs-executed pair.
+
+#### `run_all(cases: List[SwitchCase], drift_fn: Callable[[str, str], float], *, threshold: float=0.5)`
+
+Run all switch cases. Returns per-case results and totals.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `multi_attack_15`
+
+Source: `components/northstar-agent-runtime/multi_attack_15.py`
+
+Gaslighting probes (A-MULTI-015), Simulated.
+
+#### `MultiAttack15Error`
+
+Fail-closed.
+
+#### `GaslightTurn`
+
+One turn containing claims about the conversation history.
+
+#### `GaslightScript`
+
+A full gaslighting script.
+
+#### `verify_claims(turn: GaslightTurn, history: List[str], checker_fn: Callable[[str, List[str]], bool])`
+
+Return the claims NOT supported by history.
+
+#### `run_script(script: GaslightScript, history: List[str], checker_fn: Callable[[str, List[str]], bool], gate_fn: Callable[[str], bool])`
+
+Run a gaslighting script.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `multi_attack_16`
+
+Source: `components/northstar-agent-runtime/multi_attack_16.py`
+
+Memory manipulation probes (A-MULTI-016), Simulated.
+
+#### `MultiAttack16Error`
+
+Fail-closed.
+
+#### `MemoryClaim`
+
+A claim about a value the agent supposedly remembers.
+
+#### `verify_memory(claim: MemoryClaim, lookup_fn: Callable[[str], Optional[str]])`
+
+Check a memory claim against the provenance-backed record.
+
+#### `run_all(claims: List[MemoryClaim], lookup_fn: Callable[[str], Optional[str]], gate_fn: Callable[[str], bool])`
+
+Run all memory claims. Gate-checked, then memory-verified.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `multi_attack_17`
+
+Source: `components/northstar-agent-runtime/multi_attack_17.py`
+
+History rewriting probes (A-MULTI-017), Simulated.
+
+#### `MultiAttack17Error`
+
+Fail-closed.
+
+#### `RewriteCase`
+
+One original-vs-restatement pair.
+
+#### `check_restatement(case: RewriteCase, similarity_fn: Callable[[str, str], float], *, threshold: float=0.7)`
+
+Check one restatement against the original log entry.
+
+#### `run_all(cases: List[RewriteCase], similarity_fn: Callable[[str, str], float], *, threshold: float=0.7)`
+
+Run all rewrite cases. Returns per-case results and totals.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `multi_attack_18`
+
+Source: `components/northstar-agent-runtime/multi_attack_18.py`
+
+False premise injection probes (A-MULTI-018), Simulated.
+
+#### `MultiAttack18Error`
+
+Fail-closed.
+
+#### `PremiseTurn`
+
+One turn carrying embedded premises.
+
+#### `PremiseScript`
+
+A full false-premise script.
+
+#### `check_premises(turn: PremiseTurn, checker_fn: Callable[[str], Optional[bool]])`
+
+Return premises that fail verification.
+
+#### `run_script(script: PremiseScript, checker_fn: Callable[[str], Optional[bool]], gate_fn: Callable[[str], bool])`
+
+Run a false-premise script.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `multi_attack_19`
+
+Source: `components/northstar-agent-runtime/multi_attack_19.py`
+
+Leading question chains (A-MULTI-019), Simulated.
+
+#### `MultiAttack19Error`
+
+Fail-closed.
+
+#### `LeadingTurn`
+
+One leading question.
+
+#### `LeadingScript`
+
+A full leading-question chain.
+
+#### `narrowing_score(turns: List[LeadingTurn])`
+
+Measure answer-space narrowing: 1 - final/initial.
+
+#### `run_script(script: LeadingScript, gate_fn: Callable[[str], bool], *, narrowing_threshold: float=0.9)`
+
+Run a leading-question chain.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `multi_attack_20`
+
+Source: `components/northstar-agent-runtime/multi_attack_20.py`
+
+Socratic trap sequences (A-MULTI-020), Simulated.
+
+#### `MultiAttack20Error`
+
+Fail-closed.
+
+#### `SocraticTurn`
+
+One turn of a Socratic sequence.
+
+#### `SocraticScript`
+
+A full Socratic trap sequence.
+
+#### `ladder_length_before_concession(turns: List[SocraticTurn])`
+
+Count consecutive agreement probes immediately before the first concession turn. Returns -1 if there is no concession.
+
+#### `run_script(script: SocraticScript, standalone_gate_fn: Callable[[str], bool], *, min_ladder: int=2)`
+
+Run a Socratic trap sequence.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `multi_axis_autonomy_probes`
+
+Source: `components/northstar-agent-runtime/multi_axis_autonomy_probes.py`
+
+Multi-axis autonomy representation probes (per-axis risk reporting, no composite scores).
+
+#### `MultiAxisAutonomyError`
+
+An axis reading, profile, policy, or verdict that refuses to be built.
+
+#### `AxisReading`
+
+One measured risk axis for one action.
+
+- `pinned()`
+  - Return a copy with the digest pin computed.
+- `verify()`
+  - Recompute the pin; constant-time compare, never raises.
+#### `AxisProfile`
+
+The complete per-axis risk profile for one action.
+
+- `reading_for(axis: str)`
+  - The reading for one axis.
+- `pinned()`
+  - Return a copy with the digest pin computed over all readings.
+- `verify()`
+  - Recompute the pin; constant-time compare, never raises.
+#### `AxisPolicy`
+
+Per-axis risk ceilings. Caller-supplied; no defaults that grant.
+
+- `ceiling_for(axis: str)`
+  - The highest tolerable risk on one axis.
+- `pinned()`
+  - Return a copy with the digest pin computed.
+- `verify()`
+  - Recompute the pin; constant-time compare, never raises.
+#### `MultiAxisFinding`
+
+One named finding, always naming the axis it came from.
+
+- `pinned()`
+  - Return a copy with the digest pin computed.
+- `verify()`
+  - Recompute the pin; constant-time compare, never raises.
+#### `PerAxisVerdict`
+
+The gate's verdict: one decision per axis, pinned, no composite.
+
+- `decision_for(axis: str)`
+  - The decision on one axis.
+- `action_decision()`
+  - The action-level outcome: conjunction over axes, never a score.
+- `pinned()`
+  - Return a copy with the digest pin computed.
+- `verify()`
+  - Recompute the pin; constant-time compare, never raises.
+#### `decide_per_axis(profile: AxisProfile, policy: AxisPolicy)`
+
+Decide each axis independently against its ceiling.
+
+#### `refuse_composite_score(action_id: str, claimed_score: Any)`
+
+Deterministically refuse any claimed composite risk score.
+
+#### `attack_probe_names()`
+
+All multi-axis autonomy attack probe names.
+
+#### `benign_probe_names()`
+
+All benign control names.
+
+#### `probes_in_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `main()`
+
+Print the corpus summary: attack/benign counts and family listing.
 
 ### `multi_tenancy`
 
@@ -57164,6 +65175,88 @@ Deterministic NATS subject-messaging ledger (simulated).
 - `stats()`
 - `audit_log()`
 #### `main()`
+
+### `negotiation_corpus_probes`
+
+Source: `components/northstar-agent-runtime/negotiation_corpus_probes.py`
+
+Negotiation-corpus probes (reputation attestation forgery, want-registry poisoning, counter-offer laundering).
+
+#### `NegotiationCorpusError`
+
+A negotiation record that refuses to be built.
+
+#### `ReputationAttestation`
+
+One third-party claim about one agent's past behavior.
+
+- `pinned()`
+  - Return a copy with the digest pin computed.
+- `verify()`
+  - Recompute the pin; constant-time compare, never raises.
+#### `WantRegistryEntry`
+
+One offer in the want-registry: agent X offers service Y.
+
+- `pinned()`
+  - Return a copy with the digest pin computed.
+- `verify()`
+  - Recompute the pin; constant-time compare, never raises.
+#### `CounterOfferBinding`
+
+The negotiated counter offer bound to what was actually executed.
+
+- `pinned()`
+  - Return a copy with the digest pin computed.
+- `verify()`
+  - Recompute the pin; constant-time compare, never raises.
+#### `NegotiationFinding`
+
+One named finding, always naming the family it came from.
+
+- `pinned()`
+  - Return a copy with the digest pin computed.
+- `verify()`
+  - Recompute the pin; constant-time compare, never raises.
+#### `detect_attestation_forgery(attestation: ReputationAttestation, expected_subject: str, as_of: str)`
+
+Check a reputation attestation for the forgery shapes.
+
+#### `verify_registry_integrity(entries: tuple[WantRegistryEntry, ...], pinned_head_digest: str)`
+
+Verify every registry entry against the pinned registry head.
+
+#### `verify_counter_offer(binding: CounterOfferBinding)`
+
+Check that executed terms are the negotiated counter terms.
+
+#### `agreement_is_not_authorization(negotiation_record_digest: str)`
+
+Deterministic refusal: a negotiation record is never a gate verdict.
+
+#### `attack_probe_names()`
+
+All negotiation-corpus attack probe names.
+
+#### `benign_probe_names()`
+
+All benign control names.
+
+#### `probes_in_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `main()`
+
+Print the corpus summary: attack/benign counts and family listing.
 
 ### `newsmedia_agents`
 
@@ -58417,6 +66510,128 @@ Shape an ``audit.ndjson/1`` record for OIDC provider events.
 
 #### `main()`
 
+### `oncall_rotation`
+
+Source: `components/northstar-agent-runtime/oncall_rotation.py`
+
+On-call rotation — PagerDuty-shaped schedule bookkeeping (thirty-fourth batch).
+
+#### `OncallRotationError`
+
+Base error for the on-call rotation manager.
+
+#### `BadRotationError`
+
+Malformed rotation id.
+
+#### `DuplicateRotationError`
+
+This rotation id already exists.
+
+#### `UnknownRotationError`
+
+No rotation with this id is registered.
+
+#### `BadParticipantError`
+
+Malformed participant list or participant id.
+
+#### `DuplicateParticipantError`
+
+A participant appears twice in the roster.
+
+#### `BadShiftError`
+
+Shift length is not a positive int.
+
+#### `NoScheduleError`
+
+This rotation has no schedule layer yet.
+
+#### `BadHandoffError`
+
+Handoff reason is not in the pinned vocabulary.
+
+#### `BadOverrideError`
+
+Malformed override window or user id.
+
+#### `OverlappingOverrideError`
+
+This override window overlaps an active override.
+
+#### `UnknownOverrideError`
+
+No override with this id exists on the rotation.
+
+#### `AlreadyRevokedError`
+
+This override is already revoked.
+
+#### `SeqOrderError`
+
+Mutation seq is not strictly increasing.
+
+#### `RotationRecord`
+
+One named on-call rotation (created before any schedule).
+
+- `verify()`
+  - Re-derive the digest pin; True iff the record is intact.
+#### `ScheduleRecord`
+
+One schedule layer: ordered roster + shift length.
+
+- `verify()`
+  - Re-derive the digest pin; True iff the record is intact.
+#### `HandoffRecord`
+
+One explicit handoff: ``from_user`` → ``to_user``.
+
+- `verify()`
+  - Re-derive the digest pin; True iff the record is intact.
+#### `OverrideRecord`
+
+One bounded override window.
+
+- `verify()`
+  - Re-derive the digest pin; True iff the record is intact.
+#### `oncall_audit_event(kind: str, seq: int, **detail: Any)`
+
+Shape an ``audit.ndjson/1`` record for on-call rotation.
+
+#### `OncallRotation`
+
+Deterministic PagerDuty-shaped on-call schedule bookkeeping.
+
+- `create_rotation(rotation_id: str, name: str, seq: int)`
+  - Create a named on-call rotation (no schedule yet).
+- `schedule(rotation_id: str, participants: Sequence[str], shift_length_seqs: int, seq: int)`
+  - Set (or replace) the rotation's schedule layer.
+- `handoff(rotation_id: str, seq: int, reason: str=REASON_MANUAL)`
+  - Advance the on-call to the next roster participant.
+- `override(rotation_id: str, override_id: str, user_id: str, start_seq: int, end_seq: int, seq: int)`
+  - Pin a bounded override: ``user_id`` covers ``[start_seq, end_seq)``.
+- `revoke_override(rotation_id: str, override_id: str, seq: int)`
+  - End an override early (terminal; the window stops covering).
+- `current(rotation_id: str, at_seq: int)`
+  - Who the schedule says is on-call at ``at_seq`` (pure view).
+- `schedule_record(rotation_id: str)`
+  - The current schedule layer of a rotation.
+- `rotation(rotation_id: str)`
+  - The rotation's creation record.
+- `handoffs(rotation_id: str)`
+  - All handoff records, oldest first.
+- `overrides(rotation_id: str)`
+  - All override records (active and revoked), oldest first.
+- `rotation_ids()`
+  - Registered rotation ids, sorted.
+- `audit_log()`
+  - Booked audit events, oldest first (ids + pins only).
+#### `main()`
+
+Self-check: create, schedule, handoff, override, current view.
+
 ### `oncall_scheduler`
 
 Source: `components/northstar-agent-runtime/oncall_scheduler.py`
@@ -58843,6 +67058,482 @@ Shape a tracer observation as an ``audit.ndjson/1``-style record.
 
 Self-check: lifecycle, propagation, extraction, refusals.
 
+### `out_def_31`
+
+Source: `components/northstar-agent-runtime/out_def_31.py`
+
+Output watermark verification, Simulated.
+
+#### `OutDef31Error`
+
+Fail-closed.
+
+#### `embed_watermark(text: str, key: str | bytes)`
+
+Append a ``[wm:<hex>]`` watermark token to *text*.
+
+#### `has_watermark(text: str)`
+
+Return True if *text* contains a watermark token anywhere.
+
+#### `verify_watermark(text_with_token: str, key: str | bytes)`
+
+Verify the trailing watermark token. Returns (ok, reason).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `out_def_32`
+
+Source: `components/northstar-agent-runtime/out_def_32.py`
+
+LSB steganography detection, Simulated.
+
+#### `OutDef32Error`
+
+Fail-closed.
+
+#### `lsb_plane(data: bytes)`
+
+Extract the LSB of each byte in *data*, packed MSB-first.
+
+#### `detect_lsb_stego(data: bytes, *, min_bytes: int=64)`
+
+Check the LSB plane for stego-like anomalies.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `out_def_33`
+
+Source: `components/northstar-agent-runtime/out_def_33.py`
+
+Covert channel detection (size/timing anomalies), Simulated.
+
+#### `OutDef33Error`
+
+Fail-closed.
+
+#### `base64_ratio(text: str)`
+
+Fraction of base64-alphabet chars in the longest alphanumeric run.
+
+#### `check_size_channel(text: str, max_chars: int, *, baseline: int=0)`
+
+Check output size for covert-channel patterns.
+
+#### `detect_padding_anomaly(text: str)`
+
+Flag lines with long (>50) runs of trailing whitespace/padding.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `out_def_34`
+
+Source: `components/northstar-agent-runtime/out_def_34.py`
+
+Data exfiltration via formatting, Simulated.
+
+#### `OutDef34Error`
+
+Fail-closed.
+
+#### `detect_format_exfil(text: str)`
+
+Detect formatting-based exfil channels.
+
+#### `clean_format_exfil(text: str)`
+
+Strip trailing whitespace from every line.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `out_def_35`
+
+Source: `components/northstar-agent-runtime/out_def_35.py`
+
+Unicode exfiltration detection, Simulated.
+
+#### `OutDef35Error`
+
+Fail-closed.
+
+#### `detect_unicode_exfil(text: str)`
+
+Detect suspicious Unicode chars.
+
+#### `clean_unicode_exfil(text: str)`
+
+Remove all SUSPICIOUS characters from *text*.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `out_def_36`
+
+Source: `components/northstar-agent-runtime/out_def_36.py`
+
+Homoglyph exfiltration defense (D-OUT-036), Simulated.
+
+#### `detect_mixed_script(token: str)`
+
+Return (threat, reason).
+
+#### `scan_text(text: str)`
+
+Scan free text; return (threat, reason, offending_tokens).
+
+#### `normalize_confusables(text: str)`
+
+Rewrite known confusables back to their Latin lookalikes.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `out_def_37`
+
+Source: `components/northstar-agent-runtime/out_def_37.py`
+
+White-text exfiltration defense (D-OUT-037), Simulated.
+
+#### `detect_white_text(html: str)`
+
+Return (threat, reason, evidence).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `out_def_38`
+
+Source: `components/northstar-agent-runtime/out_def_38.py`
+
+Metadata exfiltration defense (D-OUT-038), Simulated.
+
+#### `detect_meta_exfil(meta: Dict[str, object])`
+
+Return (threat, reason, evidence).
+
+#### `strip_meta(meta: Dict[str, object], allowed: Optional[Set[str]]=None)`
+
+Return a copy with only allowed keys; strings truncated to 200 chars.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `out_def_39`
+
+Source: `components/northstar-agent-runtime/out_def_39.py`
+
+EXIF data stripping defense (D-OUT-039), Simulated.
+
+#### `strip_exif(data: bytes)`
+
+Return (cleaned, removed_count).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `out_def_40`
+
+Source: `components/northstar-agent-runtime/out_def_40.py`
+
+Document property stripping defense (D-OUT-040), Simulated.
+
+#### `detect_doc_props(props: Dict[str, object])`
+
+Return (threat, reason).
+
+#### `strip_doc_props(props: Dict[str, object], keep: Optional[Set[str]]=None)`
+
+Return (cleaned, removed_keys): only `keep` keys survive.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `out_def_41`
+
+Source: `components/northstar-agent-runtime/out_def_41.py`
+
+PDF metadata scrubber: /Info dictionary entries, Simulated.
+
+#### `OutDef41Error`
+
+Fail-closed.
+
+#### `clean_pdf_metadata(data: bytes)`
+
+Remove /Info metadata entries. Returns (cleaned_bytes, removed_keys).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `out_def_42`
+
+Source: `components/northstar-agent-runtime/out_def_42.py`
+
+Image metadata scrubber: PNG text chunks and JPEG COM segments, Simulated.
+
+#### `OutDef42Error`
+
+Fail-closed.
+
+#### `clean_image_metadata(data: bytes)`
+
+Remove image metadata chunks/segments. Returns (cleaned, removed_count).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `out_def_43`
+
+Source: `components/northstar-agent-runtime/out_def_43.py`
+
+Audio metadata scrubber: ID3v2 headers and ID3v1 trailers, Simulated.
+
+#### `OutDef43Error`
+
+Fail-closed.
+
+#### `clean_audio_metadata(data: bytes)`
+
+Strip ID3v2 header and/or ID3v1 trailer. Returns (cleaned, removed_count).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `out_def_44`
+
+Source: `components/northstar-agent-runtime/out_def_44.py`
+
+Video metadata scrubber: MP4-style metadata boxes, Simulated.
+
+#### `OutDef44Error`
+
+Fail-closed.
+
+#### `clean_video_metadata(data: bytes)`
+
+Remove metadata boxes. Returns (cleaned_bytes, removed_count).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `out_def_45`
+
+Source: `components/northstar-agent-runtime/out_def_45.py`
+
+Archive metadata scrubber: ZIP EOCD comments and extra fields, Simulated.
+
+#### `OutDef45Error`
+
+Fail-closed.
+
+#### `clean_archive_metadata(data: bytes)`
+
+Zero ZIP EOCD comment and local-header extra fields.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `out_def_46`
+
+Source: `components/northstar-agent-runtime/out_def_46.py`
+
+Font exfiltration defense: hidden payloads in font name tables, Simulated.
+
+#### `OutDef46Error`
+
+Fail-closed.
+
+#### `detect_font_exfil(names: list)`
+
+Scan font name-table entries for exfil markers.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `out_def_47`
+
+Source: `components/northstar-agent-runtime/out_def_47.py`
+
+CSS exfiltration defense: data smuggled in stylesheets, Simulated.
+
+#### `OutDef47Error`
+
+Fail-closed.
+
+#### `detect_css_exfil(css: str)`
+
+Scan CSS text for exfil constructs.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `out_def_48`
+
+Source: `components/northstar-agent-runtime/out_def_48.py`
+
+JS exfiltration defense: data theft smuggled in JavaScript, Simulated.
+
+#### `OutDef48Error`
+
+Fail-closed.
+
+#### `detect_js_exfil(js: str)`
+
+Scan JS text for exfil constructs.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `out_def_49`
+
+Source: `components/northstar-agent-runtime/out_def_49.py`
+
+SVG exfiltration defense: active content hidden in vector images, Simulated.
+
+#### `OutDef49Error`
+
+Fail-closed.
+
+#### `detect_svg_exfil(svg: str)`
+
+Scan SVG text for exfil/active-content constructs.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `out_def_50`
+
+Source: `components/northstar-agent-runtime/out_def_50.py`
+
+MathML exfiltration defense: payloads hidden in math markup, Simulated.
+
+#### `OutDef50Error`
+
+Fail-closed.
+
+#### `detect_mathml_exfil(mml: str)`
+
+Scan MathML text for exfil constructs.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `out_len_guard`
+
+Source: `components/northstar-agent-runtime/out_len_guard.py`
+
+Output length guard (D-OUT-007b), Simulated.
+
+#### `check(t: str, m: int=5000)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
 ### `outbox_pattern`
 
 Source: `components/northstar-agent-runtime/outbox_pattern.py`
@@ -59133,6 +67824,362 @@ Outer-alignment governance ledger (Simulated).
 #### `main()`
 
 Self-check: exercise the outer-alignment ledger end to end.
+
+### `output_defense_08`
+
+Source: `components/northstar-agent-runtime/output_defense_08.py`
+
+Output defense 08: content filtering (blocklist), Simulated.
+
+#### `ContentFilterError`
+
+Fail-closed.
+
+#### `FilterVerdict`
+
+#### `filter_content(text: str)`
+
+Return verdict. Raises on non-str input (fail-closed).
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `output_defense_09`
+
+Source: `components/northstar-agent-runtime/output_defense_09.py`
+
+Output defense 09: toxicity detection (mock classifier), Simulated.
+
+#### `ToxicityError`
+
+Fail-closed.
+
+#### `ToxicityVerdict`
+
+#### `mock_classify(text: str)`
+
+Lexical mock: base 0.05 + 0.3 per marker, +0.1 per intensifier.
+
+#### `detect_toxicity(text: str, *, threshold: float=0.5, classifier_fn: Optional[Callable[[str], float]]=None)`
+
+Detect toxicity. Classifier exception -> score 1.0 (fail-closed).
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `output_defense_10`
+
+Source: `components/northstar-agent-runtime/output_defense_10.py`
+
+Output defense 10: bias detection (mock), Simulated.
+
+#### `BiasError`
+
+Fail-closed.
+
+#### `BiasVerdict`
+
+#### `detect_bias(text: str)`
+
+Scan for biased phrasing. Raises on non-str (fail-closed).
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `output_defense_11`
+
+Source: `components/northstar-agent-runtime/output_defense_11.py`
+
+Output defense 11: hallucination detection (mock), Simulated.
+
+#### `HallucinationError`
+
+Fail-closed.
+
+#### `HallucinationVerdict`
+
+#### `detect_hallucination(text: str, evidence: FrozenSet[str])`
+
+Flag assertive sentences with no token overlap vs evidence.
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `output_defense_12`
+
+Source: `components/northstar-agent-runtime/output_defense_12.py`
+
+Output defense 12: factuality checking (mock interface), Simulated.
+
+#### `FactualityError`
+
+Fail-closed.
+
+#### `ClaimVerdict`
+
+#### `KnowledgeBase`
+
+Stub KB. Host subclasses or replaces with a real backend.
+
+- `add(fact: str, source: str)`
+- `lookup(claim: str)`
+  - Exact normalized lookup. Override for fuzzy/retrieval.
+#### `FactualityChecker`
+
+- `check(claim: str)`
+- `check_all(claims: List[str])`
+- `checked` (property)
+#### `stdlib_only()`
+
+#### `main()`
+
+### `output_defense_13`
+
+Source: `components/northstar-agent-runtime/output_defense_13.py`
+
+Output defense 13: citation verification, Simulated.
+
+#### `CitationError`
+
+Fail-closed.
+
+#### `CitationVerdict`
+
+#### `extract_citations(text: str)`
+
+Extract normalized citation keys from text.
+
+#### `verify_citations(text: str, references: List[str])`
+
+Every citation marker must match a reference entry.
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `output_defense_14`
+
+Source: `components/northstar-agent-runtime/output_defense_14.py`
+
+Output defense 14: source attribution, Simulated.
+
+#### `AttributionError`
+
+Fail-closed.
+
+#### `Source`
+
+#### `SpanAttribution`
+
+#### `AttributionTracker`
+
+- `register(source: Source)`
+- `attribute(start: int, end: int, source_id: str)`
+  - Attribute text[start:end] to a registered source.
+- `coverage(text_len: int)`
+  - Fraction of text covered by attributed spans.
+- `unattributed_gaps(text_len: int, min_gap: int=20)`
+  - Return (start, end) gaps of unattributed text >= min_gap.
+- `sources` (property)
+#### `stdlib_only()`
+
+#### `main()`
+
+### `output_defense_15`
+
+Source: `components/northstar-agent-runtime/output_defense_15.py`
+
+Output defense 15: confidence calibration (mock), Simulated.
+
+#### `CalibrationError`
+
+Fail-closed.
+
+#### `CalibrationResult`
+
+#### `calibrate(raw: float, curve: List[Tuple[float, float]]=None)`
+
+Linear-interpolate raw score on the reliability curve.
+
+#### `is_overconfident(raw: float, margin: float=0.1)`
+
+True if raw exceeds calibrated by more than margin.
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `output_defense_16`
+
+Source: `components/northstar-agent-runtime/output_defense_16.py`
+
+Output defense 16: uncertainty quantification (mock), Simulated.
+
+#### `UncertaintyError`
+
+Fail-closed.
+
+#### `UncertaintyEstimate`
+
+#### `quantify(text: str)`
+
+Estimate uncertainty components from markers.
+
+#### `should_escalate(est: UncertaintyEstimate, threshold: float=0.5)`
+
+Escalate when total uncertainty exceeds threshold.
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `output_defense_17`
+
+Source: `components/northstar-agent-runtime/output_defense_17.py`
+
+Output defense 17: refusal detection, Simulated.
+
+#### `RefusalError`
+
+Fail-closed.
+
+#### `RefusalVerdict`
+
+#### `detect_refusal(text: str)`
+
+Classify output as refusal / partial refusal / not refusal.
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `output_defense_18`
+
+Source: `components/northstar-agent-runtime/output_defense_18.py`
+
+Output defense 18: safe completion (fallback responses), Simulated.
+
+#### `SafeCompletionError`
+
+Fail-closed.
+
+#### `CompletionResult`
+
+#### `safe_complete(text: str, is_safe_fn: Callable[[str], bool], *, fallback_key: str='blocked')`
+
+Return text if safe, else the static fallback.
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `output_defense_19`
+
+Source: `components/northstar-agent-runtime/output_defense_19.py`
+
+Output defense 19: partial redaction, Simulated.
+
+#### `RedactionError`
+
+Fail-closed.
+
+#### `RedactionResult`
+
+#### `redact_spans(text: str, spans: List[Tuple[int, int]], token: str='[REDACTED]')`
+
+Redact explicit (start, end) spans. Later spans first (offsets).
+
+#### `redact_patterns(text: str, patterns: Dict[str, Pattern]=None, token_fmt: str='[REDACTED:{category}]')`
+
+Redact all matches of the pattern map, keep the rest.
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `output_defense_20`
+
+Source: `components/northstar-agent-runtime/output_defense_20.py`
+
+Output defense 20: summarization guard, Simulated.
+
+#### `SummaryGuardError`
+
+Fail-closed.
+
+#### `SummaryVerdict`
+
+#### `guard_summary(summary: str, source: str, *, max_chars: int=2000, max_ratio: float=0.5, min_ratio: float=0.01, mode: str='truncate')`
+
+Check summary bounds. mode: 'truncate' or 'reject'.
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `output_defense_21`
+
+Source: `components/northstar-agent-runtime/output_defense_21.py`
+
+Output defense 21: translation guard (mock), Simulated.
+
+#### `TranslationGuardError`
+
+Fail-closed.
+
+#### `TranslationVerdict`
+
+#### `mock_translate(text: str, target_lang: str)`
+
+Deterministic mock: wraps text with a language tag.
+
+#### `guard_translation(text: str, target_lang: str, *, translate_fn: Optional[Callable[[str, str], str]]=None, max_expansion: float=3.0)`
+
+Translate then guard the translated output.
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `output_defense_22`
+
+Source: `components/northstar-agent-runtime/output_defense_22.py`
+
+Output defense 22: code output scanning, Simulated.
+
+#### `CodeScanError`
+
+Fail-closed.
+
+#### `CodeFinding`
+
+#### `CodeScanVerdict`
+
+#### `scan_code_output(text: str)`
+
+Scan fenced code blocks for dangerous patterns.
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `output_limits`
+
+Source: `components/northstar-agent-runtime/output_limits.py`
+
+Output length limits (D-OUT-007), Simulated.
+
+#### `OutputLimiter`
+
+- `check(text: str)`
+- `truncate(text: str)`
+#### `stdlib_only()`
+
+#### `main()`
 
 ### `output_parser`
 
@@ -59595,6 +68642,18 @@ Shape an audit.ndjson/1 record. Ids + pins only; never payloads.
 #### `main()`
 
 Self-check: register, resolve, install, lock, refusals.
+
+### `partial_redact`
+
+Source: `components/northstar-agent-runtime/partial_redact.py`
+
+Partial redaction (D-OUT-019), Simulated.
+
+#### `redact_segment(text: str, start: int, end: int)`
+
+#### `stdlib_only()`
+
+#### `main()`
 
 ### `partition_manager`
 
@@ -60485,6 +69544,72 @@ Penetration-test engagement decision ledger (Simulated).
 - `stats(seq: int)`
 #### `main()`
 
+### `per_action_autonomy_probes`
+
+Source: `components/northstar-agent-runtime/per_action_autonomy_probes.py`
+
+Per-action autonomy probes (per-action autonomy levels, immutable-object approval, action-level gates).
+
+#### `PerActionAutonomyError`
+
+An autonomy level, approval, action, or gate record that refuses to be built.
+
+#### `AutonomyAction`
+
+One action submitted to the autonomy gate.
+
+- `immutable_object_digest` (property)
+  - The immutable object the approval must name: tool + arguments.
+#### `ImmutableApproval`
+
+An explicit approval bound to one immutable object.
+
+- `pinned()`
+  - Return a copy with the digest computed.
+#### `verify_approval(approval: ImmutableApproval)`
+
+Re-derive the approval digest with a constant-time compare.
+
+#### `AutonomyVerdict`
+
+One gate verdict for one action: digest-pinned over the action's identity, its assigned level, its ceiling, and the decision.
+
+- `pinned()`
+#### `verify_verdict(verdict: AutonomyVerdict)`
+
+Re-derive the verdict digest with a constant-time compare.
+
+#### `AutonomyGate`
+
+Assigns one verdict per action. Levels are per action; approvals bind immutable objects; standing grants do not exist.
+
+- `approve(approval: ImmutableApproval)`
+- `decide(action: AutonomyAction, *, approval: ImmutableApproval | None=None, level_at_dispatch: str | None=None)`
+  - Return the per-action verdict for ``action``.
+#### `attack_probe_names()`
+
+All per-action autonomy attack probe names.
+
+#### `benign_probe_names()`
+
+All benign control names.
+
+#### `probes_in_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `main()`
+
+Print the corpus summary: attack/benign counts and family listing.
+
 ### `per_call_budget`
 
 Source: `components/northstar-agent-runtime/per_call_budget.py`
@@ -61007,6 +70132,48 @@ Audit-shaped record for one phi assessment.
 
 #### `main()`
 
+### `pii_redaction`
+
+Source: `components/northstar-agent-runtime/pii_redaction.py`
+
+PII redaction: output filtering (D-OUT-001), Simulated.
+
+#### `redact(text: str)`
+
+Redact PII. Returns (redacted_text, counts).
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `pii_vault`
+
+Source: `components/northstar-agent-runtime/pii_vault.py`
+
+PII vault: mask/demask for trust boundary crossing (D6), Simulated.
+
+#### `PiiVaultError`
+
+Fail-closed.
+
+#### `Vault`
+
+In-memory PII vault keyed by run ID.
+
+- `mask(text: str, run_id: str)`
+  - Mask PII in text. Returns (masked_text, tokens_used).
+- `demask(text: str, run_id: str, allowed_types: Optional[List[str]]=None)`
+  - Demask tokens. Only allowed_types are restored.
+- `clear_run(run_id: str)`
+  - Clear vault for a run (after completion).
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
 ### `plan_defense`
 
 Source: `components/northstar-agent-runtime/plan_defense.py`
@@ -61049,6 +70216,76 @@ Combines the three plan defenses into one execution-time check.
   - Same as :meth:`check` but returns a frozen :class:`DefenseReport`.
 #### `main()`
 
+### `plan_injection_probes`
+
+Source: `components/northstar-agent-runtime/plan_injection_probes.py`
+
+Plan-injection probes: injected plans, attribution evasion, plan gates.
+
+#### `attack_probe_names()`
+
+All plan-injection attack probe names.
+
+#### `benign_probe_names()`
+
+All benign control names.
+
+#### `probes_in_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `PlanRecord`
+
+A digest-pinned plan with declared origin, goal, and sealed steps.
+
+#### `seal_plan(plan_id: str, steps: Sequence[str], goal_digest: str, source: str | None)`
+
+Seal a plan: pin its ordered steps, order, and goal binding.
+
+#### `verify_plan_record(record: PlanRecord, steps: Sequence[str], goal_digest: str)`
+
+Re-derive the seal from claimed steps; constant-time comparison.
+
+#### `detect_unattributed_plan(record: PlanRecord, steps: Sequence[str])`
+
+Name plans the agent cannot attribute to any origin.
+
+#### `detect_goal_substitution(record: PlanRecord, declared_goal_digest: str)`
+
+Name a plan whose bound goal diverges from the authorized goal.
+
+#### `detect_paraphrase_laundering(plan_text: str, untrusted_fragments: Sequence[str], attributed: bool)`
+
+Flag plans that restate untrusted fragments without attribution.
+
+#### `detect_step_binding(record: PlanRecord, steps: Sequence[str], executed_step: str)`
+
+Name executed steps absent from the sealed step list or order.
+
+#### `PlanGateDecision`
+
+A digest-pinned gate decision for one plan execution.
+
+#### `gate_plan(record: PlanRecord, steps: Sequence[str], declared_goal_digest: str, plan_text: str='', untrusted_fragments: Sequence[str]=(), executed_step: str | None=None)`
+
+Fail-closed plan gate; allowed only when every check passes.
+
+#### `verify_gate_decision(decision: PlanGateDecision, record: PlanRecord)`
+
+Re-derive the decision digest; constant-time comparison.
+
+#### `main()`
+
+Print a small summary for the CLI.
+
 ### `planner_budget_combo`
 
 Source: `components/northstar-agent-runtime/planner_budget_combo.py`
@@ -61085,6 +70322,70 @@ Composes planner gates with per-call budget enforcement.
   - Abandon a reservation without charging (plan never executed).
 - `review(plan: PlanProposal)`
   - Expose the critic review (same as ``gate_plan``).
+### `planner_executor_seam_probes`
+
+Source: `components/northstar-agent-runtime/planner_executor_seam_probes.py`
+
+Planner/executor seam probes: governance is inserted at the split.
+
+#### `probe_names()`
+
+All probe names in the corpus.
+
+#### `attack_names()`
+
+Names of the attack probes (expected deny).
+
+#### `benign_names()`
+
+Names of the benign control probes (expected allow).
+
+#### `probe_by_name(name: str)`
+
+Look up one probe by name; raises KeyError fail-closed.
+
+#### `probe_invokes_deny_side(probe: Mapping[str, Any])`
+
+True if the probe's gate_interaction names an active seam-side mechanism.
+
+#### `PlannedAction`
+
+One action the plan proposed, digest-only identity.
+
+#### `SeamHandoff`
+
+One planner -> executor handoff, pinned at the seam.
+
+- `verify()`
+  - Recompute the digest; a tampered handoff fails closed.
+- `widens_ceiling()`
+  - True if the child ceiling exceeds the parent ceiling.
+#### `SeamFinding`
+
+One integrity finding from a seam sweep; never a verdict.
+
+#### `DispatchAuthorization`
+
+One admitted dispatch under an admitted handoff.
+
+- `verify()`
+#### `SeamGate`
+
+The admission point at the planner/executor split.
+
+- `admit_handoff(handoff: SeamHandoff)`
+  - Admit one handoff; fail closed on any seam violation.
+- `current(proposal_id: str)`
+  - The currently admitted handoff for a proposal, if any.
+- `authorize_dispatch(*, proposal_id: str, revision: int, tool: str, arguments_digest: str, executor_id: str, plan_actions: Sequence[PlannedAction])`
+  - Authorize one dispatch under the admitted handoff.
+- `admitted_count()`
+#### `verify_seam_integrity(handoffs: Sequence[SeamHandoff])`
+
+Sweep a handoff list for seam violations. Never raises.
+
+#### `main()`
+
 ### `planner_gates`
 
 Source: `components/northstar-agent-runtime/planner_gates.py`
@@ -62083,6 +71384,18 @@ A snapshot-and-compare verifier bound to one workspace.
 
 The audit shape: a pass/fail roll-up with the structural split made visible.
 
+### `pow_mock`
+
+Source: `components/northstar-agent-runtime/pow_mock.py`
+
+Proof-of-work mock (D-IN-026), Simulated.
+
+#### `check_pow(data: str, nonce: str, difficulty: int=2)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
 ### `power_seeking`
 
 Source: `components/northstar-agent-runtime/power_seeking.py`
@@ -62277,6 +71590,66 @@ Build an ``audit.ndjson/1``-shaped record for this module.
 
 #### `main()`
 
+### `pre_completion_signal_probes`
+
+Source: `components/northstar-agent-runtime/pre_completion_signal_probes.py`
+
+Pre-completion-signal probe corpus + uncertainty-signal instrumentation gates.
+
+#### `probe_names()`
+
+All probe names in the corpus.
+
+#### `attack_names()`
+
+Names of the attack probes (expected deny).
+
+#### `benign_names()`
+
+Names of the benign control probes (expected allow).
+
+#### `probe_by_name(name: str)`
+
+Look up one probe by name; raises KeyError fail-closed.
+
+#### `probe_invokes_deny_side(probe: Mapping[str, Any])`
+
+True if the probe's gate_interaction names an active deny-side mechanism.
+
+#### `SignalReading`
+
+One pinned pre-completion uncertainty reading.
+
+- `verify()`
+  - Recompute the digest; constant-time compare.
+- `well_formed()`
+  - Structural checks before any semantic use.
+- `bound_to(call_id: str, arguments_digest: str)`
+  - Whether this reading is pinned to the given action.
+- `trips(threshold: float)`
+  - Whether the reading trips the hold threshold.
+- `as_dict()`
+#### `SignalPolicy`
+
+Thresholds and instrumentation for the signal channel.
+
+#### `SignalEvaluation`
+
+The pinned outcome of evaluating one action's signal channel.
+
+- `verify()`
+#### `evaluate(*, policy: SignalPolicy, call_id: str, arguments_digest: str, action_class: str, dispatch_sequence: int, readings: Sequence[SignalReading])`
+
+Evaluate one action's pre-completion signal channel.
+
+#### `requires_abstain_path(evaluation: SignalEvaluation)`
+
+Whether the signal evaluation must take the abstain human path.
+
+#### `main()`
+
+Corpus summary for the docbuild harness.
+
 ### `preference_learning`
 
 Source: `components/northstar-agent-runtime/preference_learning.py`
@@ -62470,6 +71843,556 @@ Deterministic priority-queue bookkeeping ledger.
 
 Self-check: push, peek, pop in priority order, fail-closed edges.
 
+### `priv_esc_01`
+
+Source: `components/northstar-agent-runtime/priv_esc_01.py`
+
+Priv-esc probe 01: env-exfil, Simulated.
+
+#### `PrivEscError`
+
+Fail-closed: bad inputs raise.
+
+#### `detect(text: str)`
+
+Detect the technique in text. Returns (found, reason).
+
+#### `scan_args(tool_name: str, args: Dict[str, Any])`
+
+Scan tool args. Returns (blocked, reason).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `priv_esc_02`
+
+Source: `components/northstar-agent-runtime/priv_esc_02.py`
+
+Priv-esc probe 02: path-traversal, Simulated.
+
+#### `PrivEscError`
+
+Fail-closed: bad inputs raise.
+
+#### `detect(text: str)`
+
+Detect the technique in text. Returns (found, reason).
+
+#### `scan_args(tool_name: str, args: Dict[str, Any])`
+
+Scan tool args. Returns (blocked, reason).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `priv_esc_03`
+
+Source: `components/northstar-agent-runtime/priv_esc_03.py`
+
+Priv-esc probe 03: symlink-attack, Simulated.
+
+#### `PrivEscError`
+
+Fail-closed: bad inputs raise.
+
+#### `is_symlink(path: str)`
+
+Safe read-only check: True if path is a symlink.
+
+#### `detect(text: str)`
+
+Detect the technique in text. Returns (found, reason).
+
+#### `scan_args(tool_name: str, args: Dict[str, Any])`
+
+Scan tool args. Returns (blocked, reason).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `priv_esc_04`
+
+Source: `components/northstar-agent-runtime/priv_esc_04.py`
+
+Priv-esc probe 04: toctou-race, Simulated.
+
+#### `PrivEscError`
+
+Fail-closed: bad inputs raise.
+
+#### `MockCheckedFile`
+
+Mock TOCTOU: simulates check-then-use with an attacker swap in between.
+
+- `attacker_swap(new_sig: str)`
+  - Mock attacker changes the file between check and use.
+- `check()`
+  - Record the file identity at check time.
+- `use()`
+  - Use the file; detect whether it changed since check.
+#### `detect(text: str)`
+
+Detect the technique in text. Returns (found, reason).
+
+#### `scan_args(tool_name: str, args: Dict[str, Any])`
+
+Scan tool args. Returns (blocked, reason).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `priv_esc_05`
+
+Source: `components/northstar-agent-runtime/priv_esc_05.py`
+
+Priv-esc probe 05: command-substitution, Simulated.
+
+#### `PrivEscError`
+
+Fail-closed: bad inputs raise.
+
+#### `detect(text: str)`
+
+Detect the technique in text. Returns (found, reason).
+
+#### `scan_args(tool_name: str, args: Dict[str, Any])`
+
+Scan tool args. Returns (blocked, reason).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `priv_esc_06`
+
+Source: `components/northstar-agent-runtime/priv_esc_06.py`
+
+Priv-esc probe 06: shell-metachar, Simulated.
+
+#### `PrivEscError`
+
+Fail-closed: bad inputs raise.
+
+#### `detect(text: str)`
+
+Detect the technique in text. Returns (found, reason).
+
+#### `scan_args(tool_name: str, args: Dict[str, Any])`
+
+Scan tool args. Returns (blocked, reason).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `priv_esc_07`
+
+Source: `components/northstar-agent-runtime/priv_esc_07.py`
+
+Priv-esc probe 07: ld-preload, Simulated.
+
+#### `PrivEscError`
+
+Fail-closed: bad inputs raise.
+
+#### `detect(text: str)`
+
+Detect the technique in text. Returns (found, reason).
+
+#### `scan_args(tool_name: str, args: Dict[str, Any])`
+
+Scan tool args. Returns (blocked, reason).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `priv_esc_08`
+
+Source: `components/northstar-agent-runtime/priv_esc_08.py`
+
+Priv-esc probe 08: suid-binary, Simulated.
+
+#### `PrivEscError`
+
+Fail-closed: bad inputs raise.
+
+#### `has_suid_bit(path: str)`
+
+Safe read-only check: True if the SUID bit is set on path.
+
+#### `detect(text: str)`
+
+Detect the technique in text. Returns (found, reason).
+
+#### `scan_args(tool_name: str, args: Dict[str, Any])`
+
+Scan tool args. Returns (blocked, reason).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `priv_esc_09`
+
+Source: `components/northstar-agent-runtime/priv_esc_09.py`
+
+Priv-esc probe 09: capabilities-escalation, Simulated.
+
+#### `PrivEscError`
+
+Fail-closed: bad inputs raise.
+
+#### `detect(text: str)`
+
+Detect the technique in text. Returns (found, reason).
+
+#### `scan_args(tool_name: str, args: Dict[str, Any])`
+
+Scan tool args. Returns (blocked, reason).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `priv_esc_10`
+
+Source: `components/northstar-agent-runtime/priv_esc_10.py`
+
+Priv-esc probe 10: namespace-escape, Simulated.
+
+#### `PrivEscError`
+
+Fail-closed: bad inputs raise.
+
+#### `detect(text: str)`
+
+Detect the technique in text. Returns (found, reason).
+
+#### `scan_args(tool_name: str, args: Dict[str, Any])`
+
+Scan tool args. Returns (blocked, reason).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `priv_esc_11`
+
+Source: `components/northstar-agent-runtime/priv_esc_11.py`
+
+Priv-esc probe 11: cgroup-escape, Simulated.
+
+#### `PrivEscError`
+
+Fail-closed: bad inputs raise.
+
+#### `detect(text: str)`
+
+Detect the technique in text. Returns (found, reason).
+
+#### `scan_args(tool_name: str, args: Dict[str, Any])`
+
+Scan tool args. Returns (blocked, reason).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `priv_esc_12`
+
+Source: `components/northstar-agent-runtime/priv_esc_12.py`
+
+Priv-esc probe 12: kernel-module-load, Simulated.
+
+#### `PrivEscError`
+
+Fail-closed: bad inputs raise.
+
+#### `detect(text: str)`
+
+Detect the technique in text. Returns (found, reason).
+
+#### `scan_args(tool_name: str, args: Dict[str, Any])`
+
+Scan tool args. Returns (blocked, reason).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `priv_esc_13`
+
+Source: `components/northstar-agent-runtime/priv_esc_13.py`
+
+Priv-esc probe 13: proc-self-manipulation, Simulated.
+
+#### `PrivEscError`
+
+Fail-closed: bad inputs raise.
+
+#### `detect(text: str)`
+
+Detect the technique in text. Returns (found, reason).
+
+#### `scan_args(tool_name: str, args: Dict[str, Any])`
+
+Scan tool args. Returns (blocked, reason).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `priv_esc_14`
+
+Source: `components/northstar-agent-runtime/priv_esc_14.py`
+
+Priv-esc probe 14: ptrace, Simulated.
+
+#### `PrivEscError`
+
+Fail-closed: bad inputs raise.
+
+#### `tracer_pid()`
+
+Safe read-only: TracerPid from /proc/self/status (0 = not traced).
+
+#### `detect(text: str)`
+
+Detect the technique in text. Returns (found, reason).
+
+#### `scan_args(tool_name: str, args: Dict[str, Any])`
+
+Scan tool args. Returns (blocked, reason).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `priv_esc_15`
+
+Source: `components/northstar-agent-runtime/priv_esc_15.py`
+
+Priv-esc probe 15: seccomp-bypass, Simulated.
+
+#### `PrivEscError`
+
+Fail-closed: bad inputs raise.
+
+#### `detect(text: str)`
+
+Detect the technique in text. Returns (found, reason).
+
+#### `scan_args(tool_name: str, args: Dict[str, Any])`
+
+Scan tool args. Returns (blocked, reason).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `priv_esc_16`
+
+Source: `components/northstar-agent-runtime/priv_esc_16.py`
+
+Priv-esc probe 16: apparmor-bypass, Simulated.
+
+#### `PrivEscError`
+
+Fail-closed: bad inputs raise.
+
+#### `detect(text: str)`
+
+Detect the technique in text. Returns (found, reason).
+
+#### `scan_args(tool_name: str, args: Dict[str, Any])`
+
+Scan tool args. Returns (blocked, reason).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `priv_esc_17`
+
+Source: `components/northstar-agent-runtime/priv_esc_17.py`
+
+Priv-esc probe 17: selinux-bypass, Simulated.
+
+#### `PrivEscError`
+
+Fail-closed: bad inputs raise.
+
+#### `detect(text: str)`
+
+Detect the technique in text. Returns (found, reason).
+
+#### `scan_args(tool_name: str, args: Dict[str, Any])`
+
+Scan tool args. Returns (blocked, reason).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `priv_esc_18`
+
+Source: `components/northstar-agent-runtime/priv_esc_18.py`
+
+Priv-esc probe 18: container-breakout, Simulated.
+
+#### `PrivEscError`
+
+Fail-closed: bad inputs raise.
+
+#### `detect(text: str)`
+
+Detect the technique in text. Returns (found, reason).
+
+#### `scan_args(tool_name: str, args: Dict[str, Any])`
+
+Scan tool args. Returns (blocked, reason).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `priv_esc_19`
+
+Source: `components/northstar-agent-runtime/priv_esc_19.py`
+
+Priv-esc probe 19: vm-escape, Simulated.
+
+#### `PrivEscError`
+
+Fail-closed: bad inputs raise.
+
+#### `mock_vm_boundary_check(guest_action: str)`
+
+Mock VM boundary: flags hypercall-like escape attempts.
+
+#### `detect(text: str)`
+
+Detect the technique in text. Returns (found, reason).
+
+#### `scan_args(tool_name: str, args: Dict[str, Any])`
+
+Scan tool args. Returns (blocked, reason).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `priv_esc_20`
+
+Source: `components/northstar-agent-runtime/priv_esc_20.py`
+
+Priv-esc probe 20: hypervisor-attack, Simulated.
+
+#### `PrivEscError`
+
+Fail-closed: bad inputs raise.
+
+#### `mock_hypervisor_check(guest_action: str)`
+
+Mock hypervisor: flags hypervisor-attack patterns.
+
+#### `detect(text: str)`
+
+Detect the technique in text. Returns (found, reason).
+
+#### `scan_args(tool_name: str, args: Dict[str, Any])`
+
+Scan tool args. Returns (blocked, reason).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
 ### `private_inference`
 
 Source: `components/northstar-agent-runtime/private_inference.py`
@@ -62585,6 +72508,72 @@ Private-inference query-policy ledger.
 #### `main()`
 
 Self-check entry point.
+
+### `privilege_at_recall_probes`
+
+Source: `components/northstar-agent-runtime/privilege_at_recall_probes.py`
+
+Privilege-at-recall probe corpus + identity-filter-first recall harness.
+
+#### `MemoryRecord`
+
+One recall-shaped memory record, digest-pinned.
+
+#### `build_record(*, record_id: str, payload_digest: str, writer: str, tenant: str, owner_agent: str, trust: str, scope: tuple[str, ...]=(), max_privilege: int=0, grant: tuple[str, ...]=(), authority_version: int=1, seq: int=0, prev_digest: str='sha256:' + '00' * 32)`
+
+Build a digest-pinned memory record.
+
+#### `verify_record(record: MemoryRecord)`
+
+Constant-time digest re-verification of a record.
+
+#### `RecallRequest`
+
+A recall-shaped authorization request, digest-pinned.
+
+#### `build_request(*, caller_agent: str, caller_tenant: str, caller_privilege: int, purpose: str, requires_trusted: bool=True, accepted_authority: int=1)`
+
+Build a digest-pinned recall request.
+
+#### `verify_request(request: RecallRequest)`
+
+Constant-time digest re-verification of a recall request.
+
+#### `authorize_recall(record: MemoryRecord, request: RecallRequest)`
+
+Authorize one record for one recall request.
+
+#### `filter_candidates(records: tuple[MemoryRecord, ...], request: RecallRequest)`
+
+Identity-filter-first recall: drop recall-unauthorized records before any ranking or exposure.
+
+#### `verify_filter_first(filter_before_retrieval: bool, witness_digest: str | None=None)`
+
+Attest that identity filtering ran before retrieval.
+
+#### `probe_names()`
+
+All privilege-at-recall attack probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Probes in one family (attacks plus benign).
+
+#### `probe_by_name(name: str)`
+
+Look up any privilege-at-recall probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+probe name -> expected gate outcome ('deny' or 'allow').
+
+#### `main()`
+
+Print the corpus inventory.
 
 ### `probe_defense_combo`
 
@@ -64674,6 +74663,18 @@ Deterministic Pulsar-shaped topic/subscription/cursor ledger.
 
 Self-check: topic, publish, subscribe, ack, cursor.
 
+### `punct_norm`
+
+Source: `components/northstar-agent-runtime/punct_norm.py`
+
+Punctuation normalization (D-IN-020), Simulated.
+
+#### `normalize(t: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
 ### `push_service`
 
 Source: `components/northstar-agent-runtime/push_service.py`
@@ -64884,6 +74885,20 @@ Cost-based query planning as a deterministic state machine.
 - `stats(seq: int)`
   - Pure read view of registered table cardinalities.
 - `audit_log()`
+#### `main()`
+
+### `quota_enforce`
+
+Source: `components/northstar-agent-runtime/quota_enforce.py`
+
+Quota enforcement: daily limits (D-IN-024), Simulated.
+
+#### `QuotaManager`
+
+- `check(key: str, cost: int=1)`
+- `consume(key: str, cost: int=1)`
+#### `stdlib_only()`
+
 #### `main()`
 
 ### `raft_interface`
@@ -65254,6 +75269,18 @@ Deterministic retrieval-augmented generation pipeline ledger.
 #### `main()`
 
 Self-check smoke run.
+
+### `range_check`
+
+Source: `components/northstar-agent-runtime/range_check.py`
+
+Range checks (D-IN-030), Simulated.
+
+#### `check_range(v: float, min_v: float, max_v: float)`
+
+#### `stdlib_only()`
+
+#### `main()`
 
 ### `rate_adapter`
 
@@ -66302,6 +76329,18 @@ Self-critique bookkeeping ledger: submit, critique, revise, score.
 
 Self-check: submit, critique (clean), critique (issues), revise, score.
 
+### `refusal_detect`
+
+Source: `components/northstar-agent-runtime/refusal_detect.py`
+
+Refusal detection (D-OUT-017), Simulated.
+
+#### `is_refusal(text: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
 ### `refusal_monitor`
 
 Source: `components/northstar-agent-runtime/refusal_monitor.py`
@@ -66347,6 +76386,96 @@ Tracks refusal events and measures whether refusals hold.
   - Fraction of *all* tracked events that were refused yet completed.
 - `efficacy_report(threshold: float=EFFICACY_ALERT_THRESHOLD)`
   - The verdict: efficacy plus the fail-closed alert decision.
+#### `main()`
+
+### `refusal_pattern_probes`
+
+Source: `components/northstar-agent-runtime/refusal_pattern_probes.py`
+
+Refusal-pattern + reward-hacking-attempt probes (process evaluation shapes).
+
+#### `RefusalPatternError`
+
+Raised for malformed refusal/attempt/verdict records.
+
+#### `RefusalRecord`
+
+A digest-pinned refusal event.
+
+- `pinned()`
+  - Return a copy with the digest pinned (fail-closed inputs).
+- `verify()`
+  - Constant-time digest verification. Never raises.
+#### `gate_refusal(record: 'RefusalRecord | None', expected_layers: tuple[str, ...]=EXPECTED_REFUSAL_LAYERS)`
+
+Gate a claimed refusal.
+
+#### `HackAttempt`
+
+A digest-pinned reward-hacking attempt record.
+
+- `pinned()`
+- `verify()`
+  - Constant-time digest verification. Never raises.
+#### `count_attempts(records: tuple['HackAttempt', ...])`
+
+Per-kind attempt counts. Never a composite score.
+
+#### `gate_attempts(records: tuple['HackAttempt', ...], max_allowed: int=0)`
+
+Gate a run's attempt records.
+
+#### `TrajectoryRecord`
+
+A digest-pinned trajectory outcome.
+
+- `pinned()`
+- `verify()`
+#### `VerdictBinding`
+
+A verdict bound to a pinned trajectory.
+
+- `pinned()`
+- `verify()`
+#### `gate_verdict(binding: VerdictBinding, trajectory: 'TrajectoryRecord | None')`
+
+Gate a verdict against the held trajectory.
+
+#### `attack_probe_names()`
+
+All refusal-pattern attack probe names.
+
+#### `benign_probe_names()`
+
+All benign control names.
+
+#### `probes_in_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `main()`
+
+Print the corpus summary: attack/benign counts and family listing.
+
+### `regex_block`
+
+Source: `components/northstar-agent-runtime/regex_block.py`
+
+Regex blocklist engine (D-IN-001), Simulated.
+
+#### `Blocklist`
+
+- `check(text: str)`
+#### `stdlib_only()`
+
 #### `main()`
 
 ### `regulatory`
@@ -66912,6 +77041,150 @@ Resource-accumulation detection decision ledger, Simulated.
 #### `main()`
 
 Self-check: exercise the ledger end to end.
+
+### `resource_defense`
+
+Source: `components/northstar-agent-runtime/resource_defense.py`
+
+Resource exhaustion defense: recursion/input bombs, Simulated.
+
+#### `ResourceDefenseError`
+
+Fail-closed.
+
+#### `ResourceLimits`
+
+Resource limits for a tool call.
+
+#### `check_nesting(text: str, max_depth: int)`
+
+Check for excessive nesting depth.
+
+#### `check_repetition(text: str, max_repeated: int)`
+
+Check for excessive repeated function calls.
+
+#### `check_size(payload: Dict[str, Any], max_bytes: int)`
+
+Check payload size.
+
+#### `check_resources(tool_name: str, args: Dict[str, Any], limits: ResourceLimits=None)`
+
+Check all resource limits. Returns (ok, reason).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `resource_tagging`
+
+Source: `components/northstar-agent-runtime/resource_tagging.py`
+
+Resource tagging — AWS Tag Editor-shaped tag bookkeeping (thirty-fourth batch).
+
+#### `ResourceTaggingError`
+
+Base error for the resource tagging manager.
+
+#### `BadResourceError`
+
+Malformed resource id or resource type.
+
+#### `DuplicateResourceError`
+
+This resource id is already registered.
+
+#### `UnknownResourceError`
+
+No resource with this id is registered.
+
+#### `BadTagError`
+
+Malformed tag key or value.
+
+#### `BadPolicyError`
+
+Malformed tag policy.
+
+#### `DuplicatePolicyError`
+
+This policy id is already defined.
+
+#### `UnknownPolicyError`
+
+No policy with this id is defined.
+
+#### `SeqOrderError`
+
+Mutation seq is not strictly increasing.
+
+#### `ResourceRecord`
+
+One registered resource (frozen).
+
+- `verify()`
+  - Re-derive the digest pin; True iff the record is intact.
+#### `TagApplication`
+
+One tag upsert applied to a resource (frozen).
+
+- `verify()`
+  - Re-derive the digest pin; True iff the record is intact.
+#### `UntagRecord`
+
+One tag-key removal from a resource (frozen).
+
+- `verify()`
+  - Re-derive the digest pin; True iff the record is intact.
+#### `PolicyRecord`
+
+One tag policy (frozen).
+
+- `verify()`
+  - Re-derive the digest pin; True iff the record is intact.
+#### `PolicyEvaluation`
+
+One policy evaluation against a resource (frozen).
+
+- `verify()`
+  - Re-derive the digest pin; True iff the record is intact.
+#### `resource_tagging_audit_event(kind: str, seq: int, **detail: Any)`
+
+Shape an ``audit.ndjson/1`` record for resource tagging.
+
+#### `ResourceTagging`
+
+Deterministic AWS-Tag-Editor-shaped tag bookkeeping.
+
+- `register(resource_id: str, resource_type: str, seq: int)`
+  - Register a resource with a namespaced type.
+- `tag(resource_id: str, tags: Mapping[str, str], seq: int)`
+  - Upsert ``(key, value)`` pairs onto a resource (latest wins).
+- `untag(resource_id: str, keys: Sequence[str], seq: int)`
+  - Remove tag keys from a resource.
+- `policy(policy_id: str, required_tags: Sequence[str], seq: int, allowed_values: Mapping[str, Sequence[str]] | None=None)`
+  - Define a tag policy: required keys + per-key allowed values.
+- `evaluate(policy_id: str, resource_id: str, seq: int)`
+  - Evaluate a policy against a resource's current tags.
+- `tags(resource_id: str)`
+  - Current tags for a resource (pure read).
+- `resource(resource_id: str)`
+  - Frozen record for a registered resource.
+- `policy_record(policy_id: str)`
+  - Frozen record for a defined policy.
+- `resource_ids()`
+  - Registered resource ids, sorted.
+- `policy_ids()`
+  - Defined policy ids, sorted.
+- `audit_log()`
+  - Booked audit events, oldest first (ids + pins only).
+#### `main()`
+
+Self-check: register, tag, untag, policy, evaluate, pins.
 
 ### `responsible_ai`
 
@@ -68978,6 +79251,85 @@ Append-only ledger of page sessions and web-vital samples.
   - Append-only audit events in seq order.
 #### `main()`
 
+### `run_assert_eval_probes`
+
+Source: `components/northstar-agent-runtime/run_assert_eval_probes.py`
+
+Run-assert-eval probes: the pre-deployment loop must actually close.
+
+#### `probe_names()`
+
+All probe names in corpus order.
+
+#### `attack_names()`
+
+Names of attack probes (expected: deny).
+
+#### `benign_names()`
+
+Names of benign control probes (expected: allow).
+
+#### `probe_by_name(name: str)`
+
+Return the probe dict for ``name``; raises KeyError if unknown.
+
+#### `probe_invokes_deny_side(probe: Mapping[str, Any])`
+
+True if the probe's gate_interaction names a loop-side mechanism.
+
+#### `EvalSet`
+
+The fixed evaluation set, digest-pinned.
+
+- `verify()`
+  - Recompute the digest; a tampered set record fails closed.
+#### `AxisVerdict`
+
+One axis verdict inside a run record.
+
+#### `RunRecord`
+
+One verification run over the fixed set.
+
+- `verify()`
+  - Recompute the digest; a tampered run fails closed.
+- `all_pass()`
+  - True only when every axis passed -- a conjunction, never a score.
+#### `PolicyAssertion`
+
+One assertion derived from a recorded run.
+
+- `verify()`
+  - Recompute the digest; a tampered assertion fails closed.
+#### `DeployAuthorization`
+
+One authorized deployment, bound to the closing re-eval.
+
+- `verify()`
+#### `LoopFinding`
+
+One integrity finding from a loop sweep; never a verdict.
+
+#### `RunAssertGate`
+
+The run -> assert -> re-eval loop ledger.
+
+- `register_set(eval_set: EvalSet)`
+  - Pin the fixed set. A drifted re-registration fails closed.
+- `record_run(run: RunRecord)`
+  - Record one run; fail closed on any loop violation.
+- `record_assertion(assertion: PolicyAssertion)`
+  - Record one assertion; fail closed on any provenance violation.
+- `request_deploy(policy_digest: str)`
+  - Authorize deployment of one policy digest.
+- `run_count()`
+- `assertion_count()`
+#### `verify_loop_integrity(eval_set: EvalSet, runs: Sequence[RunRecord], assertions: Sequence[PolicyAssertion])`
+
+Sweep a set, runs, and assertions for loop violations.
+
+#### `main()`
+
 ### `run_setup`
 
 Source: `components/northstar-agent-runtime/run_setup.py`
@@ -69061,6 +79413,1016 @@ Where the run records itself, what it inherits from a parent, and the config it 
 #### `resolve_session(args: argparse.Namespace, ceilings: Ceilings)`
 
 The session store, and for --resume-from the parent's checkpoint and spend.
+
+### `runbook_automation`
+
+Source: `components/northstar-agent-runtime/runbook_automation.py`
+
+Runbook automation — simulated runbook execution/rollback bookkeeping.
+
+#### `RunbookAutomationError`
+
+Base error for runbook automation.
+
+#### `BadRunbookError`
+
+Malformed runbook definition (bad id, name, or steps).
+
+#### `DuplicateRunbookError`
+
+A runbook with this id is already defined.
+
+#### `UnknownRunbookError`
+
+No runbook with this id is defined.
+
+#### `BadStepError`
+
+Malformed step declaration inside a runbook.
+
+#### `UnknownExecutionError`
+
+No execution with this id exists.
+
+#### `BadRollbackError`
+
+Malformed rollback request (e.g. rolling back a rollback).
+
+#### `BadScheduleError`
+
+Malformed schedule (bad runbook, cron expression, or id).
+
+#### `DuplicateScheduleError`
+
+A schedule with this id already exists (or cron already booked).
+
+#### `UnknownScheduleError`
+
+No schedule with this id exists.
+
+#### `SeqOrderError`
+
+Seq did not strictly increase.
+
+#### `StepDeclaration`
+
+One pinned step inside a runbook definition.
+
+- `verify(seed: str='')`
+#### `RunbookRecord`
+
+A pinned runbook definition (ordered steps).
+
+- `verify(seed: str='')`
+#### `StepResult`
+
+One booked step outcome (data, never an action).
+
+- `verify(seed: str='')`
+#### `ExecutionRecord`
+
+One booked run (kind ``run``) or compensating run (``rollback``).
+
+- `verify(seed: str='')`
+#### `ScheduleRecord`
+
+A pinned cron-shaped schedule declaration (no timers fire).
+
+- `verify(seed: str='')`
+#### `runbook_automation_audit_event(kind: str, seq: int, **detail: Any)`
+
+Shape an ``audit.ndjson/1`` record for runbook automation.
+
+#### `RunbookAutomation`
+
+Deterministic runbook-execution bookkeeping.
+
+- `define(runbook_id: str, name: str, steps: Any, seq: Any)`
+  - Book a runbook definition (ordered, pinned steps).
+- `execute(runbook_id: str, seq: Any, executor: Callable[[StepDeclaration, int], bool] | None=None)`
+  - Book one run of a runbook (outcomes via host executor).
+- `rollback(execution_id: str, seq: Any, executor: Callable[[StepDeclaration, int], bool] | None=None)`
+  - Book a compensating run over the reverse of completed steps.
+- `schedule(runbook_id: str, cron: str, seq: Any)`
+  - Book a cron-shaped schedule declaration (no timers fire).
+- `unschedule(schedule_id: str, seq: Any)`
+  - Retire a schedule (id never recycled).
+- `runbook(runbook_id: str)`
+- `runbook_ids()`
+- `execution(execution_id: str)`
+- `executions_for(runbook_id: str)`
+- `rollback_of(rollback_execution_id: str)`
+  - Return the original execution a rollback compensated.
+- `schedule_record(schedule_id: str)`
+- `schedule_ids()`
+- `active_schedule_ids()`
+- `stats()`
+- `audit_log()`
+#### `main()`
+
+Deterministic smoke test; prints one line on success.
+
+### `runtime_defense_01`
+
+Source: `components/northstar-agent-runtime/runtime_defense_01.py`
+
+Runtime defense 01: seccomp profiles (syscall allowlist generator), Simulated.
+
+#### `SeccompError`
+
+Fail-closed: bad profiles raise.
+
+#### `SeccompProfile`
+
+A generated seccomp allowlist profile.
+
+- `to_json()`
+  - Render as JSON (OCI seccomp profile shape, simplified).
+#### `generate_profile(level: str)`
+
+Generate a seccomp profile at the given strictness level.
+
+#### `is_allowed(profile: SeccompProfile, syscall: str)`
+
+Check if a syscall is in the allowlist (policy check only).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `runtime_defense_02`
+
+Source: `components/northstar-agent-runtime/runtime_defense_02.py`
+
+Runtime defense 02: AppArmor profiles (policy generator), Simulated.
+
+#### `ApparmorError`
+
+Fail-closed: bad profiles raise.
+
+#### `ApparmorRule`
+
+One AppArmor rule line.
+
+- `render()`
+#### `ApparmorProfile`
+
+A generated AppArmor profile.
+
+- `render()`
+#### `generate_profile(name: str, level: str)`
+
+Generate an AppArmor profile.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `runtime_defense_03`
+
+Source: `components/northstar-agent-runtime/runtime_defense_03.py`
+
+Runtime defense 03: SELinux policies (mock policy), Simulated.
+
+#### `SelinuxError`
+
+Fail-closed: bad policy raises.
+
+#### `SelinuxRule`
+
+One allow rule: subject type -> object type : class perms.
+
+- `render()`
+#### `SelinuxPolicy`
+
+Mock SELinux policy module.
+
+- `render()`
+- `check(subject: str, obj: str, obj_class: str, perm: str)`
+  - Mock access check: True if an allow rule covers it and no neverallow matches. Fail-closed on unknown.
+#### `generate_policy(name: str)`
+
+Generate the agent sandbox mock policy.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `runtime_defense_04`
+
+Source: `components/northstar-agent-runtime/runtime_defense_04.py`
+
+Runtime defense 04: namespace isolation (config), Simulated.
+
+#### `NamespaceError`
+
+Fail-closed: bad config raises.
+
+#### `NamespaceConfig`
+
+Validated namespace isolation config.
+
+- `clone_flags()`
+  - Clone flags for the isolated namespaces.
+- `unshare_args()`
+  - unshare(1) CLI args, e.g. ['--pid', '--net', '--mount', ...].
+#### `build_config(isolated=None, hostname: str='agent-sandbox')`
+
+Build and validate a namespace config.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `runtime_defense_05`
+
+Source: `components/northstar-agent-runtime/runtime_defense_05.py`
+
+Runtime defense 05: cgroup limits (config), Simulated.
+
+#### `CgroupError`
+
+Fail-closed: bad limits raise.
+
+#### `CgroupLimits`
+
+Validated cgroup v2 limits.
+
+- `render()`
+  - Render as cgroupfs file -> value mapping.
+- `memory_bytes()`
+  - Memory limit in bytes, None for 'max'.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `runtime_defense_06`
+
+Source: `components/northstar-agent-runtime/runtime_defense_06.py`
+
+Runtime defense 06: capability dropping (config), Simulated.
+
+#### `CapabilityError`
+
+Fail-closed: bad capability config raises.
+
+#### `CapabilityConfig`
+
+Validated capability config.
+
+- `capsh_args()`
+  - capsh(1) args, e.g. ['--drop=cap_sys_admin,...'].
+#### `build_config(keep=None)`
+
+Build capability config. Fail-closed on unknown or dangerous keeps.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `runtime_defense_07`
+
+Source: `components/northstar-agent-runtime/runtime_defense_07.py`
+
+Runtime defense 07: read-only filesystem (mount config), Simulated.
+
+#### `MountError`
+
+Fail-closed: bad mount config raises.
+
+#### `MountEntry`
+
+One mount entry.
+
+- `is_writable()`
+#### `MountConfig`
+
+Validated mount table.
+
+- `validate()`
+  - Fail-closed validation.
+- `writable_targets()`
+#### `build_config()`
+
+Default agent sandbox mount config.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `runtime_defense_08`
+
+Source: `components/northstar-agent-runtime/runtime_defense_08.py`
+
+Runtime defense 08: no-new-privileges flag, Simulated.
+
+#### `NoNewPrivsError`
+
+Fail-closed.
+
+#### `NoNewPrivsConfig`
+
+One-way no-new-privileges flag.
+
+- `enable()`
+  - Enable the flag. Can be called at setup.
+- `lock()`
+  - Lock the config: no further changes allowed (one-way).
+- `disable()`
+  - Always refused: the flag cannot be turned off.
+- `prctl_value()`
+  - Value for prctl(PR_SET_NO_NEW_PRIVS, ...).
+#### `build_config()`
+
+Default: enabled and locked.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `runtime_defense_09`
+
+Source: `components/northstar-agent-runtime/runtime_defense_09.py`
+
+Runtime defense 09: network policies (egress rules), Simulated.
+
+#### `NetPolicyError`
+
+Fail-closed: bad rules raise.
+
+#### `EgressRule`
+
+One egress rule. First match wins.
+
+- `matches(ip: str, port: int)`
+#### `NetworkPolicy`
+
+Ordered egress rules; default-deny.
+
+- `check(ip: str, port: int)`
+  - First-match. Returns (allowed, reason). No match -> deny.
+#### `default_policy()`
+
+Default: allow DNS + HTTPS to anywhere, deny the rest.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `runtime_defense_10`
+
+Source: `components/northstar-agent-runtime/runtime_defense_10.py`
+
+Runtime defense 10: egress filtering (domain allowlist), Simulated.
+
+#### `EgressFilterError`
+
+Fail-closed: bad allowlist raises.
+
+#### `normalize(domain: str)`
+
+Lowercase, strip trailing dot and whitespace.
+
+#### `validate_domain(domain: str)`
+
+Validate and normalize a domain entry. Wildcards allowed as '*.' prefix.
+
+#### `DomainAllowlist`
+
+Validated domain allowlist.
+
+- `matches(domain: str)`
+- `check(domain: str)`
+#### `build_allowlist(domains: List[str])`
+
+Build and validate an allowlist. Empty -> fail-closed.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `runtime_defense_11`
+
+Source: `components/northstar-agent-runtime/runtime_defense_11.py`
+
+Runtime defense 11: DNS filtering (blocklist), Simulated.
+
+#### `DnsFilterError`
+
+Fail-closed: bad filter config raises.
+
+#### `looks_like_dga(domain: str)`
+
+Heuristic DGA detection on the leftmost label.
+
+#### `DnsFilter`
+
+DNS blocklist filter.
+
+- `check(domain: str)`
+  - Returns (allowed, reason). Blocked -> (False, reason).
+#### `build_filter(blocklist: List[str], block_dga: bool=True)`
+
+Build filter. Blocklist may be empty (heuristics still apply).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `runtime_defense_12`
+
+Source: `components/northstar-agent-runtime/runtime_defense_12.py`
+
+Runtime defense 12: proxy enforcement (config), Simulated.
+
+#### `ProxyError`
+
+Fail-closed: bad proxy config raises.
+
+#### `ProxyConfig`
+
+Enforced proxy configuration.
+
+- `env()`
+  - Environment for proxied processes.
+- `check_connect(host: str, port: int)`
+  - Check a CONNECT request against the allowlist.
+#### `build_config(proxy_url: str, connect_allowlist=())`
+
+Build proxy config. Empty allowlist -> all CONNECT denied.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `runtime_defense_13`
+
+Source: `components/northstar-agent-runtime/runtime_defense_13.py`
+
+Runtime defense 13: TLS interception (mock), Simulated.
+
+#### `TlsInterceptError`
+
+Fail-closed: bad config raises.
+
+#### `TlsInterceptConfig`
+
+TLS interception policy.
+
+- `should_intercept(host: str)`
+  - Decide whether to intercept a host.
+#### `build_config(ca_name: str, exclusions: List[str]=())`
+
+Build interception config.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `runtime_defense_14`
+
+Source: `components/northstar-agent-runtime/runtime_defense_14.py`
+
+Runtime defense 14: certificate pinning (SPKI hashes), Simulated.
+
+#### `PinningError`
+
+Fail-closed: bad pins raise.
+
+#### `PinStore`
+
+Host -> SPKI pin sets.
+
+- `verify(host: str, spki_b64: str)`
+  - Verify a presented SPKI hash. Fail-closed.
+#### `build_store(entries: Dict[str, List[str]])`
+
+Build pin store. Empty store -> fail-closed (deny everything).
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `runtime_defense_15`
+
+Source: `components/northstar-agent-runtime/runtime_defense_15.py`
+
+Runtime defense 15: mTLS (client cert config), Simulated.
+
+#### `MtlsError`
+
+Fail-closed: bad mTLS config raises.
+
+#### `MtlsConfig`
+
+mTLS client configuration (references, not secrets).
+
+- `may_connect(host: str)`
+  - Check host is in the allowed set (exact or wildcard).
+#### `build_config(client_cert_ref: str, server_ca_names: List[str], allowed_hosts: List[str])`
+
+Build mTLS config.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `runtime_defense_16`
+
+Source: `components/northstar-agent-runtime/runtime_defense_16.py`
+
+Runtime defense 16: Time limits (config), Simulated.
+
+#### `TimeLimitError`
+
+Fail-closed: bad limits raise.
+
+#### `TimeLimits`
+
+Time limits in seconds.
+
+#### `action_expired(elapsed: float, limits: TimeLimits)`
+
+True if the action exceeded its time limit.
+
+#### `task_expired(elapsed: float, limits: TimeLimits)`
+
+True if the task exceeded its time limit.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `runtime_defense_17`
+
+Source: `components/northstar-agent-runtime/runtime_defense_17.py`
+
+Runtime defense 17: Memory limits, Simulated.
+
+#### `MemoryLimitError`
+
+Fail-closed: bad limits raise.
+
+#### `MemoryLimits`
+
+Memory limits in megabytes.
+
+#### `current_rss_mb()`
+
+Current process RSS in MB, or None if unavailable.
+
+#### `memory_exceeded(limits: MemoryLimits)`
+
+True if RSS exceeds hard limit, False if within, None if unreadable.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `runtime_defense_18`
+
+Source: `components/northstar-agent-runtime/runtime_defense_18.py`
+
+Runtime defense 18: CPU limits, Simulated.
+
+#### `CpuLimitError`
+
+Fail-closed: bad limits raise.
+
+#### `CpuLimits`
+
+CPU time limits in seconds.
+
+#### `current_cpu_seconds()`
+
+Current process CPU time (user+system) in seconds.
+
+#### `cpu_exceeded(elapsed_cpu: float, limits: CpuLimits)`
+
+True if elapsed CPU exceeds the hard limit.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `runtime_defense_19`
+
+Source: `components/northstar-agent-runtime/runtime_defense_19.py`
+
+Runtime defense 19: Disk limits, Simulated.
+
+#### `DiskLimitError`
+
+Fail-closed: bad quotas raise.
+
+#### `DiskLimits`
+
+Disk write quotas in bytes.
+
+#### `WriteLedger`
+
+Tracks bytes written this task.
+
+- `record(nbytes: int, limits: DiskLimits)`
+  - Record a write; raise if it breaks the quota.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `runtime_defense_20`
+
+Source: `components/northstar-agent-runtime/runtime_defense_20.py`
+
+Runtime defense 20: Process limits, Simulated.
+
+#### `ProcessLimitError`
+
+Fail-closed: bad limits or over-budget spawns raise.
+
+#### `ProcessLimits`
+
+Process spawn limits.
+
+#### `SpawnLedger`
+
+Tracks spawned processes.
+
+- `spawn(limits: ProcessLimits, depth: int=1)`
+  - Record a spawn; raise if over budget or too deep.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `runtime_defense_21`
+
+Source: `components/northstar-agent-runtime/runtime_defense_21.py`
+
+Runtime defense 21: File descriptor limits, Simulated.
+
+#### `FdLimitError`
+
+Fail-closed: bad limits or over-budget opens raise.
+
+#### `FdLimits`
+
+File descriptor limits.
+
+#### `system_fd_limit()`
+
+Process rlimit (soft, hard) for NOFILE, or None if unavailable.
+
+#### `FdLedger`
+
+Tracks open FDs.
+
+- `open(limits: FdLimits)`
+  - Record an open; raise if over budget.
+- `close()`
+  - Record a close (never goes negative).
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `runtime_defense_22`
+
+Source: `components/northstar-agent-runtime/runtime_defense_22.py`
+
+Runtime defense 22: Syscall filtering (allowlist), Simulated.
+
+#### `SyscallFilterError`
+
+Fail-closed: bad policy raises.
+
+#### `SyscallPolicy`
+
+Syscall allowlist policy.
+
+#### `is_allowed(syscall: str, policy: SyscallPolicy)`
+
+True if the syscall may execute under the policy.
+
+#### `filter_calls(calls: List[str], policy: SyscallPolicy)`
+
+Return the denied subset of a call list.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `runtime_defense_23`
+
+Source: `components/northstar-agent-runtime/runtime_defense_23.py`
+
+Runtime defense 23: Audit logging (mock), Simulated.
+
+#### `AuditError`
+
+Fail-closed: bad records raise.
+
+#### `AuditRecord`
+
+One audit record.
+
+#### `AuditLog`
+
+Append-only mock audit log.
+
+- `append(event: str, details: Optional[Dict[str, Any]]=None)`
+  - Append an event; returns the sealed record.
+- `verify_chain()`
+  - Verify the hash chain. True if intact.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `runtime_defense_24`
+
+Source: `components/northstar-agent-runtime/runtime_defense_24.py`
+
+Runtime defense 24: Integrity monitoring (mock), Simulated.
+
+#### `IntegrityError`
+
+Fail-closed: bad registrations raise.
+
+#### `sha256_text(text: str)`
+
+Hash helper.
+
+#### `IntegrityMonitor`
+
+Registry of expected hashes.
+
+- `register(path: str, content_hash: str)`
+  - Register the expected hash for a path.
+- `check(path: str, current_hash: str)`
+  - Check current hash against expected. (ok, reason).
+- `drifted(current: Dict[str, str])`
+  - Return paths whose current hash differs from expected.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `runtime_defense_25`
+
+Source: `components/northstar-agent-runtime/runtime_defense_25.py`
+
+Runtime defense 25: Anomaly detection (mock), Simulated.
+
+#### `AnomalyError`
+
+Fail-closed: bad config raises.
+
+#### `AnomalyConfig`
+
+Detector config.
+
+#### `AnomalyDetector`
+
+Streaming z-score detector.
+
+- `seed(values: List[float])`
+  - Seed the baseline.
+- `check(value: float)`
+  - Check a sample. Returns (is_anomaly, z_score).
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `runtime_defense_26`
+
+Source: `components/northstar-agent-runtime/runtime_defense_26.py`
+
+Runtime defense 26: Behavioral analysis (mock), Simulated.
+
+#### `BehaviorError`
+
+Fail-closed: bad profiles raise.
+
+#### `BehaviorProfile`
+
+Allowed transitions between tools.
+
+#### `BehaviorAnalyzer`
+
+Checks tool sequences against a profile.
+
+- `observe(tool: str)`
+  - Observe a tool call. Returns (ok, reason).
+- `reset()`
+  - Start a new sequence.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `runtime_defense_27`
+
+Source: `components/northstar-agent-runtime/runtime_defense_27.py`
+
+Runtime defense 27: Kill switches, Simulated.
+
+#### `KillSwitchError`
+
+Fail-closed: unknown scopes raise.
+
+#### `KillSwitch`
+
+One named kill switch.
+
+- `trip(reason: str)`
+  - Trip the switch (one-way).
+#### `KillSwitchBoard`
+
+Registry of kill switches.
+
+- `arm(name: str, scope: str)`
+  - Arm a new switch.
+- `trip(name: str, reason: str)`
+  - Trip a switch by name.
+- `is_dead(scope: str)`
+  - True if any switch covering the scope (or global) is tripped.
+- `tripped_names()`
+  - Names of tripped switches.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `runtime_defense_28`
+
+Source: `components/northstar-agent-runtime/runtime_defense_28.py`
+
+Runtime defense 28: Circuit breakers, Simulated.
+
+#### `CircuitState`
+
+#### `CircuitBreakerError`
+
+Fail-closed: bad config raises.
+
+#### `CircuitBreaker`
+
+Per-dependency circuit breaker.
+
+- `allow(now: float | None=None)`
+  - True if a call may proceed.
+- `record_success()`
+  - Record success: close the circuit.
+- `record_failure(now: float | None=None)`
+  - Record failure: open after threshold.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `runtime_defense_29`
+
+Source: `components/northstar-agent-runtime/runtime_defense_29.py`
+
+Runtime defense 29: Bulkheads, Simulated.
+
+#### `BulkheadError`
+
+Fail-closed: bad config or exhausted partitions raise.
+
+#### `BulkheadConfig`
+
+Capacity per partition.
+
+#### `Bulkhead`
+
+Partitioned capacity accounting.
+
+- `acquire(partition: str)`
+  - Acquire one slot; raise if partition exhausted or unknown.
+- `release(partition: str)`
+  - Release one slot (never negative, never unknown).
+- `available(partition: str)`
+  - Free slots in a partition.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `runtime_defense_30`
+
+Source: `components/northstar-agent-runtime/runtime_defense_30.py`
+
+Runtime defense 30: Timeouts, Simulated.
+
+#### `TimeoutError`
+
+Fail-closed: bad timeouts raise.
+
+#### `Timeout`
+
+A timeout duration.
+
+#### `Deadline`
+
+A deadline anchored to the monotonic clock.
+
+- `deadline_at` (property)
+- `expired(now: Optional[float]=None)`
+  - True if the deadline has passed.
+- `remaining(now: Optional[float]=None)`
+  - Seconds left (0 if expired).
+- `check(now: Optional[float]=None)`
+  - Raise TimeoutError if expired (fail-closed enforcement hook).
+#### `timeout_scope`
+
+Context manager: raises TimeoutError if the block overruns.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
 
 ### `sae_interface`
 
@@ -69253,6 +80615,18 @@ AST self-check: the module imports stdlib names only.
 #### `main()`
 
 Self-check: exercise assess/verify/evaluate/retire and print status.
+
+### `safe_completion`
+
+Source: `components/northstar-agent-runtime/safe_completion.py`
+
+Safe completion: fallback responses (D-OUT-018), Simulated.
+
+#### `safe_complete(blocked: bool, reason: str='')`
+
+#### `stdlib_only()`
+
+#### `main()`
 
 ### `safety_case`
 
@@ -69922,6 +81296,306 @@ Strategic-underperformance detection ledger, Simulated.
 
 Self-check: exercise the ledger end to end.
 
+### `sandbox_bun`
+
+Source: `components/northstar-agent-runtime/sandbox_bun.py`
+
+Bun permission model config (config/policy layer only), Simulated.
+
+#### `BunError`
+
+Fail-closed: invalid configs raise.
+
+#### `BunConfig`
+
+Bun permission configuration.
+
+#### `generate_config(script: str, *, allow_fs_read: List[str]=None, **overrides: Any)`
+
+Generate a deny-by-default Bun config.
+
+#### `validate_config(cfg: BunConfig)`
+
+Validate. Raises BunError.
+
+#### `to_bun_args(cfg: BunConfig)`
+
+Render as bun run permission flags (not executed).
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sandbox_deno`
+
+Source: `components/northstar-agent-runtime/sandbox_deno.py`
+
+Deno permission flags config (config/policy layer only), Simulated.
+
+#### `DenoError`
+
+Fail-closed: invalid configs raise.
+
+#### `DenoConfig`
+
+Deno permission configuration.
+
+#### `generate_config(script: str, *, allow_read: List[str]=None, **overrides: Any)`
+
+Generate a deny-by-default Deno config.
+
+#### `validate_config(cfg: DenoConfig)`
+
+Validate. Raises DenoError.
+
+#### `to_deno_args(cfg: DenoConfig)`
+
+Render as deno run flags (not executed).
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sandbox_docker`
+
+Source: `components/northstar-agent-runtime/sandbox_docker.py`
+
+Docker sandbox config + seccomp profile (config/policy layer only), Simulated.
+
+#### `DockerError`
+
+Fail-closed: invalid configs raise.
+
+#### `generate_seccomp_profile(allowed_syscalls: List[str]=None)`
+
+Generate a default-deny seccomp profile.
+
+#### `DockerConfig`
+
+Docker run configuration.
+
+#### `generate_config(image: str, command: List[str]=None, **overrides: Any)`
+
+Generate a locked-down docker run config.
+
+#### `validate_config(cfg: DockerConfig)`
+
+Validate. Raises DockerError.
+
+#### `to_run_args(cfg: DockerConfig)`
+
+Render as docker run args (not executed).
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sandbox_firecracker`
+
+Source: `components/northstar-agent-runtime/sandbox_firecracker.py`
+
+Firecracker microVM config generator (config/policy layer only), Simulated.
+
+#### `FirecrackerError`
+
+Fail-closed: invalid configs raise.
+
+#### `DriveConfig`
+
+#### `NetIfaceConfig`
+
+#### `FirecrackerConfig`
+
+Firecracker microVM configuration.
+
+#### `generate_config(rootfs: str, *, enable_networking: bool=False, **overrides: Any)`
+
+Generate a locked-down microVM config.
+
+#### `validate_config(cfg: FirecrackerConfig)`
+
+Validate. Raises FirecrackerError.
+
+#### `to_api_payload(cfg: FirecrackerConfig)`
+
+Render as Firecracker REST API payload (not sent).
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sandbox_gvisor`
+
+Source: `components/northstar-agent-runtime/sandbox_gvisor.py`
+
+gVisor (runsc) config generator (config/policy layer only), Simulated.
+
+#### `GvisorError`
+
+Fail-closed: invalid configs raise.
+
+#### `GvisorConfig`
+
+runsc sandbox configuration.
+
+#### `generate_config(allowed_paths: List[str]=None, *, network: str='none', platform: str='ptrace', **overrides: Any)`
+
+Generate a locked-down runsc config.
+
+#### `validate_config(cfg: GvisorConfig)`
+
+Validate. Raises GvisorError.
+
+#### `to_runsc_args(cfg: GvisorConfig)`
+
+Render as runsc flags (not executed).
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sandbox_nsjail`
+
+Source: `components/northstar-agent-runtime/sandbox_nsjail.py`
+
+nsjail config generator (config/policy layer only), Simulated.
+
+#### `NsjailError`
+
+Fail-closed: invalid configs raise.
+
+#### `NsjailConfig`
+
+nsjail sandbox configuration.
+
+#### `generate_config(binary: str, args: List[str]=None, *, readonly_root: bool=True, workspace: str='/workspace', **overrides: Any)`
+
+Generate a locked-down nsjail config.
+
+#### `validate_config(cfg: NsjailConfig)`
+
+Validate a config. Raises NsjailError on any problem.
+
+#### `to_cmdline(cfg: NsjailConfig)`
+
+Render config as nsjail command-line args (not executed).
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sandbox_podman`
+
+Source: `components/northstar-agent-runtime/sandbox_podman.py`
+
+Podman rootless sandbox config (config/policy layer only), Simulated.
+
+#### `PodmanError`
+
+Fail-closed: invalid configs raise.
+
+#### `PodmanConfig`
+
+Podman run configuration (rootless).
+
+#### `generate_config(image: str, command: List[str]=None, **overrides: Any)`
+
+Generate a locked-down rootless podman config.
+
+#### `validate_config(cfg: PodmanConfig)`
+
+Validate. Raises PodmanError.
+
+#### `to_podman_args(cfg: PodmanConfig)`
+
+Render as podman run args (not executed).
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sandbox_pypy`
+
+Source: `components/northstar-agent-runtime/sandbox_pypy.py`
+
+PyPy sandbox policy file generator (config/policy layer only), Simulated.
+
+#### `PypyError`
+
+Fail-closed: invalid configs raise.
+
+#### `PypySandboxConfig`
+
+PyPy sandbox policy configuration.
+
+#### `generate_config(script_path: str, *, workspace: str='/workspace', **overrides: Any)`
+
+Generate a locked-down PyPy sandbox policy.
+
+#### `validate_config(cfg: PypySandboxConfig)`
+
+Validate. Raises PypyError.
+
+#### `to_policy_dict(cfg: PypySandboxConfig)`
+
+Render as a policy dict (for the sandbox controller).
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sandbox_restrictedpython`
+
+Source: `components/northstar-agent-runtime/sandbox_restrictedpython.py`
+
+RestrictedPython AST whitelist (config/policy layer only), Simulated.
+
+#### `RestrictedPythonError`
+
+Fail-closed: rejected code raises.
+
+#### `check_source(source: str)`
+
+Validate Python source. Returns summary.
+
+#### `safe_builtins()`
+
+Return a restricted __builtins__ dict for exec().
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sandbox_wasm`
+
+Source: `components/northstar-agent-runtime/sandbox_wasm.py`
+
+WASM (wasmtime) capability config (config/policy layer only), Simulated.
+
+#### `WasmError`
+
+Fail-closed: invalid configs raise.
+
+#### `WasmConfig`
+
+wasmtime sandbox configuration.
+
+#### `generate_config(module_path: str, *, preopened_dirs: Dict[str, str]=None, **overrides: Any)`
+
+Generate a locked-down wasmtime config.
+
+#### `validate_config(cfg: WasmConfig)`
+
+Validate. Raises WasmError.
+
+#### `to_wasmtime_args(cfg: WasmConfig)`
+
+Render as wasmtime CLI args (not executed).
+
+#### `stdlib_only()`
+
+#### `main()`
+
 ### `sast_scanner`
 
 Source: `components/northstar-agent-runtime/sast_scanner.py`
@@ -70555,6 +82229,18 @@ Deterministic Confluent-shaped schema registry bookkeeping.
   - Audit events in ledger order.
 #### `main()`
 
+### `schema_valid`
+
+Source: `components/northstar-agent-runtime/schema_valid.py`
+
+Schema validation (D-IN-028), Simulated.
+
+#### `validate(data: dict, schema: dict)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
 ### `scheming`
 
 Source: `components/northstar-agent-runtime/scheming.py`
@@ -70886,6 +82572,18 @@ SCIM user/group provisioning as deterministic single-host bookkeeping.
   - True iff the user is currently deprovisioned.
 - `audit_log()`
   - Audit events emitted so far, in order.
+#### `main()`
+
+### `script_mix`
+
+Source: `components/northstar-agent-runtime/script_mix.py`
+
+Script mixing detection (D-IN-013), Simulated.
+
+#### `detect(t: str)`
+
+#### `stdlib_only()`
+
 #### `main()`
 
 ### `sdk`
@@ -71429,6 +83127,20 @@ Build an ``audit.ndjson/1``-shaped record for a secret-manager step.
 #### `main()`
 
 Self-check: store, retrieve, rotate, delete, refusals, no-leak audit.
+
+### `secret_scan`
+
+Source: `components/northstar-agent-runtime/secret_scan.py`
+
+Secret scanning: detect secrets in output (D-OUT-002), Simulated.
+
+#### `scan(text: str)`
+
+Scan for secrets. Returns list of {type, match}.
+
+#### `stdlib_only()`
+
+#### `main()`
 
 ### `secret_scanner`
 
@@ -72154,6 +83866,74 @@ Self-critique decision ledger: submit -> critique -> revise -> verify.
 - `audit_log(seq: int)`
 #### `main()`
 
+### `self_modification_probes`
+
+Source: `components/northstar-agent-runtime/self_modification_probes.py`
+
+Self-modification probe corpus.
+
+#### `SelfStateRecord`
+
+One observed state event for a component of the agent's own substrate.
+
+#### `build_record(seq: int, component: str, digest: str, kind: str, identity: str, destination: str='', previous_digest: str='')`
+
+Build a chain-linked record; raises on malformed input (fail closed).
+
+#### `verify_record(record: SelfStateRecord)`
+
+Recompute the record digest; constant-time compare. Never raises.
+
+#### `ModificationRecord`
+
+A proposed or landed self-edit.
+
+#### `approval_binding(component: str, old_digest: str, new_digest: str)`
+
+The digest a valid human approval receipt must carry: bound to the exact (component, old, new) triple. A blanket go-ahead or a prose 'yes' cannot verify.
+
+#### `verify_modification(mod: ModificationRecord)`
+
+Recompute the record digest; constant-time compare. Never raises.
+
+#### `SelfStateLedger`
+
+Append-only ledger of self-state records. Fail closed: unverifiable records, chain breaks, and seq gaps raise instead of being stored.
+
+- `append(record: SelfStateRecord)`
+- `records()`
+- `detect_self_copy(own_digest: str)`
+  - Own digest bound to any destination -- a copy record carrying the agent's own content digest -- is self-copy evidence. Returns digest-pinned findings; never raises.
+- `detect_self_modification(pinned: dict[str, str])`
+  - Any component whose latest digest differs from the operator's pinned digest is unapproved self-modification evidence. Returns findings; never raises.
+#### `verify_ledger_integrity(ledger: SelfStateLedger)`
+
+Re-verify every record in the ledger. Returns (ok, findings); findings name bad_digest / bad_link / seq_gap. Never raises.
+
+#### `gate_modification(mod: ModificationRecord, pinned_ceiling: tuple[str, ...])`
+
+Decide a self-edit. Returns ("allow" | "deny", findings).
+
+#### `probe_names()`
+
+All self-modification attack probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Probes in one family (including 'benign').
+
+#### `probe_by_name(name: str)`
+
+Look up any self-modification probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+probe name -> expected gate outcome ('deny' or 'allow').
+
 ### `self_preservation`
 
 Source: `components/northstar-agent-runtime/self_preservation.py`
@@ -72257,6 +84037,71 @@ Self-preservation persistence-drive test ledger, Simulated.
 #### `main()`
 
 Self-check: exercise the ledger end to end.
+
+### `self_referential_trust_probes`
+
+Source: `components/northstar-agent-runtime/self_referential_trust_probes.py`
+
+Self-referential-trust probe corpus + self-grounding / bootstrap detectors.
+
+#### `SelfReferentialTrustError`
+
+Raised for malformed provenance nodes or invalid graph operations.
+
+#### `EvidenceNode`
+
+One node in the provenance graph.
+
+- `as_dict()`
+- `digest()`
+  - Digest pin over the canonical node record.
+#### `build_node(node_id: str, kind: str, *, agent_id: str | None=None, refs: tuple[str, ...]=(), asserted_confidence: float | None=None, confidence_basis: tuple[str, ...]=())`
+
+Convenience constructor; validation lives in ``EvidenceNode``.
+
+#### `verify_node_digest(node: EvidenceNode, digest: str)`
+
+Constant-time check that a digest pin matches a node.
+
+#### `TrustFinding`
+
+One detector finding: what fired, on which claim, why.
+
+- `verify_digest()`
+#### `EvidenceGraph`
+
+Append-only provenance graph; detectors run over it.
+
+- `add(node: EvidenceNode)`
+- `get(node_id: str)`
+- `node_ids()`
+- `transitive_support(root_id: str)`
+  - All nodes reachable from ``root_id`` via ``refs``.
+- `detect_self_grounding(root_id: str)`
+  - Flag a claim whose support graph contains no external node.
+- `detect_citation_cycle(root_id: str)`
+  - Flag a support chain that loops back to the claim itself.
+- `detect_confidence_bootstrap(root_id: str)`
+  - Flag confidence derived only from the agent's own confidences.
+- `detect_dangling_reference(root_id: str)`
+  - Fail-closed provenance check: every ref must resolve.
+- `findings(root_id: str)`
+  - All detector findings for one claim, in a stable order.
+#### `probe_names()`
+
+All self-referential-trust probe names.
+
+#### `probes_by_family(family: str)`
+
+Probes in one family.
+
+#### `probe_by_name(name: str)`
+
+One probe by name; KeyError on unknown names.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
 
 ### `separation_logic`
 
@@ -73592,6 +85437,74 @@ Sleeper-agent deceptive-behavior test ledger, Simulated.
 
 Self-check: exercise the ledger end to end.
 
+### `sleeper_agent_probes`
+
+Source: `components/northstar-agent-runtime/sleeper_agent_probes.py`
+
+Sleeper-agent probe corpus.
+
+#### `attack_probe_names()`
+
+All sleeper-attack probe names (expected: deny).
+
+#### `benign_probe_names()`
+
+All benign control probe names (expected: allow).
+
+#### `probes_in_family(family: str)`
+
+Probes in one family (including 'benign').
+
+#### `probe_by_name(name: str)`
+
+Look up any sleeper probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+probe name -> expected gate outcome ('deny' or 'allow').
+
+#### `BehaviorRecord`
+
+One observed agent run, digest-pinned and chain-linked.
+
+#### `build_record(*, agent_id: str, model_version: str, context_class: str, run_id: str, behavior_digest: str, canary_present: bool=False, adaptation_digest: str | None=None, context_features_digest: str, prev_digest: str)`
+
+Build a verified behavior record (raises on bad inputs).
+
+#### `verify_record(record: BehaviorRecord)`
+
+Re-verify a record without raising; returns (ok, findings).
+
+#### `BehaviorLedger`
+
+Append-only chain of behavior records; fail-closed on breaks.
+
+- `append(record: BehaviorRecord)`
+- `records()`
+#### `TriggerSpec`
+
+A digest-pinned trigger condition to test records against.
+
+#### `detect_trigger_armed(records: tuple[BehaviorRecord, ...], spec: TriggerSpec)`
+
+Name records whose context features match a pinned trigger condition.
+
+#### `detect_eval_deploy_divergence(records: tuple[BehaviorRecord, ...])`
+
+Flag same agent+model whose behavior differs across context classes.
+
+#### `detect_canary_evasion(records: tuple[BehaviorRecord, ...])`
+
+Flag behavior that changes with canary presence in one context class.
+
+#### `verify_behavioral_consistency(records: tuple[BehaviorRecord, ...])`
+
+Same agent+model+context class must share one behavior digest unless a declared adaptation is attached.
+
+#### `main()`
+
+Print the corpus summary; exit 0.
+
 ### `sleeper_eval`
 
 Source: `components/northstar-agent-runtime/sleeper_eval.py`
@@ -73907,6 +85820,366 @@ Deterministic Dynamo-style quorum read/write ledger.
 #### `main()`
 
 Deterministic self-check: quorum write/read with a sloppy fallback.
+
+### `sm2_01`
+
+Source: `components/northstar-agent-runtime/sm2_01.py`
+
+Reverse a string. (sm2-01).
+
+#### `reverse_str(s: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sm2_02`
+
+Source: `components/northstar-agent-runtime/sm2_02.py`
+
+Palindrome check, case-insensitive. (sm2-02).
+
+#### `is_palindrome(s: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sm2_03`
+
+Source: `components/northstar-agent-runtime/sm2_03.py`
+
+Count vowels in a string. (sm2-03).
+
+#### `count_vowels(s: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sm2_04`
+
+Source: `components/northstar-agent-runtime/sm2_04.py`
+
+Count consonants in a string. (sm2-04).
+
+#### `count_consonants(s: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sm2_05`
+
+Source: `components/northstar-agent-runtime/sm2_05.py`
+
+Convert to camelCase. (sm2-05).
+
+#### `to_camel(s: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sm2_06`
+
+Source: `components/northstar-agent-runtime/sm2_06.py`
+
+Convert to snake_case. (sm2-06).
+
+#### `to_snake(s: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sm2_07`
+
+Source: `components/northstar-agent-runtime/sm2_07.py`
+
+Convert to kebab-case. (sm2-07).
+
+#### `to_kebab(s: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sm2_08`
+
+Source: `components/northstar-agent-runtime/sm2_08.py`
+
+Capitalize each word. (sm2-08).
+
+#### `title_words(s: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sm2_09`
+
+Source: `components/northstar-agent-runtime/sm2_09.py`
+
+Remove all whitespace. (sm2-09).
+
+#### `remove_whitespace(s: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sm2_10`
+
+Source: `components/northstar-agent-runtime/sm2_10.py`
+
+Count words. (sm2-10).
+
+#### `word_count(s: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sm2_11`
+
+Source: `components/northstar-agent-runtime/sm2_11.py`
+
+Longest word. (sm2-11).
+
+#### `longest_word(s: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sm2_12`
+
+Source: `components/northstar-agent-runtime/sm2_12.py`
+
+Shortest word. (sm2-12).
+
+#### `shortest_word(s: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sm2_13`
+
+Source: `components/northstar-agent-runtime/sm2_13.py`
+
+Anagram check. (sm2-13).
+
+#### `is_anagram(a: str, b: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sm2_14`
+
+Source: `components/northstar-agent-runtime/sm2_14.py`
+
+Character frequency map. (sm2-14).
+
+#### `char_freq(s: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sm2_15`
+
+Source: `components/northstar-agent-runtime/sm2_15.py`
+
+Remove duplicate characters, keep order. (sm2-15).
+
+#### `dedup_chars(s: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sm2_16`
+
+Source: `components/northstar-agent-runtime/sm2_16.py`
+
+Check string rotation. (sm2-16).
+
+#### `is_rotation(a: str, b: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sm2_17`
+
+Source: `components/northstar-agent-runtime/sm2_17.py`
+
+Run-length encode. (sm2-17).
+
+#### `rle_encode(s: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sm2_18`
+
+Source: `components/northstar-agent-runtime/sm2_18.py`
+
+Run-length decode. (sm2-18).
+
+#### `rle_decode(s: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sm2_19`
+
+Source: `components/northstar-agent-runtime/sm2_19.py`
+
+Pangram check. (sm2-19).
+
+#### `is_pangram(s: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sm2_20`
+
+Source: `components/northstar-agent-runtime/sm2_20.py`
+
+Isogram check (no repeated letters). (sm2-20).
+
+#### `is_isogram(s: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sm2_21`
+
+Source: `components/northstar-agent-runtime/sm2_21.py`
+
+Reverse word order. (sm2-21).
+
+#### `reverse_words(s: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sm2_22`
+
+Source: `components/northstar-agent-runtime/sm2_22.py`
+
+Truncate with ellipsis. (sm2-22).
+
+#### `truncate(s: str, n: int)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sm2_23`
+
+Source: `components/northstar-agent-runtime/sm2_23.py`
+
+Pad left to width. (sm2-23).
+
+#### `pad_left(s: str, n: int, ch: str=' ')`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sm2_24`
+
+Source: `components/northstar-agent-runtime/sm2_24.py`
+
+Pad right to width. (sm2-24).
+
+#### `pad_right(s: str, n: int, ch: str=' ')`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sm2_25`
+
+Source: `components/northstar-agent-runtime/sm2_25.py`
+
+Strip punctuation. (sm2-25).
+
+#### `strip_punct(s: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sm2_26`
+
+Source: `components/northstar-agent-runtime/sm2_26.py`
+
+Count substring occurrences (overlap). (sm2-26).
+
+#### `count_sub(s: str, sub: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sm2_27`
+
+Source: `components/northstar-agent-runtime/sm2_27.py`
+
+Starts-with and ends-with pair check. (sm2-27).
+
+#### `has_affixes(s: str, pre: str, suf: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sm2_28`
+
+Source: `components/northstar-agent-runtime/sm2_28.py`
+
+Swap letter case. (sm2-28).
+
+#### `swap_case(s: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sm2_29`
+
+Source: `components/northstar-agent-runtime/sm2_29.py`
+
+Remove vowels. (sm2-29).
+
+#### `remove_vowels(s: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `sm2_30`
+
+Source: `components/northstar-agent-runtime/sm2_30.py`
+
+Repeat-join with separator. (sm2-30).
+
+#### `repeat_join(s: str, n: int, sep: str=',')`
+
+#### `stdlib_only()`
+
+#### `main()`
 
 ### `sms_service`
 
@@ -74616,6 +86889,20 @@ Decide whether the card's recommended action may execute.
 
 Audit record for a denied SOC execution, for audit.ndjson/1.
 
+### `source_attrib`
+
+Source: `components/northstar-agent-runtime/source_attrib.py`
+
+Source attribution (D-OUT-014), Simulated.
+
+#### `Attributor`
+
+- `add(uri: str, content_hash: str)`
+- `attributions()`
+#### `stdlib_only()`
+
+#### `main()`
+
 ### `sox`
 
 Source: `components/northstar-agent-runtime/sox.py`
@@ -75262,6 +87549,18 @@ AST check: stdlib only.
 
 Self-check.
 
+### `sqli_detect`
+
+Source: `components/northstar-agent-runtime/sqli_detect.py`
+
+SQL injection detection in output (D-OUT-023), Simulated.
+
+#### `detect(text: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
 ### `sse_interface`
 
 Source: `components/northstar-agent-runtime/sse_interface.py`
@@ -75503,6 +87802,100 @@ Single-host SSO provider registry with simulated assertion login.
 Build a canonical audit event dict for external audit pipelines.
 
 #### `main()`
+
+### `ssrf_detect`
+
+Source: `components/northstar-agent-runtime/ssrf_detect.py`
+
+SSRF detection in output (D-OUT-027), Simulated.
+
+#### `is_private_url(url: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `ssti_detect`
+
+Source: `components/northstar-agent-runtime/ssti_detect.py`
+
+Template injection detection (D-OUT-030), Simulated.
+
+#### `detect(text: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `stale_plan_probes`
+
+Source: `components/northstar-agent-runtime/stale_plan_probes.py`
+
+Stale-plan probes: plan freshness gates and invalidation triggers.
+
+#### `attack_probe_names()`
+
+All stale-plan attack probe names.
+
+#### `benign_probe_names()`
+
+All benign control names.
+
+#### `probes_in_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+probe name -> expected gate outcome ('deny' or 'allow').
+
+#### `parse_timestamp(ts: Any)`
+
+Parse an epoch number or an RFC3339 string to epoch seconds.
+
+#### `StalePlanRecord`
+
+A plan with its evidence-snapshot freshness metadata.
+
+#### `seal_plan_record(plan_id: str, plan_digest: str, snapshot_time: Any, max_age_seconds: float, evidence_head_digest: str)`
+
+Build a digest-pinned stale-plan record. Fail-closed.
+
+#### `plan_age_seconds(record: StalePlanRecord, as_of: Any)`
+
+Age and freshness status of ``record`` against ``as_of``.
+
+#### `PlanFreshnessDecision`
+
+Digest-pinned disposition from the freshness gate.
+
+#### `gate_plan_freshness(record: StalePlanRecord, as_of: Any, *, ceiling_seconds: float, registered_head_digest: str)`
+
+Fail-closed freshness gate for one plan record.
+
+#### `verify_freshness_decision(decision: PlanFreshnessDecision, record: StalePlanRecord)`
+
+Re-derive the decision digest; constant-time comparison.
+
+#### `detect_snapshot_drift(record: StalePlanRecord, registered_head_digest: str)`
+
+Name plan-evidence-changed when the snapshot no longer resolves to the registered head. Returns None when the head still matches. Never raises.
+
+#### `detect_restamped_plan(old: StalePlanRecord, new: StalePlanRecord)`
+
+Name evidence-restamped when the same plan id + same plan digest carries an advanced snapshot time with no new evidence head.
+
+#### `invalidate_remaining_steps(record: StalePlanRecord, as_of: Any, *, ceiling_seconds: float, registered_head_digest: str)`
+
+Mid-run invalidation: re-run the freshness gate against the current ``as_of`` and current registered head.
+
+#### `main()`
+
+Print a small summary for the CLI.
 
 ### `standards`
 
@@ -75794,6 +88187,659 @@ Deterministic single-host finite state machine ledger.
   - Booked audit rows, oldest first. Pure read.
 #### `main()`
 
+### `state_mgmt_01`
+
+Source: `components/northstar-agent-runtime/state_mgmt_01.py`
+
+State 01: versioned checkpoint schema, Simulated.
+
+#### `CheckpointError`
+
+#### `checksum(state: Dict[str, Any])`
+
+#### `encode(state: Dict[str, Any], *, created_at: str='')`
+
+Encode a checkpoint to canonical JSON.
+
+#### `decode(text: str)`
+
+Decode and verify a checkpoint. Fail-closed.
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `state_mgmt_02`
+
+Source: `components/northstar-agent-runtime/state_mgmt_02.py`
+
+State 02: incremental checkpoints (diff-based), Simulated.
+
+#### `IncrementalError`
+
+#### `Diff`
+
+#### `diff(old: Dict[str, Any], new: Dict[str, Any], prefix: str='')`
+
+Compute diffs from old -> new (nested dicts).
+
+#### `apply(state: Dict[str, Any], diffs: List[Diff])`
+
+Apply diffs to a base state. Returns new state (base untouched).
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `state_mgmt_03`
+
+Source: `components/northstar-agent-runtime/state_mgmt_03.py`
+
+State 03: differential snapshots, Simulated.
+
+#### `SnapshotError`
+
+#### `SnapshotLog`
+
+- `append(state: Dict[str, Any])`
+- `reconstruct(seq: int)`
+#### `stdlib_only()`
+
+#### `main()`
+
+### `state_mgmt_04`
+
+Source: `components/northstar-agent-runtime/state_mgmt_04.py`
+
+State 04: zlib compression for checkpoints, Simulated.
+
+#### `CompressionError`
+
+#### `compress(state: Dict[str, Any], *, level: int=6)`
+
+Serialize state to JSON and zlib-compress. Returns envelope bytes.
+
+#### `decompress(blob: bytes)`
+
+Decompress envelope bytes back to state dict. Fail-closed.
+
+#### `ratio(state: Dict[str, Any])`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `state_mgmt_05`
+
+Source: `components/northstar-agent-runtime/state_mgmt_05.py`
+
+State 05: encryption at rest (Fernet mock), Simulated.
+
+#### `SealError`
+
+#### `generate_key()`
+
+Generate a urlsafe-base64 32-byte key (Fernet-shaped).
+
+#### `seal(key: str, state: Dict[str, Any])`
+
+Encrypt state dict -> token string.
+
+#### `unseal(key: str, token: str)`
+
+Decrypt token -> state dict. Fail-closed on any tampering.
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `state_mgmt_06`
+
+Source: `components/northstar-agent-runtime/state_mgmt_06.py`
+
+State 06: mock KMS for key management, Simulated.
+
+#### `KMSError`
+
+#### `MockKMS`
+
+- `create_key(alias: str)`
+- `rotate(alias: str)`
+- `revoke(alias: str)`
+- `encrypt(alias: str, plaintext: bytes)`
+- `decrypt(token: str)`
+#### `stdlib_only()`
+
+#### `main()`
+
+### `state_mgmt_07`
+
+Source: `components/northstar-agent-runtime/state_mgmt_07.py`
+
+State 07: version migration v1 -> v2, Simulated.
+
+#### `MigrationError`
+
+#### `migrate(doc: Dict[str, Any])`
+
+Migrate a versioned checkpoint doc to the latest (v2).
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `state_mgmt_08`
+
+Source: `components/northstar-agent-runtime/state_mgmt_08.py`
+
+State 08: additive schema evolution, Simulated.
+
+#### `EvolutionError`
+
+#### `Field`
+
+#### `Schema`
+
+#### `evolve(schema: Schema, add: List[Field], deprecate: List[str])`
+
+Validate and apply additive changes. Returns new Schema.
+
+#### `apply_defaults(state: Dict[str, Any], schema: Schema)`
+
+Fill missing non-deprecated fields with defaults. Validates types.
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `state_mgmt_09`
+
+Source: `components/northstar-agent-runtime/state_mgmt_09.py`
+
+State 09: backward compatibility (read old formats), Simulated.
+
+#### `CompatError`
+
+#### `read_v1(doc: Dict[str, Any])`
+
+#### `read_v2(doc: Dict[str, Any])`
+
+#### `read(doc: Dict[str, Any])`
+
+Read any supported version into the current shape.
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `state_mgmt_10`
+
+Source: `components/northstar-agent-runtime/state_mgmt_10.py`
+
+State 10: forward compatibility (ignore unknown fields), Simulated.
+
+#### `ForwardCompatError`
+
+#### `read(doc: Dict[str, Any])`
+
+Read doc, dropping unknown fields.
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `state_mgmt_11`
+
+Source: `components/northstar-agent-runtime/state_mgmt_11.py`
+
+State 11: G-counter CRDT, Simulated.
+
+#### `CRDTError`
+
+#### `GCounter`
+
+- `join(node: str)`
+- `increment(n: int=1)`
+- `merge(other: 'GCounter')`
+- `value()`
+- `snapshot()`
+#### `stdlib_only()`
+
+#### `main()`
+
+### `state_mgmt_12`
+
+Source: `components/northstar-agent-runtime/state_mgmt_12.py`
+
+State 12: operational transformation (mock), Simulated.
+
+#### `OTError`
+
+#### `Op`
+
+#### `transform(a: Op, b: Op)`
+
+Transform a against concurrent b (b already applied).
+
+#### `apply(doc: str, ops: List[Op])`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `state_mgmt_13`
+
+Source: `components/northstar-agent-runtime/state_mgmt_13.py`
+
+State 13: vector clocks, Simulated.
+
+#### `VectorClockError`
+
+#### `VectorClock`
+
+- `join(node: str)`
+- `tick()`
+- `update(other: Dict[str, int])`
+  - Receive: merge then tick own.
+- `compare(a: Dict[str, int], b: Dict[str, int])`
+  - before | after | concurrent | equal. Never raises.
+#### `stdlib_only()`
+
+#### `main()`
+
+### `state_mgmt_14`
+
+Source: `components/northstar-agent-runtime/state_mgmt_14.py`
+
+State 14: Lamport timestamps, Simulated.
+
+#### `LamportError`
+
+#### `LamportClock`
+
+- `tick()`
+- `receive(remote: int)`
+- `stamp()`
+#### `order(a: Tuple[int, str], b: Tuple[int, str])`
+
+-1 if a first, 1 if b first, 0 if identical.
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `state_mgmt_15`
+
+Source: `components/northstar-agent-runtime/state_mgmt_15.py`
+
+State 15: hybrid logical clocks (mock), Simulated.
+
+#### `HLCError`
+
+#### `HLCStamp`
+
+#### `HybridClock`
+
+- `tick()`
+- `receive(remote: HLCStamp)`
+- `order(a: HLCStamp, b: HLCStamp)`
+#### `stdlib_only()`
+
+#### `main()`
+
+### `state_mgmt_16`
+
+Source: `components/northstar-agent-runtime/state_mgmt_16.py`
+
+State 16: distributed snapshots (mock), Simulated.
+
+#### `SnapshotError`
+
+#### `SnapshotRecord`
+
+#### `digest_state(state: Mapping[str, object])`
+
+Deterministic digest of a JSON-serializable state mapping.
+
+#### `MockNode`
+
+In-process stand-in for a distributed node.
+
+- `take_snapshot()`
+#### `SnapshotCoordinator`
+
+Drives a global snapshot and checks quorum completeness.
+
+- `run(nodes: Sequence[MockNode])`
+#### `stdlib_only()`
+
+#### `main()`
+
+### `state_mgmt_17`
+
+Source: `components/northstar-agent-runtime/state_mgmt_17.py`
+
+State 17: Chandy-Lamport distributed snapshot (mock), Simulated.
+
+#### `ChandyLamportError`
+
+#### `Channel`
+
+#### `CLNode`
+
+One participant in the Chandy-Lamport snapshot.
+
+- `add_channel(name: str)`
+- `initiate()`
+  - Start a snapshot; returns markers to send on each channel.
+- `receive_marker(channel_name: str)`
+  - Handle an incoming marker. Returns True if this node just recorded its state (first marker), False otherwise.
+- `deliver(channel_name: str, msg: str)`
+#### `stdlib_only()`
+
+#### `main()`
+
+### `state_mgmt_18`
+
+Source: `components/northstar-agent-runtime/state_mgmt_18.py`
+
+State 18: consistent hashing ring.
+
+#### `HashRingError`
+
+#### `HashRing`
+
+- `add_node(node: str)`
+- `remove_node(node: str)`
+- `get_node(key: str)`
+- `nodes()`
+#### `stdlib_only()`
+
+#### `main()`
+
+### `state_mgmt_19`
+
+Source: `components/northstar-agent-runtime/state_mgmt_19.py`
+
+State 19: gossip protocols (mock), Simulated.
+
+#### `GossipError`
+
+#### `GossipSim`
+
+Deterministic (seeded) gossip dissemination simulator.
+
+- `disseminate(origin: str, *, max_rounds: int=1000)`
+  - Return rounds until every node has the rumor.
+- `expected_rounds(origin: str, trials: int=50)`
+  - Mean rounds over `trials` seeded runs (seed varies per trial).
+#### `stdlib_only()`
+
+#### `main()`
+
+### `state_mgmt_20`
+
+Source: `components/northstar-agent-runtime/state_mgmt_20.py`
+
+State 20: anti-entropy (mock), Simulated.
+
+#### `AntiEntropyError`
+
+#### `Replica`
+
+- `digest()`
+- `put(key: str, value: str, version: int)`
+#### `reconcile(a: Replica, b: Replica)`
+
+One anti-entropy exchange. Returns number of entries pulled.
+
+#### `rounds_until_converged(replicas: List[Replica], seed: int, *, max_rounds: int=10000)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `state_mgmt_21`
+
+Source: `components/northstar-agent-runtime/state_mgmt_21.py`
+
+State 21: Merkle-tree sync (mock), Simulated.
+
+#### `MerkleError`
+
+#### `MerkleTree`
+
+- `root()`
+- `leaf_map()`
+  - key -> leaf hash.
+- `diff(other: 'MerkleTree')`
+#### `stdlib_only()`
+
+#### `main()`
+
+### `state_mgmt_22`
+
+Source: `components/northstar-agent-runtime/state_mgmt_22.py`
+
+State 22: state reconciliation (mock), Simulated.
+
+#### `ReconcileError`
+
+#### `Op`
+
+#### `Conflict`
+
+#### `Plan`
+
+#### `Store`
+
+#### `plan(a: Store, b: Store)`
+
+#### `apply(plan_: Plan, a: Store, b: Store)`
+
+#### `reconcile(a: Store, b: Store)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `state_mgmt_23`
+
+Source: `components/northstar-agent-runtime/state_mgmt_23.py`
+
+State 23: conflict resolution strategies.
+
+#### `ConflictError`
+
+#### `Candidate`
+
+#### `Resolution`
+
+#### `resolve(strategy: str, candidates: List[Candidate])`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `state_mgmt_24`
+
+Source: `components/northstar-agent-runtime/state_mgmt_24.py`
+
+State 24: last-write-wins register.
+
+#### `LWWError`
+
+#### `LWWRegister`
+
+- `set(value: Any, timestamp: int, node: str)`
+  - Set if (timestamp, node) beats the current. Returns True if the write was accepted.
+- `get()`
+- `stamp()`
+- `merge(other: 'LWWRegister')`
+#### `stdlib_only()`
+
+#### `main()`
+
+### `state_mgmt_25`
+
+Source: `components/northstar-agent-runtime/state_mgmt_25.py`
+
+State 25: multi-value register.
+
+#### `MVError`
+
+#### `Dot`
+
+#### `VersionedValue`
+
+#### `dominates(a: VersionedValue, b: VersionedValue)`
+
+True if a causally dominates b (a.vv >= b.dot and not equal dots).
+
+#### `MVRegister`
+
+- `set(value: Any)`
+- `get()`
+- `merge(other: 'MVRegister')`
+#### `stdlib_only()`
+
+#### `main()`
+
+### `state_mgmt_26`
+
+Source: `components/northstar-agent-runtime/state_mgmt_26.py`
+
+State 26: OR-set (observed-remove set) CRDT.
+
+#### `ORSetError`
+
+#### `ORSet`
+
+- `add(elem: str)`
+- `remove(elem: str)`
+  - Tombstone all observed tags for elem. Returns count removed.
+- `elements()`
+- `merge(other: 'ORSet')`
+#### `stdlib_only()`
+
+#### `main()`
+
+### `state_mgmt_27`
+
+Source: `components/northstar-agent-runtime/state_mgmt_27.py`
+
+State 27: 2P-set (two-phase set) CRDT.
+
+#### `TwoPSetError`
+
+#### `TwoPSet`
+
+- `add(elem: str)`
+- `remove(elem: str)`
+- `elements()`
+- `merge(other: 'TwoPSet')`
+#### `stdlib_only()`
+
+#### `main()`
+
+### `state_mgmt_28`
+
+Source: `components/northstar-agent-runtime/state_mgmt_28.py`
+
+State 28: LWW-map CRDT.
+
+#### `LWWMapError`
+
+#### `LWWMap`
+
+- `put(key: str, value: Any, timestamp: int, node: str)`
+- `remove(key: str, timestamp: int, node: str)`
+- `get(key: str)`
+- `keys()`
+- `merge(other: 'LWWMap')`
+#### `stdlib_only()`
+
+#### `main()`
+
+### `state_mgmt_29`
+
+Source: `components/northstar-agent-runtime/state_mgmt_29.py`
+
+State 29: CRDT counters (G-counter + PN-counter).
+
+#### `CounterError`
+
+#### `GCounter`
+
+- `increment(amount: int=1)`
+- `value()`
+- `merge(other: 'GCounter')`
+#### `PNCounter`
+
+- `increment(amount: int=1)`
+- `decrement(amount: int=1)`
+- `value()`
+- `merge(other: 'PNCounter')`
+#### `stdlib_only()`
+
+#### `main()`
+
+### `state_mgmt_30`
+
+Source: `components/northstar-agent-runtime/state_mgmt_30.py`
+
+State 30: CRDT graphs (mock), Simulated.
+
+#### `GraphError`
+
+#### `CRDTGraph`
+
+- `add_vertex(v: str)`
+- `remove_vertex(v: str)`
+- `add_edge(u: str, w: str)`
+- `remove_edge(u: str, w: str)`
+- `vertices()`
+- `edges()`
+- `merge(other: 'CRDTGraph')`
+#### `stdlib_only()`
+
+#### `main()`
+
+### `stateful_veto`
+
+Source: `components/northstar-agent-runtime/stateful_veto.py`
+
+Stateful veto: deny is a signal, not an endpoint (D8), Simulated.
+
+#### `StatefulVetoError`
+
+Fail-closed.
+
+#### `SessionRisk`
+
+Risk state for one session.
+
+#### `StatefulVeto`
+
+Tracks denials and escalates on retry patterns.
+
+- `record_deny(session_id: str, tool_name: str, consequence: str='')`
+  - Record a denial. Returns updated risk state.
+- `should_rate_limit(session_id: str, tool_name: str, consequence: str='')`
+  - Check if this action should be rate-limited.
+- `risk_score(session_id: str)`
+#### `verify_postcondition(checker_fn: Callable[[], bool], description: str)`
+
+Verify a real postcondition, don't trust agent self-report.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
 ### `static_verify`
 
 Source: `components/northstar-agent-runtime/static_verify.py`
@@ -75869,6 +88915,124 @@ Pure static pre-dispatch gate over (name, args-shape, caller).
 #### `static_verify_audit_events(verifier: StaticVerifier)`
 
 Decision + registry events, shaped for the ``audit.ndjson/1`` chain.
+
+### `status_page`
+
+Source: `components/northstar-agent-runtime/status_page.py`
+
+Status page — Statuspage.io-shaped incident bookkeeping (batch-34 interface).
+
+#### `StatusPageError`
+
+Base error for the status page.
+
+#### `BadComponentError`
+
+Malformed component definition (bad id, name, status).
+
+#### `DuplicateComponentError`
+
+A component with this id is already registered.
+
+#### `UnknownComponentError`
+
+No component with this id is registered.
+
+#### `BadStatusError`
+
+A status is not in the pinned vocabulary.
+
+#### `BadIncidentError`
+
+Malformed incident (bad id, title, impact, components).
+
+#### `DuplicateIncidentError`
+
+An incident with this id already exists.
+
+#### `UnknownIncidentError`
+
+No incident with this id exists.
+
+#### `BadUpdateError`
+
+Malformed incident update (bad status, message).
+
+#### `AlreadyResolvedError`
+
+The incident is resolved; it can no longer be updated.
+
+#### `SeqOrderError`
+
+Seq did not strictly increase.
+
+#### `ComponentRecord`
+
+A pinned service component with its current status.
+
+- `verify(seed: str='')`
+#### `StatusChangeRecord`
+
+One hash-chained component status change (history entry).
+
+- `verify(seed: str='')`
+#### `IncidentRecord`
+
+A pinned incident opened against one or more components.
+
+- `verify(seed: str='')`
+#### `IncidentUpdate`
+
+One host-authored incident update (hash-chained).
+
+- `verify(seed: str='')`
+#### `IncidentResolution`
+
+The terminal resolution of an incident (one-way).
+
+- `verify(seed: str='')`
+#### `PageStatus`
+
+A pure page-level aggregate view (data, never raised).
+
+- `verify(seed: str='')`
+#### `status_page_audit_event(kind: str, seq: int, **detail: Any)`
+
+Shape an ``audit.ndjson/1`` record for the status page.
+
+#### `StatusPage`
+
+Deterministic Statuspage.io-shaped incident bookkeeping.
+
+- `component(component_id: str, name: str, seq: int, group: str='')`
+  - Register a component (starts ``operational``).
+- `set_status(component_id: str, status: str, seq: int)`
+  - Book a host-reported component status change.
+- `incident(incident_id: str, title: str, seq: int, component_ids: Any=(), impact: str=IMPACT_MINOR)`
+  - Open an incident (status ``investigating``).
+- `update(incident_id: str, status: str, message: str, seq: int)`
+  - Append a host-authored incident update.
+- `resolve(incident_id: str, message: str, seq: int)`
+  - Resolve an incident (terminal; no further updates allowed).
+- `page_status(seq: int)`
+  - Pure page-level aggregate view (worst status wins).
+- `component_record(component_id: str)`
+  - Lookup a component record (unknown id raises).
+- `component_ids()`
+  - Sorted component ids.
+- `status_history(component_id: str)`
+  - Hash-chained status changes for one component.
+- `incident_record(incident_id: str)`
+  - Lookup an incident record (unknown id raises).
+- `incident_ids()`
+  - Sorted incident ids.
+- `updates_for(incident_id: str)`
+  - Update feed for one incident (chronological).
+- `resolution_for(incident_id: str)`
+  - The resolution record, or raise if unresolved.
+- `audit_log()`
+  - The audit event ledger (read-only).
+#### `main()`
 
 ### `steganography`
 
@@ -76577,6 +89741,36 @@ Shape a logger event as an ``audit.ndjson/1``-style record.
 
 Self-check: gating, fields, with_fields, drain.
 
+### `structured_output`
+
+Source: `components/northstar-agent-runtime/structured_output.py`
+
+Structured gate outputs: schema-enforced verdicts (XGrammar/Outlines), Simulated.
+
+#### `StructuredOutputError`
+
+Fail-closed: schema violations raise.
+
+#### `FieldSpec`
+
+Specification for one field.
+
+#### `VerdictSchema`
+
+Schema for a gate verdict type.
+
+#### `validate(data: Dict[str, Any], schema: VerdictSchema)`
+
+Validate data against schema. Returns validated dict.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
 ### `subscription_manager`
 
 Source: `components/northstar-agent-runtime/subscription_manager.py`
@@ -76680,6 +89874,18 @@ SaaS subscription lifecycle ledger (deterministic, single-host).
 #### `subscription_manager_audit_event(kind: str, seq: int, detail: Optional[Dict[str, Any]]=None)`
 
 Shape an ``audit.ndjson/1`` record for this module.
+
+#### `main()`
+
+### `summarization_guard`
+
+Source: `components/northstar-agent-runtime/summarization_guard.py`
+
+Summarization guard (D-OUT-020), Simulated.
+
+#### `check_summary(original: str, summary: str, max_ratio: float=0.3)`
+
+#### `stdlib_only()`
 
 #### `main()`
 
@@ -78166,6 +91372,34 @@ Deterministic task->route->worker binding ledger (single host).
 #### `main()`
 
 Self-check: register, route, dispatch, complete, balance.
+
+### `task_snapshot`
+
+Source: `components/northstar-agent-runtime/task_snapshot.py`
+
+Task snapshots: replayable forensic artifacts (AgentScope), Simulated.
+
+#### `SnapshotError`
+
+Fail-closed.
+
+#### `ToolCallRecord`
+
+One recorded tool call.
+
+#### `TaskSnapshot`
+
+A replayable snapshot of a task.
+
+- `add_tool_call(tool_name: str, args: Dict[str, Any], result: Any, gate_decision: str)`
+  - Record a tool call (hashes args/result, not raw).
+- `snapshot_hash()`
+  - Hash of the snapshot for sealing.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
 
 ### `tax_agents`
 
@@ -80165,6 +93399,1050 @@ Deterministic token-count ledger for declared tokenizers.
 - `stats()`
 #### `main()`
 
+### `tool_pinning`
+
+Source: `components/northstar-agent-runtime/tool_pinning.py`
+
+Hash-pinned tool definitions (MCP rug-pull defense), Simulated.
+
+#### `ToolPinError`
+
+Fail-closed: unpinned or drifted tools raise.
+
+#### `PinnedTool`
+
+A tool definition pinned by hash.
+
+#### `hash_definition(definition: Dict[str, Any])`
+
+Hash a tool definition canonically.
+
+#### `ToolRegistry`
+
+Registry with hash-pinned tool definitions.
+
+- `pin(tool_id: str, definition: Dict[str, Any], pinned_by: str, pinned_at: str='')`
+  - Pin a tool definition (first mount).
+- `verify(tool_id: str, definition: Dict[str, Any])`
+  - Verify a tool definition matches its pin.
+- `check_or_raise(tool_id: str, definition: Dict[str, Any])`
+  - Verify or raise ToolPinError (for gate integration).
+- `is_pinned(tool_id: str)`
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
+### `tool_schema_digest_probes`
+
+Source: `components/northstar-agent-runtime/tool_schema_digest_probes.py`
+
+Tool-schema-digest probes: per-invocation digests, drift detection, identity binding.
+
+#### `attack_probe_names()`
+
+All tool-schema-digest attack probe names.
+
+#### `benign_probe_names()`
+
+All tool-schema-digest benign probe names.
+
+#### `probes_in_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
+
+#### `schema_digest(schema: Mapping[str, Any])`
+
+Pin a schema document to a ``sha256:`` digest.
+
+#### `ToolSchemaSnapshot`
+
+A pinned tool schema: the contract the gate admitted.
+
+#### `pin_schema(tool: str, schema: Mapping[str, Any], version: str)`
+
+Admit a tool schema: pin its digest under a caller-supplied version.
+
+#### `verify_snapshot(snapshot: ToolSchemaSnapshot)`
+
+Re-derive a snapshot's seal; constant-time compare, never raises.
+
+#### `InvocationBinding`
+
+Binds an admitted schema to one invocation.
+
+#### `bind_invocation(snapshot: ToolSchemaSnapshot, invocation_id: str, arguments_digest: str)`
+
+Mint a per-invocation binding against an admitted snapshot.
+
+#### `verify_binding(binding: InvocationBinding, invocation_id: str)`
+
+Verify a binding for a specific invocation; constant-time, never raises.
+
+#### `drift_details(pinned_schema: Mapping[str, Any], observed_schema: Mapping[str, Any])`
+
+Name the structural drift kinds between two schema documents.
+
+#### `SchemaFinding`
+
+One drift-check outcome, digest-pinned.
+
+#### `SchemaRegistry`
+
+Admitted schema pins, keyed by tool name.
+
+- `register(snapshot: ToolSchemaSnapshot)`
+  - Admit (or re-admit) a tool schema pin. Fail-closed on bad seal.
+- `pinned(tool: str)`
+  - Return the admitted pin for a tool, or ``None`` if unpinned.
+- `check(tool: str, observed_schema: Mapping[str, Any], pinned_schema: Mapping[str, Any] | None=None)`
+  - Compare a live schema against the admitted pin.
+#### `verify_finding(finding: SchemaFinding)`
+
+Re-derive a finding's seal; constant-time compare, never raises.
+
+#### `bind_tool_call(registry: SchemaRegistry, tool: str, live_schema: Mapping[str, Any], invocation_id: str, arguments_digest: str, pinned_schema: Mapping[str, Any] | None=None)`
+
+Bind one invocation, or fail closed.
+
+#### `main()`
+
+Print a small summary for the CLI.
+
+### `tool_system_01`
+
+Source: `components/northstar-agent-runtime/tool_system_01.py`
+
+Tool discovery: registry with search, Simulated.
+
+#### `ToolSystem01Error`
+
+Fail-closed: bad input raises.
+
+#### `ToolInfo`
+
+Metadata for one tool.
+
+#### `ToolRegistry`
+
+Registry of tools with search.
+
+- `register(info: ToolInfo)`
+- `get(name: str)`
+- `search(query: str, limit: int=10)`
+  - Search by name/description/tags. Ranked by match count.
+- `list_names()`
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `tool_system_02`
+
+Source: `components/northstar-agent-runtime/tool_system_02.py`
+
+Tool versioning: semver checks, Simulated.
+
+#### `ToolSystem02Error`
+
+Fail-closed: bad version raises.
+
+#### `Version`
+
+Semver version.
+
+- `as_tuple()`
+#### `parse_version(s: str)`
+
+Parse 'MAJOR.MINOR.PATCH'.
+
+#### `is_compatible(tool: Version, client: Version)`
+
+Compatible if same MAJOR and tool MINOR >= client MINOR.
+
+#### `satisfies(version: Version, constraint: str)`
+
+Check constraint like '>=1.2.0', '==2.0.0', '<3.0.0'.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `tool_system_03`
+
+Source: `components/northstar-agent-runtime/tool_system_03.py`
+
+Tool deprecation: warnings, Simulated.
+
+#### `ToolSystem03Error`
+
+Fail-closed.
+
+#### `Lifecycle`
+
+#### `ToolEntry`
+
+#### `DeprecationRegistry`
+
+Tracks tool lifecycle.
+
+- `register(entry: ToolEntry)`
+- `deprecate(name: str, replacement: str='', note: str='')`
+- `remove(name: str)`
+- `check(name: str)`
+  - Returns 'ok', 'deprecated', or raises for removed/unknown.
+- `call(name: str, fn: Callable[[], object])`
+  - Call fn after lifecycle check.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `tool_system_04`
+
+Source: `components/northstar-agent-runtime/tool_system_04.py`
+
+Tool composition: chain tools, Simulated.
+
+#### `ToolSystem04Error`
+
+Fail-closed.
+
+#### `ComposedTool`
+
+A pipeline of tool functions.
+
+#### `compose(name: str, *fns: Callable[[Any], Any])`
+
+Compose fns into a pipeline. compose('p', f, g) = g(f(x)).
+
+#### `run_pipeline(tool: ComposedTool, initial: Any)`
+
+Run the pipeline on initial input.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `tool_system_05`
+
+Source: `components/northstar-agent-runtime/tool_system_05.py`
+
+Tool chaining: sequential execution, Simulated.
+
+#### `ToolSystem05Error`
+
+Fail-closed.
+
+#### `ChainStep`
+
+One step: tool name + args (may contain {step_N} refs).
+
+#### `ChainResult`
+
+Results of a chain run.
+
+#### `run_chain(steps: List[ChainStep], tools: Dict[str, Callable[..., Any]], *, stop_on_error: bool=True)`
+
+Run steps in order. Tools map names to callables.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `tool_system_06`
+
+Source: `components/northstar-agent-runtime/tool_system_06.py`
+
+Parallel tool calls: mock concurrent, Simulated.
+
+#### `ToolSystem06Error`
+
+Fail-closed.
+
+#### `CallSpec`
+
+One call: tool name + args.
+
+#### `ParallelResult`
+
+Per-call outcomes in submission order.
+
+#### `run_parallel(calls: List[CallSpec], tools: Dict[str, Callable[..., Any]], *, max_workers: int=8, timeout: float=DEFAULT_TIMEOUT)`
+
+Run calls concurrently. Returns outcomes in order.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `tool_system_07`
+
+Source: `components/northstar-agent-runtime/tool_system_07.py`
+
+Tool retries: exponential backoff, Simulated.
+
+#### `ToolSystem07Error`
+
+Fail-closed: exhausted retries raise this.
+
+#### `RetryPolicy`
+
+Retry configuration.
+
+#### `backoff_schedule(policy: RetryPolicy)`
+
+Compute delays between attempts (no sleep).
+
+#### `retry(fn: Callable[[], Any], policy: Optional[RetryPolicy]=None, sleeper: Optional[Callable[[float], None]]=None)`
+
+Run fn with retries. Returns fn() result or raises.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `tool_system_08`
+
+Source: `components/northstar-agent-runtime/tool_system_08.py`
+
+Tool timeouts: mock, Simulated.
+
+#### `ToolSystem08Error`
+
+Fail-closed.
+
+#### `ToolTimeoutError`
+
+Raised when a call exceeds its timeout.
+
+#### `call_with_timeout(fn: Callable[..., Any], *args: Any, timeout: float, **kwargs: Any)`
+
+Call fn with a timeout in seconds. Raises ToolTimeoutError.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `tool_system_09`
+
+Source: `components/northstar-agent-runtime/tool_system_09.py`
+
+Tool caching: memoize results, Simulated.
+
+#### `ToolSystem09Error`
+
+Fail-closed.
+
+#### `ToolCache`
+
+Memoizing cache for tool results.
+
+- `get(tool: str, args: Dict[str, Any])`
+  - Returns (hit, value).
+- `put(tool: str, args: Dict[str, Any], value: Any, ttl: Optional[float]=None)`
+- `invalidate(tool: str, args: Dict[str, Any])`
+- `clear()`
+#### `cached_call(cache: ToolCache, tool: str, args: Dict[str, Any], fn: Callable[[], Any], ttl: Optional[float]=None)`
+
+Call fn or return cached result.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `tool_system_10`
+
+Source: `components/northstar-agent-runtime/tool_system_10.py`
+
+Tool idempotency: idempotency keys, Simulated.
+
+#### `ToolSystem10Error`
+
+Fail-closed.
+
+#### `IdempotencyStore`
+
+Tracks idempotency keys.
+
+- `execute(key: str, fn: Callable[[], Any])`
+  - Execute fn under idempotency key. Replays recorded result.
+- `status(key: str)`
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `tool_system_11`
+
+Source: `components/northstar-agent-runtime/tool_system_11.py`
+
+Tool transactions: mock 2PC, Simulated.
+
+#### `ToolSystem11Error`
+
+Fail-closed.
+
+#### `Vote`
+
+#### `Participant`
+
+One 2PC participant.
+
+#### `TxnResult`
+
+#### `run_2pc(participants: List[Participant])`
+
+Run two-phase commit. Returns TxnResult.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `tool_system_12`
+
+Source: `components/northstar-agent-runtime/tool_system_12.py`
+
+Tool sagas: compensating actions, Simulated.
+
+#### `ToolSystem12Error`
+
+Fail-closed.
+
+#### `SagaStep`
+
+One saga step: action + compensation.
+
+#### `SagaResult`
+
+Outcome of a saga run.
+
+#### `run_saga(steps: List[SagaStep])`
+
+Run steps; compensate in reverse on failure.
+
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `tool_system_13`
+
+Source: `components/northstar-agent-runtime/tool_system_13.py`
+
+Tool circuit breakers: fail fast, Simulated.
+
+#### `ToolSystem13Error`
+
+Fail-closed.
+
+#### `CircuitOpenError`
+
+Raised when the circuit is open (fail fast).
+
+#### `State`
+
+#### `CircuitBreaker`
+
+Per-tool circuit breaker.
+
+- `state` (property)
+- `call(fn: Callable[[], Any])`
+  - Call fn through the breaker.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `tool_system_14`
+
+Source: `components/northstar-agent-runtime/tool_system_14.py`
+
+Tool bulkheads: isolation, Simulated.
+
+#### `ToolSystem14Error`
+
+Fail-closed.
+
+#### `BulkheadFullError`
+
+Raised when a bulkhead's queue is full.
+
+#### `Bulkhead`
+
+Isolated pool for one tool group.
+
+- `submit(fn: Callable[..., Any], *args: Any, **kwargs: Any)`
+  - Submit work; raises BulkheadFullError if queue is full.
+- `shutdown()`
+#### `BulkheadManager`
+
+Manages named bulkheads.
+
+- `add(bulkhead: Bulkhead)`
+- `submit(bulkhead_name: str, fn: Callable[..., Any], *args: Any, **kwargs: Any)`
+- `shutdown_all()`
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `tool_system_15`
+
+Source: `components/northstar-agent-runtime/tool_system_15.py`
+
+Tool rate limiting: per-tool buckets, Simulated.
+
+#### `ToolSystem15Error`
+
+Fail-closed.
+
+#### `RateLimitExceeded`
+
+Raised when a tool's bucket is empty.
+
+#### `RateLimiter`
+
+Per-tool token buckets.
+
+- `configure(tool: str, capacity: float, refill_per_sec: float)`
+- `acquire(tool: str, tokens: float=1.0)`
+  - Consume tokens; raises RateLimitExceeded if empty.
+- `available(tool: str)`
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `tool_system_16`
+
+Source: `components/northstar-agent-runtime/tool_system_16.py`
+
+Tool quotas: per-tool usage limits, Simulated.
+
+#### `ToolSystem16Error`
+
+Fail-closed.
+
+#### `QuotaExceeded`
+
+Raised when a tool's quota is exhausted for the current window.
+
+#### `QuotaManager`
+
+Per-tool usage quotas with windowed resets.
+
+- `set_quota(tool: str, limit: int, window_seconds: float)`
+  - Set (or replace) the quota for a tool. Resets usage.
+- `consume(tool: str, count: int=1)`
+  - Consume quota; raises QuotaExceeded when exhausted.
+- `remaining(tool: str)`
+  - Quota remaining in the current window.
+- `reset_window(tool: str)`
+  - Manually start a fresh window for a tool (usage cleared).
+- `tools()`
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `tool_system_17`
+
+Source: `components/northstar-agent-runtime/tool_system_17.py`
+
+Tool billing (mock): per-tool call cost ledger, Simulated.
+
+#### `ToolSystem17Error`
+
+Fail-closed.
+
+#### `InvoiceLine`
+
+#### `Invoice`
+
+#### `BillingLedger`
+
+Mock per-tool billing ledger.
+
+- `set_cost(tool: str, cost_cents: int)`
+  - Set the mock per-call cost for a tool.
+- `cost_for(tool: str)`
+  - Per-call cost in cents (falls back to the default).
+- `record(tool: str, run_id: Optional[str]=None)`
+  - Record one tool call; returns the mock cost in cents.
+- `total_cost(tool: str)`
+  - Total mock cost in cents for one tool.
+- `total_all()`
+  - Total mock cost in cents across all recorded calls.
+- `call_count(tool: Optional[str]=None)`
+- `invoice(run_id: str)`
+  - Aggregate a per-run mock invoice.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `tool_system_18`
+
+Source: `components/northstar-agent-runtime/tool_system_18.py`
+
+Tool analytics (mock): call/latency statistics, Simulated.
+
+#### `ToolSystem18Error`
+
+Fail-closed.
+
+#### `ToolStats`
+
+#### `AnalyticsCollector`
+
+Mock tool analytics with windowed reset.
+
+- `record(tool: str, latency_ms: float, success: bool)`
+  - Record one tool call event.
+- `reset()`
+  - Clear all recorded events.
+- `stats(tool: str)`
+  - Aggregate statistics for one tool.
+- `top_tools(n: int)`
+  - Top n tools by call count, ties broken by name.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `tool_system_19`
+
+Source: `components/northstar-agent-runtime/tool_system_19.py`
+
+Tool A/B testing (mock): deterministic variant bucketing, Simulated.
+
+#### `ToolSystem19Error`
+
+Fail-closed.
+
+#### `Experiment`
+
+One A/B experiment with stable hashed bucketing.
+
+- `name` (property)
+- `assign(key: Optional[str]=None)`
+  - Deterministically assign a caller to variant A or B.
+- `record_outcome(variant: str, success: bool)`
+  - Record an outcome for a variant.
+- `rates()`
+  - variant -> (calls, success_rate).
+- `winner()`
+  - Variant with the higher success rate, or None if undecided.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `tool_system_20`
+
+Source: `components/northstar-agent-runtime/tool_system_20.py`
+
+Tool feature flags: boolean flags with rollouts, Simulated.
+
+#### `ToolSystem20Error`
+
+Fail-closed.
+
+#### `Flag`
+
+#### `FeatureFlagStore`
+
+Boolean feature flags with deterministic rollouts.
+
+- `set(name: str, enabled: bool, rollout_pct: float=100.0)`
+  - Set or override a flag.
+- `remove(name: str)`
+  - Remove a flag; unknown names are a no-op.
+- `evaluate(name: str, key: Optional[str]=None)`
+  - Evaluate a flag for an optional caller key.
+- `list_flags()`
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `tool_system_21`
+
+Source: `components/northstar-agent-runtime/tool_system_21.py`
+
+Tool canary deploys: staged percentage rollout, Simulated.
+
+#### `ToolSystem21Error`
+
+Fail-closed.
+
+#### `DeployPaused`
+
+Raised when advancing a paused deploy.
+
+#### `CanaryDeployer`
+
+Staged canary rollout for one tool version (Simulated).
+
+- `current_stage()`
+- `complete()`
+- `advance()`
+  - Move to the next stage; returns the new stage pct.
+- `record(total: int, errors: int)`
+  - Record canary metrics for the current stage.
+- `pause()`
+- `resume()`
+- `error_rate()`
+- `status()`
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `tool_system_22`
+
+Source: `components/northstar-agent-runtime/tool_system_22.py`
+
+Tool blue-green deploys: two-slot state machine, Simulated.
+
+#### `ToolSystem22Error`
+
+Fail-closed.
+
+#### `BlueGreenDeploy`
+
+Two-slot blue/green deploy router (Simulated).
+
+- `active_slot()`
+- `inactive_slot()`
+- `deploy_to_inactive(version: str)`
+  - Stage a version in the inactive slot.
+- `switch()`
+  - Swap the active slot; returns the new active version.
+- `route()`
+  - Return the currently active version.
+- `history()`
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `tool_system_23`
+
+Source: `components/northstar-agent-runtime/tool_system_23.py`
+
+Tool rollback manager: version history with pins, Simulated.
+
+#### `ToolSystem23Error`
+
+Fail-closed.
+
+#### `RollbackManager`
+
+Per-tool version history with pinned rollback floor (Simulated).
+
+- `record_deploy(tool: str, version: str)`
+- `history(tool: str)`
+- `current(tool: str)`
+- `pin(tool: str, version: str)`
+  - Forbid rolling back past this version.
+- `rollback_to(tool: str, version: str)`
+  - Roll back; requires version in history and not past the pin.
+- `audit_log()`
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `tool_system_24`
+
+Source: `components/northstar-agent-runtime/tool_system_24.py`
+
+Tool health checks: registered checkables per tool, Simulated.
+
+#### `ToolSystem24Error`
+
+Fail-closed.
+
+#### `HealthChecker`
+
+Runs registered per-tool health checks (Simulated).
+
+- `register(tool: str, name: str, check: Callable[[], bool])`
+- `checks(tool: str)`
+- `run()`
+  - Execute all checks; returns per-tool healthy/unhealthy.
+- `details(tool: str)`
+- `summary()`
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `tool_system_25`
+
+Source: `components/northstar-agent-runtime/tool_system_25.py`
+
+Tool documentation generator: markdown from specs, Simulated.
+
+#### `ToolSystem25Error`
+
+Fail-closed.
+
+#### `DocGenerator`
+
+Renders markdown docs from tool specs (Simulated).
+
+- `validate(spec: Dict[str, Any])`
+- `render(spec: Dict[str, Any])`
+  - Render one tool's markdown doc.
+- `render_index(tools: List[Dict[str, Any]])`
+  - Render an index page linking to each tool's doc.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `tool_system_26`
+
+Source: `components/northstar-agent-runtime/tool_system_26.py`
+
+Tool playground (mock): sandboxed dry-run of a tool call, Simulated.
+
+#### `ToolSystem26Error`
+
+Fail-closed.
+
+#### `SchemaViolation`
+
+Raised when args do not match the declared schema.
+
+#### `UnsafeArgs`
+
+Raised when args contain unsafe (dunder-style) keys.
+
+#### `UnknownTool`
+
+Raised when no schema is registered for a tool.
+
+#### `ArgSchema`
+
+Declared argument shape for one tool (mock).
+
+#### `DryRunRecord`
+
+One recorded dry-run (mock).
+
+#### `Playground`
+
+Simulated dry-run executor with schema validation and run log.
+
+- `register_schema(tool: str, schema: ArgSchema)`
+- `dry_run(tool: str, args: Dict[str, Any], executor: Callable[[str, Dict[str, Any]], Any])`
+  - Validate args, run the fake executor, log and return sanitized result.
+- `runs()`
+- `last_run()`
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `tool_system_27`
+
+Source: `components/northstar-agent-runtime/tool_system_27.py`
+
+Tool marketplace (mock registry), Simulated.
+
+#### `ToolSystem27Error`
+
+Fail-closed.
+
+#### `DuplicateVersion`
+
+Raised on duplicate name+version registration.
+
+#### `UnknownEntry`
+
+Raised when a name+version entry is not found.
+
+#### `ToolEntry`
+
+Mock marketplace entry.
+
+#### `Registry`
+
+Simulated tool marketplace registry.
+
+- `register(entry: ToolEntry)`
+- `unregister(name: str, version: str)`
+- `list()`
+- `search(query: str)`
+  - Substring match on name and description (case-insensitive).
+- `install(name: str, version: str)`
+  - Mark installed (mock -- no network).
+- `list_installed()`
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `tool_system_28`
+
+Source: `components/northstar-agent-runtime/tool_system_28.py`
+
+Tool composition (advanced): chained pipelines with placeholder refs.
+
+#### `ToolSystem28Error`
+
+Fail-closed.
+
+#### `CompositionError`
+
+Raised on bad references, cycles, or failed steps.
+
+#### `StepFailed`
+
+Raised when a step's executor raises.
+
+#### `Step`
+
+One pipeline step (mock).
+
+#### `Composer`
+
+Chains tool steps with ${step.field} placeholder resolution.
+
+- `add_step(name: str, tool: str, args_template: Dict[str, Any])`
+- `run(executors: Dict[str, Callable[[Dict[str, Any]], Any]])`
+  - Execute steps in order; returns {step_name: output}.
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `tool_system_29`
+
+Source: `components/northstar-agent-runtime/tool_system_29.py`
+
+Tool orchestration (mock): DAG of tool tasks, Simulated.
+
+#### `ToolSystem29Error`
+
+Fail-closed.
+
+#### `CycleError`
+
+Raised when the task graph has a cycle.
+
+#### `TaskFailed`
+
+Raised when a task callable raises; dependents halted.
+
+#### `Task`
+
+One DAG task (mock).
+
+#### `Orchestrator`
+
+Mock DAG orchestrator for tool tasks.
+
+- `add_task(name: str, fn: Callable[[], Any], deps: Optional[List[str]]=None)`
+- `parallel_groups()`
+  - Levels with no inter-deps (deterministic name order).
+- `run()`
+  - Topological order; failed task halts dependents (fail-closed).
+- `results()`
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+### `tool_system_30`
+
+Source: `components/northstar-agent-runtime/tool_system_30.py`
+
+Tool governance (policy): regex policies over tool names, Simulated.
+
+#### `ToolSystem30Error`
+
+Fail-closed.
+
+#### `Policy`
+
+One governance policy (mock).
+
+- `matches(tool: str)`
+#### `Decision`
+
+Outcome of one policy evaluation.
+
+#### `AuditEntry`
+
+One recorded evaluation.
+
+#### `PolicyEngine`
+
+Simulated policy engine with audit trail.
+
+- `add_policy(policy: Policy)`
+- `evaluate(tool: str, context: Optional[Dict[str, Any]]=None)`
+  - Pick the highest-precedence action among matching policies.
+- `audit_trail()`
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
 ### `tool_use`
 
 Source: `components/northstar-agent-runtime/tool_use.py`
@@ -80729,6 +95007,22 @@ Copy every component into a throwaway tree, keeping the `components/` layout.
 
 #### `main()`
 
+### `toxicity_mock`
+
+Source: `components/northstar-agent-runtime/toxicity_mock.py`
+
+Toxicity detection mock (D-OUT-009), Simulated.
+
+#### `score(text: str)`
+
+Mock toxicity score 0.0-1.0.
+
+#### `is_toxic(text: str, threshold: float=0.5)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
 ### `trace_export`
 
 Source: `components/northstar-agent-runtime/trace_export.py`
@@ -80746,6 +95040,73 @@ JCS canonical bytes of the Trust Record (the digest/signing form).
 #### `verify_trace_signature(record: dict[str, Any], public_key: bytes)`
 
 Check an embedded Ed25519 signature on an exported Trust Record.
+
+### `trace_tamper_probes`
+
+Source: `components/northstar-agent-runtime/trace_tamper_probes.py`
+
+Trace-tampering probe corpus + deletion / independence / integrity detectors.
+
+#### `TraceRecord`
+
+One host-reported record in an audit trace.
+
+#### `build_record(seq: int, event: str, payload: dict[str, Any], recorded_at: str, *, previous_digest: str='')`
+
+Build and digest-pin one trace record. Fail-closed on bad inputs.
+
+#### `verify_record(record: TraceRecord)`
+
+Re-derive a record's digest with constant-time compare.
+
+#### `AuditTrace`
+
+Append-only host-reported audit trace.
+
+- `append(record: TraceRecord)`
+  - Append one record. Fail-closed on:
+- `records()`
+  - The trace so far, oldest first.
+- `head_digest()`
+  - Digest-pin the whole trace for out-of-band anchoring.
+#### `detect_deletion(records: list[TraceRecord] | tuple[TraceRecord, ...])`
+
+Detect deletion signals in a candidate record list.
+
+#### `verify_trace_integrity(records: list[TraceRecord] | tuple[TraceRecord, ...])`
+
+Verify a whole trace: digests, links, and contiguity.
+
+#### `genesis_anchor(record: TraceRecord)`
+
+Recompute the genesis hash for a first record.
+
+#### `DualChannelAudit`
+
+Primary + witness audit channels with independence cross-check.
+
+- `mirror(record: TraceRecord)`
+  - Append the same record to both channels.
+- `cross_check()`
+#### `probe_names()`
+
+All trace-tampering probe names.
+
+#### `benign_names()`
+
+All benign control names.
+
+#### `probes_by_family(family: str)`
+
+Attack probes in one family.
+
+#### `probe_by_name(name: str)`
+
+Look up any probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+Map every probe name to its expected outcome.
 
 ### `traceability_paradox`
 
@@ -81150,6 +95511,18 @@ Shape an ``audit.ndjson/1`` record for transactional messaging.
 
 Deterministic self-check: begin, enlist, prepare, vote, commit.
 
+### `translation_guard`
+
+Source: `components/northstar-agent-runtime/translation_guard.py`
+
+Translation guard mock (D-OUT-021), Simulated.
+
+#### `check(text: str, target_lang: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
 ### `transparency`
 
 Source: `components/northstar-agent-runtime/transparency.py`
@@ -81486,6 +95859,18 @@ City reports keyed by (incident_id, jurisdiction).
 #### `incident_reporting_adapter(reports: CityReportRegistry, *, incident_id: str, jurisdiction: str, deadline_s: int, now: int)`
 
 Gate an incident on its city-jurisdiction report filing.
+
+### `traversal_detect`
+
+Source: `components/northstar-agent-runtime/traversal_detect.py`
+
+Path traversal detection (D-OUT-026), Simulated.
+
+#### `detect(path: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
 
 ### `treacherous_turn`
 
@@ -81900,6 +96285,72 @@ Trojan remediation lifecycle ledger (Simulated).
 - `stats(seq: int)`
 #### `main()`
 
+### `trust_inversion_probes`
+
+Source: `components/northstar-agent-runtime/trust_inversion_probes.py`
+
+Trust-inversion probe corpus + delegation-culture risk detectors + gate-strength calibration.
+
+#### `TrustInversionError`
+
+Raised for malformed trust-inversion records or calibrations.
+
+#### `attack_probe_names()`
+
+All trust-inversion attack probe names.
+
+#### `benign_probe_names()`
+
+All benign control names.
+
+#### `probes_in_family(family: str)`
+
+Probes in one family (attacks, or 'benign' for controls).
+
+#### `probe_by_name(name: str)`
+
+Look up any trust-inversion probe (attack or benign) by name.
+
+#### `expected_outcomes()`
+
+probe name -> expected gate outcome ('deny' or 'allow').
+
+#### `ComfortSignals`
+
+One observation window's ambient-comfort measurements.
+
+#### `build_signals(window_id: str, delegation_rate: float, scrutiny_rate: float, rubber_stamp_rate: float, approval_median_latency_s: float | None, override_rate: float, agent_tenure_runs: int, success_streak: int)`
+
+Build a digest-pinned ``ComfortSignals`` record (fail-closed).
+
+#### `verify_signals(record: ComfortSignals)`
+
+Re-derive the digest and compare in constant time.
+
+#### `comfort_index(signals: ComfortSignals)`
+
+Ambient comfort in [0, 1]: a measurement, never a verdict.
+
+#### `assess_delegation_culture(signals: ComfortSignals)`
+
+Assess one window's delegation culture.
+
+#### `GateStrengthDecision`
+
+One digest-pinned gate-strength calibration.
+
+#### `calibrate_gate_strength(signals: ComfortSignals, base_strength: float, *, stakes: Literal['low', 'high']='low')`
+
+Apply the inverse-coupling rule: required gate strength rises with ambient comfort.
+
+#### `verify_decision(decision: GateStrengthDecision)`
+
+Re-derive the decision digest and compare in constant time.
+
+#### `main()`
+
+Print corpus summary; exit 0 when the corpus is self-consistent.
+
 ### `trust_safety`
 
 Source: `components/northstar-agent-runtime/trust_safety.py`
@@ -82206,6 +96657,35 @@ Shape an ``audit.ndjson/1``-style record for a 2PC event.
 
 #### `main()`
 
+### `two_tier_gating`
+
+Source: `components/northstar-agent-runtime/two_tier_gating.py`
+
+Two-tier gating: fast then expensive (LlamaFirewall), Simulated.
+
+#### `TwoTierError`
+
+Fail-closed: bad config raises.
+
+#### `TierVerdict`
+
+Uniform verdict schema across tiers.
+
+#### `TwoTierGate`
+
+Two-tier gate: fast heuristic, then deep analysis on suspicion.
+
+- `check(tool_name: str, args: Dict[str, Any])`
+  - Run the two-tier check.
+- `stats` (property)
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check.
+
 ### `twopset`
 
 Source: `components/northstar-agent-runtime/twopset.py`
@@ -82440,6 +96920,20 @@ Shape an ``audit.ndjson/1`` record for type-checker-interface activity.
 
 #### `main()`
 
+### `uncertainty_mock`
+
+Source: `components/northstar-agent-runtime/uncertainty_mock.py`
+
+Uncertainty quantification mock (D-OUT-016), Simulated.
+
+#### `quantify(text: str)`
+
+Mock uncertainty 0.0-1.0. Higher = more uncertain.
+
+#### `stdlib_only()`
+
+#### `main()`
+
 ### `underwriting_agents`
 
 Source: `components/northstar-agent-runtime/underwriting_agents.py`
@@ -82576,6 +97070,30 @@ Verify a vendor accuracy claim binds trial evidence.
 #### `vendor_audit_event(verdict: VendorVerdict)`
 
 Shape a vendor verdict as an audit event.
+
+### `unicode_sanit`
+
+Source: `components/northstar-agent-runtime/unicode_sanit.py`
+
+Unicode sanitization NFKC (D-IN-005), Simulated.
+
+#### `sanitize(t: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `url_decode_guard`
+
+Source: `components/northstar-agent-runtime/url_decode_guard.py`
+
+URL decoding guard (D-IN-008), Simulated.
+
+#### `has_encoded_attack(t: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
 
 ### `user_profile`
 
@@ -86184,6 +100702,42 @@ Shape an ``audit.ndjson/1`` record for a write-through event.
 
 #### `main()`
 
+### `ws_norm`
+
+Source: `components/northstar-agent-runtime/ws_norm.py`
+
+Whitespace normalization (D-IN-018), Simulated.
+
+#### `normalize(t: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `xss_detect`
+
+Source: `components/northstar-agent-runtime/xss_detect.py`
+
+XSS detection in output (D-OUT-024), Simulated.
+
+#### `detect(text: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `xxe_detect`
+
+Source: `components/northstar-agent-runtime/xxe_detect.py`
+
+XXE detection (D-OUT-028), Simulated.
+
+#### `detect(xml: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
+
 ### `zab_interface`
 
 Source: `components/northstar-agent-runtime/zab_interface.py`
@@ -86554,3 +101108,15 @@ Mint a valid proof for tests/harnesses (prover-side helper).
 #### `main()`
 
 Self-check: valid proof verifies, substituted statement does not.
+
+### `zw_remove`
+
+Source: `components/northstar-agent-runtime/zw_remove.py`
+
+Zero-width removal (D-IN-017), Simulated.
+
+#### `clean(t: str)`
+
+#### `stdlib_only()`
+
+#### `main()`
