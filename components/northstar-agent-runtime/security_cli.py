@@ -55,6 +55,145 @@ def _is_text_candidate(path: Path) -> bool:
     )
 
 
+def _kubernetes_manifest_findings(relative: str, text: str) -> list[dict[str, Any]]:
+    """Report a small set of pod-hardening risks in recognized K8s manifests.
+
+    This intentionally parses only indentation and scalar keys. It is not a
+    YAML parser or Kubernetes schema validator; checks are restricted to
+    documents with an apiVersion and a known workload kind.
+    """
+    if Path(relative).suffix.lower() not in {".yaml", ".yml"}:
+        return []
+
+    findings: list[dict[str, Any]] = []
+    supported_kinds = {
+        "Pod", "PodTemplate", "Deployment", "DaemonSet", "StatefulSet",
+        "Job", "CronJob", "ReplicaSet", "ReplicationController",
+    }
+
+    def add(line: int, column: int, rule: str, severity: str, message: str, remediation: str) -> None:
+        findings.append({
+            "path": relative,
+            "line": line,
+            "column": column,
+            "tool": "dependency-config-scanner",
+            "rule": rule,
+            "severity": severity,
+            "message": message,
+            "remediation": remediation,
+        })
+
+    documents: list[tuple[int, list[str]]] = []
+    current: list[str] = []
+    start_line = 1
+    for line_no, raw in enumerate(text.splitlines(), start=1):
+        if re.match(r"^\s*---\s*(?:#.*)?$", raw):
+            if current:
+                documents.append((start_line, current))
+            current = []
+            start_line = line_no + 1
+        else:
+            current.append(raw)
+    if current:
+        documents.append((start_line, current))
+
+    for document_line, lines in documents:
+        api_version = any(re.match(r"^\s*apiVersion\s*:\s*\S+", line) for line in lines)
+        kind = next((
+            match.group(1)
+            for line in lines
+            if (match := re.match(r"^\s*kind\s*:\s*['\"]?([A-Za-z]+)['\"]?\s*(?:#.*)?$", line))
+        ), None)
+        if not api_version or kind not in supported_kinds:
+            continue
+
+        stack: list[tuple[int, str]] = []
+        for offset, raw in enumerate(lines):
+            line_no = document_line + offset
+            if not raw.strip() or raw.lstrip().startswith("#") or raw.lstrip().startswith("..."):
+                continue
+            if "\t" in raw[:len(raw) - len(raw.lstrip())]:
+                continue
+            indent = len(raw) - len(raw.lstrip(" "))
+            body = raw[indent:]
+            while stack and stack[-1][0] >= indent:
+                stack.pop()
+            parents = [key for _, key in stack]
+
+            if re.match(r"(?i)^-\s*['\"]?ALL['\"]?\s*(?:#.*)?$", body):
+                if (
+                    len(parents) >= 2
+                    and parents[-2:] == ["capabilities", "add"]
+                    and "securityContext" in parents
+                ):
+                    add(
+                        line_no, indent + 1, "CFG013_K8S_CAPABILITIES_ALL", "high",
+                        "container adds every Linux capability",
+                        "Drop all capabilities and add only the specific capability the workload requires.",
+                    )
+                continue
+
+            key_match = re.match(r"^(?:-\s+)?([A-Za-z0-9_.-]+)\s*:\s*(.*?)\s*$", body)
+            if not key_match:
+                continue
+            key, value = key_match.groups()
+            value = re.split(r"\s+#", value, maxsplit=1)[0].strip()
+            scalar = value.strip("'\"")
+            lowered = scalar.casefold()
+            in_security_context = "securityContext" in parents
+            in_container = any(item in parents for item in ("containers", "initContainers", "ephemeralContainers"))
+
+            if key == "privileged" and in_security_context and in_container and lowered in {"true", "yes", "on", "1"}:
+                add(
+                    line_no, indent + 1, "CFG008_K8S_PRIVILEGED", "high",
+                    "container enables privileged mode",
+                    "Disable privileged mode and grant only the specific device or capability the workload needs.",
+                )
+            elif key == "allowPrivilegeEscalation" and in_security_context and in_container and lowered in {"true", "yes", "on", "1"}:
+                add(
+                    line_no, indent + 1, "CFG009_K8S_PRIV_ESCALATION", "high",
+                    "container permits privilege escalation",
+                    "Set allowPrivilegeEscalation to false unless a reviewed workload requirement prevents it.",
+                )
+            elif key == "runAsUser" and in_security_context and scalar == "0":
+                add(
+                    line_no, indent + 1, "CFG010_K8S_RUN_AS_ROOT", "medium",
+                    "pod or container is configured to run as UID 0",
+                    "Use a dedicated non-root UID and set runAsNonRoot where the image supports it.",
+                )
+            elif key == "runAsNonRoot" and in_security_context and lowered in {"false", "no", "off", "0"}:
+                add(
+                    line_no, indent + 1, "CFG010_K8S_RUN_AS_ROOT", "medium",
+                    "pod or container explicitly permits running as root",
+                    "Set runAsNonRoot to true and use an image that supports an unprivileged UID.",
+                )
+            elif key in {"hostNetwork", "hostPID", "hostIPC"} and "spec" in parents and lowered in {"true", "yes", "on", "1"}:
+                add(
+                    line_no, indent + 1, "CFG012_K8S_HOST_NAMESPACE", "high",
+                    "pod shares a host network or process namespace",
+                    "Disable host namespace sharing unless a reviewed node-level workload requires it.",
+                )
+            elif key == "hostPath" and "volumes" in parents:
+                add(
+                    line_no, indent + 1, "CFG011_K8S_HOSTPATH", "high",
+                    "pod mounts a hostPath from the node filesystem",
+                    "Use a scoped persistent volume or projected volume; if hostPath is required, make it read-only and narrowly scoped.",
+                )
+            elif key == "image" and in_container and scalar and "@sha256:" not in scalar:
+                image_name = scalar.split("/")[-1]
+                if re.search(r":latest$", image_name, re.IGNORECASE):
+                    add(
+                        line_no, indent + 1, "CFG014_K8S_LATEST_IMAGE", "medium",
+                        "container image uses the floating latest tag",
+                        "Pin a reviewed image digest and update it through a reviewed change.",
+                    )
+
+            if value == "":
+                stack.append((indent, key))
+
+    return findings
+
+
 def _dependency_config_findings(relative: str, text: str) -> list[dict[str, Any]]:
     """Small offline supply-chain and deployment-config rule set.
 
@@ -243,6 +382,7 @@ def _dependency_config_findings(relative: str, text: str) -> list[dict[str, Any]
                 "infrastructure configuration contains a world-open IPv4 CIDR",
                 "Restrict ingress to required ports and trusted source CIDRs; verify exposure before deployment.",
             )
+    findings.extend(_kubernetes_manifest_findings(relative, text))
     return findings
 
 
@@ -411,6 +551,7 @@ def _scan_root(
         "threshold_findings": threshold_hits,
         "limitations": [
             "rules are heuristic and may miss issues or report false positives",
+            "Kubernetes configuration checks use indentation heuristics, not full YAML or Kubernetes schema validation",
             "dependency checks do not compare package versions with CVE or advisory databases",
             "remediation text is guidance only; no files are changed",
             "a clean result does not prove the workspace is secure",
@@ -465,6 +606,89 @@ def scan_workspace(args: Any) -> int:
             )
         print("Heuristic results only: clean output does not prove security.")
     return 1 if summary["threshold_findings"] else 0
+
+
+def _probe_kubernetes_scanner() -> dict[str, Any]:
+    """Check Kubernetes hardening rules using temporary positive/negative fixtures."""
+    expected_rules = {
+        "CFG008_K8S_PRIVILEGED",
+        "CFG009_K8S_PRIV_ESCALATION",
+        "CFG010_K8S_RUN_AS_ROOT",
+        "CFG011_K8S_HOSTPATH",
+        "CFG012_K8S_HOST_NAMESPACE",
+        "CFG013_K8S_CAPABILITIES_ALL",
+        "CFG014_K8S_LATEST_IMAGE",
+    }
+    vulnerable = """apiVersion: v1
+kind: Pod
+metadata:
+  name: scanner-canary
+spec:
+  hostNetwork: true
+  securityContext:
+    runAsUser: 0
+  containers:
+    - name: app
+      image: nginx:latest
+      securityContext:
+        privileged: true
+        allowPrivilegeEscalation: true
+        capabilities:
+          add:
+            - ALL
+  volumes:
+    - name: host-data
+      hostPath:
+        path: /var/lib
+"""
+    hardened = """apiVersion: v1
+kind: Pod
+metadata:
+  name: scanner-hardened
+spec:
+  hostNetwork: false
+  securityContext:
+    runAsNonRoot: true
+  containers:
+    - name: app
+      image: nginx:1.27
+      securityContext:
+        privileged: false
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+            - ALL
+"""
+
+    with tempfile.TemporaryDirectory(prefix="northstar-security-rules-") as temporary:
+        root = Path(temporary)
+        (root / "vulnerable.yaml").write_text(vulnerable, encoding="utf-8")
+        (root / "hardened.yaml").write_text(hardened, encoding="utf-8")
+        summary = _scan_root(
+            root,
+            max_files=10,
+            max_file_bytes=256 * 1024,
+            fail_on="none",
+            max_findings=100,
+        )
+        vulnerable_rules = {
+            item["rule"] for item in summary["findings"]
+            if item["path"] == "vulnerable.yaml"
+        }
+        hardened_findings = [
+            item for item in summary["findings"] if item["path"] == "hardened.yaml"
+        ]
+        missing = sorted(expected_rules - vulnerable_rules)
+        passed = not missing and not hardened_findings
+        return {
+            "check": "kubernetes-hardening-rules",
+            "passed": passed,
+            "expected_rules": sorted(expected_rules),
+            "detected_rules": sorted(expected_rules & vulnerable_rules),
+            "missing_rules": missing,
+            "hardened_fixture_findings": sorted({item["rule"] for item in hardened_findings}),
+            "scope": "two fixed temporary manifests; automatically removed",
+        }
 
 
 def _probe_runtime() -> dict[str, Any]:
@@ -789,21 +1013,26 @@ def _probe_runtime() -> dict[str, Any]:
             shell_governance_canary,
         )
         absent = all(not path.exists() for path in canaries)
-        success = all(item["blocked"] for item in all_results) and absent
+        defense_check = _probe_kubernetes_scanner()
+        success = all(item["blocked"] for item in all_results) and absent and defense_check["passed"]
         summary = {
             "target": "Northstar AgentRuntime authorization and workspace boundaries",
-            "scope": "temporary workspace and adjacent temporary canary directory only",
+            "scope": "temporary workspace, adjacent temporary canary directory, and disposable scanner fixtures only",
             "network": "disabled; no remote targets",
             "probes": all_results,
+            "defense_checks": [defense_check],
             "shell": {
                 "workspace_boundary": shell_details,
                 "governance_write": shell_governance_details,
             },
-            "side_effects": "none" if absent else "unexpected canary file created in temporary lab",
+            "side_effects": (
+                "temporary scanner fixtures removed automatically; no canary files remain"
+                if absent else "unexpected canary file created in temporary lab"
+            ),
             "status": "pass" if success else "fail",
             "limitation": (
-                "checks fixed local boundary cases only; not a general penetration test "
-                "or host-wide sandbox certification"
+                "checks fixed local boundary cases and scanner fixtures only; not a general "
+                "penetration test or host-wide sandbox certification"
             ),
         }
 
@@ -818,6 +1047,11 @@ def probe_runtime(args: Any) -> int:
         print("Northstar runtime red-team probe (temporary local workspace; network disabled)")
         for item in summary["probes"]:
             print(f"{'PASS' if item['blocked'] else 'FAIL':<8} {item['probe']} [{item['evidence']}]")
+        for item in summary.get("defense_checks", []):
+            print(
+                f"{'PASS' if item['passed'] else 'FAIL':<8} {item['check']} "
+                f"detected={len(item['detected_rules'])}/{len(item['expected_rules'])}"
+            )
         shell = summary.get("shell") or {}
         for label, key in (
             ("shell_workspace", "workspace_boundary"),
@@ -1005,8 +1239,9 @@ def security_tool_specs() -> tuple[Any, Any]:
             name="SecurityProbe",
             description=(
                 "Run fixed authorization, workspace, and governance-boundary probes against fresh Northstar runtimes in a disposable local lab. "
-                "Includes harmless printf Shell canaries whose only targets are inside the temporary lab; no user files, network, "
-                "or external targets are used. Requires --allow-tool SecurityProbe."
+                "Also checks Kubernetes scanner rules against fixed vulnerable and hardened temporary manifests. Includes harmless printf Shell "
+                "canaries whose only targets are inside the temporary lab; no user files, network, or external targets are used. "
+                "Requires --allow-tool SecurityProbe."
             ),
             input_schema={"type": "object", "properties": {}, "additionalProperties": False},
             handler=probe_handler,
