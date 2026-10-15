@@ -94549,7 +94549,7 @@ Raised for a malformed tool payload; reported to the model as an error.
 
 #### `ToolContext`
 
-Read-only environment handed to every handler.
+Environment and run-local tool state handed to every handler.
 
 - `resolve(raw: Any, *, for_write: bool=False, must_exist: bool=False)`
 - `relative(path: Path)`
