@@ -95,13 +95,15 @@ def _checked_usage_count(value: Any, field_name: str) -> int:
 _PROVIDER_USAGE_MISSING = object()
 
 
-def _provider_usage_count(value: Any, key: str, field_name: str) -> int | None:
-    """Return None for an absent field; reject any malformed present value."""
+def _provider_usage_count(
+    value: Any, key: str, field_name: str, *, optional_null: bool = False
+) -> int | None:
+    """Return None for an absent optional field; reject malformed present counts."""
     if isinstance(value, Mapping):
         raw = value.get(key, _PROVIDER_USAGE_MISSING)
     else:
         raw = getattr(value, key, _PROVIDER_USAGE_MISSING)
-    if raw is _PROVIDER_USAGE_MISSING:
+    if raw is _PROVIDER_USAGE_MISSING or (optional_null and raw is None):
         return None
     return _checked_usage_count(raw, field_name)
 
@@ -208,10 +210,10 @@ def _usage_from_provider_value(value: Any) -> Usage:
     input_tokens = _provider_usage_count(value, "input_tokens", "usage.input_tokens")
     output_tokens = _provider_usage_count(value, "output_tokens", "usage.output_tokens")
     cache_read = _provider_usage_count(
-        value, "cache_read_input_tokens", "usage.cache_read_input_tokens"
+        value, "cache_read_input_tokens", "usage.cache_read_input_tokens", optional_null=True
     )
     cache_creation = _provider_usage_count(
-        value, "cache_creation_input_tokens", "usage.cache_creation_input_tokens"
+        value, "cache_creation_input_tokens", "usage.cache_creation_input_tokens", optional_null=True
     )
     return Usage(
         input_tokens=0 if input_tokens is None else input_tokens,
