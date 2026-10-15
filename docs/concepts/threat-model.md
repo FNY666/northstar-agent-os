@@ -16,7 +16,7 @@ release is worse than none.
 | Credentials in the parent environment | API keys, tokens, cloud configs the agent must not inherit |
 | Network egress | Exfil, supply-chain pulls, unexpected C2 |
 | The run's own budget and audit trail | A runaway shell that burns tokens or erases evidence |
-| Policy files under `.northstar/` | Already write-protected by the tool sandbox; shell must not undo that |
+| Policy files under `.northstar/` | Write tools and the bwrap Shell backend keep governance read-only; process fallback cannot isolate workspace subdirectories |
 
 ## Actors
 
@@ -61,10 +61,11 @@ When bubblewrap is installed **and** a real probe succeeds (not merely
 `--version`):
 
 - host paths needed to execute (`/usr`, `/bin`, `/lib`, …) are bound **read-only**;
-- the workspace is the **only writable bind**;
+- the workspace is the **only writable bind**, with `.northstar/` overlaid read-only when governance protection is enabled;
+- the sandbox's private `/tmp` holds command scratch data, so Shell does not need write access to `.northstar/tmp`;
 - network / pid / ipc / uts namespaces are unshared;
 - the child dies with the parent (`--die-with-parent`);
-- env is scrubbed (no parent secrets; `HOME`/`TMPDIR` pinned inside the workspace).
+- env is scrubbed (no parent secrets; `HOME` stays in the workspace and `TMPDIR` uses private `/tmp` when `.northstar/` is protected).
 
 This is what the product means by **OS sandbox**.
 
@@ -79,7 +80,11 @@ When bwrap is missing or unusable on this kernel:
 
 **This is not OS isolation.** A determined command can still `cat /etc/passwd`,
 read `~/.ssh`, or open a socket. Doctor, dry-run, the init event, and every
-Shell tool result say so out loud (`backend=process isolation=process`).
+Shell tool result say so out loud (`backend=process isolation=process`). The
+process backend also cannot keep `.northstar/` read-only while granting Shell
+general workspace writes. `SecurityProbe` reports this boundary as failed when
+its temporary governance canary can be created; use bwrap when a run needs that
+protection.
 
 ### Selection rules (no quiet lies)
 

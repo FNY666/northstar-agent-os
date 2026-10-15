@@ -61,22 +61,22 @@ bin/northstar --version
 bin/northstar agent --workspace . --provider scripted --scripted-text "ok" --prompt "hello"
 bin/northstar resume latest --workspace . --prompt "continue" --scripted-text "ok"
 bin/northstar security scan --workspace .     # 密钥、Python SAST、依赖与部分部署配置检查
-bin/northstar security probe                  # 临时沙箱内验证 runtime 默认拒绝边界
+bin/northstar security probe                  # 临时靶场验证权限与工作区边界
 bin/northstar sessions list --workspace .
 bin/northstar bench                  # 公开治理基准（离线）
 ```
 
-独立 `security` 命令由操作者手动启动。agent 运行也可通过 `--enable-security-tools` 显式注册本地工具：`SecurityScan` 只读当前工作区；`SecurityProbe` 还必须出现在 `--allow-tool` 中，且只在临时目录验证 Northstar 自身的默认权限边界。探针不连接公网或扫描任意目标，也不是通用渗透测试器。扫描覆盖密钥、Python SAST、依赖固定 / 来源和部分容器 / CI / Terraform 配置，finding 按严重级别排序并附修复建议；它不查询 CVE 数据库，也不会自动修改文件。规则可能漏报或误报，干净结果不能证明项目安全。
+独立 `security` 命令由操作者手动启动。agent 运行也可通过 `--enable-security-tools` 显式注册本地工具：`SecurityScan` 只读当前工作区；`SecurityProbe` 还必须出现在 `--allow-tool` 中。探针在临时实验室验证默认权限拒绝、目录穿越读写、越界符号链接读写、`.northstar` 治理文件写保护，以及 Shell 的工作区外写入和治理目录写入边界。Shell 只执行固定的无害 `printf` canary，目标和读泄漏标记都由探针创建在临时目录，运行结束后自动清理；不连接公网、不触碰用户项目，也不是通用渗透测试器。bwrap 可将 `.northstar` 重新挂载为只读并保留 runtime 临时目录；process 回退无法隔离工作区内的子目录，会如实报告并使对应检查失败。扫描覆盖密钥、Python SAST、依赖固定 / 来源和部分容器 / CI / Terraform 配置，finding 按严重级别排序并附修复建议；它不查询 CVE 数据库，也不会自动修改文件。规则可能漏报或误报，干净结果不能证明项目安全。
 
 ```sh
 # 让 agent 检查当前工作区；只注册只读扫描器
 bin/northstar agent --workspace . --enable-security-tools \
   --prompt "调用 SecurityScan 检查本地代码，并总结 findings"
 
-# 同时显式注册并批准临时 runtime 探针
+# 同时显式注册并批准临时权限与隔离边界探针
 bin/northstar agent --workspace . --enable-security-tools \
   --allow-tool SecurityProbe \
-  --prompt "调用 SecurityProbe 验证 Northstar 默认权限边界"
+  --prompt "调用 SecurityProbe 验证 Northstar 权限与工作区隔离边界"
 ```
 
 agent 扫描每次最多读取 1,000 个文本文件、每个文件 256 KiB，最多返回 100 条 finding；CLI 最多输出 1,000 条 finding 明细。模型不能传入目录或 URL。`--read-only` 会拒绝 `SecurityProbe`。

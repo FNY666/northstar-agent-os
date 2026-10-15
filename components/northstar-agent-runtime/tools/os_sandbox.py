@@ -3,14 +3,16 @@
 Two backends, one contract:
 
 * **bwrap** (preferred) — bubblewrap with a read-only host view, a writable
-  bind of the workspace, no network namespace, a seccomp-BPF denylist over
-  escape primitives (``tools/seccomp.py``), and die-with-parent. This is the
-  isolation level the threat model calls a *sandbox*.
+  bind of the workspace with protected governance paths remounted read-only,
+  no network namespace, a seccomp-BPF denylist over escape primitives
+  (``tools/seccomp.py``), and die-with-parent. This is the isolation level
+  the threat model calls a *sandbox*.
 * **process** (fallback) — a scrubbed subprocess with cwd pinned inside the
   workspace, resource limits, and process-group cleanup, plus the same
   seccomp-BPF denylist applied via a prctl wrapper (Linux only). This is *not*
   OS isolation: a determined command can still reach the rest of the host via
-  absolute paths. Doctor and the Shell tool both say so out loud.
+  absolute paths, and protected workspace subdirectories cannot be made
+  read-only. Doctor and the Shell tool both say so out loud.
 
 The runtime never invents a third, quieter mode. ``auto`` picks bwrap when the
 binary exists and can start a throwaway probe; otherwise process. An operator
@@ -108,6 +110,10 @@ class SandboxRequest:
     argv: tuple[str, ...]
     cwd: Path
     workspace: Path
+    #: Workspace-relative governance directories that must remain read-only
+    #: to Shell. The bwrap backend overlays these after the writable workspace
+    #: bind; the process backend cannot express negative subdirectory rules.
+    protected_paths: tuple[str, ...] = ()
     timeout_ms: int = DEFAULT_TIMEOUT_MS
     max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES
     env: Mapping[str, str] | None = None
@@ -315,6 +321,20 @@ def _validate_request(request: SandboxRequest) -> None:
         total += len(item)
     if total > MAX_ARGV_BYTES:
         raise SandboxError(f"argv total size exceeds {MAX_ARGV_BYTES} bytes")
+    if not isinstance(request.protected_paths, tuple):
+        raise SandboxError("protected_paths must be a tuple of relative workspace paths")
+    for protected_path in request.protected_paths:
+        if (
+            not isinstance(protected_path, str)
+            or not protected_path
+            or "\x00" in protected_path
+            or Path(protected_path).is_absolute()
+            or ".." in Path(protected_path).parts
+            or not Path(protected_path).parts
+        ):
+            raise SandboxError(
+                f"protected path must be a workspace-relative path without '..': {protected_path!r}"
+            )
     if request.network:
         raise SandboxError(
             "network=true is not offered yet: the bwrap backend always unshares the network "
@@ -587,6 +607,25 @@ def _bwrap_argv(
     workspace_bind = "--bind"
     if request.pledges is not None and not ({"wpath", "cpath"} & pledges):
         workspace_bind = "--ro-bind"
+    protected_binds: list[str] = []
+    if workspace_bind == "--bind":
+        for protected_path in request.protected_paths:
+            target = workspace / protected_path
+            if target.is_symlink():
+                raise SandboxError(
+                    f"protected workspace path is a symlink and cannot be mounted safely: {protected_path}"
+                )
+            if not target.exists():
+                continue
+            resolved = Path(os.path.realpath(str(target)))
+            try:
+                resolved.relative_to(workspace)
+            except ValueError as error:
+                raise SandboxError(
+                    f"protected workspace path escapes the workspace: {protected_path}"
+                ) from error
+            protected_binds.extend(["--ro-bind", str(resolved), str(resolved)])
+
     # Host paths the child needs to actually execute anything useful. Bound
     # read-only; the workspace is the only writable bind.
     #
@@ -640,6 +679,7 @@ def _bwrap_argv(
         workspace_bind,
         str(workspace),
         str(workspace),
+        *protected_binds,
         "--chdir",
         str(cwd),
         "--",
@@ -661,6 +701,15 @@ def run_sandboxed(
     workspace = Path(os.path.realpath(str(request.workspace)))
     cwd = Path(os.path.realpath(str(request.cwd)))
     env = _scrubbed_env(request.env, workspace=workspace)
+    if ".northstar" in request.protected_paths:
+        if (workspace / ".northstar").is_symlink():
+            raise SandboxError(".northstar is a symlink and cannot be protected safely")
+        if (workspace / ".northstar" / "tmp").is_symlink():
+            raise SandboxError(".northstar/tmp is a symlink and cannot be safely exposed to Shell")
+    if chosen == "bwrap" and ".northstar" in request.protected_paths:
+        # bwrap supplies a private writable /tmp. Keep Shell scratch there so
+        # the governance tree can stay wholly read-only inside the sandbox.
+        env["TMPDIR"] = "/tmp"
     seccomp_mode = (request.seccomp or "auto").strip().lower()
 
     # Pledge semantic layer: declare before anything runs. A Shell execution
@@ -705,6 +754,8 @@ def run_sandboxed(
             raise
         passwd_path, group_path = identity_paths
         detail = "network namespace unshared; workspace is the only writable bind"
+        if request.protected_paths:
+            detail += "; protected workspace paths remounted read-only"
         if (request.landlock or "auto").strip().lower() != "off":
             # Landlock is a process-backend mechanism; bwrap already confines
             # paths more strongly via read-only mounts, so there is nothing
@@ -789,6 +840,11 @@ def run_sandboxed(
         "process backend: cwd pinned and env scrubbed, but the host filesystem "
         "and network are still reachable — install bubblewrap for OS isolation"
     )
+    if request.protected_paths:
+        base_detail += (
+            "; protected workspace paths cannot be made read-only by the process backend: "
+            + ", ".join(request.protected_paths)
+        )
     exec_argv: Sequence[str] = request.argv
     python = shutil.which("python3") or sys.executable
     if seccomp_mode != "off" and sys.platform.startswith("linux"):

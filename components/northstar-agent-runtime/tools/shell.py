@@ -218,6 +218,15 @@ def shell_handler(payload: dict[str, Any], ctx: "ToolContext") -> Any:
             argv=argv,
             cwd=cwd_path,
             workspace=ctx.sandbox.root_real,
+            # Shell retains normal Git workflows, but governance under
+            # .northstar is protected like it is for Write/Edit. The bwrap
+            # backend enforces this with read-only mounts; process mode reports
+            # that it cannot enforce protected subdirectories.
+            protected_paths=(
+                (".northstar",)
+                if ".northstar" in ctx.limits.protected_prefixes
+                else ()
+            ),
             timeout_ms=timeout_ms,
             max_output_bytes=max_output,
             env=env,
