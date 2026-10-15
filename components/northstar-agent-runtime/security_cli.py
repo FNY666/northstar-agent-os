@@ -15,6 +15,7 @@ import os
 import re
 import sys
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -304,6 +305,7 @@ def _scan_root(
     sast_scanner = SASTScanner()
     candidates, limited = _workspace_files(root, max_files)
     findings: list[dict[str, Any]] = []
+    group_counts: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
     findings_count = 0
     threshold_hits = 0
     skipped = 0
@@ -323,6 +325,15 @@ def _scan_root(
         findings_count += 1
         if fail_on != "none" and SEVERITY_RANK[item["severity"]] >= SEVERITY_RANK[fail_on]:
             threshold_hits += 1
+        identity = (
+            item["path"],
+            item["tool"],
+            item["rule"],
+            item["severity"],
+            item["message"],
+        )
+        group = group_counts.setdefault(identity, {**item, "count": 0})
+        group["count"] += 1
         if max_findings is None:
             findings.append(item)
             return
@@ -393,6 +404,7 @@ def _scan_root(
         "findings": findings,
         "findings_count": findings_count,
         "findings_truncated": findings_count > len(findings),
+        "_finding_groups": list(group_counts.values()),
         "fail_on": fail_on,
         "threshold_findings": threshold_hits,
         "limitations": [
@@ -429,6 +441,7 @@ def scan_workspace(args: Any) -> int:
     except ValueError as error:
         print(f"configuration error: {error}", file=sys.stderr)
         return 64
+    summary.pop("_finding_groups", None)
 
     if args.format == "json":
         print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
@@ -542,18 +555,29 @@ def security_tool_specs() -> tuple[Any, Any]:
     """Return opt-in, workspace-bounded agent tools for local scan and probe."""
     from tools import ToolResult, ToolSpec
     probe_has_run = False
+    scan_baselines: dict[str, dict[str, Any]] = {}
 
     def scan_handler(payload: dict[str, Any], ctx: Any) -> ToolResult:
         if not isinstance(payload, dict):
             return ToolResult.error("SecurityScan input must be an object")
-        if set(payload) - {"max_files", "fail_on"}:
-            return ToolResult.error("SecurityScan accepts only max_files and fail_on")
-        max_files = payload.get("max_files", AGENT_SCAN_FILES)
-        fail_on = payload.get("fail_on", "high")
+        if set(payload) - {"max_files", "fail_on", "compare_to"}:
+            return ToolResult.error("SecurityScan accepts max_files, fail_on, and compare_to")
+        compare_to = payload.get("compare_to")
+        if compare_to is not None and not isinstance(compare_to, str):
+            return ToolResult.error("compare_to must be a baseline_id returned by an earlier SecurityScan call")
+        if compare_to is not None and compare_to not in scan_baselines:
+            return ToolResult.error("compare_to is unknown or from another agent run; baselines are run-local")
+        baseline = scan_baselines.get(compare_to, {}) if compare_to is not None else {}
+        max_files = payload.get("max_files", baseline.get("max_files", AGENT_SCAN_FILES))
+        fail_on = payload.get("fail_on", baseline.get("fail_on", "high"))
         if isinstance(max_files, bool) or not isinstance(max_files, int) or not 1 <= max_files <= AGENT_SCAN_FILES:
             return ToolResult.error(f"max_files must be an integer from 1 to {AGENT_SCAN_FILES}")
         if not isinstance(fail_on, str) or fail_on not in SEVERITY_RANK:
             return ToolResult.error("fail_on must be critical, high, medium, low, or none")
+        if compare_to is None and len(scan_baselines) >= 4:
+            return ToolResult.error("SecurityScan stores at most four baselines in one agent run")
+        if compare_to is not None and max_files != baseline["max_files"]:
+            return ToolResult.error("max_files must match the selected baseline to compare the same scan scope")
         if ctx.sandbox is None or not ctx.sandbox.exists:
             return ToolResult.error("SecurityScan requires an existing run workspace")
         try:
@@ -566,6 +590,87 @@ def security_tool_specs() -> tuple[Any, Any]:
             )
         except Exception as error:  # noqa: BLE001 - scan errors fail closed without leaking file contents
             return ToolResult.error(f"SecurityScan could not complete: {type(error).__name__}")
+        groups = summary.pop("_finding_groups", [])
+        if compare_to is not None:
+            baseline = scan_baselines[compare_to]
+            if summary["file_limit_reached"]:
+                return ToolResult.error("current scan reached its file limit; increase max_files and take a new baseline")
+            baseline_groups = baseline["groups"]
+            before = {
+                (item["path"], item["tool"], item["rule"], item["severity"], item["message"]): item
+                for item in baseline_groups
+            }
+            after = {
+                (item["path"], item["tool"], item["rule"], item["severity"], item["message"]): item
+                for item in groups
+            }
+            resolved = []
+            added = []
+            persistent = []
+            persistent_count = 0
+            for identity in sorted(set(before) | set(after)):
+                old_count = int(before.get(identity, {}).get("count", 0))
+                new_count = int(after.get(identity, {}).get("count", 0))
+                if old_count > new_count:
+                    resolved.append({**before[identity], "count": old_count - new_count})
+                elif new_count > old_count:
+                    added.append({**after[identity], "count": new_count - old_count})
+                matched_count = min(old_count, new_count)
+                if matched_count:
+                    persistent.append({**after[identity], "count": matched_count})
+                    persistent_count += matched_count
+            finding_order = lambda item: (  # noqa: E731 - local stable comparison order
+                -SEVERITY_RANK[item["severity"]], item["path"], item["line"], item["rule"]
+            )
+            resolved.sort(key=finding_order)
+            added.sort(key=finding_order)
+            persistent.sort(key=finding_order)
+            resolved_count = sum(item["count"] for item in resolved)
+            added_count = sum(item["count"] for item in added)
+            comparison = {
+                "mode": "post-fix comparison",
+                "baseline_id": compare_to,
+                "baseline_findings_count": sum(int(item["count"]) for item in baseline_groups),
+                "current_findings_count": summary["findings_count"],
+                "files_scanned": summary["files_scanned"],
+                "files_skipped": summary["files_skipped"],
+                "max_files": max_files,
+                "fail_on": fail_on,
+                "threshold_findings": summary["threshold_findings"],
+                "resolved_count": resolved_count,
+                "new_count": added_count,
+                "persistent_count": persistent_count,
+                "status": (
+                    "unchanged" if resolved_count == 0 and added_count == 0
+                    else "improved" if added_count == 0
+                    else "regressed" if resolved_count == 0
+                    else "mixed"
+                ),
+                "resolved": resolved[:AGENT_SCAN_FINDINGS],
+                "new": added[:AGENT_SCAN_FINDINGS],
+                "persistent": persistent[:AGENT_SCAN_FINDINGS],
+                "details_truncated": any(
+                    len(items) > AGENT_SCAN_FINDINGS for items in (resolved, added, persistent)
+                ),
+                "limitations": summary["limitations"],
+            }
+            return ToolResult(
+                content=json.dumps(comparison, ensure_ascii=False, sort_keys=True),
+                is_error=bool(summary["threshold_findings"]),
+                truncated=comparison["details_truncated"],
+            )
+
+        if summary["file_limit_reached"]:
+            summary["baseline_comparable"] = False
+            summary["baseline_note"] = "file limit reached; increase max_files and take a complete baseline before making changes"
+        else:
+            baseline_id = uuid.uuid4().hex[:12]
+            scan_baselines[baseline_id] = {"groups": groups, "max_files": max_files, "fail_on": fail_on}
+            summary["baseline_id"] = baseline_id
+            summary["next_step"] = (
+                "After any separately authorized changes, call SecurityScan again with "
+                f"compare_to={baseline_id!r} to compare findings."
+            )
         return ToolResult(
             content=json.dumps(summary, ensure_ascii=False, sort_keys=True),
             is_error=bool(summary["threshold_findings"]),
@@ -596,13 +701,16 @@ def security_tool_specs() -> tuple[Any, Any]:
             description=(
                 "Read-only offline heuristic scan of the current run workspace for likely secrets, Python SAST issues, "
                 "dependency pinning/source risks, and selected deployment misconfigurations. No path or URL is accepted; "
-                "findings omit secret values and include remediation guidance. No CVE database is queried."
+                "findings omit secret values and include remediation guidance. The first call returns a run-local baseline_id; "
+                "pass it as compare_to on a later call to retest after changes. Writes still require separate tool approval; "
+                "no CVE database is queried."
             ),
             input_schema={
                 "type": "object",
                 "properties": {
                     "max_files": {"type": "integer", "minimum": 1, "maximum": AGENT_SCAN_FILES},
                     "fail_on": {"type": "string", "enum": list(SEVERITY_RANK)},
+                    "compare_to": {"type": "string", "description": "baseline_id returned by an earlier scan in this same agent run"},
                 },
                 "additionalProperties": False,
             },

@@ -81,6 +81,14 @@ bin/northstar agent --workspace . --enable-security-tools \
 
 agent 扫描每次最多读取 1,000 个文本文件、每个文件 256 KiB，最多返回 100 条 finding；CLI 最多输出 1,000 条 finding 明细。模型不能传入目录或 URL。`--read-only` 会拒绝 `SecurityProbe`。
 
+需要修复和复测时，可让 agent 先扫描拿到 `baseline_id`，再经单独授权使用 `Write` / `Edit` 修复，最后调用 `SecurityScan` 并传入 `compare_to`。比较结果列出已消失、新增和仍存在的发现；基线只在本次 agent 运行内有效。扫描器不代替 agent 写文件。
+
+```sh
+bin/northstar agent --workspace . --coding-mode --enable-security-tools \
+  --allow-tool Write --allow-tool Edit \
+  --prompt "先调用 SecurityScan 并保存 baseline_id；审阅发现后修复明确的问题，再用 compare_to 对该基线复测并汇报新增、消失和残留项"
+```
+
 编程任务可使用 `--coding-mode` 引导 agent 按“检查仓库 → 制定计划 → 修改 → 运行已授权的检查 → 审阅 diff”工作。它不会自动授予文件写入或 Shell 权限；请只放行本次需要的工具：
 
 ```sh
