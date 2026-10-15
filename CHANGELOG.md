@@ -4,6 +4,13 @@ The runtime API manifest and generated reference now include the 518 public
 modules that were missing from the catalog. The existing generated/internal
 exclusions remain explicit.
 
+## Unreleased — run the complete runtime test suite in CI
+
+The runtime CI job installs its test-only pytest dependency and uses pytest to
+run both unittest classes and standalone pytest tests. Three tests now resolve
+the runtime component relative to their own file instead of a developer's
+worktree path.
+
 ## Unreleased — delegation expiry uses timezone-aware instants
 
 `agent_identity.verify_delegation_chain()` now parses expiry and reference
