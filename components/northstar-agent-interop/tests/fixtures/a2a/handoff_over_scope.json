@@ -1,0 +1,21 @@
+{
+  "schema_version": "northstar.handoff-request.v1",
+  "handoff_id": "handoff-a2a-over-scope",
+  "task_id": "task-001",
+  "thread_id": "thread-001",
+  "run_id": "run-001",
+  "actor_id": "actor-001",
+  "workspace_id": "workspace-001",
+  "policy_revision": "policy-1",
+  "source_agent_id": "claude-code",
+  "target_agent_id": "codex",
+  "step_id": "implementation",
+  "trace_id": "trace-001",
+  "input_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "requested_capabilities": ["workspace:read", "workspace:write", "secrets:read"],
+  "expected_postconditions": ["tests_pass"],
+  "delegation_depth": 1,
+  "deadline_at": 1700,
+  "requested_at": 1000,
+  "idempotency_key": "handoff-a2a-over-scope-attempt-1"
+}

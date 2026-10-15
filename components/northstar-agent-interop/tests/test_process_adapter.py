@@ -408,6 +408,7 @@ class ProcessAdapterTests(unittest.TestCase):
 
         unsafe = self.root / "unsafe"
         unsafe.mkdir(mode=0o755)
+        os.chmod(unsafe, 0o755)  # mkdir mode is narrowed by the process umask.
         self.adapter._workspace_resolver = lambda workspace_id: unsafe
         with self.assertRaises(ValueError):
             self.adapter.execute(

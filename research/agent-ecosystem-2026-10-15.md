@@ -32,6 +32,12 @@
 
 SDK 行为与规范分开记录：官方 TypeScript SDK v2 将 2024-10-07 至 2025-11-25 归为一个旧代际，`versionNegotiation.mode: 'auto'` 会先探测再回退，而默认仍是旧握手；Python SDK v2 的高阶 `Client` 默认 `auto`，而底层 `ClientSession.initialize()` 仍是显式旧握手入口。两者均把 2026 版的 MRTR 字段、逐请求元数据及结果判别留在线路层处理。Northstar 仅实现 stdio 的工具调用路径，不据此声称支持现代 Streamable HTTP、subscriptions/listen 或 Tasks。
 
+## A2A 身份与传输边界核对（2026-10-15）
+
+A2A v1.0.1 的 Agent Card 以 `supportedInterfaces` 声明协议绑定、版本和 URL；skills 与 extensions 描述远端行为，不是 Northstar 的本机权限。Card 的 JWS 只有在签名密钥通过独立 host trust store 绑定身份时才提供身份依据。设计记录明确将 operator 配置的 principal、允许 origin、TLS 身份、凭据 audience 和当前 host grant 分开，并要求禁重定向、拦截私网/链路本地/metadata 地址、限制 DNS rebinding、响应大小和远端任务引用。
+
+离线夹具覆盖了 link-local metadata endpoint、skills/extensions 冒称 `workspace:write` 与 `secrets:read`、card 内攻击者控制的签名 key，以及超出 parent grant 的 handoff。现有 handoff 测试验证 Agent Card 不能直接成为 registry profile，且 parent capability 与 target profile 任一上限都能拒绝扩权。夹具不是未来 HTTP client 的 URL/TLS/DNS 实现测试；真实网络客户端仍需另行审查并通过独立 adversarial canary。
+
 ## 本轮代码审查与修复
 
 最新主线提交加入了具名 Shell session，让多次工具调用可以沿用 cwd 和额外环境变量。原实现的全局状态表与文档中的「仅当前 run」承诺不一致：
@@ -47,7 +53,7 @@ SDK 行为与规范分开记录：官方 TypeScript SDK v2 将 2024-10-07 至 20
 
 1. **完成 Shell 生命周期验证**：补上上面的跨 run 回归测试，并运行 Shell session、runtime、全仓离线套件。检查子代理共享/隔离语义是否与文档一致。
 2. **维护 MCP 代际矩阵（本轮已核对）**：现代发现、逐请求元数据、MRTR/取消及旧代际初始化与拒绝回退已有线上格式夹具；继续在协议或官方 SDK 改变协商语义时更新矩阵。
-3. **将 A2A 保持在明确边界之后**：先写 transport/身份设计和恶意 Agent Card/超范围 capability fixtures，再决定是否接真实网络客户端。
+3. **A2A 边界设计与离线 fixtures（本轮已完成）**：transport/身份决策、恶意 Agent Card 与超范围 handoff fixture 已落文档并由本地合同测试覆盖；真实网络客户端仍需 host trust/config、DNS 与 redirect guard、凭据 audience、bounded task/stream 与独立 adversarial canary 后再决定。
 4. **为远程 sandbox 预留后端，不扩张默认权限**：执行 backend 应报告隔离等级、运行身份、workspace digest 与可验证 receipt；本地 process fallback 仍必须如实标为非 OS 隔离。
 5. **最后再做事件触发的长期 agent**：GitHub/Slack/cron 触发要绑定 host 身份、显式数据域、预算上限、幂等键与人工 review。自动创建 draft PR 可以纳入产品，自动合并或绕过 permission gate 不应纳入默认路径。
 
@@ -60,6 +66,8 @@ SDK 行为与规范分开记录：官方 TypeScript SDK v2 将 2024-10-07 至 20
 - [官方 TypeScript SDK v2：protocol versions](https://ts.sdk.modelcontextprotocol.io/v2/protocol-versions) · [2026-07-28 support](https://ts.sdk.modelcontextprotocol.io/v2/migration/support-2026-07-28)
 - [官方 Python SDK v2：protocol versions](https://py.sdk.modelcontextprotocol.io/protocol-versions/) · [v2 behavior changes](https://py.sdk.modelcontextprotocol.io/whats-new/)
 - [A2A v1.0.1 规范](https://a2a-protocol.org/v1.0.1/specification/)
+- [A2A Agent Card 字段与签名](https://a2a-protocol.org/v1.0.1/specification/#441-agentcard) · [Discovery 与协议绑定](https://a2a-protocol.org/v1.0.1/specification/#82-discovery-mechanisms)
+- [A2A 授权范围与安全考虑](https://a2a-protocol.org/v1.0.1/specification/#131-data-access-and-authorization-scoping)
 - [Agent Skills 规范](https://agentskills.io/specification)
 - [OpenAI Agents SDK sandbox guide](https://openai.github.io/openai-agents-python/sandbox/guide/) · [确定性测试工具](https://openai.github.io/openai-agents-python/testing/)
 - [OpenHands sandbox guide](https://docs.openhands.dev/openhands/usage/advanced/custom-sandbox-guide) · [Agent Server 与托管 microVM 公告](https://hub.openhands.dev/blog/run-digitalocean-managed-agents-with-openhands)

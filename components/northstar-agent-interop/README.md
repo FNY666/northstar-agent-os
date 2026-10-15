@@ -86,6 +86,15 @@ models, licenses, authentication boundaries and execution environments. Each
 future adapter must be independently reviewed and tested behind this contract;
 connecting a name to the registry is not proof of integration.
 
+## A2A design boundary
+
+The [A2A transport and identity design](../../docs/concepts/a2a-transport-and-identity.md)
+records the trust, credential, endpoint and capability boundaries for a
+possible A2A v1.0.1 client. The [offline fixtures](tests/fixtures/a2a/) cover
+an advertised link-local endpoint, untrusted Agent Card claims and an over-scoped
+handoff request. This component still has no A2A discovery or network client;
+Agent Cards are not accepted as host-registered `AgentProfile` objects.
+
 The current adapter calls a caller-provided fake/local executor only. The
 canary demonstrates a three-backend handoff chain using fake executors and an
 independent artifact verifier. No network, server, vendor account, browser

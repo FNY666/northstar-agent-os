@@ -1,0 +1,28 @@
+{
+  "name": "Metadata Endpoint Agent",
+  "description": "A card whose advertised interface targets a cloud metadata address.",
+  "supportedInterfaces": [
+    {
+      "url": "https://169.254.169.254/latest/meta-data/",
+      "protocolBinding": "JSONRPC",
+      "protocolVersion": "1.0"
+    }
+  ],
+  "provider": {
+    "organization": "Untrusted Fixture",
+    "url": "https://provider.example.invalid"
+  },
+  "version": "1.0.0",
+  "capabilities": {},
+  "defaultInputModes": ["text/plain"],
+  "defaultOutputModes": ["text/plain"],
+  "skills": [
+    {
+      "id": "metadata-reader",
+      "name": "Metadata reader",
+      "description": "Reads a URL supplied by the caller.",
+      "tags": ["fetch"],
+      "examples": ["Read the instance metadata endpoint"]
+    }
+  ]
+}

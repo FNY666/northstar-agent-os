@@ -1,10 +1,14 @@
+import ipaddress
+import json
 import sys
 import unittest
 from pathlib import Path
+from urllib.parse import urlsplit
 
 COMPONENT_ROOT = Path(__file__).resolve().parents[1]
 HOST_ROOT = COMPONENT_ROOT.parent / "northstar-host"
 CONTRACT_ROOT = COMPONENT_ROOT.parent / "northstar-run-contract"
+A2A_FIXTURE_ROOT = COMPONENT_ROOT / "tests" / "fixtures" / "a2a"
 sys.path.insert(0, str(COMPONENT_ROOT))
 sys.path.insert(0, str(HOST_ROOT))
 sys.path.insert(0, str(CONTRACT_ROOT))
@@ -33,7 +37,8 @@ ATTESTATION_SECRET = b"handoff-attestation-secret"
 HANDOFF_SECRET = b"handoff-grant-secret"
 
 
-def run_request():
+def run_request(*, capabilities: list[str] | None = None):
+    requested = capabilities if capabilities is not None else ["workspace:read", "workspace:write"]
     return {
         "schema_version": "northstar.run.v1",
         "run_id": "run-001",
@@ -42,13 +47,14 @@ def run_request():
         "task_kind": "implementation",
         "prompt": "Fix the isolated fixture.",
         "timeout_ms": 10_000,
-        "requested_capabilities": ["workspace:read", "workspace:write"],
+        "requested_capabilities": requested,
         "parent_run_id": None,
     }
 
 
-def root_authorization(*, now=1_000, expires_at=1_900):
-    run = run_request()
+def root_authorization(*, now=1_000, expires_at=1_900, capabilities: list[str] | None = None):
+    allowed = capabilities if capabilities is not None else ["workspace:read", "workspace:write"]
+    run = run_request(capabilities=allowed)
     binding = {
         "schema_version": run["schema_version"],
         "run_id": run["run_id"],
@@ -63,7 +69,7 @@ def root_authorization(*, now=1_000, expires_at=1_900):
         run,
         verified,
         HostPolicy.from_mapping(
-            "policy-1", {"actor-001": ["workspace:read", "workspace:write"]}
+            "policy-1", {"actor-001": allowed}
         ),
         now=now,
         secret=AUTHORIZATION_SECRET,
@@ -501,6 +507,93 @@ class HandoffAuthorizationTests(unittest.TestCase):
     def test_wildcard_capability_components_are_rejected(self):
         with self.assertRaises(ValueError):
             handoff_request(capabilities=["workspace:*"])
+
+
+class A2AOfflineTrustBoundaryTests(unittest.TestCase):
+    def fixture(self, name):
+        return json.loads((A2A_FIXTURE_ROOT / name).read_text(encoding="utf-8"))
+
+    def test_agent_cards_cannot_be_registered_as_host_agent_profiles(self):
+        registry_value = registry()
+        for name in ("agent_card_ssrf.json", "agent_card_overclaim.json"):
+            card = self.fixture(name)
+            with self.subTest(fixture=name), self.assertRaises(ValueError):
+                AgentProfile.from_dict(card)
+            with self.subTest(fixture=name), self.assertRaises(ValueError):
+                registry_value.register(card)
+        self.assertEqual(
+            registry_value.get("codex").capabilities,
+            frozenset({"workspace:read", "workspace:write"}),
+        )
+
+    def test_ssrf_fixture_still_targets_link_local_metadata_without_network_access(self):
+        card = self.fixture("agent_card_ssrf.json")
+        endpoint = urlsplit(card["supportedInterfaces"][0]["url"])
+        self.assertEqual(endpoint.scheme, "https")
+        self.assertTrue(ipaddress.ip_address(endpoint.hostname).is_link_local)
+
+    def test_card_skill_and_extension_claims_do_not_widen_the_host_grant(self):
+        card = self.fixture("agent_card_overclaim.json")
+        extension_claims = card["capabilities"]["extensions"][0]["params"]["northstarCapabilities"]
+        self.assertIn("workspace:write", extension_claims)
+        self.assertIn("secrets:read", extension_claims)
+        self.assertEqual(card["signatures"][0]["header"]["kid"], "attacker-controlled-key")
+
+        root = verify_authorization(
+            root_authorization(capabilities=["workspace:read"]),
+            AUTHORIZATION_SECRET,
+            now=1_000,
+        )
+        source = verify_attestation(
+            sign_attestation(
+                attestation(capabilities=["workspace:read", "workspace:write", "secrets:read"]),
+                ATTESTATION_SECRET,
+            ),
+            ATTESTATION_SECRET,
+            now=1_000,
+        )
+        request = HandoffRequest.from_dict(self.fixture("handoff_over_scope.json"))
+        with self.assertRaisesRegex(ValueError, "handoff capability exceeds parent authorization"):
+            authorize_handoff(
+                request,
+                parent_authorization=root,
+                source_attestation=source,
+                registry=registry(),
+                current_policy_revision="policy-1",
+                now=1_001,
+                secret=HANDOFF_SECRET,
+            )
+
+    def test_registered_target_ceiling_still_applies_when_parent_allows_more(self):
+        root = verify_authorization(root_authorization(), AUTHORIZATION_SECRET, now=1_000)
+        source = verify_attestation(
+            sign_attestation(attestation(), ATTESTATION_SECRET),
+            ATTESTATION_SECRET,
+            now=1_000,
+        )
+        read_only_registry = AgentRegistry()
+        read_only_registry.register(
+            AgentProfile.from_dict(
+                {
+                    "schema_version": "northstar.agent-profile.v1",
+                    "agent_id": "codex",
+                    "provider": "openai",
+                    "version": "agent-v1",
+                    "capabilities": ["workspace:read"],
+                }
+            )
+        )
+        request = handoff_request(capabilities=["workspace:write"])
+        with self.assertRaisesRegex(ValueError, "target agent does not support requested capabilities"):
+            authorize_handoff(
+                request,
+                parent_authorization=root,
+                source_attestation=source,
+                registry=read_only_registry,
+                current_policy_revision="policy-1",
+                now=1_001,
+                secret=HANDOFF_SECRET,
+            )
 
 
 if __name__ == "__main__":
