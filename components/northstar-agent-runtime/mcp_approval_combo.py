@@ -9,7 +9,8 @@ module composes the two into one per-call decision point for MCP tool use:
   admission baseline on every call.
 * :mod:`approval_chain` — the human-authorization chain (SLA queue ->
   signed receipt -> edge gate). Security-sensitive tools require a
-  signed receipt; the receipt must bind the exact tool name.
+  signed receipt; this gate also pins the canonical action payload digest,
+  so a receipt cannot be reused with changed arguments.
 
 Check order, fail closed:
 
@@ -33,12 +34,18 @@ see a server that lies consistently (same lie in baseline and fresh
 response passes the drift check), and it cannot prove the tool did what
 it claimed — that is the audit layer's job. A clean ``allow`` means
 "surface unchanged, tool advertised, authorization satisfied", never
-"the tool is trustworthy".
+"the tool is trustworthy". The exact argument digest is kept in process-local
+state keyed by the signed request id; after restart or on another gate
+instance, the receipt fails closed. Durable multi-process approval requires
+persisting this binding with the approval.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
+from hmac import compare_digest
 from typing import Any, Mapping, Optional, Sequence
+
+from canonical_json import JcsError, jcs_sha256_hex
 
 from mcp_drift_monitor import (
     McpToolSnapshot,
@@ -47,6 +54,7 @@ from mcp_drift_monitor import (
     snapshot_tools,
 )
 from approval_chain import ApprovalChain
+from signed_receipt_reflux import SignedReceipt
 
 #: Version pin for this module.
 MCP_APPROVAL_COMBO_VERSION = "mcp-approval-combo.v1"
@@ -66,6 +74,16 @@ def _check_seq(name: str, value: Any) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ValueError(f"{name} must be a non-negative int")
     return value
+
+
+def _argument_digest(action: Mapping[str, Any] | None) -> str:
+    """Digest all call fields; the signed receipt independently binds the tool name."""
+    payload = dict(action) if action is not None else {}
+    payload.pop("action_type", None)
+    try:
+        return jcs_sha256_hex(payload)
+    except (JcsError, TypeError, ValueError, OverflowError) as error:
+        raise ValueError("action must contain only canonical JSON values") from error
 
 
 @dataclass(frozen=True)
@@ -120,6 +138,9 @@ class MCPApprovalGate:
             raise TypeError("chain must be an ApprovalChain")
         self._baseline = baseline
         self._chain = chain
+        # The chain is in-memory too; losing this request binding on restart
+        # fails closed because an otherwise valid receipt will have no digest.
+        self._approval_digests: dict[str, str] = {}
 
     # -- hop 0: park a tool call for human approval ------------------------
 
@@ -129,16 +150,25 @@ class MCPApprovalGate:
         reason: str,
         current_seq: int,
         sla_ticks: int | None = None,
+        *,
+        action: Mapping[str, Any] | None = None,
     ) -> str:
-        """Park ``tool_name`` for human approval; returns the request id.
+        """Park one exact MCP action for human approval; return its request id.
 
-        The receipt is issued against the tool name itself, so the call
-        must later present an action whose ``action_type`` is this name.
+        ``action`` contains the call arguments. The gate stores a JCS
+        SHA-256 digest over those fields plus the forced ``action_type``.
+        Omitting it binds approval to an empty argument object, so a later
+        call with parameters is refused.
         """
         _check_text("tool_name", tool_name)
-        return self._chain.request_approval(
+        if action is not None and not isinstance(action, Mapping):
+            raise TypeError("action must be a mapping or None")
+        digest = _argument_digest(action)
+        request_id = self._chain.request_approval(
             tool_name, reason, current_seq, sla_ticks=sla_ticks
         )
+        self._approval_digests[request_id] = digest
+        return request_id
 
     # -- the gate ----------------------------------------------------------
 
@@ -220,6 +250,41 @@ class MCPApprovalGate:
                 receipt_ok=False,
                 reason="receipt-required",
             )
+        # The signed receipt pins the tool identity in ApprovalChain; this
+        # host-side binding pins the exact canonical arguments for that
+        # request. Check before calling the chain so a mismatched attempt
+        # cannot consume a still-valid one-shot receipt.
+        if not isinstance(receipt, SignedReceipt):
+            return GateDecision(
+                verdict="deny",
+                tool_name=tool_name,
+                drift_decision="allow",
+                receipt_required=True,
+                receipt_ok=False,
+                reason="invalid-receipt",
+            )
+        approved_digest = self._approval_digests.get(receipt.request_id)
+        try:
+            current_digest = _argument_digest(extras)
+        except ValueError:
+            return GateDecision(
+                verdict="deny",
+                tool_name=tool_name,
+                drift_decision="allow",
+                receipt_required=True,
+                receipt_ok=False,
+                reason="action-not-canonical-json",
+            )
+        if approved_digest is None or not compare_digest(approved_digest, current_digest):
+            return GateDecision(
+                verdict="deny",
+                tool_name=tool_name,
+                drift_decision="allow",
+                receipt_required=True,
+                receipt_ok=False,
+                reason="action-payload-mismatch",
+            )
+
         detailed = self._chain.execute_detailed(
             extras, receipt, current_seq=current_seq
         )
@@ -232,6 +297,7 @@ class MCPApprovalGate:
                 receipt_ok=detailed.receipt_ok,
                 reason=f"chain-deny: {detailed.reason}",
             )
+        self._approval_digests.pop(receipt.request_id, None)
         return GateDecision(
             verdict="allow",
             tool_name=tool_name,
