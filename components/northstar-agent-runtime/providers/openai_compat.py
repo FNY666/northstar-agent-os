@@ -54,7 +54,7 @@ from providers.base import (
     ToolResultBlock,
     ToolUseBlock,
     Usage,
-    _checked_usage_count,
+    _provider_usage_count,
 )
 
 #: Model families that reject ``max_tokens`` and want the reasoning-era name.
@@ -448,18 +448,21 @@ def _usage(response: Any) -> Usage:
         if not isinstance(details, Mapping) and not hasattr(details, "cached_tokens"):
             raise ProviderError("openai-compatible provider returned malformed usage details")
         cached_tokens = _field(details, "cached_tokens", None)
+    input_tokens = _provider_usage_count(raw, "prompt_tokens", "usage.prompt_tokens")
+    output_tokens = _provider_usage_count(raw, "completion_tokens", "usage.completion_tokens")
+    # Providers that do server-side prefix caching report it here; mapping it
+    # onto the cache fields keeps the cost view comparable across backends.
+    cached_count = (
+        _provider_usage_count(
+            details, "cached_tokens", "usage.prompt_tokens_details.cached_tokens"
+        )
+        if details is not None
+        else None
+    )
     return Usage(
-        input_tokens=_checked_usage_count(
-            _field(raw, "prompt_tokens", None), "usage.prompt_tokens"
-        ),
-        output_tokens=_checked_usage_count(
-            _field(raw, "completion_tokens", None), "usage.completion_tokens"
-        ),
-        # Providers that do server-side prefix caching report it here; mapping it
-        # onto the cache fields keeps the cost view comparable across backends.
-        cache_read_input_tokens=_checked_usage_count(
-            cached_tokens, "usage.prompt_tokens_details.cached_tokens"
-        ),
+        input_tokens=0 if input_tokens is None else input_tokens,
+        output_tokens=0 if output_tokens is None else output_tokens,
+        cache_read_input_tokens=0 if cached_count is None else cached_count,
     )
 
 
