@@ -452,7 +452,10 @@ def _usage(response: Any) -> Usage:
     # onto the cache fields keeps the cost view comparable across backends.
     cached_count = (
         _provider_usage_count(
-            details, "cached_tokens", "usage.prompt_tokens_details.cached_tokens"
+            details,
+            "cached_tokens",
+            "usage.prompt_tokens_details.cached_tokens",
+            optional_null=True,
         )
         if details is not None
         else None
