@@ -1061,13 +1061,15 @@ class McpStdioClient:
                 self._pending_list_changed = True
 
     def subscribe_list_changed(self) -> None:
-        """Allow a locally observed ``tools/list_changed`` to trigger an early refresh.
+        """Opt in to ``notifications/tools/list_changed`` (spec: explicit opt-in required).
 
-        This records local handling only; the stdio client does not open the
-        long-lived ``subscriptions/listen`` stream required by MCP 2026-07-28.
-        Correctness does not depend on this flag because every tool call
-        revalidates the pinned definitions before invoking the server.
+        Per MCP 2026-07-28, the server MUST NOT send this notification type
+        unless the client requested it via ``subscriptions/listen``. Calling
+        this records the opt-in; notifications arriving before it are treated
+        as spec violations.
         """
+        # This is local filtering only: it does not send a subscriptions/listen
+        # request. Per-call revalidation remains authoritative.
         self._list_changed_subscribed = True
 
     def _read_line(self, deadline: float) -> str | None:
