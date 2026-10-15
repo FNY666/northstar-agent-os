@@ -220,7 +220,12 @@ def _usage_mapping(response: Any) -> dict[str, int]:
         raise ProviderError("anthropic returned a malformed usage object")
     mapping: dict[str, int] = {}
     for key in fields:
-        count = _provider_usage_count(usage, key, f"usage.{key}")
+        count = _provider_usage_count(
+            usage,
+            key,
+            f"usage.{key}",
+            optional_null=key in {"cache_read_input_tokens", "cache_creation_input_tokens"},
+        )
         if count is not None:
             mapping[key] = count
     return mapping
