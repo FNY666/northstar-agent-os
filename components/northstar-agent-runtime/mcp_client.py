@@ -123,20 +123,27 @@ class RemoteTool:
 
 
 def tool_definition_digest(
+    server: str, name: str, description: str, input_schema: Mapping[str, Any]
+) -> str:
+    """Canonical digest pinning one MCP tool's definition.
+
+    Covers ``(server identity, tool name, description, input_schema)`` with
+    the JCS canonicalization, so any drift -- a renamed tool, a rewritten
+    description, a widened schema -- changes the digest. The admission
+    baseline stores these digests; ``refresh_tools`` recomputes them and
+    quarantines the server on mismatch.
+    """
+    return _tool_definition_digest(server, name, description, input_schema)
+
+
+def _tool_definition_digest(
     server: str,
     name: str,
     description: str,
     input_schema: Mapping[str, Any],
     output_schema: Mapping[str, Any] | None = None,
 ) -> str:
-    """Canonical digest pinning one MCP tool's definition.
-
-    Covers ``(server identity, tool name, description, input_schema)`` and,
-    when present, ``output_schema`` with JCS canonicalization. Omitting the
-    optional schema keeps existing input-only digests stable. The admission
-    baseline stores these digests; ``refresh_tools`` recomputes them and
-    quarantines the server on mismatch.
-    """
+    """Canonical digest including MCP's optional output schema when present."""
     from canonical_json import jcs_canonical_json as _jcs
 
     payload: dict[str, Any] = {
@@ -521,7 +528,7 @@ class McpStdioClient:
                     description=description,
                     input_schema=schema,
                 )
-                self._tool_digests[tool_name] = tool_definition_digest(
+                self._tool_digests[tool_name] = _tool_definition_digest(
                     self.name, tool_name, description, schema, output_schema
                 )
                 # Admission coercion screen: flag descriptions that try to
@@ -724,7 +731,7 @@ class McpStdioClient:
                 tool_name=tool_name,
                 during_revalidation=True,
             )
-            observed[tool_name] = tool_definition_digest(
+            observed[tool_name] = _tool_definition_digest(
                 self.name, tool_name, description, schema, output_schema
             )
         drifts: list[ToolDrift] = []
