@@ -79384,9 +79384,9 @@ The permission mode the run uses, after the policy file and plugins had their sa
 
 ``(definition, registry, allowed)`` for a run *as* a named agent (--agent or the policy file).
 
-#### `tighten(cli_value: int | None, file_value: int | None)`
+#### `tighten(cli_value: int | float | None, file_value: int | float | None)`
 
-Policy-file ceilings may only lower; when both are set, the lower wins.
+Configuration ceilings may only lower; when multiple are set, the lower wins.
 
 #### `Ceilings`
 
