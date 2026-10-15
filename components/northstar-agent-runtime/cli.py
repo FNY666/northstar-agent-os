@@ -336,13 +336,21 @@ def _add_policy_arguments(parser: argparse.ArgumentParser) -> None:
                 "diff review, and evidence reporting; does not grant tools"
             ),
         )
+        policy.add_argument(
+            "--enable-security-tools",
+            action="store_true",
+            help=(
+                "register workspace-bounded SecurityScan and SecurityProbe for this run; "
+                "SecurityProbe is registered only when also named by --allow-tool"
+            ),
+        )
         policy.add_argument("--permission-mode", choices=("default", "acceptEdits", "plan", "bypassPermissions"), default="default")
         policy.add_argument("--allow-tool", action="append", default=[], metavar="NAME", help="auto-approve a tool (repeatable)")
         policy.add_argument("--deny-tool", action="append", default=[], metavar="NAME", help="always refuse a tool, and remove it from the allow list (repeatable)")
         policy.add_argument(
             "--read-only",
             action="store_true",
-            help="deny Write, Edit, and Shell (no file mutations and no command execution)",
+            help="deny Write, Edit, Shell, and SecurityProbe (no file mutations, command execution, or probes)",
         )
         policy.add_argument("--plan", action="store_true", help="shorthand for --permission-mode plan")
         policy.add_argument("--agent", default="", help="run as a built-in subagent definition (its tools and ceilings apply)")
@@ -1316,6 +1324,16 @@ def _run(args: argparse.Namespace) -> int:
         return USAGE_ERROR
 
     registry = build_default_registry()
+    if args.enable_security_tools:
+        from security_cli import security_tool_specs
+
+        scan_spec, probe_spec = security_tool_specs()
+        registry.register(scan_spec)
+        # Requiring the name in the raw CLI allow list makes the probe's
+        # double opt-in survive bypassPermissions, whose contract allows all
+        # registered tools automatically.
+        if any(str(name).strip().casefold() == "securityprobe" for name in args.allow_tool):
+            registry.register(probe_spec)
     agents = builtin_registry()
     plugins = load_plugins(args, registry)
     workspace_agents = load_workspace_agents(args, agents, registry, plugins)

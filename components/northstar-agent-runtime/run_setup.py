@@ -36,7 +36,7 @@ class RunConfigurationError(ValueError):
 
 #: Tools that change state; ``--read-only`` refuses them at the gate.
 #: Shell is included: a "read-only" run must not execute commands either.
-MUTATING_TOOLS = ("Write", "Edit", "Shell")
+MUTATING_TOOLS = ("Write", "Edit", "Shell", "SecurityProbe")
 
 
 def tool_lists(args: argparse.Namespace, *, base_tools: Sequence[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
