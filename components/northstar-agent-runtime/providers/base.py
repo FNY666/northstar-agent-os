@@ -84,19 +84,26 @@ class ProviderError(RuntimeError):
 
 
 def _checked_usage_count(value: Any, field_name: str) -> int:
-    """Validate a count supplied by a live provider before it affects billing.
-
-    Missing optional fields remain zero. A malformed present value is an error:
-    silently converting it to zero would under-report cost and could defeat a
-    configured run ceiling.
-    """
-    if value is None:
-        return 0
+    """Validate a present count supplied by a live provider before billing."""
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ProviderError(
             f"provider returned invalid {field_name}: expected a non-negative integer"
         )
     return value
+
+
+_PROVIDER_USAGE_MISSING = object()
+
+
+def _provider_usage_count(value: Any, key: str, field_name: str) -> int | None:
+    """Return None for an absent field; reject any malformed present value."""
+    if isinstance(value, Mapping):
+        raw = value.get(key, _PROVIDER_USAGE_MISSING)
+    else:
+        raw = getattr(value, key, _PROVIDER_USAGE_MISSING)
+    if raw is _PROVIDER_USAGE_MISSING:
+        return None
+    return _checked_usage_count(raw, field_name)
 
 
 # --------------------------------------------------------------------------
@@ -198,15 +205,19 @@ def _usage_from_provider_value(value: Any) -> Usage:
         return value
     if not isinstance(value, Mapping):
         raise ProviderError("provider returned a malformed usage object")
+    input_tokens = _provider_usage_count(value, "input_tokens", "usage.input_tokens")
+    output_tokens = _provider_usage_count(value, "output_tokens", "usage.output_tokens")
+    cache_read = _provider_usage_count(
+        value, "cache_read_input_tokens", "usage.cache_read_input_tokens"
+    )
+    cache_creation = _provider_usage_count(
+        value, "cache_creation_input_tokens", "usage.cache_creation_input_tokens"
+    )
     return Usage(
-        input_tokens=_checked_usage_count(value.get("input_tokens"), "usage.input_tokens"),
-        output_tokens=_checked_usage_count(value.get("output_tokens"), "usage.output_tokens"),
-        cache_read_input_tokens=_checked_usage_count(
-            value.get("cache_read_input_tokens"), "usage.cache_read_input_tokens"
-        ),
-        cache_creation_input_tokens=_checked_usage_count(
-            value.get("cache_creation_input_tokens"), "usage.cache_creation_input_tokens"
-        ),
+        input_tokens=0 if input_tokens is None else input_tokens,
+        output_tokens=0 if output_tokens is None else output_tokens,
+        cache_read_input_tokens=0 if cache_read is None else cache_read,
+        cache_creation_input_tokens=0 if cache_creation is None else cache_creation,
     )
 
 
