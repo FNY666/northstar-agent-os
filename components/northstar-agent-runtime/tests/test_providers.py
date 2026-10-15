@@ -283,6 +283,17 @@ class AnthropicNormaliseTests(unittest.TestCase):
         )
         self.assertEqual(generation.stop_reason, "tool_use", "inferred from the presence of a tool_use block")
 
+    def test_malformed_provider_usage_fails_closed(self):
+        for value in ("secret-count", True, 1.5, -1):
+            with self.subTest(value=type(value).__name__):
+                response = {"content": [], "usage": {"input_tokens": value}}
+                with self.assertRaises(ProviderError) as caught:
+                    AnthropicProvider.normalise(response)
+                self.assertNotIn("secret-count", str(caught.exception))
+
+        with self.assertRaises(ProviderError):
+            AnthropicProvider.normalise({"content": [], "usage": "malformed"})
+
     def test_stop_reason_defaults_to_end_turn(self):
         self.assertEqual(AnthropicProvider.normalise(FakeResponse(content=[{"type": "text", "text": "x"}])).stop_reason, "end_turn")
         self.assertEqual(AnthropicProvider.normalise({"content": []}).stop_reason, "end_turn")
