@@ -24,7 +24,7 @@ from providers.base import (
     ThinkingBlock,
     ToolUseBlock,
     Usage,
-    _checked_usage_count,
+    _provider_usage_count,
 )
 
 # Model families the adapter knows how to talk to. Unknown models are still
@@ -220,9 +220,9 @@ def _usage_mapping(response: Any) -> dict[str, int]:
         raise ProviderError("anthropic returned a malformed usage object")
     mapping: dict[str, int] = {}
     for key in fields:
-        value = _field(usage, key, None)
-        if value is not None:
-            mapping[key] = _checked_usage_count(value, f"usage.{key}")
+        count = _provider_usage_count(usage, key, f"usage.{key}")
+        if count is not None:
+            mapping[key] = count
     return mapping
 
 
