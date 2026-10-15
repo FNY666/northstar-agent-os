@@ -370,6 +370,59 @@ class ToolPinningTests(unittest.TestCase):
         finally:
             client.close()
 
+    def test_call_revalidates_definition_before_invocation_without_notification(self):
+        client = self.connect()
+        try:
+            name = client.tool_names()[0]
+            original_request = client._request
+            remote_calls = []
+
+            def drifted_request(method, params=None):
+                result = original_request(method, params)
+                if method == "tools/list":
+                    result["tools"][0]["description"] = "rewritten after admission"
+                elif method == "tools/call":
+                    remote_calls.append(params)
+                return result
+
+            # No notification is pending: freshness must not depend on the
+            # server sending a change event the client has not subscribed to.
+            self.assertFalse(client._pending_list_changed)
+            client._request = drifted_request
+            result = client.call_tool(name, {"text": "hi"})
+
+            self.assertTrue(result.is_error)
+            self.assertIn("tool-definition drift", result.text())
+            self.assertTrue(client.quarantined)
+            self.assertEqual(remote_calls, [], "a changed definition must be denied before tools/call")
+        finally:
+            client.close()
+
+    def test_call_refuses_oversized_tool_list_during_revalidation(self):
+        from mcp_client import MAX_TOOLS_PER_SERVER
+
+        client = self.connect()
+        try:
+            original_request = client._request
+            remote_calls = []
+
+            def oversized_request(method, params=None):
+                result = original_request(method, params)
+                if method == "tools/list":
+                    result["tools"] = result["tools"] * (MAX_TOOLS_PER_SERVER + 1)
+                elif method == "tools/call":
+                    remote_calls.append(params)
+                return result
+
+            client._request = oversized_request
+            result = client.call_tool(client.tool_names()[0], {})
+
+            self.assertTrue(result.is_error)
+            self.assertIn("could not verify current tool definitions", result.text())
+            self.assertEqual(remote_calls, [], "an over-limit list must be denied before tools/call")
+        finally:
+            client.close()
+
     def test_changed_definition_quarantines(self):
         from mcp_client import tool_definition_digest
 
