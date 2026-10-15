@@ -41,6 +41,7 @@ without a network, a key, or the SDK installed at all.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from typing import Any, Sequence
 
 from providers.base import (
@@ -53,6 +54,7 @@ from providers.base import (
     ToolResultBlock,
     ToolUseBlock,
     Usage,
+    _checked_usage_count,
 )
 
 #: Model families that reject ``max_tokens`` and want the reasoning-era name.
@@ -95,7 +97,7 @@ def _text_of(content: Any) -> str:
 
 def _field(obj: Any, name: str, default: Any = None) -> Any:
     """Read an attribute or a mapping key, so a test double can be a plain dict."""
-    if isinstance(obj, dict):
+    if isinstance(obj, Mapping):
         value = obj.get(name, default)
         return default if value is None else value
     value = getattr(obj, name, default)
@@ -434,14 +436,30 @@ def _classify(error: Exception) -> dict[str, Any]:
 
 
 def _usage(response: Any) -> Usage:
-    raw = _field(response, "usage", {}) or {}
-    details = _field(raw, "prompt_tokens_details", {}) or {}
+    raw = _field(response, "usage", None)
+    if raw is None:
+        return Usage()
+    fields = ("prompt_tokens", "completion_tokens", "prompt_tokens_details")
+    if not isinstance(raw, Mapping) and not any(hasattr(raw, name) for name in fields):
+        raise ProviderError("openai-compatible provider returned a malformed usage object")
+    details = _field(raw, "prompt_tokens_details", None)
+    cached_tokens = None
+    if details is not None:
+        if not isinstance(details, Mapping) and not hasattr(details, "cached_tokens"):
+            raise ProviderError("openai-compatible provider returned malformed usage details")
+        cached_tokens = _field(details, "cached_tokens", None)
     return Usage(
-        input_tokens=int(_field(raw, "prompt_tokens", 0) or 0),
-        output_tokens=int(_field(raw, "completion_tokens", 0) or 0),
+        input_tokens=_checked_usage_count(
+            _field(raw, "prompt_tokens", None), "usage.prompt_tokens"
+        ),
+        output_tokens=_checked_usage_count(
+            _field(raw, "completion_tokens", None), "usage.completion_tokens"
+        ),
         # Providers that do server-side prefix caching report it here; mapping it
         # onto the cache fields keeps the cost view comparable across backends.
-        cache_read_input_tokens=int(_field(details, "cached_tokens", 0) or 0),
+        cache_read_input_tokens=_checked_usage_count(
+            cached_tokens, "usage.prompt_tokens_details.cached_tokens"
+        ),
     )
 
 
