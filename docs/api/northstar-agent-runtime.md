@@ -54425,7 +54425,7 @@ AST check: stdlib only.
 
 #### `main()`
 
-Self-check with a naive gate (blocks on keywords).
+Self-check with a deliberately weak keyword gate.
 
 ### `inner_alignment`
 
