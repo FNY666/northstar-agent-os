@@ -11,6 +11,7 @@ normalisation against a fake client is verified.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, Sequence
 
 from providers.base import (
@@ -23,6 +24,7 @@ from providers.base import (
     ThinkingBlock,
     ToolUseBlock,
     Usage,
+    _checked_usage_count,
 )
 
 # Model families the adapter knows how to talk to. Unknown models are still
@@ -199,7 +201,7 @@ class AnthropicProvider(Provider):
 
 
 def _field(obj: Any, name: str, default: Any = None) -> Any:
-    if isinstance(obj, dict):
+    if isinstance(obj, Mapping):
         return obj.get(name, default)
     return getattr(obj, name, default)
 
@@ -208,18 +210,19 @@ def _usage_mapping(response: Any) -> dict[str, int]:
     usage = _field(response, "usage", None)
     if usage is None:
         return {}
-    if isinstance(usage, dict):
-        return {key: value for key, value in usage.items() if isinstance(value, int) and not isinstance(value, bool)}
-    mapping: dict[str, int] = {}
-    for key in (
+    fields = (
         "input_tokens",
         "output_tokens",
         "cache_read_input_tokens",
         "cache_creation_input_tokens",
-    ):
-        value = getattr(usage, key, None)
-        if isinstance(value, int) and not isinstance(value, bool):
-            mapping[key] = value
+    )
+    if not isinstance(usage, Mapping) and not any(hasattr(usage, name) for name in fields):
+        raise ProviderError("anthropic returned a malformed usage object")
+    mapping: dict[str, int] = {}
+    for key in fields:
+        value = _field(usage, key, None)
+        if value is not None:
+            mapping[key] = _checked_usage_count(value, f"usage.{key}")
     return mapping
 
 
