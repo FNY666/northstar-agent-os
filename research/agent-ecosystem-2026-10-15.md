@@ -54,7 +54,7 @@ A2A v1.0.1 的 Agent Card 以 `supportedInterfaces` 声明协议绑定、版本�
 产品排序以 [Northstar 次世代 Agent OS 总纲](../docs/next-gen-agent-os.zh-CN.md) 第 5 节为准。基础设施协议工作持续维护，不得挤占首要产品路径。
 
 1. **先打磨编程任务闭环**：用现有 `Read` / `Write` / `Edit` / `Shell` 和独立后置条件完成“理解仓库 → 修改 → 运行相关检查 → 审阅 diff → 汇报证据”；补齐体验与验收缺口，不把工具已注册等同于端到端编程体验已完成。
-2. **把攻击测试与防护工具成对产品化**：目前攻防相关模块分散在专项验证与独立能力中，尚未组成统一的默认产品工具面。分别定义工具权限、目标范围、预算和审计；攻击测试只针对显式授权的本地项目、隔离靶场或 allowlist，防护工具负责检查、分级、修复建议和复测闭环。
+2. **继续把攻击测试与防护工具成对产品化**：首版手动 CLI `northstar security probe` 在临时工作区验证 runtime 默认拒绝和未知工具拒绝；`northstar security scan` 对本地文件做只读密钥 / Python SAST 启发式检查。它们尚不是 agent 可调用的安全工具、通用渗透测试器或完整 SAST，也不自动修复文件；后续再补充操作者授权的本地项目 / 隔离靶场范围、依赖与配置检查、统一 finding、预算与审计，以及修复后同范围复测。
 3. **再扩展多模态输入**：先稳定图片理解，再按实际任务需求加入音频和视频；媒体输入沿用 workspace 范围、来源标注、预算和不可信内容处理规则。
 4. **为远程 sandbox 预留后端，不扩张默认权限**：执行 backend 应报告隔离等级、运行身份、workspace digest 与可验证 receipt；本地 process fallback 仍必须如实标为非 OS 隔离。
 5. **最后再做事件触发的长期 agent**：GitHub/Slack/cron 触发要绑定 host 身份、显式数据域、预算上限、幂等键与人工 review。自动创建 draft PR 可以纳入产品，自动合并或绕过 permission gate 不应纳入默认路径。

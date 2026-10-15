@@ -60,9 +60,13 @@ make demo
 bin/northstar --version
 bin/northstar agent --workspace . --provider scripted --scripted-text "ok" --prompt "hello"
 bin/northstar resume latest --workspace . --prompt "continue" --scripted-text "ok"
+bin/northstar security scan --workspace .     # 本地密钥与 Python SAST 启发式检查
+bin/northstar security probe                  # 临时沙箱内验证 runtime 默认拒绝边界
 bin/northstar sessions list --workspace .
 bin/northstar bench                  # 公开治理基准（离线）
 ```
+
+这两个是由操作者手动启动的 CLI 命令，目前不会暴露给 agent 自动调用，也不会自动修复文件。`security scan` 只读本地文本文件，不联网、不打印密钥值；结果是启发式检查，不能证明项目安全。`security probe` 只向 Northstar 自身的临时 runtime 发起受控工具调用，不连接公网或扫描任意目标；它覆盖默认工具授权与未知工具拒绝，不是通用渗透测试器。
 
 编程任务可使用 `--coding-mode` 引导 agent 按“检查仓库 → 制定计划 → 修改 → 运行已授权的检查 → 审阅 diff”工作。它不会自动授予文件写入或 Shell 权限；请只放行本次需要的工具：
 

@@ -226,6 +226,30 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     add_bench_arguments(bench)
+    security = sub.add_parser(
+        "security",
+        help="read-only local security scan and bounded runtime red-team probes",
+        description=(
+            "Local-only security utilities. `scan` uses bounded heuristic rules over the selected "
+            "workspace. `probe` attempts controlled tool calls against a fresh Northstar runtime "
+            "in a temporary workspace. Neither command contacts remote targets."
+        ),
+    )
+    security_actions = security.add_subparsers(dest="security_action", required=True)
+    scan = security_actions.add_parser(
+        "scan",
+        help="read-only heuristic secret and Python SAST scan of one workspace",
+    )
+    scan.add_argument("--workspace", default=".", help="local workspace to inspect (no files are changed)")
+    scan.add_argument("--max-files", type=int, default=4000, help="maximum text files to inspect (hard cap 10000)")
+    scan.add_argument("--max-file-bytes", type=int, default=1024 * 1024, help="maximum bytes per file (hard cap 1 MiB)")
+    scan.add_argument("--fail-on", choices=("critical", "high", "medium", "low", "none"), default="high", help="exit 1 when a finding reaches this severity")
+    scan.add_argument("--format", choices=("text", "json"), default="text", help="output format; secret values are never printed")
+    probe = security_actions.add_parser(
+        "probe",
+        help="probe Northstar default permissions in a temporary local lab",
+    )
+    probe.add_argument("--format", choices=("text", "json"), default="text", help="output format")
     new_proj = sub.add_parser("new", help="scaffold a governed project (config, agents, hooks guide, CI recipe)")
     new_proj.add_argument("directory", help="directory to create (must not exist, or be empty unless --force)")
     new_proj.add_argument("--force", action="store_true", help="write the template files into a non-empty directory (never deletes)")
@@ -727,6 +751,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         for spec in build_default_registry().specs():
             print(f"{spec.name:<14} {spec.kind:<8} {'mutating' if spec.is_mutating else 'read-only':<10} {spec.description[:60]}")
         return 0
+    if args.command == "security":
+        from security_cli import run_security_command
+
+        try:
+            return run_security_command(args)
+        except (OSError, ValueError) as error:
+            print(f"security command failed: {error}", file=sys.stderr)
+            return USAGE_ERROR
     if args.command == "agents":
         from agent_files import AgentFileError, register_workspace_agents
         from agents import builtin_registry
