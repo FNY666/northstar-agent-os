@@ -51,11 +51,15 @@ A2A v1.0.1 的 Agent Card 以 `supportedInterfaces` 声明协议绑定、版本�
 
 ## 建议的实施顺序
 
-1. **完成 Shell 生命周期验证**：补上上面的跨 run 回归测试，并运行 Shell session、runtime、全仓离线套件。检查子代理共享/隔离语义是否与文档一致。
-2. **维护 MCP 代际矩阵（本轮已核对）**：现代发现、逐请求元数据、MRTR/取消及旧代际初始化与拒绝回退已有线上格式夹具；继续在协议或官方 SDK 改变协商语义时更新矩阵。
-3. **A2A 边界设计与离线 fixtures（本轮已完成）**：transport/身份决策、恶意 Agent Card 与超范围 handoff fixture 已落文档并由本地合同测试覆盖；真实网络客户端仍需 host trust/config、DNS 与 redirect guard、凭据 audience、bounded task/stream 与独立 adversarial canary 后再决定。
+产品排序以 [Northstar 次世代 Agent OS 总纲](../docs/next-gen-agent-os.zh-CN.md) 第 5 节为准。基础设施协议工作持续维护，不得挤占首要产品路径。
+
+1. **先打磨编程任务闭环**：用现有 `Read` / `Write` / `Edit` / `Shell` 和独立后置条件完成“理解仓库 → 修改 → 运行相关检查 → 审阅 diff → 汇报证据”；补齐体验与验收缺口，不把工具已注册等同于端到端编程体验已完成。
+2. **把攻击测试与防护工具成对产品化**：目前攻防相关模块分散在专项验证与独立能力中，尚未组成统一的默认产品工具面。分别定义工具权限、目标范围、预算和审计；攻击测试只针对显式授权的本地项目、隔离靶场或 allowlist，防护工具负责检查、分级、修复建议和复测闭环。
+3. **再扩展多模态输入**：先稳定图片理解，再按实际任务需求加入音频和视频；媒体输入沿用 workspace 范围、来源标注、预算和不可信内容处理规则。
 4. **为远程 sandbox 预留后端，不扩张默认权限**：执行 backend 应报告隔离等级、运行身份、workspace digest 与可验证 receipt；本地 process fallback 仍必须如实标为非 OS 隔离。
 5. **最后再做事件触发的长期 agent**：GitHub/Slack/cron 触发要绑定 host 身份、显式数据域、预算上限、幂等键与人工 review。自动创建 draft PR 可以纳入产品，自动合并或绕过 permission gate 不应纳入默认路径。
+
+MCP 代际矩阵（现代发现、逐请求元数据、MRTR/取消及旧代际拒绝回退）与 A2A 身份 / handoff 边界已完成本轮核对；继续在协议或官方 SDK 改变协商语义时更新 fixtures。真实 A2A 网络客户端仍需 host trust/config、DNS 与 redirect guard、凭据 audience、bounded task/stream 与独立 adversarial canary 后再决定。
 
 ## 来源
 
