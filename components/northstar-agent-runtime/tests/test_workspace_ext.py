@@ -163,7 +163,7 @@ class AgentFileTests(unittest.TestCase):
     def test_an_agent_file_compiles_to_a_definition(self):
         self.write_agent(
             "summariser",
-            "---\nname: summariser\ndescription: Summarises.\ntools: [Read, Grep, LS]\nmax_turns: 4\n---\nSummarise the workspace.\n",
+            "---\nname: summariser\ndescription: Summarises.\ntools: [Read, Grep, LS]\nmax_turns: 4\nmax_budget_usd: 0.07\n---\nSummarise the workspace.\n",
         )
         found = discover_agent_files(self.ws, known_tools=KNOWN_TOOLS)
         self.assertEqual(len(found), 1)
@@ -171,8 +171,45 @@ class AgentFileTests(unittest.TestCase):
         self.assertEqual(agent.name, "summariser")
         self.assertEqual(agent.tools, ("Read", "Grep", "LS"))
         self.assertEqual(agent.max_turns, 4)
+        self.assertAlmostEqual(agent.max_budget_usd, 0.07)
         self.assertIn("Summarise the workspace.", agent.prompt)
         self.assertTrue(agent.is_read_only)
+
+    def test_workspace_agent_budget_is_tightened_with_direct_run_flags(self):
+        self.write_agent(
+            "budgeted",
+            "---\nname: budgeted\ndescription: Capped helper.\ntools: [Read]\nmax_budget_usd: 0.04\n---\n"
+            "Inspect the workspace.\n",
+        )
+        code, out, err = run_cli(
+            "agent",
+            "--workspace",
+            str(self.ws),
+            "--agent",
+            "budgeted",
+            "--provider",
+            "scripted",
+            "--scripted-text",
+            "ok",
+            "--max-budget-usd",
+            "0.20",
+            "--prompt",
+            "inspect",
+            "--dry-run",
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn("max_budget_usd=0.04", out)
+
+    def test_workspace_agent_budget_rejects_invalid_values(self):
+        for value in ("true", "0", "-0.1", "'0.1'", "1.0e309"):
+            with self.subTest(value=value):
+                self.write_agent(
+                    "budgeted",
+                    f"---\nname: budgeted\ndescription: Capped helper.\ntools: [Read]\n"
+                    f"max_budget_usd: {value}\n---\nInspect.\n",
+                )
+                with self.assertRaises(AgentFileError):
+                    discover_agent_files(self.ws, known_tools=KNOWN_TOOLS)
 
     def test_registry_registration_and_collisions(self):
         self.write_agent(
