@@ -64,6 +64,14 @@ bin/northstar sessions list --workspace .
 bin/northstar bench                  # 公开治理基准（离线）
 ```
 
+编程任务可使用 `--coding-mode` 引导 agent 按“检查仓库 → 制定计划 → 修改 → 运行已授权的检查 → 审阅 diff”工作。它不会自动授予文件写入或 Shell 权限；请只放行本次需要的工具：
+
+```sh
+bin/northstar agent --workspace . --coding-mode \
+  --allow-tool Write --allow-tool Edit --allow-tool Shell \
+  --prompt "修复这个问题，运行相关检查，并汇报 diff"
+```
+
 Sidecar 本地验证：
 
 ```sh

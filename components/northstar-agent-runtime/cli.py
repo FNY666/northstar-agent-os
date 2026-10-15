@@ -304,6 +304,14 @@ def _add_limits_transport_arguments(parser: argparse.ArgumentParser) -> None:
 def _add_policy_arguments(parser: argparse.ArgumentParser) -> None:
         policy = parser.add_argument_group("policy")
         policy.add_argument("--workspace", default=".", help="directory the tools are confined to")
+        policy.add_argument(
+            "--coding-mode",
+            action="store_true",
+            help=(
+                "guide coding tasks through repository inspection, a focused patch, approved checks, "
+                "diff review, and evidence reporting; does not grant tools"
+            ),
+        )
         policy.add_argument("--permission-mode", choices=("default", "acceptEdits", "plan", "bypassPermissions"), default="default")
         policy.add_argument("--allow-tool", action="append", default=[], metavar="NAME", help="auto-approve a tool (repeatable)")
         policy.add_argument("--deny-tool", action="append", default=[], metavar="NAME", help="always refuse a tool, and remove it from the allow list (repeatable)")
@@ -618,6 +626,8 @@ def _print_dry_run(
     agent_suffix = "" if config.agent in ("", "main") else f" (agent '{config.agent}')"
     print(f"provider={args.provider} model={config.model}{agent_suffix}")
     print(f"permission_mode={config.permission_mode}")
+    if getattr(args, "coding_mode", False):
+        print("coding_mode=on (workflow instructions only; permissions unchanged)")
     print(f"tools={','.join(tool_names) or '(none)'}")
     print(f"allowed_tools={','.join(config.allowed_tools) or '(none)'}  "
           f"disallowed_tools={','.join(config.disallowed_tools) or '(none)'}")

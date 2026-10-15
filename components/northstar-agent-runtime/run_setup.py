@@ -441,6 +441,18 @@ def compose_system_prompt(args: argparse.Namespace, definition: Any, policy: Any
         system_prompt = (
             base_prompt + "\n\n== Plugin context (developer-authored, from installed bundles) ==\n" + blocks + "\n== End of plugin context =="
         )
+    if getattr(args, "coding_mode", False):
+        base_prompt = system_prompt if system_prompt is not None else DEFAULT_SYSTEM_PROMPT
+        system_prompt = base_prompt + (
+            "\n\n== Coding workflow preset (instructions only; runtime permissions still govern) ==\n"
+            "For coding tasks, inspect the relevant repository files before editing. For a multi-step "
+            "change, state a short plan and keep the patch focused. Use only tools the runtime allows. "
+            "When Shell is allowed, run the narrowest relevant checks and inspect the resulting diff. "
+            "Report which files changed, the checks actually run and their results, and anything left "
+            "unverified. Never claim a check passed without its result. If a required tool is denied, "
+            "explain the limitation and continue with the work that remains possible.\n"
+            "== End of coding workflow preset =="
+        )
     return PromptSetup(system_prompt=system_prompt, context=context, skills=skills, memory_note=memory_note)
 
 
