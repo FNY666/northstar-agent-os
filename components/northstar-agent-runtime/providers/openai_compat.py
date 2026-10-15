@@ -443,11 +443,9 @@ def _usage(response: Any) -> Usage:
     if not isinstance(raw, Mapping) and not any(hasattr(raw, name) for name in fields):
         raise ProviderError("openai-compatible provider returned a malformed usage object")
     details = _field(raw, "prompt_tokens_details", None)
-    cached_tokens = None
     if details is not None:
         if not isinstance(details, Mapping) and not hasattr(details, "cached_tokens"):
             raise ProviderError("openai-compatible provider returned malformed usage details")
-        cached_tokens = _field(details, "cached_tokens", None)
     input_tokens = _provider_usage_count(raw, "prompt_tokens", "usage.prompt_tokens")
     output_tokens = _provider_usage_count(raw, "completion_tokens", "usage.completion_tokens")
     # Providers that do server-side prefix caching report it here; mapping it
