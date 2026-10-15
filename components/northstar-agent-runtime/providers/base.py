@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Iterator, Literal, Sequence
+from typing import Any, Iterable, Iterator, Literal, Mapping, Sequence
 
 # --------------------------------------------------------------------------
 # Closed vocabularies
@@ -81,6 +81,22 @@ class ProviderError(RuntimeError):
         self.failure_kind = failure_kind
         self.status_code = status_code if isinstance(status_code, int) and not isinstance(status_code, bool) else None
         self.retry_after_ms = retry_after_ms if isinstance(retry_after_ms, int) and not isinstance(retry_after_ms, bool) else None
+
+
+def _checked_usage_count(value: Any, field_name: str) -> int:
+    """Validate a count supplied by a live provider before it affects billing.
+
+    Missing optional fields remain zero. A malformed present value is an error:
+    silently converting it to zero would under-report cost and could defeat a
+    configured run ceiling.
+    """
+    if value is None:
+        return 0
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ProviderError(
+            f"provider returned invalid {field_name}: expected a non-negative integer"
+        )
+    return value
 
 
 # --------------------------------------------------------------------------
@@ -172,6 +188,26 @@ class Usage:
             cache_read_input_tokens=number("cache_read_input_tokens"),
             cache_creation_input_tokens=number("cache_creation_input_tokens"),
         )
+
+
+def _usage_from_provider_value(value: Any) -> Usage:
+    """Read live metering data strictly; historical records use the tolerant reader."""
+    if value is None:
+        return Usage()
+    if isinstance(value, Usage):
+        return value
+    if not isinstance(value, Mapping):
+        raise ProviderError("provider returned a malformed usage object")
+    return Usage(
+        input_tokens=_checked_usage_count(value.get("input_tokens"), "usage.input_tokens"),
+        output_tokens=_checked_usage_count(value.get("output_tokens"), "usage.output_tokens"),
+        cache_read_input_tokens=_checked_usage_count(
+            value.get("cache_read_input_tokens"), "usage.cache_read_input_tokens"
+        ),
+        cache_creation_input_tokens=_checked_usage_count(
+            value.get("cache_creation_input_tokens"), "usage.cache_creation_input_tokens"
+        ),
+    )
 
 
 ZERO_USAGE = Usage()
