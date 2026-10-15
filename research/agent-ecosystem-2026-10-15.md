@@ -27,7 +27,7 @@
 3. run 结束不会清理 dict 中的 cwd/env，变量可能一直留在内存中。
 4. 本分支把 dict 放进 RunState，并通过该 run 的 ToolContext 传给 Shell handler。新的 run（包括复用 transcript ID 的 run）会取得空 dict；同一 run 内具名 session 的 cwd/env 仍会续用。
 
-合并前还应补一个确定性回归场景：同一进程、同一 transcript session ID、两个独立 run；第二个 run 不得看到第一个 run 的 cwd/env。现有的单 run 续用场景也应继续覆盖。
+确定性回归测试覆盖同一进程、同一 transcript session ID 下的两个独立 run；第二个 run 不得看到第一个 run 的 cwd/env。现有单 run 续用场景继续覆盖 cwd/env 跨工具调用保持、显式 per-call 覆盖，以及不同具名 session 隔离。
 
 ## 建议的实施顺序
 

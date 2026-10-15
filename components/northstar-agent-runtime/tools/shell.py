@@ -135,8 +135,8 @@ def shell_handler(payload: dict[str, Any], ctx: "ToolContext") -> Any:
         # Session memory: a named session remembers the last cwd and env so a
         # multi-step programming flow (cd, export, build, test) doesn't have
         # to re-establish context on every call. Explicit per-call cwd/env
-        # win and update the session. Keyed by the run's session_id — sessions
-        # never cross runs.
+        # win and update the named session. Its state map belongs to this run's
+        # ToolContext, so reusing a transcript session_id later cannot recover it.
         session_name = payload.get("session")
         session_key: str | None = None
         session_mem: dict[str, Any] | None = None

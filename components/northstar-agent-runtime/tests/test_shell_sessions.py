@@ -2,13 +2,12 @@
 
 This is the programming-priority work: a multi-step flow (cd into a project,
 export vars, build, test) keeps context instead of re-establishing it every
-call. Sessions are scoped to the run via ctx.session_id — they never cross
-runs, and they grant no new privilege (cwd is re-resolved every call, env
+call. Session state belongs to one run's ToolContext, not its transcript
+session_id, and grants no new privilege (cwd is re-resolved every call, env
 still passes the sandbox's protected-var filter).
 """
 from __future__ import annotations
 
-import re
 import sys
 
 sys.path.insert(0, ".")
@@ -25,16 +24,17 @@ def _stdouts(report):
     for ev in report.events:
         if not isinstance(ev, UserMessage):
             continue
-        c = str(ev.content)
-        # c is str() of a repr'd block: tool_use_id=\'t1\', content="...\\n--- stdout ---\\nhi\"..."
-        for m in re.finditer(r"tool_use_id='(\w+)'", c):
-            tid = m.group(1)
-            seg = c[m.start():m.start() + 4000]
-            sm = re.search(r"--- stdout ---(.*?)\", is_error", seg, re.S)
-            if sm:
-                out[tid] = sm.group(1).replace("\\n", "\n").strip()
-            elif "(no output)" in seg:
-                out[tid] = ""
+        for block in ev.tool_results:
+            content = block.text()
+            stdout_marker = "--- stdout ---\n"
+            stderr_marker = "\n--- stderr ---"
+            if stdout_marker in content:
+                stdout = content.split(stdout_marker, 1)[1]
+                if stderr_marker in stdout:
+                    stdout = stdout.split(stderr_marker, 1)[0]
+                out[block.tool_use_id] = stdout.strip()
+            else:
+                out[block.tool_use_id] = ""
     return out
 
 
@@ -42,7 +42,18 @@ class ShellSessionTests(RuntimeTestCase):
     def _drive(self, turns):
         def approve(tool, args, context):
             return True
-        rt = self.runtime(turns, can_use_tool=approve, allowed_tools=["Shell"])
+        # These tests exercise cwd/env lifecycle, not kernel isolation. Use the
+        # portable process backend without optional kernel hardening so they
+        # also run on hosts whose kernels lack Landlock/seccomp support.
+        rt = self.runtime(
+            turns,
+            can_use_tool=approve,
+            allowed_tools=["Shell"],
+            shell_backend="process",
+            shell_seccomp="off",
+            shell_capdrop="off",
+            shell_landlock="off",
+        )
         return self.drive(rt)
 
     def _turn(self, tid, tool_input, text="x"):
@@ -130,3 +141,56 @@ class ShellSessionTests(RuntimeTestCase):
         self.assertIn("A=two", stdouts["t2"])
         self.assertIn("A=two", stdouts["t3"],
                       f"session did not adopt per-call env: {stdouts['t3'][:60]}")
+
+    def test_named_session_state_does_not_cross_runs_with_reused_session_id(self):
+        """A later run starts clean even when the host reuses a transcript id."""
+        workspace = self.workspace()
+        (workspace / "previous-run").mkdir()
+
+        def approve(tool, args, context):
+            return True
+
+        runtime = self.runtime(
+            [
+                self._turn(
+                    "t1",
+                    {
+                        "command": "pwd && (env | grep '^VALUE=' || echo VALUE=unset)",
+                        "cwd": "previous-run",
+                        "env": {"VALUE": "first-run"},
+                        "session": "build",
+                    },
+                ),
+                ScriptedTurn(blocks=(TextBlock(text="first run done"),), stop_reason="end_turn"),
+                self._turn(
+                    "t2",
+                    {
+                        "command": "pwd && (env | grep '^VALUE=' || echo VALUE=unset)",
+                        "session": "build",
+                    },
+                ),
+                ScriptedTurn(blocks=(TextBlock(text="second run done"),), stop_reason="end_turn"),
+            ],
+            workspace=workspace,
+            can_use_tool=approve,
+            allowed_tools=["Shell"],
+            shell_backend="process",
+            shell_seccomp="off",
+            shell_capdrop="off",
+            shell_landlock="off",
+            session_id="reused-transcript-id",
+        )
+
+        first = runtime.run_collect("first run")
+        second = runtime.run_collect("second run")
+
+        self.assertTrue(first.ok, first.errors)
+        self.assertTrue(second.ok, second.errors)
+        self.assertEqual(first.session_id, "reused-transcript-id")
+        self.assertEqual(second.session_id, first.session_id)
+        first_output = _stdouts(first)["t1"]
+        second_output = _stdouts(second)["t2"]
+        self.assertTrue(first_output.splitlines()[0].endswith("/previous-run"), first_output)
+        self.assertIn("VALUE=first-run", first_output)
+        self.assertFalse(second_output.splitlines()[0].endswith("/previous-run"), second_output)
+        self.assertIn("VALUE=unset", second_output)
