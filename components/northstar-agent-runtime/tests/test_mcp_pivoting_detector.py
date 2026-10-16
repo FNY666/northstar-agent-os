@@ -92,6 +92,9 @@ class TestPrivateRanges(unittest.TestCase):
     def test_ipv6_multicast_blocked(self):
         self.assertTrue(detect_pivoting(call(url="http://[ff02::1]/")))
 
+    def test_ipv6_zone_id_does_not_hide_link_local_target(self):
+        self.assertTrue(detect_pivoting(call(url="http://[fe80::1%25eth0]/")))
+
 
 class TestEvasionResistance(unittest.TestCase):
     def test_percent_encoded_metadata_blocked(self):
