@@ -3102,6 +3102,20 @@ class AgentRuntime:
             )
         return safe
 
+    def _safe_hook_value(self, value: Any) -> Any:
+        """Copy a hook-facing JSON value without changing the executed payload."""
+        if isinstance(value, str):
+            from defensive_agent import sanitize_for_model
+
+            return sanitize_for_model(value)[0]
+        if isinstance(value, dict):
+            return {key: self._safe_hook_value(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [self._safe_hook_value(item) for item in value]
+        if isinstance(value, tuple):
+            return tuple(self._safe_hook_value(item) for item in value)
+        return value
+
     def _refuse_by_gate(
         self,
         call: ToolUseBlock,
@@ -3367,6 +3381,7 @@ class AgentRuntime:
         # that crosses the model boundary. Calling `result.text()` first would
         # serialize attacker-sized structured content before the cap could act.
         tool_text = block.text()
+        hook_input = self._safe_hook_value(payload)
         original_chars = raw_result_chars if raw_result_chars is not None else len(tool_text)
         attrs: dict[str, Any] = {
             "tool.name": spec.name,
@@ -3409,7 +3424,7 @@ class AgentRuntime:
                     turn_index=turn_index,
                     tool_name=spec.name,
                     tool_use_id=call.id,
-                    tool_input=payload,
+                    tool_input=hook_input,
                     tool_response=tool_text[:500],
                     tool_is_error=True,
                     error=tool_text[:500],
@@ -3432,7 +3447,7 @@ class AgentRuntime:
                     turn_index=turn_index,
                     tool_name=spec.name,
                     tool_use_id=call.id,
-                    tool_input=payload,
+                    tool_input=hook_input,
                     tool_response=tool_text[:500],
                     data={
                         "duration_ms": duration_ms,
