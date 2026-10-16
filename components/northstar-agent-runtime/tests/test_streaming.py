@@ -127,6 +127,17 @@ class ContractTests(unittest.TestCase):
 
 
 class LoopStreamTests(unittest.TestCase):
+    def test_streaming_output_is_screened_before_release(self):
+        secret = "api_key=sk-1234567890abcdef"
+        provider = _Streaming(
+            [StreamDelta(text="safe "), StreamDelta(text=secret)],
+            generation=Generation(content=("safe " + secret,)),
+        )
+        events = run(provider)
+        self.assertNotIn(secret, "".join(deltas(events)))
+        self.assertIn("blocked by defensive agent", "".join(deltas(events)))
+        self.assertEqual(events[-1].subtype, "success")
+
     def test_deltas_come_before_the_assistant_message_and_result_last(self):
         provider = ScriptedProvider([ScriptedTurn.streamed("hello there", ["hello ", "there"])])
         events = run(provider)

@@ -1115,6 +1115,8 @@ class AgentRuntime:
         generation: Generation | None = None
         withheld = 0
         forwarded = 0
+        pending: list[StreamDelta] = []
+        pending_chars = 0
         try:
             stream = self.provider.stream(request)
         except AttributeError as error:
@@ -1136,27 +1138,37 @@ class AgentRuntime:
                     raise ProviderError("provider stream kept yielding text after the turn was complete")
                 if not item.text:
                     continue  # an empty chunk is noise, not content: spend no event on it
-                if forwarded >= MAX_STREAM_EVENTS_PER_TURN or (
-                    collected_total(collected) + len(item.text) > MAX_STREAM_TURN_CHARS
-                ):
-                    withheld += len(item.text)
-                    continue
-                # A provider that hands back one enormous block gets re-chunked rather
-                # than forwarded whole or dropped: splitting keeps the concatenation
-                # exact (so fidelity still means something) while keeping a single
-                # event's size bounded for whoever has to serialise it.
+                # Hold chunks until the complete generation is available. This
+                # lets the defensive agent inspect the whole stream before any
+                # byte reaches the caller; a secret split across chunks cannot
+                # escape through the streaming path.
                 for chunk in split_for_stream(item.text):
-                    if forwarded >= MAX_STREAM_EVENTS_PER_TURN:
+                    available = MAX_STREAM_TURN_CHARS - pending_chars
+                    if available <= 0:
                         withheld += len(chunk)
                         continue
-                    forwarded += 1
-                    collected.append(chunk)
-                    yield StreamDelta(
-                        text=chunk,
-                        block_index=item.block_index,
-                        turn_index=item.turn_index or request.turn_index,
-                        provider=item.provider or self.provider_name,
+                    retained = chunk[:available]
+                    pending.append(
+                        StreamDelta(
+                            text=retained,
+                            block_index=item.block_index,
+                            turn_index=item.turn_index or request.turn_index,
+                            provider=item.provider or self.provider_name,
+                        )
                     )
+                    pending_chars += len(retained)
+                    withheld += len(chunk) - len(retained)
+        except ProviderError:
+            # A provider fault ends the turn, but already-received text may
+            # still be useful to the operator. Release only the screened
+            # prefix; it is never recorded as a completed assistant turn.
+            from defensive_agent import sanitize_for_model
+
+            prefix, _defensive = sanitize_for_model("".join(item.text for item in pending))
+            for chunk in split_for_stream(prefix):
+                collected.append(chunk)
+                yield StreamDelta(text=chunk, turn_index=request.turn_index, provider=self.provider_name)
+            raise
         finally:
             # An interrupted run must not leave the provider's own resources (an HTTP
             # connection, an SDK stream context) open until the garbage collector gets
@@ -1173,6 +1185,48 @@ class AgentRuntime:
         )
         if generation is None:
             raise ProviderError("provider stream ended without returning the turn")
+        from defensive_agent import sanitize_for_model
+
+        raw_stream = "".join(item.text for item in pending)
+        safe_stream, defensive = sanitize_for_model(raw_stream)
+        # Long opaque/base64-like documents are a noisy indirect tripwire in
+        # the text detector. Keep those review-only findings visible in the
+        # existing stream contract; direct injection and high-confidence
+        # findings still sanitize before release.
+        if defensive.decision.value == "review" and defensive.findings and all(
+            item.category == "indirect" for item in defensive.findings
+        ):
+            safe_stream = raw_stream
+        if safe_stream != raw_stream:
+            from providers.base import TextBlock
+
+            generation = replace(generation, content=(TextBlock(text=safe_stream),))
+        # Release only after screening. The generation was rewritten above when
+        # content changed, so stream-fidelity still compares the safe bytes.
+        if safe_stream != raw_stream:
+            pending = [
+                StreamDelta(
+                    text=chunk,
+                    block_index=pending[0].block_index if pending else 0,
+                    turn_index=pending[0].turn_index if pending else request.turn_index,
+                    provider=pending[0].provider if pending else self.provider_name,
+                )
+                for chunk in split_for_stream(safe_stream)
+            ]
+        for item in pending:
+            if forwarded >= MAX_STREAM_EVENTS_PER_TURN:
+                withheld += len(item.text)
+                continue
+            forwarded += 1
+            collected.append(item.text)
+            yield item
+        if defensive.findings:
+            span.set_attributes(
+                {
+                    "stream.defensive_decision": defensive.decision.value,
+                    "stream.defensive_findings": ",".join(item.rule_id for item in defensive.findings[:8]),
+                }
+            )
         if withheld:
             span.set_attribute("stream.truncated", True)
         return generation, withheld
@@ -1394,7 +1448,7 @@ class AgentRuntime:
                 # same bounded detector before persisting or yielding a final
                 # answer; tool-use blocks remain untouched so authorization
                 # still sees the exact structured call.
-                if not assistant.tool_uses:
+                if not assistant.tool_uses and not config.stream:
                     from defensive_agent import sanitize_for_model
 
                     sanitized_text, defensive = sanitize_for_model(assistant.text)

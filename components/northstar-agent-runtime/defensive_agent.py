@@ -107,7 +107,16 @@ def assess(
             )
         )
 
-    for finding in scan_for_credentials(text):
+    lowered = text.lower()
+    credential_candidate = any(
+        marker in lowered
+        for marker in (
+            "sk-", "akia", "ghp_", "gho_", "ghu_", "ghs_", "ghr_",
+            "xox", "aiza", "api_key", "apikey", "bearer", "token",
+            "password", "private key",
+        )
+    ) or (text.count(".") >= 2 and len(text) < 16_384)
+    for finding in scan_for_credentials(text) if credential_candidate else ():
         findings.append(
             DefensiveFinding(
                 rule_id="D-SEC-001",
