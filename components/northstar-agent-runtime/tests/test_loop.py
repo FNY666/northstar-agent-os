@@ -99,6 +99,14 @@ class DispatchTests(RuntimeTestCase):
         self.assertEqual(effects, [])
         self.assertEqual(report.tool_calls[0].permission_source, "defensive_agent")
 
+    def test_model_output_credentials_are_sanitized_before_transcript(self):
+        report = self.drive(self.runtime(
+            provider=self.provider([text_turn("answer: api_key=sk-1234567890abcdef")]),
+        ))
+        self.assertEqual(report.result.subtype, "success")
+        self.assertNotIn("sk-1234567890abcdef", report.transcript[1].text)
+        self.assertIn("blocked by defensive agent", report.transcript[1].text)
+
     def test_egress_target_scope_is_exact_and_precedes_approval_callback(self):
         effects = []
         approvals = []

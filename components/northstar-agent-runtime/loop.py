@@ -1390,6 +1390,37 @@ class AgentRuntime:
                     usage=generation.usage,
                     stop_reason=generation.stop_reason,
                 )
+                # The model's own text is an egress boundary too. Apply the
+                # same bounded detector before persisting or yielding a final
+                # answer; tool-use blocks remain untouched so authorization
+                # still sees the exact structured call.
+                if not assistant.tool_uses:
+                    from defensive_agent import sanitize_for_model
+
+                    sanitized_text, defensive = sanitize_for_model(assistant.text)
+                    if defensive.findings:
+                        self.sessions.append(
+                            "defensive_assessment",
+                            {
+                                "agent": config.agent,
+                                "tool": "(generation)",
+                                "turn_index": turn_index,
+                                "decision": defensive.decision.value,
+                                "sanitized": sanitized_text != assistant.text,
+                                "finding_count": len(defensive.findings),
+                                "findings": [
+                                    {"rule_id": item.rule_id, "category": item.category, "severity": item.severity}
+                                    for item in defensive.findings[:8]
+                                ],
+                            },
+                        )
+                        if sanitized_text != assistant.text:
+                            from providers.base import TextBlock
+
+                            assistant = replace(
+                                assistant,
+                                content=(TextBlock(text=sanitized_text),),
+                            )
                 if config.stream:
                     if (yield from self._stream_mismatch(state, turn_index, turn_span, assistant, streamed, stream_withheld)):
                         return
