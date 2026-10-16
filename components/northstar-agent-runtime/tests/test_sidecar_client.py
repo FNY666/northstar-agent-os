@@ -249,6 +249,22 @@ class RoundTripTests(unittest.TestCase):
         self.assertEqual(result.errors, ("prompt must be a non-empty string",))
         self.assertFalse(result.may_fall_back)
 
+    def test_remote_error_fields_and_raw_payload_are_screened(self):
+        secret = "api_key=sk-1234567890abcdef"
+        client, _ = client_with(
+            {
+                "status": "internal_error",
+                "error": f"upstream failed: {secret}",
+                "errors": [f"detail: {secret}"],
+                "debug": f"raw body {secret}",
+            }
+        )
+        result = client.execute("go")
+        self.assertNotIn(secret, result.error)
+        self.assertNotIn(secret, str(result.errors))
+        self.assertNotIn(secret, str(result.raw))
+        self.assertIn("blocked by defensive agent", result.report)
+
     def test_latency_and_bytes_are_measured(self):
         client, _ = client_with({"status": "ok", "text": "hello"})
         result = client.execute("go")

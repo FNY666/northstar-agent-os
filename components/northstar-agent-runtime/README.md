@@ -213,6 +213,8 @@ retry event, preventing upstream response bodies from leaking through failure
 handling.
 Unexpected runtime and delivery-protocol errors use the same boundary before
 they enter traces or result records.
+Sidecar transport and remote error fields are screened as well, including the
+diagnostic `raw` payload retained for host inspection.
 On resume, the final provider payload is screened again copy-on-write, so old
 or imported transcripts cannot bypass the current rules; the durable transcript
 itself is never rewritten by this compatibility pass.
