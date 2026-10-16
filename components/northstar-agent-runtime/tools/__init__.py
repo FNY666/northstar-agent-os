@@ -480,16 +480,16 @@ def read_file(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
             raw = handle.read(limit + 1)
     else:
         # Hash the same bounded bytes that will be returned. Skills larger than
-        # Read's existing cap fail closed instead of triggering an unbounded hash.
+        # this call's Read cap fail closed instead of triggering an unbounded hash.
         try:
             with open(path, "rb") as handle:
-                raw = handle.read(ctx.limits.max_read_bytes + 1)
+                raw = handle.read(limit + 1)
         except OSError as error:
             return ToolResult.error(f"cannot verify skill integrity for {ctx.relative(path)}: {error}")
-        if len(raw) > ctx.limits.max_read_bytes:
+        if len(raw) > limit:
             return ToolResult.error(
                 f"cannot verify skill integrity: {ctx.relative(path)} exceeds the "
-                f"{ctx.limits.max_read_bytes}-byte Read verification limit"
+                f"{limit}-byte Read verification limit"
             )
         size = len(raw)
         if hashlib.sha256(raw).hexdigest() != expected_digest:
