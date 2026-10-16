@@ -36,7 +36,7 @@ class RunConfigurationError(ValueError):
 
 #: Tools that change state; ``--read-only`` refuses them at the gate.
 #: Shell is included: a "read-only" run must not execute commands either.
-MUTATING_TOOLS = ("Write", "Edit", "Shell", "SecurityProbe")
+MUTATING_TOOLS = ("Write", "Edit", "ApplyPatch", "Shell", "SecurityProbe")
 
 
 def tool_lists(args: argparse.Namespace, *, base_tools: Sequence[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
@@ -457,6 +457,10 @@ def compose_system_prompt(args: argparse.Namespace, definition: Any, policy: Any
             "\n\n== Coding workflow preset (instructions only; runtime permissions still govern) ==\n"
             "For coding tasks, inspect the relevant repository files before editing. For a multi-step "
             "change, state a short plan and keep the patch focused. Use only tools the runtime allows. "
+            "Read returns a SHA-256 marker for complete UTF-8 files. For a related multi-file change, "
+            "prefer one ApplyPatch call with every file's exact expected_sha256 and full replacement "
+            "content; if any hash is stale, re-read and rebuild the whole patch. The marker is metadata, "
+            "not part of the file. "
             "When Shell is allowed, run the narrowest relevant checks and inspect the resulting diff. "
             "Report which files changed, the checks actually run and their results, and anything left "
             "unverified. Never claim a check passed without its result. If a required tool is denied, "

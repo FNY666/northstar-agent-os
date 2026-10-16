@@ -186,7 +186,7 @@ def append_memory(base_prompt: str, memory: WorkspaceMemory) -> str:
     end = _MARKERS[1]
     body = memory.text if not memory.truncated else memory.text + "\n[truncated]"
     note = (
-        f"(workspace-scoped only; update via Write/Edit on '{memory.relative}' — "
+        f"(workspace-scoped only; update via Write/Edit/ApplyPatch on '{memory.relative}' — "
         "never a global MEMORY store)\n"
     )
     return f"{base_prompt}{start}{note}{body}{end}"

@@ -61,7 +61,7 @@ DEFAULT_MAX_TOOL_CALLS = 50
 DEFAULT_COMPACTION_THRESHOLD_TOKENS = 60_000
 # Auto-approval of a mutating tool is an operator-at-runtime decision, never a
 # repository file decision.
-MUTATING_TOOLS = ("Write", "Edit")
+MUTATING_TOOLS = ("Write", "Edit", "ApplyPatch")
 # A sidecar tool that may not even be registered yet; denying it in a policy
 # file is forward-looking and harmless.
 ALWAYS_KNOWN_TOOLS = ("CodexReadOnly",)

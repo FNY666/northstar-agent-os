@@ -91,8 +91,8 @@ project_context = "AGENTS.md"            # project instructions auto-injected fr
 agent = "reviewer"
 
 # Tighten further per project, for example:
-# read_only = true                # refuse Write/Edit for every run
-# deny_tools = ["Write", "Edit"]  # additive floor; --allow-tool cannot resurrect these
+# read_only = true                # refuse Write/Edit/ApplyPatch/Shell for every run
+# deny_tools = ["Write", "Edit", "ApplyPatch"]  # additive floor; --allow-tool cannot resurrect these
 # max_turns = 10                  # may only lower the built-in ceiling of 25
 # max_tool_calls = 50             # may only lower 50
 # max_budget_usd = 0.25           # any positive cap (built-in default: unlimited)
@@ -242,7 +242,7 @@ the child sees only `PATH` and `LANG`, so no model credential crosses into hook
 code. The script is executable code and is not an OS sandbox; review it before
 enabling workspace hooks. Plugin bundles remain limited to veto-capable events.
 
-The `Write` and `Edit` tools cannot touch this directory: `.northstar` is write-
+The `Write`, `Edit`, and `ApplyPatch` tools cannot touch this directory: `.northstar` is write-
 protected through the tool layer. An enabled hook script is separately trusted
 executable code, so review it for writes to `.northstar` as well as other project
 files.
@@ -328,6 +328,9 @@ def _agents_md(name: str) -> str:
 ## Boundaries
 
 - Do not modify files under `.northstar/` without a policy discussion.
+- For an existing source file, `Read` includes a SHA-256 marker when the whole
+  UTF-8 file was read. Use `ApplyPatch` for coordinated multi-file replacements
+  and pass each exact marker as `expected_sha256`; stale hashes refuse the batch.
 """
 
 

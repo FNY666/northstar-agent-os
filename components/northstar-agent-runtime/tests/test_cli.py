@@ -89,8 +89,8 @@ class ParserTests(unittest.TestCase):
         args = build_parser().parse_args(["run", "--read-only", "--allow-tool", "Write", "--allow-tool", "Grep"])
         allowed, denied = _tool_lists(args, base_tools=("Read", "Write", "Edit", "Grep", "Shell"))
         self.assertEqual(allowed, ("Grep",))
-        # Shell is mutating (kind=exec): a "read-only" run must not execute commands.
-        self.assertEqual(sorted(denied), ["Edit", "Shell", "Write"])
+        # Shell executes commands; ApplyPatch and SecurityProbe also remain denied.
+        self.assertEqual(sorted(denied), ["ApplyPatch", "Edit", "SecurityProbe", "Shell", "Write"])
 
     def test_bypass_mode_starts_from_the_whole_registry(self):
         args = build_parser().parse_args(["run", "--permission-mode", "bypassPermissions"])

@@ -16,6 +16,7 @@ out of the sandbox.
 """
 from __future__ import annotations
 
+import hashlib
 import inspect
 import json
 import os
@@ -485,6 +486,15 @@ def read_file(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
             data={"bytes": 0, "truncated": truncated, "binary": True},
         )
     content = text
+    sha256: str | None = None
+    if not truncated and "\x00" not in text:
+        try:
+            raw.decode("utf-8", errors="strict")
+        except UnicodeDecodeError:
+            pass
+        else:
+            sha256 = hashlib.sha256(raw).hexdigest()
+            content += f"\n[northstar file sha256={sha256}]"
     if truncated:
         # Marked on both ends: a long tail can be cut again by the result cap, and
         # a model that only reads the head must still know it is holding a prefix.
@@ -497,7 +507,7 @@ def read_file(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
     return ToolResult(
         content=content,
         truncated=truncated,
-        data={"path": ctx.relative(path), "bytes": min(limit, size), "size": size, "truncated": truncated},
+        data={"path": ctx.relative(path), "bytes": min(limit, size), "size": size, "truncated": truncated, "sha256": sha256},
     )
 
 
@@ -689,10 +699,13 @@ def describe_tools(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
     )
 
 
+from tools.apply_patch_tool import MAX_PATCH_FILE_BYTES, MAX_PATCH_FILES, apply_patch
+
 BUILTIN_TOOLS: tuple[str, ...] = (
     "Read",
     "Write",
     "Edit",
+    "ApplyPatch",
     "LS",
     "Grep",
     "DescribeTools",
@@ -706,7 +719,10 @@ def build_default_registry(include_describe: bool = True) -> ToolRegistry:
     registry.register(
         ToolSpec(
             name="Read",
-            description="Read a workspace text file. Output is capped; re-read with max_bytes or use Grep for the remainder.",
+            description=(
+                "Read a workspace text file. Complete UTF-8 reads include a runtime SHA-256 metadata line "
+                "that is not part of the file. Output is capped; use max_bytes or Grep for the remainder."
+            ),
             input_schema=_schema(
                 {
                     "path": {"type": "string", "description": "Path relative to the run workspace"},
@@ -748,6 +764,45 @@ def build_default_registry(include_describe: bool = True) -> ToolRegistry:
                 ["path", "old_string", "new_string"],
             ),
             handler=edit_file,
+            kind="edit",
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="ApplyPatch",
+            description=(
+                "Replace up to 32 existing UTF-8 workspace files in one governed call. "
+                "Each file must include the exact SHA-256 printed by Read; every path and "
+                "hash is validated before any file is replaced."
+            ),
+            input_schema=_schema(
+                {
+                    "files": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": MAX_PATCH_FILES,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "path": {"type": "string", "description": "Existing workspace-relative file"},
+                                "expected_sha256": {
+                                    "type": "string",
+                                    "pattern": "^[0-9a-fA-F]{64}$",
+                                    "description": "The 64-hex digest printed in Read's SHA-256 marker for this file",
+                                },
+                                "content": {
+                                    "type": "string",
+                                    "maxLength": MAX_PATCH_FILE_BYTES,
+                                    "description": "Full replacement UTF-8 file content",
+                                },
+                            },
+                            "required": ["path", "expected_sha256", "content"],
+                        },
+                    }
+                },
+                ["files"],
+            ),
+            handler=apply_patch,
             kind="edit",
         )
     )
@@ -857,6 +912,7 @@ __all__ = [
     "ToolSandbox",
     "ToolSpec",
     "build_default_registry",
+    "apply_patch",
     "codex_tool_spec",
     "describe_tools",
     "edit_file",

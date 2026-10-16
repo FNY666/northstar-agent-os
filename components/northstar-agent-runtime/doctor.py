@@ -184,7 +184,7 @@ def _check_workspace(args: argparse.Namespace, findings: list[Finding]) -> None:
     elif not workspace.is_dir():
         findings.append(Finding("workspace", "fail", f"{workspace} exists but is not a directory"))
     elif not os.access(workspace, os.W_OK):
-        findings.append(Finding("workspace", "fail", f"{workspace} is not writable - Write/Edit need it"))
+        findings.append(Finding("workspace", "fail", f"{workspace} is not writable - Write/Edit/ApplyPatch need it"))
     else:
         findings.append(Finding("workspace", "ok", str(workspace.resolve())))
 

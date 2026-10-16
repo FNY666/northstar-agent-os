@@ -66,8 +66,8 @@ class AgentDefinition:
     @property
     def is_read_only(self) -> bool:
         # Shell (kind=exec) is command execution: a "read-only" agent must deny it
-        # the same way it denies Write/Edit, even if the tool is not in `tools`.
-        mutating_floor = {"Write", "Edit", "Shell"}
+        # the same way it denies Write/Edit/ApplyPatch, even if the tool is not in `tools`.
+        mutating_floor = {"Write", "Edit", "ApplyPatch", "Shell"}
         return set(self.disallowed_tools) >= mutating_floor or all(
             tool in READ_ONLY_TOOLS or tool == "CodexReadOnly" for tool in self.tools
         )
@@ -256,7 +256,7 @@ def general_agent() -> AgentDefinition:
             "Carry out the delegated task with the smallest set of tool calls that "
             "answers it, then report what changed and what you did not verify."
         ),
-        tools=("Read", "Grep", "LS", "Write", "Edit", "DescribeTools"),
+        tools=("Read", "Grep", "LS", "Write", "Edit", "ApplyPatch", "DescribeTools"),
         permission_mode="default",
         max_turns=12,
         max_tool_calls=40,
@@ -276,7 +276,7 @@ def explorer_agent() -> AgentDefinition:
             "references, and state what you could not determine."
         ),
         tools=READ_ONLY_TOOLS,
-        disallowed_tools=("Write", "Edit", "Shell"),
+        disallowed_tools=("Write", "Edit", "ApplyPatch", "Shell"),
         permission_mode="default",
         max_turns=8,
         max_tool_calls=30,
@@ -295,7 +295,7 @@ def planner_agent() -> AgentDefinition:
             "proves each step. Never attempt a modification: plan mode refuses it."
         ),
         tools=READ_ONLY_TOOLS,
-        disallowed_tools=("Write", "Edit", "Shell"),
+        disallowed_tools=("Write", "Edit", "ApplyPatch", "Shell"),
         permission_mode="plan",
         max_turns=6,
         max_tool_calls=20,
@@ -317,7 +317,7 @@ def evaluator_agent(criteria: Sequence[str] = ()) -> AgentDefinition:
             "Quote path:line evidence for each criterion. Do not modify anything."
         ),
         tools=READ_ONLY_TOOLS,
-        disallowed_tools=("Write", "Edit", "Shell", "Task"),
+        disallowed_tools=("Write", "Edit", "ApplyPatch", "Shell", "Task"),
         permission_mode="plan",
         model="",
         max_turns=6,

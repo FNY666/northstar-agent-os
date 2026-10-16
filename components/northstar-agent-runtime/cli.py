@@ -352,7 +352,7 @@ def _add_policy_arguments(parser: argparse.ArgumentParser) -> None:
         policy.add_argument(
             "--read-only",
             action="store_true",
-            help="deny Write, Edit, Shell, and SecurityProbe (no file mutations, command execution, or probes)",
+            help="deny Write, Edit, ApplyPatch, Shell, and SecurityProbe (no file mutations, command execution, or probes)",
         )
         policy.add_argument("--plan", action="store_true", help="shorthand for --permission-mode plan")
         policy.add_argument("--agent", default="", help="run as a built-in subagent definition (its tools and ceilings apply)")
@@ -365,7 +365,7 @@ def _add_policy_arguments(parser: argparse.ArgumentParser) -> None:
             help=(
                 "run up to N parallel-safe (read-only) tool handlers concurrently inside one "
                 "assistant turn (default 1 = serial). Gate + hooks stay serial and independent. "
-                f"Max 8. Mutating tools (Write/Edit/Shell/Task/MCP) force the whole turn serial"
+                f"Max 8. Mutating tools (Write/Edit/ApplyPatch/Shell/Task/MCP) force the whole turn serial"
             ),
         )
         policy.add_argument("--allow-nested-delegation", action="store_true", help="subagents may delegate one level deeper")

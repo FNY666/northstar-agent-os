@@ -36,9 +36,9 @@ class ToolsPackageLayoutTests(unittest.TestCase):
     def test_registry_names_still_resolve_from_the_package(self):
         from tools import ToolRegistry, build_default_registry
 
-        # Read/Write/Edit/LS/Grep/DescribeTools/Shell — Shell is registered but
-        # denied by default under the permission gate until --allow-tool Shell.
-        self.assertEqual(len(build_default_registry().names()), 7)
+        # Read/Write/Edit/ApplyPatch/LS/Grep/DescribeTools/Shell — mutating tools
+        # are registered but still cross the default-deny permission gate.
+        self.assertEqual(len(build_default_registry().names()), 8)
         self.assertIn("Shell", build_default_registry().names())
         self.assertTrue(issubclass(ToolRegistry, object))
 

@@ -195,7 +195,11 @@ class DelegationTests(RuntimeTestCase):
         text = parent.sent_tool_results()[0]["content"]
         self.assertIn("Write", text, "the message must name the tool that broke the gate")
         self.assertNotIn("Task refused", text)
-        self.assertEqual({denial.tool for denial in report.denials}, {"Write", "Edit"}, "every tool the subagent declared is gated")
+        self.assertEqual(
+            {denial.tool for denial in report.denials},
+            {"Write", "Edit", "ApplyPatch"},
+            "every tool the subagent declared is gated",
+        )
         self.assertEqual({denial.agent for denial in report.denials}, {"general"}, "the denial is attributed to the subagent that asked")
         self.assertEqual({denial.source for denial in report.denials}, {"delegation_gate"})
         self.assertEqual(self.assertExactlyOneResult(report).subtype, "success")

@@ -6,7 +6,7 @@ handler body of tools that cannot race each other or the audit trail:
 
 * kind ``read`` and not mutating (Read / Grep / LS / DescribeTools);
 * not a delegation tool (``Task`` owns a nested run and shared budget roll-up);
-* not ``exec`` / ``edit`` / ``network`` / ``other`` (Shell, Write, Edit, MCP, …).
+* not ``exec`` / ``edit`` / ``network`` / ``other`` (Shell, Write, Edit, ApplyPatch, MCP, …).
 
 A mixed turn (any non-parallel-safe call) falls back to full serial dispatch so
 ordering, denials, and workspace mutations stay deterministic. That is the
