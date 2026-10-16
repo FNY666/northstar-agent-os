@@ -188,6 +188,9 @@ script or other adversarial-perturbation signals are recorded as review
 findings; a clean result still means only that no known tripwire fired.
 The same high-confidence input gate applies to read-only tools: a reader cannot
 be used as a transcript return channel for a literal credential or jailbreak.
+Review-level findings on tool inputs are retained as redaction-safe
+`defensive_assessment` records even when the call is allowed, so operators can
+measure suspicious traffic without collecting the original argument.
 Tool descriptions and JSON Schema `description` annotations are screened before
 they are sent to the provider as well, while schema keys and enum values remain
 unchanged so the authorization contract cannot drift during sanitization.
