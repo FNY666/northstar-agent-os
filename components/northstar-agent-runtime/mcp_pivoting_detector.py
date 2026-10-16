@@ -90,11 +90,17 @@ BLOCKED_NETWORKS = (
     ipaddress.ip_network("172.16.0.0/12"),    # RFC 1918
     ipaddress.ip_network("192.168.0.0/16"),   # RFC 1918
     ipaddress.ip_network("169.254.0.0/16"),   # link-local / metadata
+    ipaddress.ip_network("100.64.0.0/10"),    # carrier-grade NAT / shared space
+    ipaddress.ip_network("192.0.0.0/24"),     # IETF protocol assignments
+    ipaddress.ip_network("198.18.0.0/15"),    # benchmarking networks
+    ipaddress.ip_network("224.0.0.0/4"),      # multicast
+    ipaddress.ip_network("240.0.0.0/4"),      # reserved/future use
     ipaddress.ip_network("0.0.0.0/8"),        # unspecified ("this host")
     ipaddress.ip_network("::1/128"),          # IPv6 loopback
     ipaddress.ip_network("fc00::/7"),         # IPv6 unique-local
     ipaddress.ip_network("fe80::/10"),        # IPv6 link-local
     ipaddress.ip_network("::/128"),           # IPv6 unspecified
+    ipaddress.ip_network("ff00::/8"),         # IPv6 multicast
 )
 
 #: Decimal / octal / hex spellings of 127.0.0.1 that bypass naive
@@ -171,6 +177,11 @@ def _host_is_blocked(host: str) -> bool:
     mapped = getattr(addr, "ipv4_mapped", None)
     if mapped is not None:
         addr = mapped
+    if any(
+        getattr(addr, attribute, False)
+        for attribute in ("is_private", "is_loopback", "is_link_local", "is_reserved", "is_unspecified", "is_multicast")
+    ):
+        return True
     return any(addr in net for net in BLOCKED_NETWORKS)
 
 

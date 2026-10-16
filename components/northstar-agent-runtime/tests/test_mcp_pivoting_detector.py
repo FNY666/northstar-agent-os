@@ -84,6 +84,14 @@ class TestPrivateRanges(unittest.TestCase):
     def test_ipv4_mapped_ipv6_metadata_blocked(self):
         self.assertTrue(detect_pivoting(call(url="http://[::ffff:169.254.169.254]/")))
 
+    def test_shared_and_special_use_ipv4_ranges_blocked(self):
+        for host in ("100.64.0.1", "192.0.0.1", "198.18.0.1", "224.0.0.1", "240.0.0.1"):
+            with self.subTest(host=host):
+                self.assertTrue(detect_pivoting(call(url=f"http://{host}/")))
+
+    def test_ipv6_multicast_blocked(self):
+        self.assertTrue(detect_pivoting(call(url="http://[ff02::1]/")))
+
 
 class TestEvasionResistance(unittest.TestCase):
     def test_percent_encoded_metadata_blocked(self):
