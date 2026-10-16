@@ -107,6 +107,19 @@ class DispatchTests(RuntimeTestCase):
         self.assertNotIn("sk-1234567890abcdef", report.transcript[1].text)
         self.assertIn("blocked by defensive agent", report.transcript[1].text)
 
+    def test_tool_call_commentary_is_sanitized_without_changing_tool_use(self):
+        secret = "api_key=sk-1234567890abcdef"
+        report = self.drive(self.runtime(
+            provider=self.provider([
+                tool_turn("Read", {"path": "x"}, also_text=secret),
+                text_turn("done"),
+            ]),
+            workspace=self.workspace({"x": "ok"}),
+        ))
+        self.assertEqual(report.result.subtype, "success")
+        self.assertNotIn(secret, report.transcript[1].text)
+        self.assertEqual(report.transcript[1].tool_uses[0].name, "Read")
+
     def test_egress_target_scope_is_exact_and_precedes_approval_callback(self):
         effects = []
         approvals = []
