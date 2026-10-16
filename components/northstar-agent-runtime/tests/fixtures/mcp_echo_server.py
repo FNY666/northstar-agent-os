@@ -13,6 +13,7 @@ Environment switches used by the tests:
 
 - MCP_SILENT=1    answer initialize, then never answer tools/list (timeout test)
 - MCP_SLOW_TOOL=1 sleep before answering tools/call (call-timeout test)
+- MCP_PAGINATED_TOOL_LIST=1 split tools/list across two cursor pages (pagination tests)
 - MCP_SPAWN_REPORT=/path  record cwd and MCP_TEST_* variables there at startup, so a test can
               prove what the *child process* was given (an imported env/cwd, not this test's)
 """
@@ -71,28 +72,38 @@ def main() -> int:
                 # Never answer tools/list: the client must time out and kill us.
                 time.sleep(3600)
         elif method == "tools/list":
-            respond({
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "result": {
-                    "tools": [
-                        {
-                            "name": "echo",
-                            "description": "Echoes the text argument back verbatim.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {"text": {"type": "string"}},
-                                "required": ["text"],
-                            },
-                        },
-                        {
-                            "name": "fail",
-                            "description": "Always fails with an isError result.",
-                            "inputSchema": {"type": "object", "properties": {}},
-                        },
-                    ]
+            tools = [
+                {
+                    "name": "echo",
+                    "description": "Echoes the text argument back verbatim.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {"text": {"type": "string"}},
+                        "required": ["text"],
+                    },
                 },
-            })
+                {
+                    "name": "fail",
+                    "description": "Always fails with an isError result.",
+                    "inputSchema": {"type": "object", "properties": {}},
+                },
+            ]
+            params = request.get("params") or {}
+            cursor = params.get("cursor") if isinstance(params, dict) else None
+            result = {"tools": tools}
+            if os.environ.get("MCP_PAGINATED_TOOL_LIST") == "1":
+                if cursor is None:
+                    result = {"tools": tools[:1], "nextCursor": "fixture-page-2"}
+                elif cursor == "fixture-page-2":
+                    result = {"tools": tools[1:]}
+                else:
+                    respond({
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "error": {"code": -32602, "message": "unknown pagination cursor"},
+                    })
+                    continue
+            respond({"jsonrpc": "2.0", "id": request_id, "result": result})
         elif method == "tools/call":
             params = request.get("params") or {}
             name = (params.get("name") or "") if isinstance(params, dict) else ""
