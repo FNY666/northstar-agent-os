@@ -71,6 +71,66 @@ class ClientTests(unittest.TestCase):
         finally:
             client.close()
 
+    def test_tool_listing_follows_cursors_under_one_deadline(self):
+        client = McpStdioClient("demo", ["true"], timeout_ms=1000, env={})
+        tools = [{"name": "first"}, {"name": "second"}]
+        pages = [
+            {"tools": tools[:1], "nextCursor": "opaque-page-token"},
+            {"tools": tools[1:]},
+        ]
+        requests = []
+
+        def paged_request(method, params=None, *, deadline=None):
+            requests.append((method, params, deadline))
+            return pages.pop(0)
+
+        client._request = paged_request  # type: ignore[method-assign]
+        self.assertEqual(client._list_tools(), tools)
+        self.assertEqual([entry[1] for entry in requests], [{}, {"cursor": "opaque-page-token"}])
+        self.assertEqual(requests[0][2], requests[1][2])
+        self.assertIsNotNone(requests[0][2])
+
+    def test_tool_listing_rejects_repeated_cursors(self):
+        client = McpStdioClient("demo", ["true"], timeout_ms=1000, env={})
+        pages = [
+            {"tools": [], "nextCursor": "loop"},
+            {"tools": [], "nextCursor": "loop"},
+        ]
+
+        def paged_request(method, params=None, *, deadline=None):
+            return pages.pop(0)
+
+        client._request = paged_request  # type: ignore[method-assign]
+        with self.assertRaisesRegex(McpError, "repeated a pagination cursor"):
+            client._list_tools()
+
+    def test_tool_listing_caps_total_tools_across_pages(self):
+        from mcp_client import MAX_TOOLS_PER_SERVER
+
+        client = McpStdioClient("demo", ["true"], timeout_ms=1000, env={})
+        pages = [
+            {
+                "tools": [{"name": f"tool_{index}"} for index in range(MAX_TOOLS_PER_SERVER)],
+                "nextCursor": "overflow",
+            },
+            {"tools": [{"name": "extra_tool"}]},
+        ]
+
+        def paged_request(method, params=None, *, deadline=None):
+            return pages.pop(0)
+
+        client._request = paged_request  # type: ignore[method-assign]
+        with self.assertRaisesRegex(McpError, "at most 25 tools"):
+            client._list_tools()
+
+    def test_connect_and_refresh_follow_tool_list_pages(self):
+        client = self.connect(env={"MCP_PAGINATED_TOOL_LIST": "1"})
+        try:
+            self.assertEqual(client.tool_names(), ("echo", "fail"))
+            self.assertEqual(client.refresh_tools(), ())
+        finally:
+            client.close()
+
     def test_call_echo_returns_the_text(self):
         client = self.connect()
         try:
@@ -377,8 +437,8 @@ class ToolPinningTests(unittest.TestCase):
             original_request = client._request
             remote_calls = []
 
-            def drifted_request(method, params=None):
-                result = original_request(method, params)
+            def drifted_request(method, params=None, *, deadline=None):
+                result = original_request(method, params, deadline=deadline)
                 if method == "tools/list":
                     result["tools"][0]["description"] = "rewritten after admission"
                 elif method == "tools/call":
@@ -406,8 +466,8 @@ class ToolPinningTests(unittest.TestCase):
             original_request = client._request
             remote_calls = []
 
-            def output_schema_changed(method, params=None):
-                result = original_request(method, params)
+            def output_schema_changed(method, params=None, *, deadline=None):
+                result = original_request(method, params, deadline=deadline)
                 if method == "tools/list":
                     result["tools"][0]["outputSchema"] = {
                         "type": "object",
@@ -440,8 +500,8 @@ class ToolPinningTests(unittest.TestCase):
             original_request = client._request
             remote_calls = []
 
-            def oversized_schema(method, params=None):
-                result = original_request(method, params)
+            def oversized_schema(method, params=None, *, deadline=None):
+                result = original_request(method, params, deadline=deadline)
                 if method == "tools/list":
                     result["tools"][0]["outputSchema"] = {
                         "type": "string",
@@ -469,8 +529,8 @@ class ToolPinningTests(unittest.TestCase):
             original_request = client._request
             remote_calls = []
 
-            def oversized_request(method, params=None):
-                result = original_request(method, params)
+            def oversized_request(method, params=None, *, deadline=None):
+                result = original_request(method, params, deadline=deadline)
                 if method == "tools/list":
                     result["tools"] = result["tools"] * (MAX_TOOLS_PER_SERVER + 1)
                 elif method == "tools/call":
