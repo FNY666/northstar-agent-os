@@ -214,7 +214,10 @@ def sanitize_for_model(
         or (unicodedata.category(char) == "Cc" and char not in "\t\n\r")
         for char in text
     )
-    if not findings and not has_unicode_controls:
+    has_unicode_separators = any(
+        unicodedata.category(char) in {"Pd", "Zs"} for char in normalized
+    )
+    if not findings and not has_unicode_controls and not has_unicode_separators:
         return text, assessment
     sanitized = scan_text
     for finding in sorted(findings, key=lambda item: (item.start, item.end), reverse=True):
@@ -238,6 +241,15 @@ def sanitize_for_model(
     # Collapse only for detection: model-visible spacing is preserved below,
     # while equivalent whitespace cannot hide a phrase from lexical rules.
     post_cleanup = assess(" ".join(sanitized.split()))
+    separator_cleanup = "".join(
+        " " if unicodedata.category(char) in {"Pd", "Zs"} else char
+        for char in sanitized
+    )
+    separator_pass = assess(" ".join(separator_cleanup.split()))
+    if separator_pass.findings and any(
+        finding.rule_id.startswith("D-INJ-") for finding in separator_pass.findings
+    ):
+        post_cleanup = replace(separator_pass, decision=Decision.BLOCK)
     if post_cleanup.decision is Decision.BLOCK or any(
         finding.rule_id.startswith("D-INJ-") for finding in post_cleanup.findings
     ):
