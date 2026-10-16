@@ -167,6 +167,11 @@ def _host_is_blocked(host: str) -> bool:
         return True  # empty host: fail closed
     if any(unicodedata.category(char) in {"Cc", "Cf"} for char in host):
         return True  # ambiguous/control-bearing authorities fail closed
+    if any(char in host for char in "/\\?#@") or any(char.isspace() for char in host):
+        # Percent-decoded authority delimiters can be interpreted differently
+        # by URL stacks (for example, %2f as a path separator). Refuse the
+        # ambiguous authority before a downstream client gets to reinterpret it.
+        return True
     if host in BLOCKED_HOSTNAMES:
         return True
     numeric = _parse_numeric_ipv4(host)
