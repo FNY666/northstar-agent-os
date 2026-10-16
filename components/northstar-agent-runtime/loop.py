@@ -1031,6 +1031,19 @@ class AgentRuntime:
             changed = changed or safe != value
             return safe
 
+        def screen_value(value: Any) -> Any:
+            """Screen nested resumed tool arguments without changing their shape."""
+            nonlocal changed
+            if isinstance(value, str):
+                return screen_text(value)
+            if isinstance(value, dict):
+                return {key: screen_value(item) for key, item in value.items()}
+            if isinstance(value, list):
+                return [screen_value(item) for item in value]
+            if isinstance(value, tuple):
+                return tuple(screen_value(item) for item in value)
+            return value
+
         for message in payload:
             content = message.get("content")
             if not isinstance(content, list):
@@ -1066,6 +1079,8 @@ class AgentRuntime:
                     if assessment.decision.value == "block":
                         block["input"] = {"_redacted_by_defensive_agent": True}
                         changed = True
+                    else:
+                        block["input"] = screen_value(raw_input)
                 elif block_type == "tool_result":
                     result_content = block.get("content")
                     if isinstance(result_content, str):

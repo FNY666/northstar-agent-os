@@ -208,6 +208,8 @@ prompt-injection channel.
 On resume, the final provider payload is screened again copy-on-write, so old
 or imported transcripts cannot bypass the current rules; the durable transcript
 itself is never rewritten by this compatibility pass.
+Nested string fields inside resumed tool arguments are screened recursively,
+including review-level findings, while the original argument shape is retained.
 Delegation prompts receive an additional review-level redaction before a child
 runtime is created, preventing low-confidence injection text from propagating
 through the agent tree.
