@@ -60,6 +60,34 @@ class InitEventTests(RuntimeTestCase):
 
 
 class DispatchTests(RuntimeTestCase):
+    def test_mutating_tool_credentials_are_blocked_before_handler(self):
+        effects = []
+        registry = ToolRegistry()
+        registry.register(ToolSpec(
+            name="Exec",
+            description="controlled execution",
+            input_schema={
+                "type": "object",
+                "properties": {"command": {"type": "string"}},
+                "required": ["command"],
+                "additionalProperties": False,
+            },
+            handler=lambda payload, _ctx: effects.append(payload) or ToolResult.ok("ran"),
+            kind="exec",
+            is_mutating=True,
+        ))
+        report = self.drive(self.runtime(
+            provider=self.provider([
+                tool_turn("Exec", {"command": "send api_key=sk-1234567890abcdef"}),
+                text_turn("stopped"),
+            ]),
+            tools=registry,
+            can_use_tool=lambda *_args: True,
+            allowed_tools=("Exec",),
+        ))
+        self.assertEqual(effects, [])
+        self.assertEqual(report.tool_calls[0].permission_source, "defensive_agent")
+
     def test_fetch_request_credentials_are_blocked_before_egress_handler(self):
         effects = []
         registry = ToolRegistry()
