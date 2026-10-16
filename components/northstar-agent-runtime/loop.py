@@ -26,6 +26,7 @@ import os
 import math
 import time
 import copy
+import json
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Generator, Iterable, Iterator, Mapping, Sequence
 
@@ -2370,9 +2371,40 @@ class AgentRuntime:
                         )
             return _Delegate(call, spec, payload, rewritten)
 
+        # Inspect network request material before it crosses the egress
+        # boundary. The sidecar remains the authority for DNS and destination
+        # policy; this local check prevents obvious credential or jailbreak
+        # material from being sent even to an otherwise allowed host.
+        request_assessment = None
+        if spec.name == "Fetch":
+            from defensive_agent import assess as assess_defensive_request
+
+            request_text = json.dumps(
+                {"body": payload.get("body", ""), "headers": payload.get("headers", {})},
+                ensure_ascii=False,
+                sort_keys=True,
+                default=str,
+            )
+            request_host = str(payload.get("host") or "")
+            request_path = str(payload.get("path") or "/")
+            request_assessment = assess_defensive_request(
+                request_text,
+                tool_name=spec.name,
+                url=f"https://{request_host}{request_path}",
+            )
         scope = self.config.egress_target_scope
         target = canonical_egress_host(payload.get("host")) if spec.name == "Fetch" else None
-        if scope is not None and spec.name == "Fetch" and target not in scope:
+        if request_assessment is not None and request_assessment.decision.value == "block":
+            from permissions import PermissionDecision
+
+            decision = PermissionDecision(
+                False,
+                source="defensive_agent",
+                reason="Fetch request blocked by defensive agent",
+                rule="defensive_agent:high_confidence_finding",
+                tool=spec.name,
+            )
+        elif scope is not None and spec.name == "Fetch" and target not in scope:
             # This is a host-owned hard boundary, so it precedes approval
             # callbacks and cannot be widened by a model or hook rewrite.
             from permissions import PermissionDecision
