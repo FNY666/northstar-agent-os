@@ -112,7 +112,7 @@ class SessionIdTests(unittest.TestCase):
         # "postconditions" (the end-of-run verdict) and "checkpoint" (a resumable
         # turn boundary), each with its own record type rather than hiding inside
         # "informational". Add a type here only with a test for it.
-        self.assertEqual(len(RECORD_TYPES), 13)
+        self.assertEqual(len(RECORD_TYPES), 14)
 
 
 class WriteTests(RuntimeTestCase):

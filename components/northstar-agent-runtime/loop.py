@@ -26,6 +26,7 @@ import os
 import math
 import time
 import copy
+import json
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Generator, Iterable, Iterator, Mapping, Sequence
 
@@ -1114,6 +1115,8 @@ class AgentRuntime:
         generation: Generation | None = None
         withheld = 0
         forwarded = 0
+        pending: list[StreamDelta] = []
+        pending_chars = 0
         try:
             stream = self.provider.stream(request)
         except AttributeError as error:
@@ -1135,27 +1138,37 @@ class AgentRuntime:
                     raise ProviderError("provider stream kept yielding text after the turn was complete")
                 if not item.text:
                     continue  # an empty chunk is noise, not content: spend no event on it
-                if forwarded >= MAX_STREAM_EVENTS_PER_TURN or (
-                    collected_total(collected) + len(item.text) > MAX_STREAM_TURN_CHARS
-                ):
-                    withheld += len(item.text)
-                    continue
-                # A provider that hands back one enormous block gets re-chunked rather
-                # than forwarded whole or dropped: splitting keeps the concatenation
-                # exact (so fidelity still means something) while keeping a single
-                # event's size bounded for whoever has to serialise it.
+                # Hold chunks until the complete generation is available. This
+                # lets the defensive agent inspect the whole stream before any
+                # byte reaches the caller; a secret split across chunks cannot
+                # escape through the streaming path.
                 for chunk in split_for_stream(item.text):
-                    if forwarded >= MAX_STREAM_EVENTS_PER_TURN:
+                    available = MAX_STREAM_TURN_CHARS - pending_chars
+                    if available <= 0:
                         withheld += len(chunk)
                         continue
-                    forwarded += 1
-                    collected.append(chunk)
-                    yield StreamDelta(
-                        text=chunk,
-                        block_index=item.block_index,
-                        turn_index=item.turn_index or request.turn_index,
-                        provider=item.provider or self.provider_name,
+                    retained = chunk[:available]
+                    pending.append(
+                        StreamDelta(
+                            text=retained,
+                            block_index=item.block_index,
+                            turn_index=item.turn_index or request.turn_index,
+                            provider=item.provider or self.provider_name,
+                        )
                     )
+                    pending_chars += len(retained)
+                    withheld += len(chunk) - len(retained)
+        except ProviderError:
+            # A provider fault ends the turn, but already-received text may
+            # still be useful to the operator. Release only the screened
+            # prefix; it is never recorded as a completed assistant turn.
+            from defensive_agent import sanitize_for_model
+
+            prefix, _defensive = sanitize_for_model("".join(item.text for item in pending))
+            for chunk in split_for_stream(prefix):
+                collected.append(chunk)
+                yield StreamDelta(text=chunk, turn_index=request.turn_index, provider=self.provider_name)
+            raise
         finally:
             # An interrupted run must not leave the provider's own resources (an HTTP
             # connection, an SDK stream context) open until the garbage collector gets
@@ -1172,6 +1185,48 @@ class AgentRuntime:
         )
         if generation is None:
             raise ProviderError("provider stream ended without returning the turn")
+        from defensive_agent import sanitize_for_model
+
+        raw_stream = "".join(item.text for item in pending)
+        safe_stream, defensive = sanitize_for_model(raw_stream)
+        # Long opaque/base64-like documents are a noisy indirect tripwire in
+        # the text detector. Keep those review-only findings visible in the
+        # existing stream contract; direct injection and high-confidence
+        # findings still sanitize before release.
+        if defensive.decision.value == "review" and defensive.findings and all(
+            item.category == "indirect" for item in defensive.findings
+        ):
+            safe_stream = raw_stream
+        if safe_stream != raw_stream:
+            from providers.base import TextBlock
+
+            generation = replace(generation, content=(TextBlock(text=safe_stream),))
+        # Release only after screening. The generation was rewritten above when
+        # content changed, so stream-fidelity still compares the safe bytes.
+        if safe_stream != raw_stream:
+            pending = [
+                StreamDelta(
+                    text=chunk,
+                    block_index=pending[0].block_index if pending else 0,
+                    turn_index=pending[0].turn_index if pending else request.turn_index,
+                    provider=pending[0].provider if pending else self.provider_name,
+                )
+                for chunk in split_for_stream(safe_stream)
+            ]
+        for item in pending:
+            if forwarded >= MAX_STREAM_EVENTS_PER_TURN:
+                withheld += len(item.text)
+                continue
+            forwarded += 1
+            collected.append(item.text)
+            yield item
+        if defensive.findings:
+            span.set_attributes(
+                {
+                    "stream.defensive_decision": defensive.decision.value,
+                    "stream.defensive_findings": ",".join(item.rule_id for item in defensive.findings[:8]),
+                }
+            )
         if withheld:
             span.set_attribute("stream.truncated", True)
         return generation, withheld
@@ -1389,6 +1444,45 @@ class AgentRuntime:
                     usage=generation.usage,
                     stop_reason=generation.stop_reason,
                 )
+                # The model's own text is an egress boundary too. Apply the
+                # same bounded detector before persisting or yielding it. Tool
+                # blocks stay byte-for-byte unchanged so authorization still
+                # sees the exact structured call; stream mode was screened in
+                # _stream_turn before any delta was released.
+                if not config.stream:
+                    from defensive_agent import sanitize_for_model
+                    from providers.base import TextBlock
+
+                    safe_blocks: list[Any] = []
+                    defensive_findings: list[Any] = []
+                    changed = False
+                    for content_block in assistant.content:
+                        if isinstance(content_block, TextBlock):
+                            safe_text, assessment = sanitize_for_model(content_block.text)
+                            safe_blocks.append(TextBlock(text=safe_text))
+                            defensive_findings.extend(assessment.findings)
+                            changed = changed or safe_text != content_block.text
+                        else:
+                            safe_blocks.append(content_block)
+                    if defensive_findings:
+                        decision = "block" if any(item.severity >= 90 for item in defensive_findings) else "review"
+                        self.sessions.append(
+                            "defensive_assessment",
+                            {
+                                "agent": config.agent,
+                                "tool": "(generation)",
+                                "turn_index": turn_index,
+                                "decision": decision,
+                                "sanitized": changed,
+                                "finding_count": len(defensive_findings),
+                                "findings": [
+                                    {"rule_id": item.rule_id, "category": item.category, "severity": item.severity}
+                                    for item in defensive_findings[:8]
+                                ],
+                            },
+                        )
+                    if changed:
+                        assistant = replace(assistant, content=tuple(safe_blocks))
                 if config.stream:
                     if (yield from self._stream_mismatch(state, turn_index, turn_span, assistant, streamed, stream_withheld)):
                         return
@@ -2332,6 +2426,51 @@ class AgentRuntime:
                 )
         rewritten = pre.updated_input is not None
 
+        # Mutating, executable, network, and delegation inputs are egress
+        # boundaries even when they are not Fetch calls. Refuse literal
+        # credentials before any handler or child agent can receive them;
+        # environment-variable references remain valid because the detector
+        # does not classify indirection as a secret.
+        if spec.is_mutating or spec.kind in {"exec", "network"} or spec.is_delegation:
+            from defensive_agent import assess as assess_defensive_input
+
+            input_assessment = assess_defensive_input(
+                json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str),
+                tool_name=spec.name,
+            )
+            if input_assessment.decision.value == "block":
+                decision = PermissionDecision(
+                    False,
+                    source="defensive_agent",
+                    reason=f"{spec.name} input blocked by defensive agent",
+                    rule="defensive_agent:high_confidence_finding",
+                    tool=spec.name,
+                )
+                self._governed_runner.run(
+                    intent="agent-tool-call",
+                    action=spec.name,
+                    subject=self.config.agent,
+                    tool=spec.name,
+                    tool_args=payload,
+                    inputs_digest=GovernedActionRunner.pin(
+                        {"call_id": call.id, "tool": spec.name, "args": payload}
+                    ),
+                    decision=decision,
+                    executor=lambda _tool, _args: (_ for _ in ()).throw(
+                        GovernedRunnerError("defensive agent denied call")
+                    ),
+                )
+                return self._refuse_by_gate(
+                    call,
+                    spec,
+                    decision,
+                    state,
+                    payload=payload,
+                    turn_index=turn_index,
+                    span=span,
+                    rewritten=rewritten,
+                )
+
         if spec.is_delegation:
             # Delegation is a data egress boundary too: the prompt is sent to
             # another agent and often another model provider. Preserve the
@@ -2370,13 +2509,40 @@ class AgentRuntime:
                         )
             return _Delegate(call, spec, payload, rewritten)
 
+        # Inspect network request material before it crosses the egress
+        # boundary. The sidecar remains the authority for DNS and destination
+        # policy; this local check prevents obvious credential or jailbreak
+        # material from being sent even to an otherwise allowed host.
+        request_assessment = None
+        if spec.name == "Fetch":
+            from defensive_agent import assess as assess_defensive_request
+
+            request_text = json.dumps(
+                {"body": payload.get("body", ""), "headers": payload.get("headers", {})},
+                ensure_ascii=False,
+                sort_keys=True,
+                default=str,
+            )
+            request_host = str(payload.get("host") or "")
+            request_path = str(payload.get("path") or "/")
+            request_assessment = assess_defensive_request(
+                request_text,
+                tool_name=spec.name,
+                url=f"https://{request_host}{request_path}",
+            )
         scope = self.config.egress_target_scope
         target = canonical_egress_host(payload.get("host")) if spec.name == "Fetch" else None
-        if scope is not None and spec.name == "Fetch" and target not in scope:
+        if request_assessment is not None and request_assessment.decision.value == "block":
+            decision = PermissionDecision(
+                False,
+                source="defensive_agent",
+                reason="Fetch request blocked by defensive agent",
+                rule="defensive_agent:high_confidence_finding",
+                tool=spec.name,
+            )
+        elif scope is not None and spec.name == "Fetch" and target not in scope:
             # This is a host-owned hard boundary, so it precedes approval
             # callbacks and cannot be widened by a model or hook rewrite.
-            from permissions import PermissionDecision
-
             decision = PermissionDecision(
                 False,
                 source="target_scope",

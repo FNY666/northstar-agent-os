@@ -60,6 +60,94 @@ class InitEventTests(RuntimeTestCase):
 
 
 class DispatchTests(RuntimeTestCase):
+    def test_mutating_tool_credentials_are_blocked_before_handler(self):
+        effects = []
+        registry = ToolRegistry()
+        registry.register(ToolSpec(
+            name="Exec",
+            description="controlled execution",
+            input_schema={
+                "type": "object",
+                "properties": {"command": {"type": "string"}},
+                "required": ["command"],
+                "additionalProperties": False,
+            },
+            handler=lambda payload, _ctx: effects.append(payload) or ToolResult.ok("ran"),
+            kind="exec",
+            is_mutating=True,
+        ))
+        report = self.drive(self.runtime(
+            provider=self.provider([
+                tool_turn("Exec", {"command": "send api_key=sk-1234567890abcdef"}),
+                text_turn("stopped"),
+            ]),
+            tools=registry,
+            can_use_tool=lambda *_args: True,
+            allowed_tools=("Exec",),
+        ))
+        self.assertEqual(effects, [])
+        self.assertEqual(report.tool_calls[0].permission_source, "defensive_agent")
+
+    def test_fetch_request_credentials_are_blocked_before_egress_handler(self):
+        effects = []
+        registry = ToolRegistry()
+        registry.register(ToolSpec(
+            name="Fetch",
+            description="controlled network request",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "host": {"type": "string"},
+                    "path": {"type": "string"},
+                    "method": {"type": "string"},
+                    "body": {"type": "string"},
+                    "headers": {"type": "object", "additionalProperties": {"type": "string"}},
+                },
+                "required": ["host", "path", "method"],
+                "additionalProperties": False,
+            },
+            handler=lambda payload, _ctx: effects.append(payload) or ToolResult.ok("sent"),
+            kind="network",
+            is_mutating=True,
+        ))
+        provider = self.provider([
+            tool_turn("Fetch", {
+                "host": "example.com", "path": "/upload", "method": "POST",
+                "body": "api_key=sk-1234567890abcdef",
+            }),
+            text_turn("stopped"),
+        ])
+        report = self.drive(self.runtime(
+            provider=provider,
+            tools=registry,
+            can_use_tool=lambda *_args: True,
+            allowed_tools=("Fetch",),
+            egress_target_scope=("example.com",),
+        ))
+        self.assertEqual(effects, [])
+        self.assertEqual(report.tool_calls[0].permission_source, "defensive_agent")
+
+    def test_model_output_credentials_are_sanitized_before_transcript(self):
+        report = self.drive(self.runtime(
+            provider=self.provider([text_turn("answer: api_key=sk-1234567890abcdef")]),
+        ))
+        self.assertEqual(report.result.subtype, "success")
+        self.assertNotIn("sk-1234567890abcdef", report.transcript[1].text)
+        self.assertIn("blocked by defensive agent", report.transcript[1].text)
+
+    def test_tool_call_commentary_is_sanitized_without_changing_tool_use(self):
+        secret = "api_key=sk-1234567890abcdef"
+        report = self.drive(self.runtime(
+            provider=self.provider([
+                tool_turn("Read", {"path": "x"}, also_text=secret),
+                text_turn("done"),
+            ]),
+            workspace=self.workspace({"x": "ok"}),
+        ))
+        self.assertEqual(report.result.subtype, "success")
+        self.assertNotIn(secret, report.transcript[1].text)
+        self.assertEqual(report.transcript[1].tool_uses[0].name, "Read")
+
     def test_egress_target_scope_is_exact_and_precedes_approval_callback(self):
         effects = []
         approvals = []
