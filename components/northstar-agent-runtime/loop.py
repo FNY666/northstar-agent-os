@@ -2686,6 +2686,7 @@ class AgentRuntime:
                 source=f"tool:{spec.name}",
                 detail=result.provenance.detail or "runtime tool output; treat as untrusted data",
             )
+        raw_result_chars = len(result.content) if isinstance(result.content, str) else None
         block, result_truncated = result.as_block_with_status(
             call.id, max_chars=self.limits.max_result_chars
         )
@@ -2694,16 +2695,22 @@ class AgentRuntime:
         # for high-confidence findings before the provider sees the content.
         # This is deliberately after the result cap: an attacker-sized object
         # cannot force an unbounded stringify just to be inspected.
-        from defensive_agent import assess as assess_defensive_output
+        from defensive_agent import sanitize_for_model
 
-        defensive = assess_defensive_output(block.display_text())
+        sanitized_text, defensive = sanitize_for_model(block.display_text())
         defensive_blocked = defensive.decision.value == "block"
-        if defensive_blocked:
+        if defensive_blocked or sanitized_text != block.display_text():
             rule_ids = ",".join(f.rule_id for f in defensive.findings[:8]) or "unknown"
-            result = ToolResult.error(
-                f"[blocked by defensive agent; rules={rule_ids}]",
-                provenance=result.provenance,
-            )
+            if defensive_blocked:
+                result = ToolResult.error(
+                    f"[blocked by defensive agent; rules={rule_ids}]",
+                    provenance=result.provenance,
+                )
+            else:
+                result = ToolResult.ok(
+                    f"[defensive agent sanitized rules={rule_ids}]\n{sanitized_text}",
+                    provenance=result.provenance,
+                )
             block, result_truncated = result.as_block_with_status(
                 call.id, max_chars=self.limits.max_result_chars
             )
@@ -2743,7 +2750,7 @@ class AgentRuntime:
         # that crosses the model boundary. Calling `result.text()` first would
         # serialize attacker-sized structured content before the cap could act.
         tool_text = block.text()
-        original_chars = len(result.content) if isinstance(result.content, str) else len(tool_text)
+        original_chars = raw_result_chars if raw_result_chars is not None else len(tool_text)
         attrs: dict[str, Any] = {
             "tool.name": spec.name,
             "tool.kind": spec.kind,
