@@ -1079,6 +1079,13 @@ class AgentRuntime:
             if isinstance(content, str):
                 message["content"] = screen_text(content)
                 continue
+            if isinstance(content, dict):
+                message["content"] = screen_unknown_block(content)
+                continue
+            if isinstance(content, tuple):
+                # Provider APIs use lists, but imported/resumed records may
+                # retain the runtime's immutable tuple representation.
+                content = list(content)
             if not isinstance(content, list):
                 continue
             safe_blocks: list[Any] = []
