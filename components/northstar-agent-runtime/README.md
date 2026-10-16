@@ -177,6 +177,22 @@ credential exposure, jailbreaks, or internal/metadata targets. Findings keep
 rule identifiers, severities, spans, and masked values only; raw text,
 credentials, and URLs never cross the result boundary.
 
+The same checkpoint runs on context-compaction summaries before they become
+model-visible again. Provider-written summaries that contain a high-confidence
+credential or jailbreak are replaced with a fixed quarantine marker; review
+findings are span-redacted and recorded in the compaction boundary metadata.
+Tool-result redaction preserves the original character budget with inert
+whitespace, so security filtering cannot silently disable context ceilings.
+Unicode format/control characters are removed at the model boundary and mixed
+script or other adversarial-perturbation signals are recorded as review
+findings; a clean result still means only that no known tripwire fired.
+Tool descriptions and JSON Schema `description` annotations are screened before
+they are sent to the provider as well, while schema keys and enum values remain
+unchanged so the authorization contract cannot drift during sanitization.
+Provider thinking blocks are checked too; a flagged signed block is dropped as
+a unit instead of being rewritten into an invalid signature, while its rule
+IDs remain in the defensive audit record.
+
 Transcripts are append-only JSONL, but they are meant to be read back:
 
 ```sh

@@ -10,7 +10,9 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Any
+import unicodedata
 
+from adversarial_detector import analyze_input
 from credential_detector import scan_for_credentials
 from injection_detector import InjectionType, scan_injection
 from mcp_pivoting_detector import check_tool_call
@@ -107,6 +109,27 @@ def assess(
             )
         )
 
+    # Unicode format/control characters and mixed-script confusables are a
+    # separate tripwire from lexical injection. Keep their signal at review
+    # severity: legitimate multilingual and rich-text content exists, but an
+    # invisible character must never be silently treated as clean.
+    adversarial = analyze_input(text)
+    for signal in adversarial.findings:
+        if signal.signal.value == "high-frequency-noise":
+            rule_id = "D-ADV-001"
+        elif signal.signal.value == "imperceptible-perturbation":
+            rule_id = "D-ADV-002"
+        else:
+            rule_id = "D-ADV-003"
+        findings.append(
+            DefensiveFinding(
+                rule_id=rule_id,
+                category=f"adversarial-{signal.signal.value}",
+                severity=80,
+                detail=f"score:{signal.score:.3f}",
+            )
+        )
+
     lowered = text.lower()
     credential_candidate = any(
         marker in lowered
@@ -147,14 +170,23 @@ def assess(
     return DefensiveAssessment(VERSION, SCHEMA_PIN, decision, tuple(findings))
 
 
-def sanitize_for_model(text: str) -> tuple[str, DefensiveAssessment]:
+def sanitize_for_model(
+    text: str,
+    *,
+    preserve_length: bool = False,
+) -> tuple[str, DefensiveAssessment]:
     """Remove known instruction-forgery spans before model consumption.
 
     High-confidence findings are replaced with a fixed quarantine marker. For
     review-level direct/indirect injections, only the matched spans are
     replaced so surrounding benign tool output remains useful. Credentials,
     jailbreaks, and blocked targets therefore never get partial disclosure.
+    ``preserve_length`` keeps the returned review-level artifact within the
+    input's character budget using inert padding; it is for resource accounting
+    at an output boundary, not for preserving the matched bytes.
     """
+    if not isinstance(preserve_length, bool):
+        raise TypeError("preserve_length must be a bool")
     assessment = assess(text)
     if assessment.decision is Decision.BLOCK:
         return "[blocked by defensive agent]", assessment
@@ -171,11 +203,39 @@ def sanitize_for_model(text: str) -> tuple[str, DefensiveAssessment]:
             for finding in scan_injection(text[-edge:])
         )
         findings = prefix + suffix
-    if not findings:
+    has_unicode_controls = any(
+        unicodedata.category(char) == "Cf"
+        or (unicodedata.category(char) == "Cc" and char not in "\t\n\r")
+        for char in text
+    )
+    if not findings and not has_unicode_controls:
         return text, assessment
     sanitized = text
     for finding in sorted(findings, key=lambda item: (item.start, item.end), reverse=True):
         sanitized = sanitized[: finding.start] + "[redacted defensive rule]" + sanitized[finding.end :]
+    # Remove Unicode format and control characters independently of lexical
+    # injection matches. In preserve-length mode use inert spaces so a tool
+    # result's accounting remains stable; otherwise leave an explicit marker
+    # for operators and the model to see that content was altered.
+    unicode_rewritten: list[str] = []
+    for char in sanitized:
+        category = unicodedata.category(char)
+        if category == "Cf" or (category == "Cc" and char not in "\t\n\r"):
+            unicode_rewritten.append(" " if preserve_length else "[redacted unicode]")
+        else:
+            unicode_rewritten.append(char)
+    sanitized = "".join(unicode_rewritten)
+    if preserve_length and len(sanitized) < len(text):
+        # Keep resource accounting stable without retaining any bytes from the
+        # matched span. Padding is deliberately inert whitespace: it cannot be
+        # interpreted as a hidden instruction, but it still exercises the same
+        # context/compaction ceilings as the original artifact.
+        sanitized += " " * (len(text) - len(sanitized))
+    elif preserve_length and len(sanitized) > len(text):
+        # A short marker (for example ``### system``) can be shorter than the
+        # fixed redaction label. Never let a safety rewrite increase the caller's
+        # resource budget; retain the safe prefix and drop the rest.
+        sanitized = sanitized[: len(text)]
     return sanitized, assessment
 
 

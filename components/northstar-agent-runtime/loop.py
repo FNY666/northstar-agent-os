@@ -78,6 +78,7 @@ from providers.base import (
     SystemMessage,
     ResultMessage,
     ToolResultBlock,
+    ThinkingBlock,
     ToolUseBlock,
     Usage,
     UserMessage,
@@ -973,7 +974,32 @@ class AgentRuntime:
         return self.tools.names()
 
     def api_tools(self) -> tuple[dict[str, Any], ...]:
-        return self.tools.to_api()
+        # MCP and other extension registries may supply descriptions and JSON
+        # Schema annotations from outside the host. They are model-visible
+        # instructions, not merely documentation, so screen only descriptive
+        # strings while leaving property names/enums unchanged for dispatch.
+        from defensive_agent import sanitize_for_model
+
+        def sanitize_schema(value: Any) -> Any:
+            if isinstance(value, dict):
+                result = {}
+                for key, item in value.items():
+                    if key == "description" and isinstance(item, str):
+                        result[key] = sanitize_for_model(item)[0]
+                    else:
+                        result[key] = sanitize_schema(item)
+                return result
+            if isinstance(value, list):
+                return [sanitize_schema(item) for item in value]
+            return value
+
+        safe_tools: list[dict[str, Any]] = []
+        for descriptor in self.tools.to_api():
+            safe = dict(descriptor)
+            safe["description"] = sanitize_for_model(str(descriptor.get("description", "")))[0]
+            safe["input_schema"] = sanitize_schema(descriptor.get("input_schema", {}))
+            safe_tools.append(safe)
+        return tuple(safe_tools)
 
     def describe(self) -> dict[str, Any]:
         return {
@@ -1213,6 +1239,48 @@ class AgentRuntime:
                 )
                 for chunk in split_for_stream(safe_stream)
             ]
+        # Thinking blocks are not streamed as deltas, but they are carried in
+        # the completed generation and can re-enter the next request. Their
+        # signatures bind their original bytes, so quarantine a flagged block
+        # rather than rewriting it into an unverifiable signature.
+        from providers.base import ThinkingBlock
+        safe_content: list[Any] = []
+        thinking_findings: list[Any] = []
+        dropped_thinking = False
+        for content_block in generation.content:
+            if not isinstance(content_block, ThinkingBlock):
+                safe_content.append(content_block)
+                continue
+            _safe_thinking, thinking_assessment = sanitize_for_model(content_block.text)
+            thinking_findings.extend(thinking_assessment.findings)
+            if thinking_assessment.findings or _safe_thinking != content_block.text:
+                dropped_thinking = True
+                continue
+            safe_content.append(content_block)
+        if thinking_findings:
+            self.sessions.append(
+                "defensive_assessment",
+                {
+                    "agent": self.config.agent,
+                    "tool": "(thinking)",
+                    "turn_index": request.turn_index,
+                    "decision": "block" if any(item.severity >= 90 for item in thinking_findings) else "review",
+                    "sanitized": dropped_thinking,
+                    "finding_count": len(thinking_findings),
+                    "findings": [
+                        {"rule_id": item.rule_id, "category": item.category, "severity": item.severity}
+                        for item in thinking_findings[:8]
+                    ],
+                },
+            )
+            span.set_attributes(
+                {
+                    "stream.thinking_defensive_decision": "block" if any(item.severity >= 90 for item in thinking_findings) else "review",
+                    "stream.thinking_defensive_findings": ",".join(item.rule_id for item in thinking_findings[:8]),
+                }
+            )
+        if dropped_thinking:
+            generation = replace(generation, content=tuple(safe_content))
         for item in pending:
             if forwarded >= MAX_STREAM_EVENTS_PER_TURN:
                 withheld += len(item.text)
@@ -1462,6 +1530,19 @@ class AgentRuntime:
                             safe_blocks.append(TextBlock(text=safe_text))
                             defensive_findings.extend(assessment.findings)
                             changed = changed or safe_text != content_block.text
+                        elif isinstance(content_block, ThinkingBlock):
+                            # Thinking signatures bind the original bytes, so
+                            # rewriting a thinking block would make a later
+                            # provider request unverifiable. If its content
+                            # trips any defensive rule, drop the block as a
+                            # whole while preserving tool calls and ordinary
+                            # assistant text.
+                            safe_text, assessment = sanitize_for_model(content_block.text)
+                            defensive_findings.extend(assessment.findings)
+                            if assessment.findings or safe_text != content_block.text:
+                                changed = True
+                                continue
+                            safe_blocks.append(content_block)
                         else:
                             safe_blocks.append(content_block)
                     if defensive_findings:
@@ -2863,7 +2944,9 @@ class AgentRuntime:
         # cannot force an unbounded stringify just to be inspected.
         from defensive_agent import sanitize_for_model
 
-        sanitized_text, defensive = sanitize_for_model(block.display_text())
+        sanitized_text, defensive = sanitize_for_model(
+            block.display_text(), preserve_length=True
+        )
         defensive_blocked = defensive.decision.value == "block"
         if defensive.findings:
             self.sessions.append(
