@@ -157,6 +157,26 @@ python3 -m cli run --workspace . --provider anthropic \
 warnings, not failures); `--dry-run` prints the resolved tools, allow/deny
 lists, ceilings, and pricing, then exits without constructing the provider.
 
+### Local defensive assessment
+
+The runtime also exposes a deterministic blue-team checkpoint for untrusted
+content and declared fetch targets. It is read-only: it makes no network
+request, executes no command, and never attempts to exploit a finding. The
+result is safe to pass to CI or an approval gate:
+
+```sh
+python3 -m cli security assess --text "summarise this document" --json
+python3 -m cli security assess --text-file tool-output.txt --json
+python3 -m cli security assess --text "fetch it" \
+  --tool-name browser --url https://example.com/api --json
+```
+
+The command returns `allow` for clean input, `review` for known instruction
+forgery patterns, and exit code `5` with `block` for high-confidence
+credential exposure, jailbreaks, or internal/metadata targets. Findings keep
+rule identifiers, severities, spans, and masked values only; raw text,
+credentials, and URLs never cross the result boundary.
+
 Transcripts are append-only JSONL, but they are meant to be read back:
 
 ```sh
