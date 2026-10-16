@@ -223,14 +223,14 @@ def sanitize_for_model(
     for finding in sorted(findings, key=lambda item: (item.start, item.end), reverse=True):
         sanitized = sanitized[: finding.start] + "[redacted defensive rule]" + sanitized[finding.end :]
     # Remove Unicode format and control characters independently of lexical
-    # injection matches. In preserve-length mode use inert spaces so a tool
-    # result's accounting remains stable; otherwise leave an explicit marker
-    # for operators and the model to see that content was altered.
+    # injection matches. In preserve-length mode use a visible one-character
+    # marker so accounting stays stable without reconstructing a readable
+    # instruction; otherwise leave an explicit marker for operators.
     unicode_rewritten: list[str] = []
     for char in sanitized:
         category = unicodedata.category(char)
         if category == "Cf" or (category == "Cc" and char not in "\t\n\r"):
-            unicode_rewritten.append(" " if preserve_length else "[redacted unicode]")
+            unicode_rewritten.append("□" if preserve_length else "[redacted unicode]")
         else:
             unicode_rewritten.append(char)
     sanitized = "".join(unicode_rewritten)
@@ -242,7 +242,7 @@ def sanitize_for_model(
     # while equivalent whitespace cannot hide a phrase from lexical rules.
     post_cleanup = assess(" ".join(sanitized.split()))
     separator_cleanup = "".join(
-        " " if unicodedata.category(char) in {"Pd", "Zs"} else char
+        " " if char == "□" or unicodedata.category(char) in {"Pd", "Zs"} else char
         for char in sanitized
     )
     separator_pass = assess(" ".join(separator_cleanup.split()))
