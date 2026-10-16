@@ -1061,6 +1061,9 @@ class AgentRuntime:
 
         for message in payload:
             content = message.get("content")
+            if isinstance(content, str):
+                message["content"] = screen_text(content)
+                continue
             if not isinstance(content, list):
                 continue
             safe_blocks: list[Any] = []
