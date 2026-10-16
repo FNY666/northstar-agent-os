@@ -247,6 +247,8 @@ Unknown multimodal `data` fields are screened unless their parent explicitly
 declares a binary media type; opaque provider signatures remain untouched.
 String, tuple, and single-block content forms are normalized into the same
 screening path for imported provider messages.
+Malformed non-message records in an imported sequence are dropped from the
+copy-on-write request instead of crashing the runtime.
 Nested string fields inside resumed tool arguments are screened recursively,
 including review-level findings, while the original argument shape is retained.
 Delegation prompts receive an additional review-level redaction before a child
