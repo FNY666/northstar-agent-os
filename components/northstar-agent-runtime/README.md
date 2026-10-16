@@ -191,6 +191,9 @@ be used as a transcript return channel for a literal credential or jailbreak.
 Review-level findings on tool inputs are retained as redaction-safe
 `defensive_assessment` records even when the call is allowed, so operators can
 measure suspicious traffic without collecting the original argument.
+The free-form provenance header attached to unstructured tool results is
+screened separately from the artifact body, closing metadata-only injection and
+credential bypasses.
 Hook-injected context is screened at the same boundary before it is added to
 the transcript; this keeps extension callbacks from becoming an untracked
 prompt-injection channel.
