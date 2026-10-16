@@ -92,6 +92,34 @@ class InitEventTests(RuntimeTestCase):
 
 
 class DispatchTests(RuntimeTestCase):
+    def test_read_only_tool_credentials_are_blocked_before_transcript(self):
+        effects = []
+        registry = ToolRegistry()
+        registry.register(ToolSpec(
+            name="Lookup",
+            description="read-only lookup",
+            input_schema={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+                "additionalProperties": False,
+            },
+            handler=lambda payload, _ctx: effects.append(payload) or ToolResult.ok("looked up"),
+            kind="read",
+            is_mutating=False,
+        ))
+        report = self.drive(self.runtime(
+            provider=self.provider([
+                tool_turn("Lookup", {"query": "api_key=sk-1234567890abcdef"}),
+                text_turn("stopped"),
+            ]),
+            tools=registry,
+            can_use_tool=lambda *_args: True,
+            allowed_tools=("Lookup",),
+        ))
+        self.assertEqual(effects, [])
+        self.assertEqual(report.tool_calls[0].permission_source, "defensive_agent")
+
     def test_mutating_tool_credentials_are_blocked_before_handler(self):
         effects = []
         registry = ToolRegistry()

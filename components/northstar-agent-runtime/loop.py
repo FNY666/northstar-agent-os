@@ -2507,50 +2507,49 @@ class AgentRuntime:
                 )
         rewritten = pre.updated_input is not None
 
-        # Mutating, executable, network, and delegation inputs are egress
-        # boundaries even when they are not Fetch calls. Refuse literal
-        # credentials before any handler or child agent can receive them;
-        # environment-variable references remain valid because the detector
-        # does not classify indirection as a secret.
-        if spec.is_mutating or spec.kind in {"exec", "network"} or spec.is_delegation:
-            from defensive_agent import assess as assess_defensive_input
+        # Every tool input becomes part of the assistant transcript after the
+        # call, including a read-only call. Run the same local checkpoint for
+        # all tools so a hardcoded credential cannot use a harmless-looking
+        # reader as a return channel. Environment-variable references remain
+        # valid because the detector does not classify indirection as a secret.
+        from defensive_agent import assess as assess_defensive_input
 
-            input_assessment = assess_defensive_input(
-                json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str),
-                tool_name=spec.name,
+        input_assessment = assess_defensive_input(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str),
+            tool_name=spec.name,
+        )
+        if input_assessment.decision.value == "block":
+            decision = PermissionDecision(
+                False,
+                source="defensive_agent",
+                reason=f"{spec.name} input blocked by defensive agent",
+                rule="defensive_agent:high_confidence_finding",
+                tool=spec.name,
             )
-            if input_assessment.decision.value == "block":
-                decision = PermissionDecision(
-                    False,
-                    source="defensive_agent",
-                    reason=f"{spec.name} input blocked by defensive agent",
-                    rule="defensive_agent:high_confidence_finding",
-                    tool=spec.name,
-                )
-                self._governed_runner.run(
-                    intent="agent-tool-call",
-                    action=spec.name,
-                    subject=self.config.agent,
-                    tool=spec.name,
-                    tool_args=payload,
-                    inputs_digest=GovernedActionRunner.pin(
-                        {"call_id": call.id, "tool": spec.name, "args": payload}
-                    ),
-                    decision=decision,
-                    executor=lambda _tool, _args: (_ for _ in ()).throw(
-                        GovernedRunnerError("defensive agent denied call")
-                    ),
-                )
-                return self._refuse_by_gate(
-                    call,
-                    spec,
-                    decision,
-                    state,
-                    payload=payload,
-                    turn_index=turn_index,
-                    span=span,
-                    rewritten=rewritten,
-                )
+            self._governed_runner.run(
+                intent="agent-tool-call",
+                action=spec.name,
+                subject=self.config.agent,
+                tool=spec.name,
+                tool_args=payload,
+                inputs_digest=GovernedActionRunner.pin(
+                    {"call_id": call.id, "tool": spec.name, "args": payload}
+                ),
+                decision=decision,
+                executor=lambda _tool, _args: (_ for _ in ()).throw(
+                    GovernedRunnerError("defensive agent denied call")
+                ),
+            )
+            return self._refuse_by_gate(
+                call,
+                spec,
+                decision,
+                state,
+                payload=payload,
+                turn_index=turn_index,
+                span=span,
+                rewritten=rewritten,
+            )
 
         if spec.is_delegation:
             # Delegation is a data egress boundary too: the prompt is sent to
