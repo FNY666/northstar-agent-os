@@ -253,6 +253,7 @@ def build_callback(
         exit_code: int | None = None,
         timed_out: bool = False,
         reason: str = "",
+        workspace_binding: Mapping[str, Any] | None = None,
     ) -> HookResult:
         check = {
             "name": hook.name,
@@ -264,6 +265,8 @@ def build_callback(
             "timed_out": timed_out,
             "duration_ms": max(0, int((time.monotonic() - started) * 1000)),
         }
+        if workspace_binding is not None:
+            check["workspace_binding"] = dict(workspace_binding)
         result_data = {"workspace_check": check}
         if passed:
             return HookResult(decision="allow", data=result_data)
@@ -273,6 +276,21 @@ def build_callback(
         payload = hook_input.as_dict()
         started = time.monotonic()
         is_stop_check = hook.event == "Stop"
+        workspace_before: Any = None
+
+        def stop_outcome(**kwargs: Any) -> HookResult:
+            binding = None
+            if workspace_before is not None:
+                from coding_evidence import snapshot_workspace, workspace_check_binding
+
+                binding = workspace_check_binding(workspace_before, snapshot_workspace(root))
+            return stop_check_result(
+                started=started,
+                turn_index=hook_input.turn_index,
+                workspace_binding=binding,
+                **kwargs,
+            )
+
         # Workspace Stop checks verify the completed top-level task. A child agent
         # returning its partial result must not launch the project suite early.
         if is_stop_check and hook_input.depth > 0:
@@ -281,12 +299,16 @@ def build_callback(
             current = hook.script.read_bytes()
         except OSError as error:
             if is_stop_check:
-                return stop_check_result(passed=False, started=started, turn_index=hook_input.turn_index, reason=f"{hook.name} script is no longer readable: {error}")
+                return stop_outcome(passed=False, reason=f"{hook.name} script is no longer readable: {error}")
             return HookResult.deny(f"{hook.name} script is no longer readable: {error}")
         if hashlib.sha256(current).hexdigest() != hook.script_digest:
             if is_stop_check:
-                return stop_check_result(passed=False, started=started, turn_index=hook_input.turn_index, reason=f"{hook.name} script changed since registration; refusing check")
+                return stop_outcome(passed=False, reason=f"{hook.name} script changed since registration; refusing check")
             return HookResult.deny(f"{hook.name} script changed since registration; refusing dispatch")
+        if is_stop_check:
+            from coding_evidence import snapshot_workspace
+
+            workspace_before = snapshot_workspace(root)
         # Preserve the original path/interpreter semantics after verifying current bytes.
         # Residual: a same-user adversary can still race this check against the OS open in Popen.
         argv = ([hook.interpreter] if hook.interpreter else []) + [str(hook.script)]
@@ -305,10 +327,8 @@ def build_callback(
         except subprocess.TimeoutExpired:
             # A hook that will not answer is a veto, not a green light.
             if is_stop_check:
-                return stop_check_result(
+                return stop_outcome(
                     passed=False,
-                    started=started,
-                    turn_index=hook_input.turn_index,
                     timed_out=True,
                     reason=f"{hook.name} check timed out after {hook.timeout_ms}ms",
                 )
@@ -317,22 +337,20 @@ def build_callback(
             )
         except OSError as error:
             if is_stop_check:
-                return stop_check_result(passed=False, started=started, turn_index=hook_input.turn_index, reason=f"{hook.name} could not be executed: {error}")
+                return stop_outcome(passed=False, reason=f"{hook.name} could not be executed: {error}")
             raise _fail(f"{hook.name} could not be executed: {error}") from error
         except Exception as error:  # output caps, cleanup failures, and decode errors
             if is_stop_check:
-                return stop_check_result(passed=False, started=started, turn_index=hook_input.turn_index, reason=f"{hook.name} could not complete: {type(error).__name__}: {error}")
+                return stop_outcome(passed=False, reason=f"{hook.name} could not complete: {type(error).__name__}: {error}")
             raise
         stdout = (completed.stdout or "")[:MAX_STDOUT_BYTES]
         stderr = (completed.stderr or "")[:MAX_STDERR_BYTES]
         code = int(getattr(completed, "returncode", 0) or 0)
         if is_stop_check:
             if code == 0:
-                return stop_check_result(passed=True, started=started, turn_index=hook_input.turn_index, exit_code=code)
-            return stop_check_result(
+                return stop_outcome(passed=True, exit_code=code)
+            return stop_outcome(
                 passed=False,
-                started=started,
-                turn_index=hook_input.turn_index,
                 exit_code=code,
                 reason=f"{hook.name} check exited {code}: "
                 + (("\n".join(part.strip() for part in (stdout, stderr) if part.strip()))[-MAX_STDERR_BYTES:] or "no output"),

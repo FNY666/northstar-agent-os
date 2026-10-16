@@ -1087,6 +1087,14 @@ check can block completion, return its failure to the agent, and run again after
 the agent responds; the turn history can be compared with Shell calls from the same
 turns. Checks run on the top-level agent's proposed stop; delegated subagent stops
 skip them.
+Each executed attempt also carries a SHA-256 fingerprint from immediately before
+and after the check. The receipt compares the post-check fingerprint with the final
+workspace fingerprint and reports `stable`, `changed`, or `unknown` during the check,
+then `matched`, `changed`, or `unknown` at the final boundary. The digest binds HEAD,
+the staged diff, and Git-visible changed-file paths, states, and contents; Git-ignored
+files are outside its scope. This is a read-only boundary observation, not filesystem
+isolation: an edit that is reverted between snapshots can go undetected, and partial
+coverage is reported as `unknown` rather than a match.
 The receipt distinguishes checks that were not configured, disabled, or configured
 but never reached evaluation.
 Command text and command output are omitted from this summary; use each `call_id` and

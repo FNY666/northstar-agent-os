@@ -1306,11 +1306,12 @@ def _print_coding_evidence(args: argparse.Namespace, before: Any, run_report: An
         workspace_check_evidence,
     )
 
-    evidence = compare_snapshots(before, snapshot_workspace(args.workspace))
+    after = snapshot_workspace(args.workspace)
+    evidence = compare_snapshots(before, after)
     evidence["shell_execution_scope"] = "top_level_and_subagents"
     evidence["shell_executions"] = shell_execution_evidence(run_report)
     evidence["postconditions"] = postcondition_evidence(run_report)
-    evidence["workspace_checks"] = workspace_check_evidence(run_report)
+    evidence["workspace_checks"] = workspace_check_evidence(run_report, after)
     if hook_setup is not None and hook_setup.declared_stop_count and not args.enable_workspace_hooks:
         evidence["workspace_checks"] = {
             "source": "workspace_stop_hooks",
@@ -1401,10 +1402,24 @@ def _print_coding_evidence(args: argparse.Namespace, before: Any, run_report: An
             f"status={workspace_checks['status']} configured={workspace_checks['configured']}"
         )
         for item in workspace_checks["results"]:
-            if item["status"] == "failed" or item["attempts"] > 1:
+            if (
+                item["status"] == "failed"
+                or item["attempts"] > 1
+                or any("workspace_binding" in attempt for attempt in item["history"])
+            ):
                 history = ", ".join(
                     f"turn={attempt.get('turn_index', '?')}:{attempt['status']}"
                     + (f"/exit={attempt['exit_code']}" if "exit_code" in attempt else "")
+                    + (
+                        "/workspace="
+                        + attempt["workspace_binding"]["during_check"]
+                        + "->"
+                        + attempt["workspace_binding"]["final_state"]
+                        + "/"
+                        + (attempt["workspace_binding"].get("after_digest") or "n/a")[-12:]
+                        if isinstance(attempt.get("workspace_binding"), dict)
+                        else ""
+                    )
                     for attempt in item["history"]
                 )
                 print(

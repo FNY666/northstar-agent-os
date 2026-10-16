@@ -7,6 +7,7 @@ deliberately a net before/after view: it does not claim which actor made a chang
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import stat
@@ -21,6 +22,7 @@ MAX_STATUS_PATHS = 2_048
 MAX_FILE_BYTES = 4 * 1024 * 1024
 MAX_TOTAL_BYTES = 64 * 1024 * 1024
 GIT_TIMEOUT_SECONDS = 5
+WORKSPACE_BINDING_SCOPE = "git_visible_worktree"
 
 
 @dataclass(frozen=True)
@@ -263,6 +265,66 @@ def snapshot_workspace(workspace: str | os.PathLike[str]) -> WorkspaceSnapshot:
         index_entries,
         tuple(unverifiable),
     )
+
+
+def workspace_snapshot_fingerprint(snapshot: WorkspaceSnapshot) -> dict[str, Any]:
+    """Return a stable digest for the bounded Git-visible state in a snapshot.
+
+    HEAD binds clean tracked files; the staged diff binds index changes; and the
+    status plus fingerprints bind changed tracked and untracked file contents.
+    Ignored files are outside this deliberately Git-scoped receipt. A partial
+    digest remains useful for comparison but cannot attest that all visible paths
+    were read successfully.
+    """
+    if not snapshot.available:
+        return {
+            "scope": WORKSPACE_BINDING_SCOPE,
+            "coverage": "unavailable",
+            "digest": None,
+        }
+    payload = {
+        "repository": os.path.relpath(snapshot.repository, str(snapshot.workspace)),
+        "head": snapshot.head,
+        "index_digest": snapshot.index_digest,
+        "paths": [
+            {
+                "path": path,
+                "status": snapshot.states[path],
+                "fingerprint": snapshot.fingerprints.get(path),
+            }
+            for path in sorted(snapshot.states)
+        ],
+    }
+    digest = "sha256:" + hashlib.sha256(
+        json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    complete = snapshot.index_digest is not None and not snapshot.unverifiable
+    return {
+        "scope": WORKSPACE_BINDING_SCOPE,
+        "coverage": "complete" if complete else "partial",
+        "digest": digest,
+    }
+
+
+def workspace_check_binding(before: WorkspaceSnapshot, after: WorkspaceSnapshot) -> dict[str, Any]:
+    """Bind a Stop-check attempt to the Git-visible state around its execution."""
+    start = workspace_snapshot_fingerprint(before)
+    end = workspace_snapshot_fingerprint(after)
+    if start["digest"] is None or end["digest"] is None:
+        during_check = "unknown"
+    elif start["digest"] != end["digest"]:
+        during_check = "changed"
+    elif start["coverage"] == end["coverage"] == "complete":
+        during_check = "stable"
+    else:
+        during_check = "unknown"
+    return {
+        "scope": WORKSPACE_BINDING_SCOPE,
+        "coverage": "complete" if start["coverage"] == end["coverage"] == "complete" else "partial",
+        "before_digest": start["digest"],
+        "after_digest": end["digest"],
+        "during_check": during_check,
+    }
 
 
 def _committed_changes(
@@ -572,7 +634,10 @@ def postcondition_evidence(run_report: Any) -> dict[str, Any]:
     }
 
 
-def workspace_check_evidence(run_report: Any) -> dict[str, Any]:
+def workspace_check_evidence(
+    run_report: Any,
+    final_snapshot: WorkspaceSnapshot | None = None,
+) -> dict[str, Any]:
     """Summarize repository Stop checks, retaining only bounded verdict metadata."""
     empty = {
         "source": "workspace_stop_hooks",
@@ -585,6 +650,49 @@ def workspace_check_evidence(run_report: Any) -> dict[str, Any]:
     }
     if run_report is None:
         return {**empty, "status": "unavailable"}
+
+    final_fingerprint = (
+        workspace_snapshot_fingerprint(final_snapshot)
+        if final_snapshot is not None
+        else {"scope": WORKSPACE_BINDING_SCOPE, "coverage": "unavailable", "digest": None}
+    )
+
+    def checked_binding(value: Any) -> dict[str, Any] | None:
+        if not isinstance(value, dict) or value.get("scope") != WORKSPACE_BINDING_SCOPE:
+            return None
+        before_digest = value.get("before_digest")
+        after_digest = value.get("after_digest")
+        digest_pattern = re.compile(r"^sha256:[0-9a-f]{64}$")
+        before_ok = isinstance(before_digest, str) and digest_pattern.fullmatch(before_digest)
+        after_ok = isinstance(after_digest, str) and digest_pattern.fullmatch(after_digest)
+        coverage = value.get("coverage")
+        if coverage not in {"complete", "partial"}:
+            coverage = "unavailable"
+        during = value.get("during_check")
+        if during not in {"stable", "changed", "unknown"}:
+            during = "unknown"
+        if not before_ok:
+            before_digest = None
+        if not after_ok:
+            after_digest = None
+        final_digest = final_fingerprint["digest"]
+        final_coverage = final_fingerprint["coverage"]
+        if after_digest is None or final_digest is None:
+            final_state = "unknown"
+        elif after_digest != final_digest:
+            final_state = "changed"
+        elif coverage == final_coverage == "complete":
+            final_state = "matched"
+        else:
+            final_state = "unknown"
+        return {
+            "scope": WORKSPACE_BINDING_SCOPE,
+            "coverage": coverage,
+            "before_digest": before_digest,
+            "after_digest": after_digest,
+            "during_check": during,
+            "final_state": final_state,
+        }
 
     configured: int | None = None
     for event in getattr(run_report, "events", ()):
@@ -624,6 +732,10 @@ def workspace_check_evidence(run_report: Any) -> dict[str, Any]:
             if isinstance(check_id, str):
                 result["id"] = check_id
             attempt: dict[str, Any] = {"status": status}
+            binding = checked_binding(check.get("workspace_binding"))
+            if binding is not None:
+                result["workspace_binding"] = binding
+                attempt["workspace_binding"] = binding
             turn_index = check.get("turn_index")
             if isinstance(turn_index, int) and not isinstance(turn_index, bool) and turn_index >= 0:
                 result["turn_index"] = turn_index
@@ -669,4 +781,9 @@ def workspace_check_evidence(run_report: Any) -> dict[str, Any]:
         "passed": passed,
         "failed": failed,
         "results": results,
+        "workspace_binding": {
+            "scope": WORKSPACE_BINDING_SCOPE,
+            "coverage": final_fingerprint["coverage"],
+            "final_digest": final_fingerprint["digest"],
+        },
     }

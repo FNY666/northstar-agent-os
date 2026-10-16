@@ -228,6 +228,9 @@ verdict, while a bounded stdout tail and bounded stderr are sent to the agent on
 failure. A timeout or execution error also blocks a `Stop` check.
 Project checks run when the top-level agent proposes to finish; delegated subagent
 stops skip them and return their partial result to the parent.
+In coding mode, the final receipt fingerprints Git-visible workspace state before
+and after each check and compares it with the final state. Ignored files are outside
+that digest, and matching snapshots do not provide filesystem isolation.
 
 **Nothing in section 2 runs unless you pass `--enable-workspace-hooks`.**
 Cloning a repository must not mean executing it, which is why the surface is
