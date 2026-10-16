@@ -2518,6 +2518,23 @@ class AgentRuntime:
             json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str),
             tool_name=spec.name,
         )
+        if input_assessment.findings:
+            self.sessions.append(
+                "defensive_assessment",
+                {
+                    "agent": self.config.agent,
+                    "tool": spec.name,
+                    "tool_use_id": call.id,
+                    "turn_index": turn_index,
+                    "decision": input_assessment.decision.value,
+                    "sanitized": False,
+                    "finding_count": len(input_assessment.findings),
+                    "findings": [
+                        {"rule_id": item.rule_id, "category": item.category, "severity": item.severity}
+                        for item in input_assessment.findings[:8]
+                    ],
+                },
+            )
         if input_assessment.decision.value == "block":
             decision = PermissionDecision(
                 False,
