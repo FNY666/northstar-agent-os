@@ -2598,6 +2598,38 @@ class AgentRuntime:
             return self._refuse_invalid_tool_input(
                 call, spec, state, turn_index=turn_index, input_type=f"schema-invalid: {exc}"
             )
+        rewritten = False
+        # Refuse high-confidence credentials/jailbreaks before extension hooks
+        # see the payload. Hooks are an input boundary too and must not become
+        # a place where a secret crosses merely because a later gate would deny
+        # the call.
+        from defensive_agent import assess as assess_defensive_pre_hook
+
+        pre_hook_assessment = assess_defensive_pre_hook(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str),
+            tool_name=spec.name,
+        )
+        if pre_hook_assessment.decision.value == "block":
+            self.sessions.append(
+                "defensive_assessment",
+                {
+                    "agent": self.config.agent,
+                    "tool": spec.name,
+                    "tool_use_id": call.id,
+                    "turn_index": turn_index,
+                    "decision": "block",
+                    "sanitized": False,
+                    "finding_count": len(pre_hook_assessment.findings),
+                    "findings": [
+                        {"rule_id": item.rule_id, "category": item.category, "severity": item.severity}
+                        for item in pre_hook_assessment.findings[:8]
+                    ],
+                },
+            )
+            return self._refuse_defensive_input(
+                call, spec, state, payload=payload, turn_index=turn_index, span=span, rewritten=rewritten
+            )
+
         pre = self._fire(
             state,
             "PreToolUse",
@@ -2672,36 +2704,8 @@ class AgentRuntime:
                 },
             )
         if input_assessment.decision.value == "block":
-            decision = PermissionDecision(
-                False,
-                source="defensive_agent",
-                reason=f"{spec.name} input blocked by defensive agent",
-                rule="defensive_agent:high_confidence_finding",
-                tool=spec.name,
-            )
-            self._governed_runner.run(
-                intent="agent-tool-call",
-                action=spec.name,
-                subject=self.config.agent,
-                tool=spec.name,
-                tool_args=payload,
-                inputs_digest=GovernedActionRunner.pin(
-                    {"call_id": call.id, "tool": spec.name, "args": payload}
-                ),
-                decision=decision,
-                executor=lambda _tool, _args: (_ for _ in ()).throw(
-                    GovernedRunnerError("defensive agent denied call")
-                ),
-            )
-            return self._refuse_by_gate(
-                call,
-                spec,
-                decision,
-                state,
-                payload=payload,
-                turn_index=turn_index,
-                span=span,
-                rewritten=rewritten,
+            return self._refuse_defensive_input(
+                call, spec, state, payload=payload, turn_index=turn_index, span=span, rewritten=rewritten
             )
 
         if spec.is_delegation:
@@ -3055,6 +3059,48 @@ class AgentRuntime:
         )
         fatal = "error_permission_denied" if self.config.halt_on_denial else None
         return _Refused(block, report, fatal)
+
+    def _refuse_defensive_input(
+        self,
+        call: ToolUseBlock,
+        spec: Any,
+        state: _RunState,
+        *,
+        payload: dict[str, Any],
+        turn_index: int,
+        span: Any,
+        rewritten: bool = False,
+    ) -> _Refused:
+        """Refuse a high-confidence defensive finding before tool execution."""
+        decision = PermissionDecision(
+            False,
+            source="defensive_agent",
+            reason=f"{spec.name} input blocked by defensive agent",
+            rule="defensive_agent:high_confidence_finding",
+            tool=spec.name,
+        )
+        self._governed_runner.run(
+            intent="agent-tool-call",
+            action=spec.name,
+            subject=self.config.agent,
+            tool=spec.name,
+            tool_args=payload,
+            inputs_digest=GovernedActionRunner.pin({"call_id": call.id, "tool": spec.name, "args": payload}),
+            decision=decision,
+            executor=lambda _tool, _args: (_ for _ in ()).throw(
+                GovernedRunnerError("defensive agent denied call")
+            ),
+        )
+        return self._refuse_by_gate(
+            call,
+            spec,
+            decision,
+            state,
+            payload=payload,
+            turn_index=turn_index,
+            span=span,
+            rewritten=rewritten,
+        )
 
     def _finish_tool_result(
         self,
