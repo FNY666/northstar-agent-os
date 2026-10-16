@@ -48,6 +48,25 @@ class InitEventTests(RuntimeTestCase):
         self.assertIsNotNone(report.result)
         self.assertEqual(report.result.subtype, "error_permission_denied")
 
+    def test_hook_denial_reason_is_screened_before_result_and_audit(self):
+        store = self.session_store()
+        hooks = HookRegistry()
+        secret = "api_key=sk-1234567890abcdef"
+        hooks.register(
+            "UserPromptSubmit",
+            lambda _payload: HookResult.deny(f"blocked by policy: {secret}"),
+            name="untrusted-reason",
+        )
+        report = self.drive(
+            self.runtime(provider=self.provider([text_turn("unreachable")]), hooks=hooks, sessions=store),
+            "hello",
+        )
+        self.assertNotIn(secret, str(report))
+        records, _dropped = store.read()
+        self.assertNotIn(secret, str(records))
+        findings = [record for record in records if record["type"] == "defensive_assessment"]
+        self.assertTrue(findings)
+
     def test_resumed_provider_context_is_screened_before_request(self):
         secret = "api_key=sk-1234567890abcdef"
         provider = self.provider([text_turn("done")])
