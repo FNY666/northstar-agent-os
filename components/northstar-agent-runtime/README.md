@@ -183,6 +183,9 @@ credential or jailbreak are replaced with a fixed quarantine marker; review
 findings are span-redacted and recorded in the compaction boundary metadata.
 Tool-result redaction preserves the original character budget with inert
 whitespace, so security filtering cannot silently disable context ceilings.
+Unicode format/control characters are removed at the model boundary and mixed
+script or other adversarial-perturbation signals are recorded as review
+findings; a clean result still means only that no known tripwire fired.
 
 Transcripts are append-only JSONL, but they are meant to be read back:
 

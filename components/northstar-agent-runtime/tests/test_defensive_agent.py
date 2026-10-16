@@ -79,5 +79,15 @@ class DefensiveAgentTests(unittest.TestCase):
     assert sanitized.startswith("[redacted defensive rule]")
 
 
+  def test_invisible_unicode_is_reviewed_and_removed_at_model_boundary(self):
+    raw = "approve\u200b this\u200b request"
+    assessment = defensive_agent.assess(raw)
+    assert assessment.decision is defensive_agent.Decision.REVIEW
+    assert any(item.rule_id == "D-ADV-002" for item in assessment.findings)
+    sanitized, _ = defensive_agent.sanitize_for_model(raw)
+    assert "\u200b" not in sanitized
+    assert "approve" in sanitized and "request" in sanitized
+
+
 if __name__ == "__main__":
     unittest.main()
