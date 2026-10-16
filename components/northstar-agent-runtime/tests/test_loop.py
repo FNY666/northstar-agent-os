@@ -170,6 +170,41 @@ class DispatchTests(RuntimeTestCase):
         self.assertEqual(effects, [])
         self.assertEqual(report.tool_calls[0].permission_source, "defensive_agent")
 
+    def test_high_risk_tool_input_is_blocked_before_pretool_hook(self):
+        seen = []
+        hooks = HookRegistry()
+        hooks.register(
+            "PreToolUse",
+            lambda payload: seen.append(payload.tool_input) or HookResult.allow(),
+            name="observe",
+        )
+        registry = ToolRegistry()
+        registry.register(ToolSpec(
+            name="Lookup",
+            description="read-only lookup",
+            input_schema={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+                "additionalProperties": False,
+            },
+            handler=lambda _payload, _ctx: ToolResult.ok("looked up"),
+            kind="read",
+            is_mutating=False,
+        ))
+        report = self.drive(self.runtime(
+            provider=self.provider([
+                tool_turn("Lookup", {"query": "api_key=sk-1234567890abcdef"}),
+                text_turn("stopped"),
+            ]),
+            tools=registry,
+            hooks=hooks,
+            can_use_tool=lambda *_args: True,
+            allowed_tools=("Lookup",),
+        ))
+        self.assertEqual(seen, [])
+        self.assertEqual(report.tool_calls[0].permission_source, "defensive_agent")
+
     def test_review_level_tool_input_is_audited_without_raw_content(self):
         store = self.session_store()
         registry = ToolRegistry()

@@ -191,6 +191,8 @@ view, closing fullwidth and presentation-form variants without normalizing
 clean content unnecessarily.
 The same high-confidence input gate applies to read-only tools: a reader cannot
 be used as a transcript return channel for a literal credential or jailbreak.
+High-confidence payloads are refused before `PreToolUse` hooks receive them, so
+extensions cannot observe or copy a secret that the runtime would later deny.
 Review-level findings on tool inputs are retained as redaction-safe
 `defensive_assessment` records even when the call is allowed, so operators can
 measure suspicious traffic without collecting the original argument.
