@@ -243,6 +243,8 @@ or imported transcripts cannot bypass the current rules; the durable transcript
 itself is never rewritten by this compatibility pass.
 Both structured block content and legacy plain-string message content pass
 through that checkpoint.
+Unknown multimodal `data` fields are screened unless their parent explicitly
+declares a binary media type; opaque provider signatures remain untouched.
 Nested string fields inside resumed tool arguments are screened recursively,
 including review-level findings, while the original argument shape is retained.
 Delegation prompts receive an additional review-level redaction before a child

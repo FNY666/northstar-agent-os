@@ -1044,19 +1044,34 @@ class AgentRuntime:
                 return tuple(screen_value(item) for item in value)
             return value
 
-        def screen_unknown_block(value: Any, *, key: str = "") -> Any:
-            """Screen multimodal metadata while leaving binary payloads intact."""
+        def screen_unknown_block(
+            value: Any, *, key: str = "", binary_parent: bool = False
+        ) -> Any:
+            """Screen multimodal metadata while leaving known binary blobs intact."""
             if isinstance(value, str):
-                if key in {"data", "signature"}:
+                if key == "data" and binary_parent:
+                    return value
+                if key == "signature":
+                    # Provider signatures are opaque bytes, not model-visible
+                    # instructions; preserve them for transcript verification.
                     return value
                 return screen_text(value)
             if isinstance(value, dict):
+                media_type = str(value.get("media_type") or "").casefold()
+                is_binary = binary_parent or media_type.startswith(("image/", "audio/", "video/")) or media_type == "application/octet-stream"
                 return {
-                    item_key: screen_unknown_block(item, key=str(item_key))
+                    item_key: screen_unknown_block(
+                        item,
+                        key=str(item_key),
+                        binary_parent=is_binary,
+                    )
                     for item_key, item in value.items()
                 }
             if isinstance(value, list):
-                return [screen_unknown_block(item, key=key) for item in value]
+                return [
+                    screen_unknown_block(item, key=key, binary_parent=binary_parent)
+                    for item in value
+                ]
             return value
 
         for message in payload:
