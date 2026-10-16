@@ -241,6 +241,8 @@ when it has enough alphabet diversity, reducing long-input false positives.
 On resume, the final provider payload is screened again copy-on-write, so old
 or imported transcripts cannot bypass the current rules; the durable transcript
 itself is never rewritten by this compatibility pass.
+Both structured block content and legacy plain-string message content pass
+through that checkpoint.
 Nested string fields inside resumed tool arguments are screened recursively,
 including review-level findings, while the original argument shape is retained.
 Delegation prompts receive an additional review-level redaction before a child
