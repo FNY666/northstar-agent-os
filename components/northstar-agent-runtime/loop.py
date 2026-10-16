@@ -1896,7 +1896,8 @@ class AgentRuntime:
         # SessionStart may seed context or refuse the run outright.
         start = self._fire(state, "SessionStart", HookInput(event="SessionStart", session_id=state.session_id, agent=config.agent, depth=config.depth, data={"model": config.model, "tools": list(self.tools.names())}))
         if start.denied:
-            state.denials.append(Denial(tool="", source="hook:SessionStart", reason=start.deny_reason, agent=config.agent, kind="run"))
+            reason = self._safe_hook_text(start.deny_reason, event="SessionStart", turn_index=0)
+            state.denials.append(Denial(tool="", source="hook:SessionStart", reason=reason, agent=config.agent, kind="run"))
             yield self._finish(state, "error_permission_denied")
             return True
         for context in start.additional_context:
@@ -1912,8 +1913,9 @@ class AgentRuntime:
             HookInput(event="UserPromptSubmit", session_id=state.session_id, agent=config.agent, depth=config.depth, prompt=prompt, turn_index=0),
         )
         if submitted.denied:
+            reason = self._safe_hook_text(submitted.deny_reason, event="UserPromptSubmit", turn_index=0)
             state.denials.append(
-                Denial(source="hook:UserPromptSubmit", reason=submitted.deny_reason, agent=config.agent, turn_index=0, kind="prompt")
+                Denial(source="hook:UserPromptSubmit", reason=reason, agent=config.agent, turn_index=0, kind="prompt")
             )
             yield self._finish(state, "error_permission_denied")
             return True
@@ -3034,7 +3036,8 @@ class AgentRuntime:
     ) -> _Refused:
         """A PreToolUse hook denied the call; a hook deny is terminal."""
         self._trace_refusal(span, spec.name, source=f"hook:{pre.denied_by}", turn_index=turn_index)
-        reason = f"{spec.name} refused by the {pre.denied_by} hook: {pre.deny_reason}"
+        deny_reason = self._safe_hook_text(pre.deny_reason, event="PreToolUse", turn_index=turn_index)
+        reason = f"{spec.name} refused by the {pre.denied_by} hook: {deny_reason}"
         state.denials.append(
             Denial(
                 tool=spec.name,
@@ -3056,6 +3059,30 @@ class AgentRuntime:
         )
         fatal = "error_permission_denied" if self.config.halt_on_denial else None
         return _Refused(block, report, fatal)
+
+    def _safe_hook_text(self, value: Any, *, event: str, turn_index: int) -> str:
+        """Keep extension-provided denial text out of logs and model messages."""
+        raw = str(value or "hook denied")
+        from defensive_agent import sanitize_for_model
+
+        safe, assessment = sanitize_for_model(raw)
+        if assessment.findings:
+            self.sessions.append(
+                "defensive_assessment",
+                {
+                    "agent": self.config.agent,
+                    "tool": f"(hook:{event})",
+                    "turn_index": turn_index,
+                    "decision": assessment.decision.value,
+                    "sanitized": safe != raw,
+                    "finding_count": len(assessment.findings),
+                    "findings": [
+                        {"rule_id": item.rule_id, "category": item.category, "severity": item.severity}
+                        for item in assessment.findings[:8]
+                    ],
+                },
+            )
+        return safe
 
     def _refuse_by_gate(
         self,
@@ -3754,7 +3781,8 @@ class AgentRuntime:
             ),
         )
         if start.denied:
-            reason = f"delegation to {definition.name} refused by the {start.denied_by} hook: {start.deny_reason}"
+            deny_reason = self._safe_hook_text(start.deny_reason, event="SubagentStart", turn_index=turn_index)
+            reason = f"delegation to {definition.name} refused by the {start.denied_by} hook: {deny_reason}"
             state.denials.append(Denial(tool=spec.name, source=f"hook:{start.denied_by}", reason=reason, agent=definition.name, turn_index=turn_index, kind="delegation"))
             return _Refused(
                 ToolResultBlock(tool_use_id=call.id, content=reason, is_error=True),
@@ -4121,9 +4149,10 @@ class AgentRuntime:
             ),
         )
         if pre.denied:
+            deny_reason = self._safe_hook_text(pre.deny_reason, event="PreCompact", turn_index=turn_index)
             outcome = CompactionOutcome(
                 performed=False,
-                reason=f"compaction refused by the {pre.denied_by} hook: {pre.deny_reason}",
+                reason=f"compaction refused by the {pre.denied_by} hook: {deny_reason}",
                 transcript=tuple(state.transcript),
                 tokens_before=estimate_transcript_tokens(state.transcript),
                 tokens_after=estimate_transcript_tokens(state.transcript),
@@ -4147,6 +4176,13 @@ class AgentRuntime:
     def _fire(self, state: _RunState, event: Any, payload: HookInput) -> Any:
         outcome = self.hooks.fire(event, payload)
         record: dict[str, Any] = {"event": event, **outcome.as_dict()}
+        # Hook diagnostics are persisted in the run report. Keep a denial
+        # reason from becoming a second raw-content channel even when the
+        # caller later builds the user-facing refusal from the same outcome.
+        if record.get("deny_reason"):
+            from defensive_agent import sanitize_for_model
+
+            record["deny_reason"] = sanitize_for_model(str(record["deny_reason"]))[0]
         if payload.tool_name:
             record["tool"] = payload.tool_name
         state.hook_fires.append(record)

@@ -205,6 +205,9 @@ credential bypasses.
 Hook-injected context is screened at the same boundary before it is added to
 the transcript; this keeps extension callbacks from becoming an untracked
 prompt-injection channel.
+Hook denial reasons are screened before they enter run reports, refusal
+messages, or durable audit records, so extension diagnostics cannot become a
+credential exfiltration channel.
 On resume, the final provider payload is screened again copy-on-write, so old
 or imported transcripts cannot bypass the current rules; the durable transcript
 itself is never rewritten by this compatibility pass.
