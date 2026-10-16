@@ -1788,6 +1788,49 @@ class AgentRuntime:
         """
         config = self.config
 
+        # User prompts are an input boundary before extension hooks as well as
+        # before the provider. Do not let a hook observe a literal credential or
+        # high-confidence jailbreak merely because the provider checkpoint is
+        # later in the request path. Review-level content is span-redacted and
+        # the safe form is what reaches both the hook and the transcript.
+        from defensive_agent import assess as assess_defensive_prompt, sanitize_for_model
+
+        prompt_assessment = assess_defensive_prompt(prompt)
+        if prompt_assessment.findings:
+            self.sessions.append(
+                "defensive_assessment",
+                {
+                    "agent": config.agent,
+                    "tool": "(user-prompt)",
+                    "turn_index": 0,
+                    "decision": prompt_assessment.decision.value,
+                    "sanitized": prompt_assessment.decision.value != "allow",
+                    "finding_count": len(prompt_assessment.findings),
+                    "findings": [
+                        {"rule_id": item.rule_id, "category": item.category, "severity": item.severity}
+                        for item in prompt_assessment.findings[:8]
+                    ],
+                },
+            )
+        if prompt_assessment.decision.value == "block":
+            reason = "user prompt blocked by defensive agent"
+            state.denials.append(
+                Denial(source="defensive_agent", reason=reason, agent=config.agent, turn_index=0, kind="prompt")
+            )
+            yield self._finish(state, "error_permission_denied")
+            return True
+        # A long, repetitive user blob can trip the base64 carrier heuristic
+        # without containing an instruction. Keep that review signal for the
+        # audit trail and provider checkpoint, while redacting actionable
+        # direct/jailbreak/credential findings before the hook boundary.
+        actionable_prompt_findings = tuple(
+            item
+            for item in prompt_assessment.findings
+            if not (item.category == "indirect" and "pattern:base64-blob" in item.detail)
+        )
+        if actionable_prompt_findings:
+            prompt, _ = sanitize_for_model(prompt)
+
         def append_hook_context(context: str, source: str) -> SystemMessage:
             # Hook-provided context is an extension boundary: it is allowed to
             # add host facts, but it must not smuggle a credential or a forged
