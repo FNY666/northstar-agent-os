@@ -112,6 +112,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  northstar doctor --workspace .\n"
             "  northstar sessions list --workspace .\n"
             "  northstar bench\n"
+            "  northstar security assess --text 'review this input'\n"
             "  northstar agent --workspace . 'summarise README' --provider scripted --scripted-text ok\n"
             "  northstar new my-project\n"
             "  northstar plugin install ./my-bundle --workspace . && northstar plugin verify --workspace .\n"
@@ -291,6 +292,20 @@ def build_parser() -> argparse.ArgumentParser:
     bench.add_argument("--json", action="store_true", help="emit one JSON object (machine-readable score)")
     bench.add_argument("--only", action="append", default=[], metavar="ID", help="run only this case id or track prefix (repeatable)")
     bench.add_argument("--track", action="append", default=[], metavar="NAME", help="run only this track (repeatable)")
+    security = sub.add_parser(
+        "security",
+        help="local defensive assessment (read-only; no network or command execution)",
+    )
+    security_actions = security.add_subparsers(dest="security_action")
+    assess = security_actions.add_parser(
+        "assess",
+        help="assess text and an optional tool URL with deterministic local detectors",
+    )
+    assess.add_argument("--text", default="", help="untrusted text to inspect")
+    assess.add_argument("--text-file", default="", metavar="PATH", help="read text from a file, or '-' for stdin")
+    assess.add_argument("--tool-name", default=None, metavar="NAME", help="declared tool name for URL inspection")
+    assess.add_argument("--url", default=None, help="declared tool URL; inspected locally and never fetched")
+    assess.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     new_proj = sub.add_parser("new", help="scaffold a governed project (config, agents, hooks guide, CI recipe)")
     new_proj.add_argument("directory", help="directory to create (must not exist, or be empty unless --force)")
     new_proj.add_argument("--force", action="store_true", help="write the template files into a non-empty directory (never deletes)")
@@ -929,6 +944,31 @@ def _run_code_reconcile(args: argparse.Namespace) -> int:
     } else 2
 
 
+def _run_security_assess(args: argparse.Namespace) -> int:
+    from defensive_agent import assess
+
+    try:
+        if args.text and args.text_file:
+            raise ValueError("use either --text or --text-file, not both")
+        text = args.text
+        if args.text_file:
+            if args.text_file == "-":
+                text = sys.stdin.read()
+            else:
+                text = Path(args.text_file).read_text(encoding="utf-8")
+        result = assess(text, tool_name=args.tool_name, url=args.url)
+    except (ValueError, OSError) as error:
+        print(f"configuration error: {error}", file=sys.stderr)
+        return USAGE_ERROR
+    if args.json:
+        print(json.dumps(result.as_dict(), ensure_ascii=False, sort_keys=True))
+    else:
+        print(f"decision: {result.decision.value}")
+        for finding in result.findings:
+            print(f"{finding.rule_id} severity={finding.severity} category={finding.category} {finding.detail}")
+    return 0 if result.decision.value != "block" else 5
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     raw = list(argv) if argv is not None else None
     # Product verbs are rewritten before argparse so the rest of the CLI only
@@ -1044,6 +1084,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
                 return run_bench_command(args)
             return handler(args)
+        if args.command == "security":
+            if args.security_action != "assess":
+                parser.parse_args(["security", "assess", "--help"])
+                return 0
+            return _run_security_assess(args)
         parser.print_help()
         return USAGE_ERROR
 
