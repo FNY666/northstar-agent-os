@@ -114,6 +114,11 @@ class TestEvasionResistance(unittest.TestCase):
             with self.subTest(host=host):
                 self.assertTrue(detect_pivoting(call(url=f"http://{host}/")))
 
+    def test_encoded_authority_delimiters_fail_closed(self):
+        for suffix in ("%2f.evil", "%5cevil", "%40evil", "%3fevil", "%23evil"):
+            with self.subTest(suffix=suffix):
+                self.assertTrue(detect_pivoting(call(url=f"http://127.0.0.1{suffix}/")))
+
     def test_internal_suffix_blocked(self):
         self.assertTrue(detect_pivoting(call(url="http://db.internal/query")))
 

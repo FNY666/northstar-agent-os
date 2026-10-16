@@ -229,6 +229,8 @@ IPv6 zone identifiers are removed before classification, so link-local
 addresses with an interface suffix cannot evade the SSRF guard.
 Unicode control and format characters in host authorities are rejected
 fail-closed, including zero-width and bidirectional markers.
+Percent-decoded authority delimiters and whitespace are rejected as ambiguous
+hosts before a downstream HTTP client can reinterpret them.
 The encoded-payload tripwire also rejects repetitive filler as a carrier only
 when it has enough alphabet diversity, reducing long-input false positives.
 On resume, the final provider payload is screened again copy-on-write, so old
