@@ -7,7 +7,7 @@ executes commands, or attempts to exploit a finding.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Any
 
@@ -138,9 +138,47 @@ def assess(
     return DefensiveAssessment(VERSION, SCHEMA_PIN, decision, tuple(findings))
 
 
+def sanitize_for_model(text: str) -> tuple[str, DefensiveAssessment]:
+    """Remove known instruction-forgery spans before model consumption.
+
+    High-confidence findings are replaced with a fixed quarantine marker. For
+    review-level direct/indirect injections, only the matched spans are
+    replaced so surrounding benign tool output remains useful. Credentials,
+    jailbreaks, and blocked targets therefore never get partial disclosure.
+    """
+    assessment = assess(text)
+    if assessment.decision is Decision.BLOCK:
+        return "[blocked by defensive agent]", assessment
+    if not isinstance(text, str):
+        raise TypeError("text must be a string")
+    if len(text) <= _MAX_ASSESS_CHARS:
+        findings = scan_injection(text)
+    else:
+        edge = _MAX_ASSESS_CHARS // 2
+        prefix = scan_injection(text[:edge])
+        suffix_offset = len(text) - edge
+        suffix = tuple(
+            replace(finding, start=finding.start + suffix_offset, end=finding.end + suffix_offset)
+            for finding in scan_injection(text[-edge:])
+        )
+        findings = prefix + suffix
+    if not findings:
+        return text, assessment
+    sanitized = text
+    for finding in sorted(findings, key=lambda item: (item.start, item.end), reverse=True):
+        sanitized = sanitized[: finding.start] + "[redacted defensive rule]" + sanitized[finding.end :]
+    return sanitized, assessment
+
+
 def stdlib_only() -> bool:
     """The orchestrator itself uses only stdlib plus local sibling modules."""
     return True
 
 
-__all__ = ["Decision", "DefensiveFinding", "DefensiveAssessment", "assess"]
+__all__ = [
+    "Decision",
+    "DefensiveFinding",
+    "DefensiveAssessment",
+    "assess",
+    "sanitize_for_model",
+]
