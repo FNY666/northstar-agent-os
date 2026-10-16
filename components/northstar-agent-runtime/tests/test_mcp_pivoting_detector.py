@@ -101,6 +101,11 @@ class TestEvasionResistance(unittest.TestCase):
     def test_case_insensitive_localhost(self):
         self.assertTrue(detect_pivoting(call(url="http://LOCALHOST/")))
 
+    def test_nfkc_host_spellings_are_blocked(self):
+        for host in ("１２７．０．０．１", "ｌｏｃａｌｈｏｓｔ", "127．0．0．1"):
+            with self.subTest(host=host):
+                self.assertTrue(detect_pivoting(call(url=f"http://{host}/")))
+
     def test_internal_suffix_blocked(self):
         self.assertTrue(detect_pivoting(call(url="http://db.internal/query")))
 

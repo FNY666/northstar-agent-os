@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Any, Mapping
 from urllib.parse import unquote, urlsplit
@@ -145,7 +146,7 @@ def _parse_numeric_ipv4(host: str) -> ipaddress.IPv4Address | None:
 
 def _decode_host(raw_host: str) -> str:
     """Percent-decode the host and strip brackets/ports/trailing dots."""
-    host = unquote(raw_host or "").strip().lower()
+    host = unicodedata.normalize("NFKC", unquote(raw_host or "")).strip().lower()
     # Strip IPv6 brackets.
     if host.startswith("[") and host.endswith("]"):
         host = host[1:-1]
