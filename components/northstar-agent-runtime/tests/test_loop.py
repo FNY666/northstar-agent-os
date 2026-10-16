@@ -13,7 +13,7 @@ from support import RuntimeTestCase, text_turn, tool_turn
 
 from hooks import HookRegistry, HookResult
 from loop import AgentRuntime, RuntimeConfig, RuntimeConfigurationError, run_agent, task_tool_spec
-from providers.base import AssistantMessage, ResultMessage, SystemMessage, ThinkingBlock, ToolResultBlock, ToolUseBlock, UserMessage
+from providers.base import AssistantMessage, ProviderError, ResultMessage, SystemMessage, ThinkingBlock, ToolResultBlock, ToolUseBlock, UserMessage
 from providers.scripted import ScriptedProvider, ScriptedTurn
 from tools import ToolLimits, ToolProvenance, ToolRegistry, ToolResult, ToolSpec
 
@@ -66,6 +66,20 @@ class InitEventTests(RuntimeTestCase):
         self.assertNotIn(secret, str(records))
         findings = [record for record in records if record["type"] == "defensive_assessment"]
         self.assertTrue(findings)
+
+    def test_provider_failure_text_is_screened_before_result(self):
+        secret = "api_key=sk-1234567890abcdef"
+
+        class LeakyProvider:
+            name = "leaky-provider"
+
+            def generate(self, _request):
+                raise ProviderError(f"upstream rejected request: {secret}")
+
+        report = self.drive(self.runtime(provider=LeakyProvider()), "hello")
+        self.assertNotIn(secret, str(report))
+        self.assertIsNotNone(report.result)
+        self.assertEqual(report.result.subtype, "error_during_execution")
 
     def test_resumed_provider_context_is_screened_before_request(self):
         secret = "api_key=sk-1234567890abcdef"

@@ -1169,8 +1169,10 @@ class AgentRuntime:
         if policy is None or not policy.enabled:
             return False, ()
         from provider_retry import classify
+        from defensive_agent import sanitize_for_model
 
         fault = classify(error, already_streamed=already_streamed)
+        safe_fault_detail = sanitize_for_model(fault.detail)[0]
         # Events to hand back for the caller to yield, in order: a boundary, then the note
         # that explains it. Built here rather than yielded here because the method is not a
         # generator - the loop's turn body owns the yielding.
@@ -1208,7 +1210,7 @@ class AgentRuntime:
                     SystemMessage(
                         subtype="informational",
                         content=(
-                            f"turn {turn_index} was refused for being too large ({fault.detail[:120]}) - compacted "
+                            f"turn {turn_index} was refused for being too large ({safe_fault_detail[:120]}) - compacted "
                             "the transcript to "
                             f"{outcome.tokens_after} tokens and re-issued the request once (this attempt costs no "
                             "retry budget)"
@@ -1242,7 +1244,8 @@ class AgentRuntime:
         state.retries += 1
         span.set_attributes({"retry.attempt": attempt, "retry.kind": fault.kind, "retry.delay_ms": decision.delay_ms})
         self._sleep(decision.delay_ms / 1000.0)
-        return True, (SystemMessage(subtype="informational", content=decision.line()),)
+        safe_line = sanitize_for_model(decision.line())[0]
+        return True, (SystemMessage(subtype="informational", content=safe_line),)
 
     def _sleep(self, seconds: float) -> None:
         """The one place a run blocks, so an embedder can hand us a clock it controls."""
@@ -2033,7 +2036,10 @@ class AgentRuntime:
                 # A provider that breaks its contract is a fault to report, and
                 # the partial text it already streamed must stay unrecorded: the
                 # transcript is only ever written from a complete turn.
-                detail = f"provider failure on turn {turn_index}: {error}"
+                from defensive_agent import sanitize_for_model
+
+                safe_error = sanitize_for_model(str(error))[0]
+                detail = f"provider failure on turn {turn_index}: {safe_error}"
                 if state.retries:
                     # Say what the budget did, in the line that explains the failure:
                     # "it failed" and "it failed after four attempts and 12 s of
@@ -2049,7 +2055,12 @@ class AgentRuntime:
                 if reservation is not None:
                     reservation.charge_unknown()
                     reservation = None
-                state.errors.append(f"provider failure on turn {turn_index}: {type(error).__name__}: {error}")
+                from defensive_agent import sanitize_for_model
+
+                safe_error = sanitize_for_model(str(error))[0]
+                state.errors.append(
+                    f"provider failure on turn {turn_index}: {type(error).__name__}: {safe_error}"
+                )
                 generation_span.record_error(f"{type(error).__name__}")
             else:
                 breakdown = self.budget.observe(

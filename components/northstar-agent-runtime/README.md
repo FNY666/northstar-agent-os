@@ -208,6 +208,9 @@ prompt-injection channel.
 Hook denial reasons are screened before they enter run reports, refusal
 messages, or durable audit records, so extension diagnostics cannot become a
 credential exfiltration channel.
+Provider and retry failure text is screened before it becomes a result error or
+retry event, preventing upstream response bodies from leaking through failure
+handling.
 On resume, the final provider payload is screened again copy-on-write, so old
 or imported transcripts cannot bypass the current rules; the durable transcript
 itself is never rewritten by this compatibility pass.
