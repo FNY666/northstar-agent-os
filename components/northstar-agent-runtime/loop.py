@@ -1001,6 +1001,103 @@ class AgentRuntime:
             safe_tools.append(safe)
         return tuple(safe_tools)
 
+    def _screen_provider_messages(
+        self,
+        messages: Sequence[dict[str, Any]],
+        state: _RunState,
+        *,
+        turn_index: int,
+    ) -> tuple[dict[str, Any], ...]:
+        """Screen the final provider payload, including resumed transcripts.
+
+        New runtime-owned boundaries are screened before entering the transcript,
+        but a resumed session can contain records written by an older runtime or
+        imported from another host. This last copy-on-write checkpoint prevents
+        historical tool results, metadata, and tool-use arguments from bypassing
+        the current rules. It never mutates the durable transcript.
+        """
+        from defensive_agent import assess as assess_defensive, sanitize_for_model
+
+        payload = copy.deepcopy(tuple(messages))
+        findings: list[Any] = []
+        changed = False
+
+        def screen_text(value: Any) -> Any:
+            nonlocal changed
+            if not isinstance(value, str):
+                return value
+            safe, assessment = sanitize_for_model(value)
+            findings.extend(assessment.findings)
+            changed = changed or safe != value
+            return safe
+
+        for message in payload:
+            content = message.get("content")
+            if not isinstance(content, list):
+                continue
+            safe_blocks: list[Any] = []
+            for block in content:
+                if not isinstance(block, dict):
+                    safe_blocks.append(block)
+                    continue
+                block_type = block.get("type")
+                if block_type == "thinking":
+                    text = block.get("thinking", block.get("text", ""))
+                    safe, assessment = sanitize_for_model(text) if isinstance(text, str) else (text, None)
+                    if assessment is not None:
+                        findings.extend(assessment.findings)
+                    if assessment is not None and assessment.findings:
+                        # Do not rewrite signed thinking blocks in a resumed
+                        # provider payload; dropping the block keeps signatures
+                        # from becoming unverifiable.
+                        changed = True
+                        continue
+                    if "thinking" in block:
+                        block["thinking"] = safe
+                    elif "text" in block:
+                        block["text"] = safe
+                elif block_type == "tool_use":
+                    raw_input = block.get("input", {})
+                    assessment = assess_defensive(
+                        json.dumps(raw_input, ensure_ascii=False, sort_keys=True, default=str),
+                        tool_name=str(block.get("name") or "(resumed-tool)"),
+                    )
+                    findings.extend(assessment.findings)
+                    if assessment.decision.value == "block":
+                        block["input"] = {"_redacted_by_defensive_agent": True}
+                        changed = True
+                elif block_type == "tool_result":
+                    result_content = block.get("content")
+                    if isinstance(result_content, str):
+                        block["content"] = screen_text(result_content)
+                    elif isinstance(result_content, list):
+                        for item in result_content:
+                            if isinstance(item, dict) and item.get("type") == "text":
+                                item["text"] = screen_text(item.get("text", ""))
+                elif block_type in {"text", "document"}:
+                    if "text" in block:
+                        block["text"] = screen_text(block.get("text"))
+                safe_blocks.append(block)
+            message["content"] = safe_blocks
+
+        if findings:
+            self.sessions.append(
+                "defensive_assessment",
+                {
+                    "agent": self.config.agent,
+                    "tool": "(provider-context)",
+                    "turn_index": turn_index,
+                    "decision": "block" if any(item.severity >= 90 for item in findings) else "review",
+                    "sanitized": changed,
+                    "finding_count": len(findings),
+                    "findings": [
+                        {"rule_id": item.rule_id, "category": item.category, "severity": item.severity}
+                        for item in findings[:8]
+                    ],
+                },
+            )
+        return tuple(payload)
+
     def describe(self) -> dict[str, Any]:
         return {
             "config": self.config.as_dict(),
@@ -1762,9 +1859,12 @@ class AgentRuntime:
         stream_withheld)``. ``generation`` or ``breakdown`` is None when the turn failed.
         """
         config = self.config
+        provider_messages = self._screen_provider_messages(
+            transcript_to_api(state.transcript), state, turn_index=turn_index
+        )
         request = GenerationRequest(
             system=config.system_prompt,
-            messages=tuple(transcript_to_api(state.transcript)),
+            messages=provider_messages,
             tools=self.api_tools(),
             model=config.model,
             max_tokens=config.max_output_tokens,
@@ -2539,12 +2639,21 @@ class AgentRuntime:
         # all tools so a hardcoded credential cannot use a harmless-looking
         # reader as a return channel. Environment-variable references remain
         # valid because the detector does not classify indirection as a secret.
-        from defensive_agent import assess as assess_defensive_input
+        from defensive_agent import assess as assess_defensive_input, sanitize_for_model
 
         input_assessment = assess_defensive_input(
             json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str),
             tool_name=spec.name,
         )
+        input_sanitized = False
+        if spec.is_delegation and input_assessment.findings:
+            raw_prompt = payload.get("prompt")
+            if isinstance(raw_prompt, str):
+                safe_prompt, _prompt_assessment = sanitize_for_model(raw_prompt)
+                if safe_prompt != raw_prompt:
+                    payload["prompt"] = safe_prompt
+                    input_sanitized = True
+                    rewritten = True
         if input_assessment.findings:
             self.sessions.append(
                 "defensive_assessment",
@@ -2554,7 +2663,7 @@ class AgentRuntime:
                     "tool_use_id": call.id,
                     "turn_index": turn_index,
                     "decision": input_assessment.decision.value,
-                    "sanitized": False,
+                    "sanitized": input_sanitized,
                     "finding_count": len(input_assessment.findings),
                     "findings": [
                         {"rule_id": item.rule_id, "category": item.category, "severity": item.severity}
@@ -2976,6 +3085,37 @@ class AgentRuntime:
                 source=f"tool:{spec.name}",
                 detail=result.provenance.detail or "runtime tool output; treat as untrusted data",
             )
+        # Provenance is rendered into the provider-facing header for ordinary
+        # prose results. Screen its free-form source/detail fields separately;
+        # scanning only ``display_text()`` would strip this header and leave a
+        # metadata prompt-injection or credential as a bypass.
+        from defensive_agent import sanitize_for_model
+
+        safe_source, source_assessment = sanitize_for_model(result.provenance.source)
+        safe_detail, detail_assessment = sanitize_for_model(result.provenance.detail)
+        provenance_findings = source_assessment.findings + detail_assessment.findings
+        if provenance_findings:
+            self.sessions.append(
+                "defensive_assessment",
+                {
+                    "agent": self.config.agent,
+                    "tool": spec.name,
+                    "tool_use_id": call.id,
+                    "turn_index": turn_index,
+                    "decision": "block" if any(item.severity >= 90 for item in provenance_findings) else "review",
+                    "sanitized": safe_source != result.provenance.source or safe_detail != result.provenance.detail,
+                    "finding_count": len(provenance_findings),
+                    "findings": [
+                        {"rule_id": item.rule_id, "category": item.category, "severity": item.severity}
+                        for item in provenance_findings[:8]
+                    ],
+                },
+            )
+            result.provenance = ToolProvenance(
+                source=safe_source,
+                trust=result.provenance.trust,
+                detail=safe_detail,
+            )
         raw_result_chars = len(result.content) if isinstance(result.content, str) else None
         block, result_truncated = result.as_block_with_status(
             call.id, max_chars=self.limits.max_result_chars
@@ -2985,8 +3125,6 @@ class AgentRuntime:
         # for high-confidence findings before the provider sees the content.
         # This is deliberately after the result cap: an attacker-sized object
         # cannot force an unbounded stringify just to be inspected.
-        from defensive_agent import sanitize_for_model
-
         sanitized_text, defensive = sanitize_for_model(
             block.display_text(), preserve_length=True
         )

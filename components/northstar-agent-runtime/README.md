@@ -186,14 +186,26 @@ whitespace, so security filtering cannot silently disable context ceilings.
 Unicode format/control characters are removed at the model boundary and mixed
 script or other adversarial-perturbation signals are recorded as review
 findings; a clean result still means only that no known tripwire fired.
+Known lexical rules are also checked against an NFKC compatibility-normalized
+view, closing fullwidth and presentation-form variants without normalizing
+clean content unnecessarily.
 The same high-confidence input gate applies to read-only tools: a reader cannot
 be used as a transcript return channel for a literal credential or jailbreak.
 Review-level findings on tool inputs are retained as redaction-safe
 `defensive_assessment` records even when the call is allowed, so operators can
 measure suspicious traffic without collecting the original argument.
+The free-form provenance header attached to unstructured tool results is
+screened separately from the artifact body, closing metadata-only injection and
+credential bypasses.
 Hook-injected context is screened at the same boundary before it is added to
 the transcript; this keeps extension callbacks from becoming an untracked
 prompt-injection channel.
+On resume, the final provider payload is screened again copy-on-write, so old
+or imported transcripts cannot bypass the current rules; the durable transcript
+itself is never rewritten by this compatibility pass.
+Delegation prompts receive an additional review-level redaction before a child
+runtime is created, preventing low-confidence injection text from propagating
+through the agent tree.
 Tool descriptions and JSON Schema `description` annotations are screened before
 they are sent to the provider as well, while schema keys and enum values remain
 unchanged so the authorization contract cannot drift during sanitization.
