@@ -738,6 +738,26 @@ class ToolPinningTests(unittest.TestCase):
         client.connect()
         return client
 
+    def connect_with_annotations(self, annotations: dict[str, object]):
+        client = McpStdioClient(
+            "demo", ["python3", str(FIXTURE)], timeout_ms=4000, env={}, network="allowed"
+        )
+        original_request = client._request
+
+        def annotated_request(method, *args, **kwargs):
+            response = original_request(method, *args, **kwargs)
+            if method != "tools/list":
+                return response
+            tools = [dict(item) for item in response.get("tools", [])]
+            for item in tools:
+                if item.get("name") == "echo":
+                    item["annotations"] = annotations
+            return {**response, "tools": tools}
+
+        client._request = annotated_request  # type: ignore[method-assign]
+        client.connect()
+        return client, original_request
+
     def test_refresh_with_no_drift_returns_empty(self):
         client = self.connect()
         try:
@@ -857,6 +877,64 @@ class ToolPinningTests(unittest.TestCase):
         finally:
             client.close()
 
+
+    def test_annotations_are_captured_without_relaxing_mutating_default(self):
+        client, _original_request = self.connect_with_annotations({"readOnlyHint": True})
+        try:
+            self.assertEqual(client.tool("echo").annotations, {"readOnlyHint": True})
+            echo = next(spec for spec in mcp_tool_specs(client) if spec.name.endswith("__echo"))
+            self.assertTrue(echo.is_mutating)
+            self.assertEqual(client.refresh_tools(), ())
+        finally:
+            client.close()
+
+    def test_annotation_change_during_refresh_quarantines(self):
+        client, original_request = self.connect_with_annotations({"readOnlyHint": True})
+        try:
+            def changed_request(method, *args, **kwargs):
+                response = original_request(method, *args, **kwargs)
+                if method != "tools/list":
+                    return response
+                tools = [dict(item) for item in response.get("tools", [])]
+                for item in tools:
+                    if item.get("name") == "echo":
+                        item["annotations"] = {"destructiveHint": True}
+                return {**response, "tools": tools}
+
+            client._request = changed_request  # type: ignore[method-assign]
+            drifts = client.refresh_tools()
+            self.assertEqual([(drift.tool_name, drift.kind) for drift in drifts], [("echo", "changed")])
+            self.assertTrue(client.quarantined)
+            self.assertTrue(client.call_tool("echo", {}).is_error)
+        finally:
+            client.close()
+
+    def test_refresh_rejects_invalid_or_oversized_annotations(self):
+        from mcp_client import MAX_TOOL_ANNOTATIONS_BYTES
+
+        client = self.connect()
+        try:
+            for bad_annotations in (
+                [],
+                {"readOnlyHint": "true"},
+                {"extension": "x" * MAX_TOOL_ANNOTATIONS_BYTES},
+            ):
+                with self.subTest(annotation=type(bad_annotations).__name__):
+                    client._request = lambda *_args, _value=bad_annotations, **_kwargs: {
+                        "tools": [{
+                            "name": "echo",
+                            "inputSchema": {"type": "object", "properties": {}},
+                            "annotations": _value,
+                        }]
+                    }  # type: ignore[method-assign]
+                    client._quarantined = False
+                    client._quarantine_reason = ""
+                    self.assertEqual(client.refresh_tools(), ())
+                    self.assertTrue(client.quarantined)
+                    self.assertIn("annotation", client._quarantine_reason)
+        finally:
+            client.close()
+
     def test_digest_is_stable_and_sensitive(self):
         from mcp_client import tool_definition_digest
 
@@ -870,6 +948,24 @@ class ToolPinningTests(unittest.TestCase):
             "s", "t", "desc", {"type": "object"}, {"type": "string"}
         )
         self.assertNotEqual(base, with_output, "output schema changes are part of the pinned tool contract")
+        annotated = tool_definition_digest(
+            "s", "t", "desc", {"type": "object"},
+            annotations={"readOnlyHint": True, "destructiveHint": False},
+        )
+        self.assertEqual(
+            annotated,
+            tool_definition_digest(
+                "s", "t", "desc", {"type": "object"},
+                annotations={"destructiveHint": False, "readOnlyHint": True},
+            ),
+        )
+        self.assertNotEqual(base, annotated, "advertised behavior annotations are part of the pin")
+        self.assertNotEqual(
+            annotated,
+            tool_definition_digest(
+                "s", "t", "desc", {"type": "object"}, annotations={"readOnlyHint": False}
+            ),
+        )
 
     def test_baseline_persists_across_reconnects(self):
         import tempfile
