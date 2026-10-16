@@ -2699,6 +2699,23 @@ class AgentRuntime:
 
         sanitized_text, defensive = sanitize_for_model(block.display_text())
         defensive_blocked = defensive.decision.value == "block"
+        if defensive.findings:
+            self.sessions.append(
+                "defensive_assessment",
+                {
+                    "agent": self.config.agent,
+                    "tool": spec.name,
+                    "tool_use_id": call.id,
+                    "turn_index": turn_index,
+                    "decision": defensive.decision.value,
+                    "sanitized": sanitized_text != block.display_text(),
+                    "finding_count": len(defensive.findings),
+                    "findings": [
+                        {"rule_id": item.rule_id, "category": item.category, "severity": item.severity}
+                        for item in defensive.findings[:8]
+                    ],
+                },
+            )
         if defensive_blocked or sanitized_text != block.display_text():
             rule_ids = ",".join(f.rule_id for f in defensive.findings[:8]) or "unknown"
             if defensive_blocked:

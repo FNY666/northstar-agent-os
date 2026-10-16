@@ -42,6 +42,7 @@ RECORD_TYPES: tuple[str, ...] = (
     "tool_result",
     "hook",
     "denial",
+    "defensive_assessment",
     "compact_boundary",
     "informational",
     # The independent end-of-run verdict (postconditions.py): its own type so an
