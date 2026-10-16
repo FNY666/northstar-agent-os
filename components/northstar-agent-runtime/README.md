@@ -1232,10 +1232,13 @@ uses those hashes as optimistic concurrency guards for up to 32 existing files i
 one governed edit call. It validates every path, file type, size, and hash before
 staging any replacement, then rechecks hashes before each replacement; stale input
 rejects the batch. Each replacement is atomic, with best-effort rollback if a later
-filesystem replacement fails. An external writer can still race the final hash
-check and rename. The operation is still mutating: it crosses the same permission
-gate and hooks as `Write`/`Edit`, is refused by `--read-only` and `plan`, and cannot write protected
-`.git` or `.northstar` paths. The multi-file sequence is not crash-atomic. File
+filesystem replacement fails. Before rollback, the tool checks that the file still
+contains its replacement; if it no longer matches, rollback leaves that file
+untouched and reports it. An external writer can still race the final hash check
+and rename during either commit or rollback. The operation is still mutating: it
+crosses the same permission gate and hooks as `Write`/`Edit`, is refused by
+`--read-only` and `plan`, and cannot write protected `.git` or `.northstar` paths.
+The multi-file sequence is not crash-atomic. File
 contents and permission bits are preserved through same-directory staging;
 ownership, ACLs, and extended attributes are not preserved.
 

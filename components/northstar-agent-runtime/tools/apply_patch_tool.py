@@ -142,6 +142,20 @@ def _current_patch_matches(item: Mapping[str, Any]) -> bool:
     )
 
 
+def _current_patch_is_applied(item: Mapping[str, Any]) -> bool:
+    """Return whether the target still contains this patch's replacement."""
+    from tools import ToolInputError
+
+    try:
+        current, mode = _read_patch_target(item["directory_fd"], item["name"])
+    except (OSError, ToolInputError):
+        return False
+    return (
+        hashlib.sha256(current).hexdigest() == item["after_sha256"]
+        and mode == item["mode"]
+    )
+
+
 def apply_patch(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
     """Apply bounded full-file replacements guarded by the hashes returned by Read."""
     from tools import ToolAccessError, ToolInputError, ToolResult
@@ -255,11 +269,18 @@ def apply_patch(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
             item["staged_name"] = None
             applied.append(item)
     except (OSError, _PatchConflictError) as error:
-        rollback_errors: list[str] = []
+        rollback_incomplete: list[tuple[str, str]] = []
         for item in reversed(applied):
             backup: str | None = None
             try:
                 backup = _stage_patch_bytes(item["directory_fd"], item["old_bytes"], item["mode"])
+                if not _current_patch_is_applied(item):
+                    os.unlink(backup, dir_fd=item["directory_fd"])
+                    backup = None
+                    rollback_incomplete.append(
+                        (item["relative"], "no longer matches this patch; left untouched")
+                    )
+                    continue
                 os.replace(
                     backup,
                     item["name"],
@@ -272,11 +293,12 @@ def apply_patch(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
                         os.unlink(backup, dir_fd=item["directory_fd"])
                     except OSError:
                         pass
-                rollback_errors.append(f"{item['relative']}: {rollback_error}")
-        if rollback_errors:
-            partial = [item["relative"] for item in applied]
+                rollback_incomplete.append((item["relative"], str(rollback_error)))
+        if rollback_incomplete:
+            partial = list(dict.fromkeys(path for path, _ in rollback_incomplete))
+            details = ", ".join(f"{path}: {reason}" for path, reason in rollback_incomplete)
             return ToolResult.error(
-                f"patch commit failed: {error}; rollback also failed for " + ", ".join(rollback_errors),
+                f"patch commit failed: {error}; rollback was incomplete for {details}",
                 files_maybe_changed=partial,
             )
         return ToolResult.error(f"patch commit failed and prior replacements were rolled back: {error}")
