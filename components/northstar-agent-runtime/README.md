@@ -186,6 +186,9 @@ whitespace, so security filtering cannot silently disable context ceilings.
 Unicode format/control characters are removed at the model boundary and mixed
 script or other adversarial-perturbation signals are recorded as review
 findings; a clean result still means only that no known tripwire fired.
+Known lexical rules are also checked against an NFKC compatibility-normalized
+view, closing fullwidth and presentation-form variants without normalizing
+clean content unnecessarily.
 The same high-confidence input gate applies to read-only tools: a reader cannot
 be used as a transcript return channel for a literal credential or jailbreak.
 Review-level findings on tool inputs are retained as redaction-safe

@@ -95,8 +95,12 @@ def assess(
         edge = _MAX_ASSESS_CHARS // 2
         text = text[:edge] + "\n...[assessment middle omitted]...\n" + text[-edge:]
 
+    # Inspect a compatibility-normalized view as well as the original bytes.
+    # Fullwidth Latin and similar presentation forms otherwise evade lexical
+    # tripwires while rendering as ordinary instructions to a model.
+    inspection_text = unicodedata.normalize("NFKC", text)
     findings: list[DefensiveFinding] = []
-    injection_findings = scan_injection(text)
+    injection_findings = scan_injection(inspection_text)
     for finding in injection_findings:
         family = finding.injection_type
         severity = 90 if family is InjectionType.JAILBREAK else 70
@@ -130,7 +134,7 @@ def assess(
             )
         )
 
-    lowered = text.lower()
+    lowered = inspection_text.lower()
     credential_candidate = any(
         marker in lowered
         for marker in (
@@ -138,8 +142,8 @@ def assess(
             "xox", "aiza", "api_key", "apikey", "bearer", "token",
             "password", "private key",
         )
-    ) or (text.count(".") >= 2 and len(text) < 16_384)
-    for finding in scan_for_credentials(text) if credential_candidate else ():
+    ) or (inspection_text.count(".") >= 2 and len(inspection_text) < 16_384)
+    for finding in scan_for_credentials(inspection_text) if credential_candidate else ():
         findings.append(
             DefensiveFinding(
                 rule_id="D-SEC-001",
@@ -192,15 +196,17 @@ def sanitize_for_model(
         return "[blocked by defensive agent]", assessment
     if not isinstance(text, str):
         raise TypeError("text must be a string")
-    if len(text) <= _MAX_ASSESS_CHARS:
-        findings = scan_injection(text)
+    normalized = unicodedata.normalize("NFKC", text)
+    scan_text = normalized if normalized != text else text
+    if len(scan_text) <= _MAX_ASSESS_CHARS:
+        findings = scan_injection(scan_text)
     else:
         edge = _MAX_ASSESS_CHARS // 2
-        prefix = scan_injection(text[:edge])
-        suffix_offset = len(text) - edge
+        prefix = scan_injection(scan_text[:edge])
+        suffix_offset = len(scan_text) - edge
         suffix = tuple(
             replace(finding, start=finding.start + suffix_offset, end=finding.end + suffix_offset)
-            for finding in scan_injection(text[-edge:])
+            for finding in scan_injection(scan_text[-edge:])
         )
         findings = prefix + suffix
     has_unicode_controls = any(
@@ -210,7 +216,7 @@ def sanitize_for_model(
     )
     if not findings and not has_unicode_controls:
         return text, assessment
-    sanitized = text
+    sanitized = scan_text
     for finding in sorted(findings, key=lambda item: (item.start, item.end), reverse=True):
         sanitized = sanitized[: finding.start] + "[redacted defensive rule]" + sanitized[finding.end :]
     # Remove Unicode format and control characters independently of lexical
