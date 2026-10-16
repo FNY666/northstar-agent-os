@@ -2863,7 +2863,9 @@ class AgentRuntime:
         # cannot force an unbounded stringify just to be inspected.
         from defensive_agent import sanitize_for_model
 
-        sanitized_text, defensive = sanitize_for_model(block.display_text())
+        sanitized_text, defensive = sanitize_for_model(
+            block.display_text(), preserve_length=True
+        )
         defensive_blocked = defensive.decision.value == "block"
         if defensive.findings:
             self.sessions.append(
