@@ -598,7 +598,7 @@ def workspace_check_evidence(run_report: Any) -> dict[str, Any]:
         break
 
     latest: dict[tuple[str, str], dict[str, Any]] = {}
-    attempts: dict[tuple[str, str], int] = {}
+    attempts: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for event in getattr(run_report, "hook_fires", ()):
         if not isinstance(event, dict) or event.get("event") != "Stop":
             continue
@@ -620,22 +620,30 @@ def workspace_check_evidence(run_report: Any) -> dict[str, Any]:
                 continue
             check_id = check.get("id")
             key = (str(check_id) if isinstance(check_id, str) else name, script)
-            attempts[key] = attempts.get(key, 0) + 1
             result = {"name": name, "script": script, "status": status}
             if isinstance(check_id, str):
                 result["id"] = check_id
+            attempt: dict[str, Any] = {"status": status}
+            turn_index = check.get("turn_index")
+            if isinstance(turn_index, int) and not isinstance(turn_index, bool) and turn_index >= 0:
+                result["turn_index"] = turn_index
+                attempt["turn_index"] = turn_index
             exit_code = check.get("exit_code")
             if isinstance(exit_code, int) and not isinstance(exit_code, bool):
                 result["exit_code"] = exit_code
+                attempt["exit_code"] = exit_code
             if isinstance(check.get("timed_out"), bool):
                 result["timed_out"] = check["timed_out"]
+                attempt["timed_out"] = check["timed_out"]
             duration_ms = check.get("duration_ms")
             if isinstance(duration_ms, int) and not isinstance(duration_ms, bool) and duration_ms >= 0:
                 result["duration_ms"] = duration_ms
+                attempt["duration_ms"] = duration_ms
             latest[key] = result
+            attempts.setdefault(key, []).append(attempt)
 
     results = [
-        {**latest[key], "attempts": attempts[key]}
+        {**latest[key], "attempts": len(attempts[key]), "history": attempts[key]}
         for key in sorted(latest)
     ]
     checked = len(results)

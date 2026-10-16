@@ -1401,10 +1401,15 @@ def _print_coding_evidence(args: argparse.Namespace, before: Any, run_report: An
             f"status={workspace_checks['status']} configured={workspace_checks['configured']}"
         )
         for item in workspace_checks["results"]:
-            if item["status"] == "failed":
+            if item["status"] == "failed" or item["attempts"] > 1:
+                history = ", ".join(
+                    f"turn={attempt.get('turn_index', '?')}:{attempt['status']}"
+                    + (f"/exit={attempt['exit_code']}" if "exit_code" in attempt else "")
+                    for attempt in item["history"]
+                )
                 print(
-                    f"    failed: {item['script']} exit={item.get('exit_code', 'n/a')} "
-                    f"timed_out={str(item.get('timed_out', False)).lower()} attempts={item['attempts']}"
+                    f"    check: {item['script']} final={item['status']} attempts={item['attempts']} "
+                    f"[{history}]"
                 )
 
 

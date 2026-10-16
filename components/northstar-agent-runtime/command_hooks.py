@@ -249,6 +249,7 @@ def build_callback(
         *,
         passed: bool,
         started: float,
+        turn_index: int,
         exit_code: int | None = None,
         timed_out: bool = False,
         reason: str = "",
@@ -258,6 +259,7 @@ def build_callback(
             "id": f"{hook.name}#{hook.entry_index}",
             "script": hook.script.relative_to(root).as_posix(),
             "status": "passed" if passed else "failed",
+            "turn_index": turn_index,
             "exit_code": exit_code,
             "timed_out": timed_out,
             "duration_ms": max(0, int((time.monotonic() - started) * 1000)),
@@ -279,11 +281,11 @@ def build_callback(
             current = hook.script.read_bytes()
         except OSError as error:
             if is_stop_check:
-                return stop_check_result(passed=False, started=started, reason=f"{hook.name} script is no longer readable: {error}")
+                return stop_check_result(passed=False, started=started, turn_index=hook_input.turn_index, reason=f"{hook.name} script is no longer readable: {error}")
             return HookResult.deny(f"{hook.name} script is no longer readable: {error}")
         if hashlib.sha256(current).hexdigest() != hook.script_digest:
             if is_stop_check:
-                return stop_check_result(passed=False, started=started, reason=f"{hook.name} script changed since registration; refusing check")
+                return stop_check_result(passed=False, started=started, turn_index=hook_input.turn_index, reason=f"{hook.name} script changed since registration; refusing check")
             return HookResult.deny(f"{hook.name} script changed since registration; refusing dispatch")
         # Preserve the original path/interpreter semantics after verifying current bytes.
         # Residual: a same-user adversary can still race this check against the OS open in Popen.
@@ -306,6 +308,7 @@ def build_callback(
                 return stop_check_result(
                     passed=False,
                     started=started,
+                    turn_index=hook_input.turn_index,
                     timed_out=True,
                     reason=f"{hook.name} check timed out after {hook.timeout_ms}ms",
                 )
@@ -314,21 +317,22 @@ def build_callback(
             )
         except OSError as error:
             if is_stop_check:
-                return stop_check_result(passed=False, started=started, reason=f"{hook.name} could not be executed: {error}")
+                return stop_check_result(passed=False, started=started, turn_index=hook_input.turn_index, reason=f"{hook.name} could not be executed: {error}")
             raise _fail(f"{hook.name} could not be executed: {error}") from error
         except Exception as error:  # output caps, cleanup failures, and decode errors
             if is_stop_check:
-                return stop_check_result(passed=False, started=started, reason=f"{hook.name} could not complete: {type(error).__name__}: {error}")
+                return stop_check_result(passed=False, started=started, turn_index=hook_input.turn_index, reason=f"{hook.name} could not complete: {type(error).__name__}: {error}")
             raise
         stdout = (completed.stdout or "")[:MAX_STDOUT_BYTES]
         stderr = (completed.stderr or "")[:MAX_STDERR_BYTES]
         code = int(getattr(completed, "returncode", 0) or 0)
         if is_stop_check:
             if code == 0:
-                return stop_check_result(passed=True, started=started, exit_code=code)
+                return stop_check_result(passed=True, started=started, turn_index=hook_input.turn_index, exit_code=code)
             return stop_check_result(
                 passed=False,
                 started=started,
+                turn_index=hook_input.turn_index,
                 exit_code=code,
                 reason=f"{hook.name} check exited {code}: "
                 + (("\n".join(part.strip() for part in (stdout, stderr) if part.strip()))[-MAX_STDERR_BYTES:] or "no output"),

@@ -1082,9 +1082,11 @@ It also summarizes any host-evaluated `--verify` or policy `[[verify]]` checks i
 the same receipt, including kind, path, verdict, and structural pass/total counts.
 Expected text for `contains` checks is omitted from this summary.
 Enabled repository `Stop` checks also appear as `workspace_checks`, with the final
-verdict, exit code, duration, and number of attempts. A failed check can block
-completion, return its failure to the agent, and run again after the agent responds.
-They run on the top-level agent's proposed stop; delegated subagent stops skip them.
+verdict, exit code, duration, and a per-attempt history keyed by turn. A failed
+check can block completion, return its failure to the agent, and run again after
+the agent responds; the turn history can be compared with Shell calls from the same
+turns. Checks run on the top-level agent's proposed stop; delegated subagent stops
+skip them.
 The receipt distinguishes checks that were not configured, disabled, or configured
 but never reached evaluation.
 Command text and command output are omitted from this summary; use each `call_id` and
