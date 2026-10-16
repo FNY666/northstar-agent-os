@@ -1044,6 +1044,21 @@ class AgentRuntime:
                 return tuple(screen_value(item) for item in value)
             return value
 
+        def screen_unknown_block(value: Any, *, key: str = "") -> Any:
+            """Screen multimodal metadata while leaving binary payloads intact."""
+            if isinstance(value, str):
+                if key in {"data", "signature"}:
+                    return value
+                return screen_text(value)
+            if isinstance(value, dict):
+                return {
+                    item_key: screen_unknown_block(item, key=str(item_key))
+                    for item_key, item in value.items()
+                }
+            if isinstance(value, list):
+                return [screen_unknown_block(item, key=key) for item in value]
+            return value
+
         for message in payload:
             content = message.get("content")
             if not isinstance(content, list):
@@ -1092,6 +1107,12 @@ class AgentRuntime:
                 elif block_type in {"text", "document"}:
                     if "text" in block:
                         block["text"] = screen_text(block.get("text"))
+                else:
+                    # Resumed image/document/custom blocks may carry captions,
+                    # alt text, URLs, or provider metadata outside the small
+                    # native block vocabulary. Screen those strings too, but
+                    # never rewrite binary data or signed block bytes.
+                    block = screen_unknown_block(block)
                 safe_blocks.append(block)
             message["content"] = safe_blocks
 
