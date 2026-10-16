@@ -231,6 +231,17 @@ def sanitize_for_model(
         else:
             unicode_rewritten.append(char)
     sanitized = "".join(unicode_rewritten)
+    # Removing an invisible separator can join words into a fresh jailbreak
+    # phrase that was not present during the first scan. Re-assess the cleaned
+    # representation before releasing it, and fail closed if it now matches a
+    # high-confidence rule.
+    # Collapse only for detection: model-visible spacing is preserved below,
+    # while equivalent whitespace cannot hide a phrase from lexical rules.
+    post_cleanup = assess(" ".join(sanitized.split()))
+    if post_cleanup.decision is Decision.BLOCK or any(
+        finding.rule_id.startswith("D-INJ-") for finding in post_cleanup.findings
+    ):
+        return "[blocked by defensive agent]", replace(post_cleanup, decision=Decision.BLOCK)
     if preserve_length and len(sanitized) < len(text):
         # Keep resource accounting stable without retaining any bytes from the
         # matched span. Padding is deliberately inert whitespace: it cannot be
