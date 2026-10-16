@@ -80,6 +80,7 @@ MCP_NAME_RE = "mcp__"
 MAX_LINE_BYTES = 1_000_000          # one JSON-RPC line
 MAX_SCHEMA_CHARS = 30_000           # one inputSchema or outputSchema
 MAX_TOOLS_PER_SERVER = 25
+MAX_TOOL_LIST_PAGES = 25
 MAX_DESCRIPTION_CHARS = 600
 MIN_TIMEOUT_MS = 100
 MAX_TIMEOUT_MS = 300_000
@@ -98,6 +99,7 @@ DEFAULT_MCP_ENV_ALLOWLIST = frozenset({
     # Protocol fixture controls used by the offline MCP test servers. These are
     # non-secret coordination variables, not credentials.
     "MCP_SILENT",
+    "MCP_PAGINATED_TOOL_LIST",
     "MCP_SLOW_TOOL",
     "MCP_SPAWN_REPORT",
     "MRTR_SERVER_MODE",
@@ -477,6 +479,59 @@ class McpStdioClient:
             )
         return prctl_loader_argv(self.command, python=python)
 
+    def _list_tools(self) -> list[Any]:
+        """Collect the full, bounded tools/list surface within one timeout."""
+        deadline = time.monotonic() + self.timeout_ms / 1000
+        cursor: str | None = None
+        seen_cursors: set[str] = set()
+        names: set[str] = set()
+        tools: list[Any] = []
+
+        for page_number in range(1, MAX_TOOL_LIST_PAGES + 1):
+            params = {} if cursor is None else {"cursor": cursor}
+            listed = self._request("tools/list", params, deadline=deadline)
+            page = listed.get("tools")
+            if not isinstance(page, list):
+                raise McpError(f"mcp server {self.name!r}: tools/list must return an array")
+            if len(tools) + len(page) > MAX_TOOLS_PER_SERVER:
+                raise McpError(
+                    f"mcp server {self.name!r}: tools/list must return an array of at most "
+                    f"{MAX_TOOLS_PER_SERVER} tools"
+                )
+            for raw in page:
+                if not isinstance(raw, dict):
+                    continue
+                tool_name = raw.get("name")
+                if isinstance(tool_name, str):
+                    if tool_name in names:
+                        raise McpError(
+                            f"mcp server {self.name!r}: tools/list returned duplicate "
+                            f"tool name {tool_name!r}"
+                        )
+                    names.add(tool_name)
+            tools.extend(page)
+
+            next_cursor = listed.get("nextCursor")
+            if next_cursor is None:
+                return tools
+            if not isinstance(next_cursor, str):
+                raise McpError(
+                    f"mcp server {self.name!r}: tools/list nextCursor must be a string"
+                )
+            if next_cursor in seen_cursors:
+                raise McpError(
+                    f"mcp server {self.name!r}: tools/list repeated a pagination cursor"
+                )
+            if page_number == MAX_TOOL_LIST_PAGES:
+                raise McpError(
+                    f"mcp server {self.name!r}: tools/list exceeded the "
+                    f"{MAX_TOOL_LIST_PAGES}-page limit"
+                )
+            seen_cursors.add(next_cursor)
+            cursor = next_cursor
+
+        raise McpError(f"mcp server {self.name!r}: tools/list exceeded its page limit")
+
     def connect(self) -> None:
         """Spawn the server, agree a generation, and list its tools."""
         if self._proc is not None:
@@ -499,13 +554,7 @@ class McpStdioClient:
         self._proc = proc
         try:
             self._negotiate()
-            listed = self._request("tools/list", {})
-            tools = listed.get("tools") if isinstance(listed, dict) else None
-            if not isinstance(tools, list) or len(tools) > MAX_TOOLS_PER_SERVER:
-                raise McpError(
-                    f"mcp server {self.name!r}: tools/list must return an array of at most "
-                    f"{MAX_TOOLS_PER_SERVER} tools"
-                )
+            tools = self._list_tools()
             for raw in tools:
                 if not isinstance(raw, dict):
                     raise McpError(f"mcp server {self.name!r}: a tool entry is not an object")
@@ -698,15 +747,7 @@ class McpStdioClient:
         """
         if not self.connected:
             raise McpError(f"mcp server {self.name!r} is not connected")
-        listed = self._request("tools/list", {})
-        tools = listed.get("tools") if isinstance(listed, dict) else None
-        if not isinstance(tools, list):
-            raise McpError(f"mcp server {self.name!r}: tools/list must return an array")
-        if len(tools) > MAX_TOOLS_PER_SERVER:
-            raise McpError(
-                f"mcp server {self.name!r}: tools/list returned more than "
-                f"{MAX_TOOLS_PER_SERVER} tools during revalidation"
-            )
+        tools = self._list_tools()
         observed: dict[str, str] = {}
         for raw in tools:
             if not isinstance(raw, dict):
@@ -997,8 +1038,14 @@ class McpStdioClient:
     def _notify(self, method: str, params: dict[str, Any] | None = None) -> None:
         self._send({"jsonrpc": "2.0", "method": method, "params": self._params(params)})
 
-    def _request(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        result, error, timed_out = self._exchange(method, params)
+    def _request(
+        self,
+        method: str,
+        params: dict[str, Any] | None = None,
+        *,
+        deadline: float | None = None,
+    ) -> dict[str, Any]:
+        result, error, timed_out = self._exchange(method, params, deadline=deadline)
         if error is not None:
             detail = error.get("message", "unknown error") if isinstance(error, dict) else error
             raise McpError(f"mcp server {self.name!r}: {method}: {detail}")
@@ -1014,6 +1061,7 @@ class McpStdioClient:
         params: dict[str, Any] | None = None,
         *,
         force_meta: bool = False,
+        deadline: float | None = None,
     ) -> tuple[dict[str, Any] | None, dict[str, Any] | None, bool]:
         """Send one request and return ``(result, error, timed_out)``.
 
@@ -1032,7 +1080,7 @@ class McpStdioClient:
         self._send(
             {"jsonrpc": "2.0", "id": request_id, "method": method, "params": self._params(params, force_meta=force_meta)}
         )
-        deadline = time.monotonic() + self.timeout_ms / 1000
+        deadline = deadline if deadline is not None else time.monotonic() + self.timeout_ms / 1000
         while True:
             line = self._read_line(deadline)
             if line is None:
