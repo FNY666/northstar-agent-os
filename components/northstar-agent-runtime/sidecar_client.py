@@ -53,6 +53,26 @@ CONNECT_ATTEMPTS = 3
 CONNECT_RETRY_DELAY = 0.1
 
 
+def _safe_diagnostic(value: Any) -> str:
+    """Keep sidecar diagnostics from becoming an unfiltered output channel."""
+    from defensive_agent import sanitize_for_model
+
+    return sanitize_for_model(str(value))[0]
+
+
+def _safe_raw(value: Any, *, key: str = "") -> Any:
+    """Copy remote diagnostic payloads while preserving binary/signature fields."""
+    if isinstance(value, str):
+        if key in {"data", "signature"}:
+            return value
+        return _safe_diagnostic(value)
+    if isinstance(value, dict):
+        return {item_key: _safe_raw(item, key=str(item_key)) for item_key, item in value.items()}
+    if isinstance(value, list):
+        return [_safe_raw(item, key=key) for item in value]
+    return value
+
+
 @dataclass(frozen=True)
 class SidecarValidation:
     ok: bool
@@ -217,12 +237,12 @@ class SidecarClient:
         try:
             rid = request_id or self.new_request_id()
         except BridgeError as error:
-            return SidecarResult(request_id="", status="rejected", errors=(str(error),))
+            return SidecarResult(request_id="", status="rejected", errors=(_safe_diagnostic(error),))
         effective_timeout = self.timeout_ms if timeout_ms is None else int(timeout_ms)
         try:
             request: dict[str, Any] = build_request(prompt, run_id=rid, timeout_ms=effective_timeout)
         except BridgeError as error:
-            return SidecarResult(request_id=rid, status="rejected", errors=(str(error),))
+            return SidecarResult(request_id=rid, status="rejected", errors=(_safe_diagnostic(error),))
         checked = validate_request(request)
         if not checked.ok:
             return SidecarResult(request_id=rid, status="rejected", errors=checked.errors)
@@ -233,7 +253,7 @@ class SidecarClient:
             return SidecarResult(
                 request_id=rid,
                 status="rejected",
-                errors=tuple(f"run contract: {e}" for e in report.errors),
+                errors=tuple(_safe_diagnostic(f"run contract: {e}") for e in report.errors),
                 wire_mode=report.mode,
             )
         started = time.monotonic()
@@ -267,7 +287,7 @@ class SidecarClient:
             latency_ms=latency_ms,
             bytes_read=bytes_read,
             truncated=bool(truncated or result.truncated),
-            raw=payload if isinstance(payload, dict) else {},
+            raw=result.raw,
             wire_mode=report.mode,
         )
 
@@ -416,7 +436,7 @@ class SidecarClient:
         if status == "ok" and not text:
             raise SidecarProtocolError("sidecar reported ok without an agent message")
         errors = payload.get("errors")
-        normalised_errors = tuple(str(item) for item in errors) if isinstance(errors, (list, tuple)) else ()
+        normalised_errors = tuple(_safe_diagnostic(item) for item in errors) if isinstance(errors, (list, tuple)) else ()
         request_id = payload.get("request_id")
         if isinstance(request_id, str) and request_id and request_id != expected_request_id:
             raise SidecarProtocolError(
@@ -426,16 +446,16 @@ class SidecarClient:
             request_id=request_id if isinstance(request_id, str) else expected_request_id,
             status=status,
             text=text if status == "ok" else "",
-            error=payload.get("error") if isinstance(payload.get("error"), str) else "",
+            error=_safe_diagnostic(payload.get("error")) if isinstance(payload.get("error"), str) else "",
             errors=normalised_errors,
-            raw=dict(payload),
+            raw=_safe_raw(dict(payload)),
         )
 
     def _failure(self, request_id: str, status: str, message: str, started: float) -> SidecarResult:
         return SidecarResult(
             request_id=request_id,
             status=status,
-            error=message,
+            error=_safe_diagnostic(message),
             latency_ms=int((time.monotonic() - started) * 1000),
         )
 
