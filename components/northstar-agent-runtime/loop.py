@@ -1151,20 +1151,34 @@ class AgentRuntime:
                 safe_blocks.append(block)
             message["content"] = safe_blocks
 
-        if findings:
+        if findings or malformed_count:
+            audit_findings = []
+            if malformed_count:
+                audit_findings.append(
+                    {
+                        "rule_id": "D-RESUME-001",
+                        "category": "malformed-provider-message",
+                        "severity": 100,
+                    }
+                )
+            audit_findings.extend(
+                {
+                    "rule_id": item.rule_id,
+                    "category": item.category,
+                    "severity": item.severity,
+                }
+                for item in findings[:8]
+            )
             self.sessions.append(
                 "defensive_assessment",
                 {
                     "agent": self.config.agent,
                     "tool": "(provider-context)",
                     "turn_index": turn_index,
-                    "decision": "block" if any(item.severity >= 90 for item in findings) else "review",
+                    "decision": "block" if malformed_count or any(item.severity >= 90 for item in findings) else "review",
                     "sanitized": changed,
-                    "finding_count": len(findings),
-                    "findings": [
-                        {"rule_id": item.rule_id, "category": item.category, "severity": item.severity}
-                        for item in findings[:8]
-                    ],
+                    "finding_count": len(audit_findings),
+                    "findings": audit_findings[:8],
                 },
             )
         return tuple(payload)
