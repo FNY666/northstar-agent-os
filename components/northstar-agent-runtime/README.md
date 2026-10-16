@@ -256,6 +256,8 @@ If that second pass finds an instruction pattern, the release is quarantined
 even when the original obfuscated form was only review-level.
 Equivalent Unicode dash and space separators receive the same second-pass
 check, closing punctuation-based variants of known instruction spans.
+Length-preserving cleanup uses a visible one-character marker for hidden
+controls, so budget stability cannot turn obfuscation into ordinary whitespace.
 Nested string fields inside resumed tool arguments are screened recursively,
 including review-level findings, while the original argument shape is retained.
 Delegation prompts receive an additional review-level redaction before a child
