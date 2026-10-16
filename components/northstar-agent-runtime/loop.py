@@ -1690,15 +1690,42 @@ class AgentRuntime:
         Yields the notes hooks add; returns True when a hook refused and the run has ended.
         """
         config = self.config
+
+        def append_hook_context(context: str, source: str) -> SystemMessage:
+            # Hook-provided context is an extension boundary: it is allowed to
+            # add host facts, but it must not smuggle a credential or a forged
+            # instruction into the provider request. Keep the finding record
+            # redaction-safe and pass only the screened text onward.
+            from defensive_agent import sanitize_for_model
+
+            safe_context, assessment = sanitize_for_model(context)
+            if assessment.findings:
+                self.sessions.append(
+                    "defensive_assessment",
+                    {
+                        "agent": config.agent,
+                        "tool": f"(hook:{source})",
+                        "turn_index": 0,
+                        "decision": assessment.decision.value,
+                        "sanitized": safe_context != context,
+                        "finding_count": len(assessment.findings),
+                        "findings": [
+                            {"rule_id": item.rule_id, "category": item.category, "severity": item.severity}
+                            for item in assessment.findings[:8]
+                        ],
+                    },
+                )
+            return SystemMessage(subtype="informational", content=safe_context)
+
         # SessionStart may seed context or refuse the run outright.
         start = self._fire(state, "SessionStart", HookInput(event="SessionStart", session_id=state.session_id, agent=config.agent, depth=config.depth, data={"model": config.model, "tools": list(self.tools.names())}))
         if start.denied:
             state.denials.append(Denial(tool="", source="hook:SessionStart", reason=start.deny_reason, agent=config.agent, kind="run"))
             yield self._finish(state, "error_permission_denied")
             return True
-        for context in (start.additional_context,):
+        for context in start.additional_context:
             if context:
-                note = SystemMessage(subtype="informational", content=context)
+                note = append_hook_context(context, "SessionStart")
                 state.transcript.append(note)
                 self.sessions.record_system(note, agent=config.agent)
                 yield note
@@ -1716,7 +1743,7 @@ class AgentRuntime:
             return True
         for context in submitted.additional_context:
             if context:
-                note = SystemMessage(subtype="informational", content=context)
+                note = append_hook_context(context, "UserPromptSubmit")
                 state.transcript.append(note)
                 self.sessions.record_system(note, agent=config.agent)
                 yield note
@@ -2507,50 +2534,66 @@ class AgentRuntime:
                 )
         rewritten = pre.updated_input is not None
 
-        # Mutating, executable, network, and delegation inputs are egress
-        # boundaries even when they are not Fetch calls. Refuse literal
-        # credentials before any handler or child agent can receive them;
-        # environment-variable references remain valid because the detector
-        # does not classify indirection as a secret.
-        if spec.is_mutating or spec.kind in {"exec", "network"} or spec.is_delegation:
-            from defensive_agent import assess as assess_defensive_input
+        # Every tool input becomes part of the assistant transcript after the
+        # call, including a read-only call. Run the same local checkpoint for
+        # all tools so a hardcoded credential cannot use a harmless-looking
+        # reader as a return channel. Environment-variable references remain
+        # valid because the detector does not classify indirection as a secret.
+        from defensive_agent import assess as assess_defensive_input
 
-            input_assessment = assess_defensive_input(
-                json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str),
-                tool_name=spec.name,
+        input_assessment = assess_defensive_input(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str),
+            tool_name=spec.name,
+        )
+        if input_assessment.findings:
+            self.sessions.append(
+                "defensive_assessment",
+                {
+                    "agent": self.config.agent,
+                    "tool": spec.name,
+                    "tool_use_id": call.id,
+                    "turn_index": turn_index,
+                    "decision": input_assessment.decision.value,
+                    "sanitized": False,
+                    "finding_count": len(input_assessment.findings),
+                    "findings": [
+                        {"rule_id": item.rule_id, "category": item.category, "severity": item.severity}
+                        for item in input_assessment.findings[:8]
+                    ],
+                },
             )
-            if input_assessment.decision.value == "block":
-                decision = PermissionDecision(
-                    False,
-                    source="defensive_agent",
-                    reason=f"{spec.name} input blocked by defensive agent",
-                    rule="defensive_agent:high_confidence_finding",
-                    tool=spec.name,
-                )
-                self._governed_runner.run(
-                    intent="agent-tool-call",
-                    action=spec.name,
-                    subject=self.config.agent,
-                    tool=spec.name,
-                    tool_args=payload,
-                    inputs_digest=GovernedActionRunner.pin(
-                        {"call_id": call.id, "tool": spec.name, "args": payload}
-                    ),
-                    decision=decision,
-                    executor=lambda _tool, _args: (_ for _ in ()).throw(
-                        GovernedRunnerError("defensive agent denied call")
-                    ),
-                )
-                return self._refuse_by_gate(
-                    call,
-                    spec,
-                    decision,
-                    state,
-                    payload=payload,
-                    turn_index=turn_index,
-                    span=span,
-                    rewritten=rewritten,
-                )
+        if input_assessment.decision.value == "block":
+            decision = PermissionDecision(
+                False,
+                source="defensive_agent",
+                reason=f"{spec.name} input blocked by defensive agent",
+                rule="defensive_agent:high_confidence_finding",
+                tool=spec.name,
+            )
+            self._governed_runner.run(
+                intent="agent-tool-call",
+                action=spec.name,
+                subject=self.config.agent,
+                tool=spec.name,
+                tool_args=payload,
+                inputs_digest=GovernedActionRunner.pin(
+                    {"call_id": call.id, "tool": spec.name, "args": payload}
+                ),
+                decision=decision,
+                executor=lambda _tool, _args: (_ for _ in ()).throw(
+                    GovernedRunnerError("defensive agent denied call")
+                ),
+            )
+            return self._refuse_by_gate(
+                call,
+                spec,
+                decision,
+                state,
+                payload=payload,
+                turn_index=turn_index,
+                span=span,
+                rewritten=rewritten,
+            )
 
         if spec.is_delegation:
             # Delegation is a data egress boundary too: the prompt is sent to
