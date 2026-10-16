@@ -1690,15 +1690,42 @@ class AgentRuntime:
         Yields the notes hooks add; returns True when a hook refused and the run has ended.
         """
         config = self.config
+
+        def append_hook_context(context: str, source: str) -> SystemMessage:
+            # Hook-provided context is an extension boundary: it is allowed to
+            # add host facts, but it must not smuggle a credential or a forged
+            # instruction into the provider request. Keep the finding record
+            # redaction-safe and pass only the screened text onward.
+            from defensive_agent import sanitize_for_model
+
+            safe_context, assessment = sanitize_for_model(context)
+            if assessment.findings:
+                self.sessions.append(
+                    "defensive_assessment",
+                    {
+                        "agent": config.agent,
+                        "tool": f"(hook:{source})",
+                        "turn_index": 0,
+                        "decision": assessment.decision.value,
+                        "sanitized": safe_context != context,
+                        "finding_count": len(assessment.findings),
+                        "findings": [
+                            {"rule_id": item.rule_id, "category": item.category, "severity": item.severity}
+                            for item in assessment.findings[:8]
+                        ],
+                    },
+                )
+            return SystemMessage(subtype="informational", content=safe_context)
+
         # SessionStart may seed context or refuse the run outright.
         start = self._fire(state, "SessionStart", HookInput(event="SessionStart", session_id=state.session_id, agent=config.agent, depth=config.depth, data={"model": config.model, "tools": list(self.tools.names())}))
         if start.denied:
             state.denials.append(Denial(tool="", source="hook:SessionStart", reason=start.deny_reason, agent=config.agent, kind="run"))
             yield self._finish(state, "error_permission_denied")
             return True
-        for context in (start.additional_context,):
+        for context in start.additional_context:
             if context:
-                note = SystemMessage(subtype="informational", content=context)
+                note = append_hook_context(context, "SessionStart")
                 state.transcript.append(note)
                 self.sessions.record_system(note, agent=config.agent)
                 yield note
@@ -1716,7 +1743,7 @@ class AgentRuntime:
             return True
         for context in submitted.additional_context:
             if context:
-                note = SystemMessage(subtype="informational", content=context)
+                note = append_hook_context(context, "UserPromptSubmit")
                 state.transcript.append(note)
                 self.sessions.record_system(note, agent=config.agent)
                 yield note
