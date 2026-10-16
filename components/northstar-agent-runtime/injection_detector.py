@@ -154,6 +154,12 @@ def _find_base64_blobs(text: str) -> Tuple[InjectionFinding, ...]:
     findings = []
     for match in _BASE64_RUN_RE.finditer(text):
         candidate = match.group(0)
+        # A single repeated alphabet character is usually an opaque filler
+        # (for example a context-budget probe), not an encoded instruction.
+        # Requiring a small amount of alphabet diversity removes that noisy
+        # false positive without weakening ordinary encoded payload detection.
+        if len(set(candidate.rstrip("="))) < 4:
+            continue
         # validate=True rejects non-alphabet characters; the minimum
         # decoded size rejects short runs that happen to decode.
         try:
