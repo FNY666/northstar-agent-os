@@ -32,6 +32,11 @@ class SsrfDetectTests(unittest.TestCase):
         for host in ("127.1", "0177.0.0.1", "0x7f000001", "2130706433"):
             with self.subTest(host=host):
                 self.assertTrue(ssrf_detect.is_private_url(f"http://{host}/"))
+
+    def test_unicode_and_encoded_authority_evasions_are_flagged(self):
+        for host in ("１２７．０．０．１", "local\u200bhost", "127.0.0.1%2f.evil", "127.0.0.1%5cevil"):
+            with self.subTest(host=host):
+                self.assertTrue(ssrf_detect.is_private_url(f"http://{host}/"))
         for host in ("169.254.169.254", "0xa9fea9fe", "2852039166"):
             with self.subTest(host=host):
                 self.assertTrue(ssrf_detect.is_private_url(f"http://{host}/"))

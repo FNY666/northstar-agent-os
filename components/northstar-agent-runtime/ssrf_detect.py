@@ -12,7 +12,8 @@ import ast
 from ipaddress import ip_address
 from pathlib import Path
 import socket
-from urllib.parse import urlsplit
+import unicodedata
+from urllib.parse import unquote, urlsplit
 
 VERSION = "ssrf-detect.v2"
 
@@ -36,7 +37,14 @@ def is_private_url(url: str) -> bool:
     if not host:
         return False
 
-    host = host.rstrip(".").lower()
+    host = unicodedata.normalize("NFKC", unquote(host)).rstrip(".").lower()
+    # An authority containing controls, whitespace, or decoded delimiters is
+    # ambiguous across URL stacks. Treat it as a private-destination signal so
+    # a downstream client cannot reinterpret it into an internal target.
+    if any(unicodedata.category(char) in {"Cc", "Cf"} for char in host):
+        return True
+    if any(char in host for char in "/\\?#@") or any(char.isspace() for char in host):
+        return True
     if host == "localhost" or host.endswith(".localhost"):
         return True
     try:
@@ -53,7 +61,7 @@ def is_private_url(url: str) -> bool:
 
 def stdlib_only() -> bool:
     tree = ast.parse(Path(__file__).read_text(encoding="utf-8"), filename=__file__)
-    allowed = {"__future__", "ast", "ipaddress", "pathlib", "socket", "urllib"}
+    allowed = {"__future__", "ast", "ipaddress", "pathlib", "socket", "unicodedata", "urllib"}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             if any(alias.name.split(".")[0] not in allowed for alias in node.names):
