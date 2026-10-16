@@ -25,6 +25,7 @@ from __future__ import annotations
 import os
 import time
 from dataclasses import dataclass, field, replace
+from types import MappingProxyType
 from typing import Any, Callable, Generator, Iterable, Iterator, Mapping, Sequence
 
 from agents import AgentDefinition, AgentRegistry, Verdict, builtin_registry, parse_verdict
@@ -655,10 +656,12 @@ class AgentRuntime:
         sidecar: SidecarClient | None = None,
         budget: Budget | None = None,
         summarizer: Callable[[Sequence[Any]], str] | None = None,
+        skill_digests: Mapping[str, str] | None = None,
     ) -> None:
         if provider is None:
             raise RuntimeConfigurationError("a provider is required")
         self.config = config or RuntimeConfig()
+        self.skill_digests = MappingProxyType(dict(skill_digests or {}))
         if self.config.stream and not getattr(provider, "streams", False):
             name = getattr(provider, "name", None) or type(provider).__name__
             raise RuntimeConfigurationError(
@@ -2390,6 +2393,7 @@ class AgentRuntime:
             "shell_seccomp": self.config.shell_seccomp,
             "shell_capdrop": self.config.shell_capdrop,
             "shell_landlock": self.config.shell_landlock,
+            "skill_digests": self.skill_digests,
         }
 
     def _record_tool_message(self, message: UserMessage) -> None:
@@ -2674,6 +2678,7 @@ class AgentRuntime:
             sidecar=self.sidecar,
             budget=Budget(max_budget_usd=child_config.max_budget_usd),
             summarizer=self.summarizer,
+            skill_digests=self.skill_digests,
         )
         return child, child_config, child_mode
 

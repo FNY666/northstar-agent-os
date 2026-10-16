@@ -45,6 +45,7 @@ class Skill:
     description: str
     path: Path            # absolute path of the SKILL.md inside the workspace
     model: str = ""
+    digest: str = ""  # SHA-256 of the raw bytes captured during discovery
 
 
 def skills_directory(workspace: str | Path) -> Path:
@@ -68,8 +69,9 @@ def discover_skills(
     instructions the model sees must not depend on discovery order.
 
     ``reviewed_digests`` pins workspace skill paths to SHA-256 of the exact bytes
-    parsed here; absent pins or changed bytes are refused. Plugin extra roots keep
-    their separate bundle trust source. This does not pin later tool reads of bodies.
+    parsed here; absent pins or changed bytes are refused. The digest captured for
+    each discovered skill is also held by the runtime and checked when ``Read`` later
+    returns its body. Plugin extra roots keep their separate bundle trust source.
     """
     root = Path(workspace).resolve()
     skills: list[Skill] = list(_scan(root / SKILLS_DIRECTORY, root, reviewed_digests))
@@ -134,7 +136,8 @@ def _parse_skill(skill_file: Path, *, expected_digest: str | None = None) -> Ski
         raw = skill_file.read_bytes()
     except OSError as error:
         raise SkillError(f"{skill_file}: cannot read skill: {error}") from error
-    if expected_digest is not None and hashlib.sha256(raw).hexdigest() != expected_digest:
+    digest = hashlib.sha256(raw).hexdigest()
+    if expected_digest is not None and digest != expected_digest:
         raise SkillError(f"{skill_file}: skill changed since review or is unreviewed; refusing metadata")
     try:
         fields, _body = parse_frontmatter(raw.decode("utf-8", errors="replace"))
@@ -161,6 +164,7 @@ def _parse_skill(skill_file: Path, *, expected_digest: str | None = None) -> Ski
         description=description.strip()[:MAX_DESCRIPTION_CHARS],
         path=skill_file.resolve(),
         model=model,
+        digest=digest,
     )
 
 
