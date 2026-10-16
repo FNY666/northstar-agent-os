@@ -334,7 +334,7 @@ def _add_policy_arguments(parser: argparse.ArgumentParser) -> None:
             "--coding-mode",
             action="store_true",
             help=(
-                "guide coding tasks and emit independent Git workspace-change evidence; "
+                "guide coding tasks and emit Git change plus independent verification evidence; "
                 "permissions remain unchanged"
             ),
         )
@@ -661,7 +661,7 @@ def _print_dry_run(
     print(f"provider={args.provider} model={config.model}{agent_suffix}")
     print(f"permission_mode={config.permission_mode}")
     if getattr(args, "coding_mode", False):
-        print("coding_mode=on (workflow instructions + post-run Git evidence; permissions unchanged)")
+        print("coding_mode=on (workflow instructions + post-run change/verification evidence; permissions unchanged)")
     print(f"tools={','.join(tool_names) or '(none)'}")
     print(f"allowed_tools={','.join(config.allowed_tools) or '(none)'}  "
           f"disallowed_tools={','.join(config.disallowed_tools) or '(none)'}")
@@ -1298,11 +1298,17 @@ def _stream_events(
 
 def _print_coding_evidence(args: argparse.Namespace, before: Any, run_report: Any) -> None:
     """Print a host-observed workspace receipt after all run-owned clients stop."""
-    from coding_evidence import compare_snapshots, shell_execution_evidence, snapshot_workspace
+    from coding_evidence import (
+        compare_snapshots,
+        postcondition_evidence,
+        shell_execution_evidence,
+        snapshot_workspace,
+    )
 
     evidence = compare_snapshots(before, snapshot_workspace(args.workspace))
-    evidence["shell_execution_scope"] = "top_level"
+    evidence["shell_execution_scope"] = "top_level_and_subagents"
     evidence["shell_executions"] = shell_execution_evidence(run_report)
+    evidence["postconditions"] = postcondition_evidence(run_report)
     if args.json:
         # A CLI receipt follows the runtime event stream. It is separate from
         # model-authored text and keeps --json usable by automation.
@@ -1336,19 +1342,38 @@ def _print_coding_evidence(args: argparse.Namespace, before: Any, run_report: An
     for note in evidence.get("coverage_notes", []):
         print(f"  coverage note: {note}")
     shell_executions = evidence["shell_executions"]
-    print(f"  shell_executions={len(shell_executions)} (top-level calls; commands and output omitted)")
+    print(f"  shell_executions={len(shell_executions)} (commands and output omitted)")
     for item in shell_executions:
         fields = [
             f"turn={item['turn_index']}",
             f"status={item['status']}",
             f"call_id={item['call_id']}",
         ]
+        agent_path = item.get("agent_path", [])
+        if agent_path:
+            fields.append("agent_path=" + "/".join(str(part) for part in agent_path))
         if "exit_code" in item:
             fields.append(f"exit={item['exit_code'] if item['exit_code'] is not None else 'n/a'}")
             fields.append(f"timed_out={str(item['timed_out']).lower()}")
         if "backend" in item:
             fields.append(f"backend={item['backend']}/{item['isolation']}")
         print("    " + " ".join(fields))
+    postconditions = evidence["postconditions"]
+    if postconditions["status"] == "not_configured":
+        print("  postconditions=not_configured")
+    else:
+        print(
+            f"  postconditions={postconditions['passed']}/{postconditions['checked']} "
+            f"status={postconditions['status']} "
+            f"structural_passed={postconditions['structural_passed']}"
+        )
+        for item in postconditions["results"]:
+            if not item["ok"]:
+                path = json.dumps(item.get("path", "?"), ensure_ascii=True)
+                print(
+                    f"    failed: {item.get('kind', '?')} {path}: "
+                    f"{item.get('detail', 'check failed')}"
+                )
 
 
 def _run(args: argparse.Namespace) -> int:

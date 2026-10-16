@@ -459,6 +459,7 @@ class SubagentReport:
     transcript: str = ""
     permission_verdict: DelegationVerdict | None = None
     depth: int = 1
+    shell_executions: tuple[dict[str, Any], ...] = ()
 
     @property
     def subtype(self) -> str:
@@ -477,6 +478,7 @@ class SubagentReport:
             "final_text_chars": len(self.final_text),
             "permission_gate": self.permission_verdict.as_dict() if self.permission_verdict else None,
             "depth": self.depth,
+            "shell_executions": list(self.shell_executions),
         }
 
 
@@ -2706,6 +2708,9 @@ class AgentRuntime:
             )
             events = tuple(child.run(task_prompt))
             report = child._last_report
+            from coding_evidence import shell_execution_evidence
+
+            child_shell_executions = tuple(shell_execution_evidence(report))
             self.budget.observe_child(child.budget)
             verdict = parse_verdict(report.final_text, criteria=definition.acceptance_criteria, agent=definition.name) if definition.require_verdict else None
             subagent_report = SubagentReport(
@@ -2721,6 +2726,7 @@ class AgentRuntime:
                 transcript=render_transcript(report.transcript),
                 permission_verdict=gate,
                 depth=child_config.depth,
+                shell_executions=child_shell_executions,
             )
             sub_span.set_attributes(
                 {

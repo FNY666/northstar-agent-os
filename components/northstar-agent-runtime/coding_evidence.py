@@ -407,7 +407,7 @@ _SHELL_BACKEND_LINE = re.compile(r"^backend=([^\s]+) isolation=([^\s]+)$")
 
 
 def shell_execution_evidence(run_report: Any) -> list[dict[str, Any]]:
-    """Summarize top-level Shell outcomes without copying command or output text."""
+    """Summarize reported Shell outcomes without copying command or output text."""
     if run_report is None:
         return []
     results: dict[str, Any] = {}
@@ -441,6 +441,8 @@ def shell_execution_evidence(run_report: Any) -> list[dict[str, Any]]:
             "call_id": call.call_id,
             "turn_index": call.turn_index,
             "agent": call.agent,
+            "execution_scope": "top_level",
+            "agent_path": [],
             "status": status,
             "executed": executed,
             "denied": bool(call.denied),
@@ -456,4 +458,86 @@ def shell_execution_evidence(run_report: Any) -> list[dict[str, Any]]:
             record["backend"] = backend_match.group(1)
             record["isolation"] = backend_match.group(2)
         evidence.append(record)
+
+    # Child runs retain only this bounded, sanitized evidence, not their full
+    # tool inputs or output. Prefix the delegation path as the child receipts
+    # are folded into the parent report.
+    for subagent in getattr(run_report, "subagents", ()):
+        name = str(getattr(subagent, "agent", "") or "unknown")
+        for item in getattr(subagent, "shell_executions", ()):
+            if not isinstance(item, dict):
+                continue
+            relative_path = item.get("agent_path", ())
+            if not isinstance(relative_path, (list, tuple)):
+                relative_path = ()
+            safe_item = {
+                key: item[key]
+                for key in (
+                    "call_id", "turn_index", "agent", "status", "executed",
+                    "denied", "permission_source", "tool_error", "duration_ms",
+                    "truncated", "exit_code", "timed_out", "backend", "isolation",
+                )
+                if key in item
+            }
+            evidence.append({
+                **safe_item,
+                "execution_scope": "subagent",
+                "agent_path": [name, *(str(part) for part in relative_path)],
+            })
     return evidence
+
+
+def postcondition_evidence(run_report: Any) -> dict[str, Any]:
+    """Summarize host-evaluated postconditions without copying expected text."""
+    empty = {
+        "source": "runtime_postconditions",
+        "status": "not_configured",
+        "checked": 0,
+        "passed": 0,
+        "failed": 0,
+        "structural_passed": 0,
+        "results": [],
+    }
+    if run_report is None:
+        return empty
+    for event in getattr(run_report, "events", ()):
+        if type(event).__name__ != "SystemMessage" or getattr(event, "subtype", "") != "postconditions":
+            continue
+        data = getattr(event, "data", {})
+        if not isinstance(data, dict):
+            return {**empty, "status": "unavailable"}
+        raw_results = data.get("results", ())
+        if not isinstance(raw_results, (list, tuple)):
+            return {**empty, "status": "unavailable"}
+        results: list[dict[str, Any]] = []
+        for item in raw_results:
+            if not isinstance(item, dict):
+                continue
+            # The full event may contain the expected ``contains`` text. Keep
+            # the check identity and verdict, never the user-supplied needle.
+            result = {
+                key: item[key]
+                for key in (
+                    "kind", "path", "ok", "detail", "structural",
+                    "digest_before", "digest_after",
+                )
+                if key in item
+            }
+            if isinstance(result.get("ok"), bool):
+                results.append(result)
+        declared_checked = data.get("checked", len(results))
+        if isinstance(declared_checked, bool) or not isinstance(declared_checked, int) or declared_checked != len(results):
+            return {**empty, "status": "unavailable"}
+        passed = sum(item["ok"] for item in results)
+        failed = len(results) - passed
+        structural_passed = sum(item["ok"] and item.get("structural", False) for item in results)
+        return {
+            "source": "runtime_postconditions",
+            "status": "passed" if failed == 0 and declared_checked else "failed" if failed else "unavailable",
+            "checked": declared_checked,
+            "passed": passed,
+            "failed": failed,
+            "structural_passed": structural_passed,
+            "results": results,
+        }
+    return empty
