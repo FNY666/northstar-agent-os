@@ -34,6 +34,7 @@ from providers.base import (
     ProviderError,
     StreamDelta,
     TextBlock,
+    ThinkingBlock,
     Usage,
     split_for_stream,
     stream_comparable_text,
@@ -127,6 +128,18 @@ class ContractTests(unittest.TestCase):
 
 
 class LoopStreamTests(unittest.TestCase):
+    def test_streaming_drops_flagged_thinking_blocks_without_rewriting_signature(self):
+        provider = _Streaming(
+            [StreamDelta(text="done")],
+            generation=Generation(
+                content=(ThinkingBlock(text="api_key=sk-1234567890abcdef", signature="sig"), TextBlock("done")),
+            ),
+        )
+        events = run(provider)
+        assistant = next(event for event in events if type(event).__name__ == "AssistantMessage")
+        self.assertFalse(any(isinstance(block, ThinkingBlock) for block in assistant.content))
+        self.assertEqual(assistant.text, "done")
+
     def test_streaming_output_is_screened_before_release(self):
         secret = "api_key=sk-1234567890abcdef"
         provider = _Streaming(

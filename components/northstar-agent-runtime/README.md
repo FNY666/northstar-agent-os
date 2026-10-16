@@ -189,6 +189,9 @@ findings; a clean result still means only that no known tripwire fired.
 Tool descriptions and JSON Schema `description` annotations are screened before
 they are sent to the provider as well, while schema keys and enum values remain
 unchanged so the authorization contract cannot drift during sanitization.
+Provider thinking blocks are checked too; a flagged signed block is dropped as
+a unit instead of being rewritten into an invalid signature, while its rule
+IDs remain in the defensive audit record.
 
 Transcripts are append-only JSONL, but they are meant to be read back:
 
