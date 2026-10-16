@@ -16,6 +16,7 @@ out of the sandbox.
 """
 from __future__ import annotations
 
+import hashlib
 import inspect
 import json
 import os
@@ -472,9 +473,30 @@ def read_file(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
     limit = max(1, min(limit, ctx.limits.max_read_bytes))
     if not path.is_file():
         return ToolResult.error(f"not a file: {payload.get('path')}")
-    size = path.stat().st_size
-    with open(path, "rb") as handle:
-        raw = handle.read(limit + 1)
+    expected_digest = (ctx.service("skill_digests") or {}).get(str(path))
+    if expected_digest is None:
+        size = path.stat().st_size
+        with open(path, "rb") as handle:
+            raw = handle.read(limit + 1)
+    else:
+        # Hash the same bounded bytes that will be returned. Skills larger than
+        # Read's existing cap fail closed instead of triggering an unbounded hash.
+        try:
+            with open(path, "rb") as handle:
+                raw = handle.read(ctx.limits.max_read_bytes + 1)
+        except OSError as error:
+            return ToolResult.error(f"cannot verify skill integrity for {ctx.relative(path)}: {error}")
+        if len(raw) > ctx.limits.max_read_bytes:
+            return ToolResult.error(
+                f"cannot verify skill integrity: {ctx.relative(path)} exceeds the "
+                f"{ctx.limits.max_read_bytes}-byte Read verification limit"
+            )
+        size = len(raw)
+        if hashlib.sha256(raw).hexdigest() != expected_digest:
+            return ToolResult.error(
+                f"skill changed since discovery; refusing to read: {ctx.relative(path)}",
+                path=ctx.relative(path),
+            )
     truncated = len(raw) > limit or size > limit
     text = raw[:limit].decode("utf-8", "replace")
     if "\x00" in text:
