@@ -221,6 +221,8 @@ Special-use destinations such as CGNAT/shared space, protocol-assignment,
 benchmarking, multicast, and reserved ranges are denied as well.
 Host parsing applies NFKC normalization before these checks, closing fullwidth
 dot and digit/letter spellings of internal destinations.
+IPv6 zone identifiers are removed before classification, so link-local
+addresses with an interface suffix cannot evade the SSRF guard.
 The encoded-payload tripwire also rejects repetitive filler as a carrier only
 when it has enough alphabet diversity, reducing long-input false positives.
 On resume, the final provider payload is screened again copy-on-write, so old

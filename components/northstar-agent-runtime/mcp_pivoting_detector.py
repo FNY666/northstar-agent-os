@@ -150,6 +150,11 @@ def _decode_host(raw_host: str) -> str:
     # Strip IPv6 brackets.
     if host.startswith("[") and host.endswith("]"):
         host = host[1:-1]
+    # RFC 6874 zone identifiers are routing metadata, not part of the IP
+    # address. Remove them before ipaddress classification so link-local
+    # destinations cannot become "external" merely by adding %25interface.
+    if ":" in host and "%" in host:
+        host = host.split("%", 1)[0]
     # Strip a trailing dot (DNS root).
     if host.endswith("."):
         host = host[:-1]
