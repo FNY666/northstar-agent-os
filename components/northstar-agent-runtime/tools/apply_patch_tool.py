@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
 MAX_PATCH_FILES = 32
 MAX_PATCH_FILE_BYTES = 256 * 1024
+MAX_PATCH_EDITS_PER_FILE = 256
 
 
 class _PatchConflictError(RuntimeError):
@@ -93,6 +94,123 @@ def _read_patch_target(directory_fd: int, name: str) -> tuple[bytes, int]:
         return b"".join(chunks), mode
     finally:
         os.close(descriptor)
+
+
+def _validate_line_edits(raw_edits: Any, file_index: int) -> list[dict[str, Any]]:
+    """Validate bounded, line-addressed edits before opening their target."""
+    from tools import ToolInputError
+
+    if not isinstance(raw_edits, list) or not raw_edits:
+        raise ToolInputError(f"files[{file_index}].edits must be a non-empty array")
+    if len(raw_edits) > MAX_PATCH_EDITS_PER_FILE:
+        raise ToolInputError(
+            f"files[{file_index}].edits accepts at most {MAX_PATCH_EDITS_PER_FILE} edits"
+        )
+    edits: list[dict[str, Any]] = []
+    expected_bytes = 0
+    replacement_bytes = 0
+    for edit_index, entry in enumerate(raw_edits):
+        prefix = f"files[{file_index}].edits[{edit_index}]"
+        if not isinstance(entry, dict):
+            raise ToolInputError(f"{prefix} must be an object")
+        start_line = entry.get("start_line")
+        delete_lines = entry.get("delete_lines")
+        expected = entry.get("expected")
+        replacement = entry.get("replacement")
+        if isinstance(start_line, bool) or not isinstance(start_line, int) or start_line < 1:
+            raise ToolInputError(f"{prefix}.start_line must be a positive 1-based line number")
+        if isinstance(delete_lines, bool) or not isinstance(delete_lines, int) or delete_lines < 0:
+            raise ToolInputError(f"{prefix}.delete_lines must be a non-negative integer")
+        if not isinstance(expected, str) or not isinstance(replacement, str):
+            raise ToolInputError(f"{prefix}.expected and {prefix}.replacement must be strings")
+        if "\x00" in expected or "\x00" in replacement:
+            raise ToolInputError(f"{prefix} contains a NUL byte")
+        try:
+            expected_size = len(expected.encode("utf-8", errors="strict"))
+            replacement_size = len(replacement.encode("utf-8", errors="strict"))
+        except UnicodeEncodeError as error:
+            raise ToolInputError(f"{prefix} is not valid UTF-8 text") from error
+        expected_bytes += expected_size
+        replacement_bytes += replacement_size
+        if expected_bytes > MAX_PATCH_FILE_BYTES:
+            raise ToolInputError(f"files[{file_index}].edits expected text exceeds the file size limit")
+        if replacement_bytes > MAX_PATCH_FILE_BYTES:
+            raise ToolInputError(f"files[{file_index}].edits replacement text exceeds the file size limit")
+        edits.append(
+            {
+                "start_line": start_line,
+                "delete_lines": delete_lines,
+                "expected": expected,
+                "replacement": replacement,
+            }
+        )
+    return edits
+
+
+def _apply_line_edits(old_text: str, edits: list[dict[str, Any]], file_index: int) -> bytes:
+    """Apply exact, non-overlapping line edits while preserving untouched lines."""
+    from tools import ToolInputError
+
+    lines = old_text.splitlines(keepends=True)
+    located: list[dict[str, Any]] = []
+    for edit_index, edit in enumerate(edits):
+        start = edit["start_line"] - 1
+        end = start + edit["delete_lines"]
+        if start > len(lines) or end > len(lines):
+            raise ToolInputError(
+                f"files[{file_index}].edits[{edit_index}] line range exceeds the current file"
+            )
+        actual = "".join(lines[start:end])
+        if actual != edit["expected"]:
+            location = (
+                f"line {edit['start_line']}"
+                if edit["delete_lines"] == 0
+                else f"lines {edit['start_line']}..{end}"
+            )
+            raise ToolInputError(
+                f"files[{file_index}].edits[{edit_index}] expected text does not match {location}"
+            )
+        replacement = edit["replacement"]
+        if end < len(lines) and replacement and not replacement.endswith(("\n", "\r")):
+            raise ToolInputError(
+                f"files[{file_index}].edits[{edit_index}].replacement must end with a newline "
+                "when unchanged lines follow it"
+            )
+        if (
+            start == len(lines)
+            and start > 0
+            and not lines[-1].endswith(("\n", "\r"))
+            and replacement
+            and not replacement.startswith(("\n", "\r"))
+        ):
+            raise ToolInputError(
+                f"files[{file_index}].edits[{edit_index}].replacement must begin with a newline "
+                "when appending after a final line without a newline"
+            )
+        located.append({**edit, "start": start, "end": end})
+
+    ordered = sorted(located, key=lambda edit: (edit["start"], edit["end"]))
+    for previous, current in zip(ordered, ordered[1:]):
+        if current["start"] < previous["end"] or current["start"] == previous["start"]:
+            raise ToolInputError(f"files[{file_index}].edits contain overlapping line ranges")
+
+    pieces: list[str] = []
+    cursor = 0
+    for edit in ordered:
+        pieces.extend(lines[cursor:edit["start"]])
+        pieces.append(edit["replacement"])
+        cursor = edit["end"]
+    pieces.extend(lines[cursor:])
+    result = "".join(pieces)
+    if "\x00" in result:
+        raise ToolInputError(f"files[{file_index}].edits produce a NUL byte")
+    try:
+        result_bytes = result.encode("utf-8", errors="strict")
+    except UnicodeEncodeError as error:
+        raise ToolInputError(f"files[{file_index}].edits produce invalid UTF-8 text") from error
+    if len(result_bytes) > MAX_PATCH_FILE_BYTES:
+        raise ToolInputError(f"files[{file_index}].edits produce a file larger than {MAX_PATCH_FILE_BYTES} bytes")
+    return result_bytes
 
 
 def _stage_patch_bytes(directory_fd: int, content: bytes, mode: int) -> str:
@@ -176,27 +294,32 @@ def apply_patch(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
             raw_path = entry.get("path")
             expected = entry.get("expected_sha256")
             content = entry.get("content")
+            has_content = "content" in entry
+            has_edits = "edits" in entry
             if not isinstance(raw_path, str) or not raw_path.strip():
                 raise ToolInputError(f"files[{index}].path must be a non-empty workspace-relative path")
             if Path(raw_path.strip()).is_absolute():
                 raise ToolInputError(f"files[{index}].path must be workspace-relative")
             if not isinstance(expected, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", expected):
                 raise ToolInputError(f"files[{index}].expected_sha256 must be a 64-character SHA-256 hex digest from Read")
-            if not isinstance(content, str):
-                raise ToolInputError(f"files[{index}].content must be a UTF-8 string")
-            if len(content) > MAX_PATCH_FILE_BYTES:
-                raise ToolInputError(f"files[{index}].content exceeds the {MAX_PATCH_FILE_BYTES}-byte limit")
-            if "\x00" in content:
-                raise ToolInputError(f"files[{index}].content contains a NUL byte")
-            try:
-                new_bytes = content.encode("utf-8", errors="strict")
-            except UnicodeEncodeError as error:
-                raise ToolInputError(f"files[{index}].content is not valid UTF-8 text") from error
-            if len(new_bytes) > MAX_PATCH_FILE_BYTES:
-                raise ToolInputError(f"files[{index}].content exceeds the {MAX_PATCH_FILE_BYTES}-byte limit")
-            total_new_bytes += len(new_bytes)
-            if total_new_bytes > MAX_PATCH_FILE_BYTES * MAX_PATCH_FILES:
-                raise ToolInputError("combined patch content exceeds the runtime limit")
+            if has_content == has_edits:
+                raise ToolInputError(f"files[{index}] must provide exactly one of content or edits")
+            line_edits = None
+            if has_edits:
+                line_edits = _validate_line_edits(entry.get("edits"), index)
+            else:
+                if not isinstance(content, str):
+                    raise ToolInputError(f"files[{index}].content must be a UTF-8 string")
+                if len(content) > MAX_PATCH_FILE_BYTES:
+                    raise ToolInputError(f"files[{index}].content exceeds the {MAX_PATCH_FILE_BYTES}-byte limit")
+                if "\x00" in content:
+                    raise ToolInputError(f"files[{index}].content contains a NUL byte")
+                try:
+                    new_bytes = content.encode("utf-8", errors="strict")
+                except UnicodeEncodeError as error:
+                    raise ToolInputError(f"files[{index}].content is not valid UTF-8 text") from error
+                if len(new_bytes) > MAX_PATCH_FILE_BYTES:
+                    raise ToolInputError(f"files[{index}].content exceeds the {MAX_PATCH_FILE_BYTES}-byte limit")
 
             target = ctx.resolve(raw_path, for_write=True, must_exist=True)
             canonical = os.path.normcase(str(target))
@@ -212,11 +335,16 @@ def apply_patch(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
                         f"stale patch for {ctx.relative(target)}: expected {expected.lower()}, found {actual}; re-read before editing"
                     )
                 try:
-                    old_bytes.decode("utf-8", errors="strict")
+                    old_text = old_bytes.decode("utf-8", errors="strict")
                 except UnicodeDecodeError as error:
                     raise ToolInputError(f"patch target is not UTF-8 text: {ctx.relative(target)}") from error
                 if b"\x00" in old_bytes:
                     raise ToolInputError(f"patch target is binary, not UTF-8 text: {ctx.relative(target)}")
+                if line_edits is not None:
+                    new_bytes = _apply_line_edits(old_text, line_edits, index)
+                total_new_bytes += len(new_bytes)
+                if total_new_bytes > MAX_PATCH_FILE_BYTES * MAX_PATCH_FILES:
+                    raise ToolInputError("combined patch content exceeds the runtime limit")
                 prepared.append(
                     {
                         "path": target,

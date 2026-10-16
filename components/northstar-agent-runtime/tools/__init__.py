@@ -699,7 +699,12 @@ def describe_tools(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
     )
 
 
-from tools.apply_patch_tool import MAX_PATCH_FILE_BYTES, MAX_PATCH_FILES, apply_patch
+from tools.apply_patch_tool import (
+    MAX_PATCH_EDITS_PER_FILE,
+    MAX_PATCH_FILE_BYTES,
+    MAX_PATCH_FILES,
+    apply_patch,
+)
 
 BUILTIN_TOOLS: tuple[str, ...] = (
     "Read",
@@ -771,9 +776,9 @@ def build_default_registry(include_describe: bool = True) -> ToolRegistry:
         ToolSpec(
             name="ApplyPatch",
             description=(
-                "Replace up to 32 existing UTF-8 workspace files in one governed call. "
-                "Each file must include the exact SHA-256 printed by Read; every path and "
-                "hash is validated before any file is replaced."
+                "Edit up to 32 existing UTF-8 workspace files in one governed call, using either "
+                "full replacement content or exact line edits. Each file must include the exact "
+                "SHA-256 printed by Read; every path and hash is validated before any file is replaced."
             ),
             input_schema=_schema(
                 {
@@ -795,8 +800,50 @@ def build_default_registry(include_describe: bool = True) -> ToolRegistry:
                                     "maxLength": MAX_PATCH_FILE_BYTES,
                                     "description": "Full replacement UTF-8 file content",
                                 },
+                                "edits": {
+                                    "type": "array",
+                                    "minItems": 1,
+                                    "maxItems": MAX_PATCH_EDITS_PER_FILE,
+                                    "description": (
+                                        "Exact non-overlapping line edits. start_line is 1-based; "
+                                        "delete_lines selects the old range; expected must exactly "
+                                        "match that range; replacement is inserted there. Use "
+                                        "delete_lines=0 and expected='' to insert at a line boundary."
+                                    ),
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "start_line": {
+                                                "type": "integer",
+                                                "minimum": 1,
+                                                "description": (
+                                                    "1-based start line; with delete_lines=0, insert before that line; "
+                                                    "line_count + 1 inserts at EOF"
+                                                ),
+                                            },
+                                            "delete_lines": {
+                                                "type": "integer",
+                                                "minimum": 0,
+                                                "description": "Number of existing lines to match and replace",
+                                            },
+                                            "expected": {
+                                                "type": "string",
+                                                "description": "Exact UTF-8 text of the selected lines; empty for insertion",
+                                            },
+                                            "replacement": {
+                                                "type": "string",
+                                                "description": "Replacement UTF-8 text, including line endings where needed",
+                                            },
+                                        },
+                                        "required": ["start_line", "delete_lines", "expected", "replacement"],
+                                    },
+                                },
                             },
-                            "required": ["path", "expected_sha256", "content"],
+                            "required": ["path", "expected_sha256"],
+                            "oneOf": [
+                                {"required": ["content"], "not": {"required": ["edits"]}},
+                                {"required": ["edits"], "not": {"required": ["content"]}},
+                            ],
                         },
                     }
                 },

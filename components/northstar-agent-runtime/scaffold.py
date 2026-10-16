@@ -329,8 +329,11 @@ def _agents_md(name: str) -> str:
 
 - Do not modify files under `.northstar/` without a policy discussion.
 - For an existing source file, `Read` includes a SHA-256 marker when the whole
-  UTF-8 file was read. Use `ApplyPatch` for coordinated multi-file replacements
-  and pass each exact marker as `expected_sha256`; stale hashes refuse the batch.
+  UTF-8 file was read. Use `ApplyPatch` for coordinated multi-file changes and
+  pass each exact marker as `expected_sha256`; stale hashes refuse the batch.
+  Prefer exact line edits for focused changes and full replacement content for
+  broad rewrites. Line edits include the exact expected text at each 1-based
+  line range; stale text refuses the entire batch.
 """
 
 

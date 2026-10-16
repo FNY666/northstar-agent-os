@@ -1231,7 +1231,17 @@ backend). See [docs/concepts/threat-model.md](../../docs/concepts/threat-model.m
 uses those hashes as optimistic concurrency guards for up to 32 existing files in
 one governed edit call. It validates every path, file type, size, and hash before
 staging any replacement, then rechecks hashes before each replacement; stale input
-rejects the batch. Each replacement is atomic, with best-effort rollback if a later
+rejects the batch. Each file can provide either full `content` or up to 256 exact,
+non-overlapping line `edits` (never both). Each edit gives a 1-based `start_line`,
+`delete_lines`, the exact old text in `expected`, and the inserted `replacement`.
+Use `delete_lines: 0` with `expected: ""` to insert at a line boundary. For example:
+
+```json
+{"files":[{"path":"src/example.py","expected_sha256":"<Read SHA-256>","edits":[{"start_line":12,"delete_lines":2,"expected":"old_a()\nold_b()\n","replacement":"new_call()\n"}]}]}
+```
+
+An expected-text mismatch or overlapping range rejects the entire batch. Each
+replacement is atomic, with best-effort rollback if a later
 filesystem replacement fails. Before rollback, the tool checks that the file still
 contains its replacement; if it no longer matches, rollback leaves that file
 untouched and reports it. An external writer can still race the final hash check
