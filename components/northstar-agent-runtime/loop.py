@@ -2639,12 +2639,21 @@ class AgentRuntime:
         # all tools so a hardcoded credential cannot use a harmless-looking
         # reader as a return channel. Environment-variable references remain
         # valid because the detector does not classify indirection as a secret.
-        from defensive_agent import assess as assess_defensive_input
+        from defensive_agent import assess as assess_defensive_input, sanitize_for_model
 
         input_assessment = assess_defensive_input(
             json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str),
             tool_name=spec.name,
         )
+        input_sanitized = False
+        if spec.is_delegation and input_assessment.findings:
+            raw_prompt = payload.get("prompt")
+            if isinstance(raw_prompt, str):
+                safe_prompt, _prompt_assessment = sanitize_for_model(raw_prompt)
+                if safe_prompt != raw_prompt:
+                    payload["prompt"] = safe_prompt
+                    input_sanitized = True
+                    rewritten = True
         if input_assessment.findings:
             self.sessions.append(
                 "defensive_assessment",
@@ -2654,7 +2663,7 @@ class AgentRuntime:
                     "tool_use_id": call.id,
                     "turn_index": turn_index,
                     "decision": input_assessment.decision.value,
-                    "sanitized": False,
+                    "sanitized": input_sanitized,
                     "finding_count": len(input_assessment.findings),
                     "findings": [
                         {"rule_id": item.rule_id, "category": item.category, "severity": item.severity}
