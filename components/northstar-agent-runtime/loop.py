@@ -1018,9 +1018,14 @@ class AgentRuntime:
         """
         from defensive_agent import assess as assess_defensive, sanitize_for_model
 
-        payload = copy.deepcopy(tuple(messages))
+        # Keep a mutable copy so malformed imported records can be removed
+        # without mutating the durable transcript or the caller's sequence.
+        payload = list(copy.deepcopy(tuple(messages)))
         findings: list[Any] = []
-        changed = False
+        malformed_count = sum(not isinstance(message, dict) for message in payload)
+        if malformed_count:
+            payload = [message for message in payload if isinstance(message, dict)]
+        changed = bool(malformed_count)
 
         def screen_text(value: Any) -> Any:
             nonlocal changed
@@ -1075,6 +1080,11 @@ class AgentRuntime:
             return value
 
         for message in payload:
+            if not isinstance(message, dict):
+                # Imported transcripts are untrusted. A malformed record must
+                # not turn the screening checkpoint into a runtime crash.
+                changed = True
+                continue
             content = message.get("content")
             if isinstance(content, str):
                 message["content"] = screen_text(content)
