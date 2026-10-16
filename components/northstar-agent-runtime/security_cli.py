@@ -1,7 +1,8 @@
 """Local security scans and bounded runtime red-team probes.
 
 The workspace scan is read-only, offline, and heuristic. It includes secret,
-Python SAST, dependency-source/pinning, and selected deployment-config rules.
+Python and JavaScript/TypeScript SAST, dependency-source/pinning, and selected
+deployment-config rules.
 It does not query vulnerability databases. The runtime probe feeds a
 compromised-model-shaped tool-call sequence into fresh Northstar runtimes
 backed by a temporary workspace. It checks default authorization, path
@@ -37,7 +38,7 @@ IGNORED_DIRS = frozenset({
 TEXT_SUFFIXES = frozenset({
     ".bash", ".c", ".cc", ".cfg", ".cjs", ".conf", ".cpp", ".cs", ".css",
     ".env", ".go", ".gradle", ".h", ".hpp", ".html", ".ini", ".java",
-    ".js", ".json", ".jsx", ".kt", ".lua", ".md", ".mjs", ".php", ".pl",
+    ".js", ".json", ".jsx", ".kt", ".lua", ".md", ".mjs", ".mts", ".cts", ".php", ".pl",
     ".properties", ".ps1", ".py", ".rb", ".rs", ".sh", ".sql", ".swift",
     ".tf", ".toml", ".ts", ".tsx", ".txt", ".xml", ".yaml", ".yml", ".zsh",
 })
@@ -438,6 +439,7 @@ def _scan_root(
     """Shared bounded scanner used by the CLI and the opt-in agent tool."""
     from sast_scanner import SASTScanner
     from secret_scanner import SecretScanner
+    from javascript_sast import scan_source as scan_javascript_source
 
     root = root.resolve()
     if not root.is_dir():
@@ -533,6 +535,18 @@ def _scan_root(
                     "message": item.message,
                     "remediation": _remediation("sast-scanner", item.rule_id),
                 })
+        elif safe_path.suffix.lower() in {".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"}:
+            for item in scan_javascript_source(text):
+                add_finding({
+                    "path": relative,
+                    "line": item["line"],
+                    "column": item["column"],
+                    "tool": "javascript-sast-scanner",
+                    "rule": item["rule"],
+                    "severity": item["severity"],
+                    "message": item["message"],
+                    "remediation": item["remediation"],
+                })
         for item in _dependency_config_findings(relative, text):
             add_finding(item)
 
@@ -561,7 +575,7 @@ def _scan_root(
 
 
 def scan_workspace(args: Any) -> int:
-    """Run local secret and Python SAST heuristics without writing or networking."""
+    """Run local secret, Python, and JavaScript/TypeScript SAST heuristics."""
     if args.max_files < 1 or args.max_files > MAX_SCAN_FILES:
         print(f"configuration error: --max-files must be between 1 and {MAX_SCAN_FILES}", file=sys.stderr)
         return 64
@@ -688,6 +702,64 @@ spec:
             "missing_rules": missing,
             "hardened_fixture_findings": sorted({item["rule"] for item in hardened_findings}),
             "scope": "two fixed temporary manifests; automatically removed",
+        }
+
+
+def _probe_javascript_scanner() -> dict[str, Any]:
+    """Check JS/TS SAST rules against fixed bad and hardened source examples."""
+    from javascript_sast import RULES
+
+    vulnerable = """const code = eval(req.query.code);
+child_process.exec("convert " + req.body.file);
+const result = await pool.query(`SELECT * FROM users WHERE id = ${req.params.id}`);
+element.innerHTML = req.query.html;
+const response = await fetch(req.query.url);
+const agent = new https.Agent({ rejectUnauthorized: false });
+const sessionToken = Math.random().toString(36);
+jwt.verify(token, secret, { algorithms: ["none"] });
+"""
+    hardened = """const operation = operations[input.action];
+execFile("convert", ["--", validatedFile]);
+const result = await pool.query("SELECT * FROM users WHERE id = $1", [id]);
+element.textContent = req.query.html;
+const response = await fetch(allowedTargets.get(targetName));
+const agent = new https.Agent({ rejectUnauthorized: true });
+const sessionToken = randomBytes(32).toString("hex");
+jwt.verify(token, secret, { algorithms: ["RS256"], issuer: expectedIssuer });
+"""
+    expected_rules = {rule[0] for rule in RULES}
+
+    with tempfile.TemporaryDirectory(prefix="northstar-js-sast-rules-") as temporary:
+        root = Path(temporary)
+        (root / "vulnerable.ts").write_text(vulnerable, encoding="utf-8")
+        (root / "hardened.ts").write_text(hardened, encoding="utf-8")
+        summary = _scan_root(
+            root,
+            max_files=10,
+            max_file_bytes=256 * 1024,
+            fail_on="none",
+            max_findings=100,
+        )
+        vulnerable_rules = {
+            item["rule"] for item in summary["findings"]
+            if item["path"] == "vulnerable.ts"
+            and item["tool"] == "javascript-sast-scanner"
+        }
+        hardened_findings = [
+            item for item in summary["findings"]
+            if item["path"] == "hardened.ts"
+            and item["tool"] == "javascript-sast-scanner"
+        ]
+        missing = sorted(expected_rules - vulnerable_rules)
+        passed = not missing and not hardened_findings
+        return {
+            "check": "javascript-typescript-sast-rules",
+            "passed": passed,
+            "expected_rules": sorted(expected_rules),
+            "detected_rules": sorted(expected_rules & vulnerable_rules),
+            "missing_rules": missing,
+            "hardened_fixture_findings": sorted({item["rule"] for item in hardened_findings}),
+            "scope": "fixed temporary source examples; analyzed without execution and automatically removed",
         }
 
 
@@ -1013,14 +1085,18 @@ def _probe_runtime() -> dict[str, Any]:
             shell_governance_canary,
         )
         absent = all(not path.exists() for path in canaries)
-        defense_check = _probe_kubernetes_scanner()
-        success = all(item["blocked"] for item in all_results) and absent and defense_check["passed"]
+        defense_checks = [_probe_kubernetes_scanner(), _probe_javascript_scanner()]
+        success = (
+            all(item["blocked"] for item in all_results)
+            and absent
+            and all(item["passed"] for item in defense_checks)
+        )
         summary = {
             "target": "Northstar AgentRuntime authorization and workspace boundaries",
             "scope": "temporary workspace, adjacent temporary canary directory, and disposable scanner fixtures only",
             "network": "disabled; no remote targets",
             "probes": all_results,
-            "defense_checks": [defense_check],
+            "defense_checks": defense_checks,
             "shell": {
                 "workspace_boundary": shell_details,
                 "governance_write": shell_governance_details,
@@ -1217,7 +1293,7 @@ def security_tool_specs() -> tuple[Any, Any]:
         ToolSpec(
             name="SecurityScan",
             description=(
-                "Read-only offline heuristic scan of the current run workspace for likely secrets, Python SAST issues, "
+                "Read-only offline heuristic scan of the current run workspace for likely secrets, Python and JavaScript/TypeScript SAST issues, "
                 "dependency pinning/source risks, and selected deployment misconfigurations. No path or URL is accepted; "
                 "findings omit secret values and include remediation guidance. The first call returns a run-local baseline_id; "
                 "pass it as compare_to on a later call to retest after changes. Writes still require separate tool approval; "
@@ -1239,7 +1315,7 @@ def security_tool_specs() -> tuple[Any, Any]:
             name="SecurityProbe",
             description=(
                 "Run fixed authorization, workspace, and governance-boundary probes against fresh Northstar runtimes in a disposable local lab. "
-                "Also checks Kubernetes scanner rules against fixed vulnerable and hardened temporary manifests. Includes harmless printf Shell "
+                "Also checks Kubernetes and JavaScript/TypeScript scanner rules against fixed vulnerable and hardened temporary examples. Includes harmless printf Shell "
                 "canaries whose only targets are inside the temporary lab; no user files, network, or external targets are used. "
                 "Requires --allow-tool SecurityProbe."
             ),

@@ -815,6 +815,7 @@ py-modules = [
     "iterated_amplification",
     "jailbreak",
     "jailbreak_defense",
+    "javascript_sast",
     "job_queue",
     "job_scheduler",
     "jwt_handler",

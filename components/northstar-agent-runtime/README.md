@@ -128,19 +128,27 @@ python3 -m cli security probe --format json
 ```
 
 The scan runs offline and makes no file changes. It checks likely secrets,
-Python SAST patterns, dependency source and pinning, and selected Docker,
-Compose, Kubernetes, GitHub Actions, and Terraform configuration risks. The
+Python and JavaScript/TypeScript SAST patterns, dependency source and pinning,
+and selected Docker, Compose, Kubernetes, GitHub Actions, and Terraform risks. The
 Kubernetes rules cover privileged containers, privilege escalation, root UIDs,
 host namespace sharing, hostPath volumes, all Linux capabilities, and floating
 `latest` image tags. Results are heuristics, not a YAML/schema validator or a
 vulnerability database lookup; a clean report is not proof that a project is
 secure.
 
+JavaScript and TypeScript files also receive line-pattern checks for dynamic
+code execution, shell commands, interpolated SQL, HTML injection, direct
+request-to-URL SSRF, disabled TLS verification, weak security tokens, and JWT
+`none` algorithms. These checks are heuristic and do not replace
+parser-backed analysis.
+
 The runtime probe drives fixed tool calls through fresh runtimes backed by a
 temporary workspace. It also scans fixed vulnerable and hardened Kubernetes
-fixtures to ensure the local defense rules trigger and stay quiet on those
-examples. Its files are removed automatically; it never targets a real project
-or a remote system. In an agent run, `SecurityScan` is opt-in with
+and JavaScript/TypeScript fixtures to ensure the local defense rules trigger
+on the vulnerable samples and stay quiet on the hardened examples. The source
+samples are analyzed as text and never executed. Its files are removed
+automatically; it never targets a real project or a remote system. In an agent
+run, `SecurityScan` is opt-in with
 `--enable-security-tools`; `SecurityProbe` also requires
 `--allow-tool SecurityProbe`.
 
