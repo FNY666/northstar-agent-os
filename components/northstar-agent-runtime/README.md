@@ -191,6 +191,9 @@ be used as a transcript return channel for a literal credential or jailbreak.
 Review-level findings on tool inputs are retained as redaction-safe
 `defensive_assessment` records even when the call is allowed, so operators can
 measure suspicious traffic without collecting the original argument.
+Hook-injected context is screened at the same boundary before it is added to
+the transcript; this keeps extension callbacks from becoming an untracked
+prompt-injection channel.
 Tool descriptions and JSON Schema `description` annotations are screened before
 they are sent to the provider as well, while schema keys and enum values remain
 unchanged so the authorization contract cannot drift during sanitization.
