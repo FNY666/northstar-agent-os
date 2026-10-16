@@ -53829,8 +53829,8 @@ Full record of one MCP tool-call gate verdict.
 
 Per-server gate composing the MCP drift tripwire and the approval chain.
 
-- `request_tool_approval(tool_name: str, reason: str, current_seq: int, sla_ticks: int | None=None)`
-  - Park ``tool_name`` for human approval; returns the request id.
+- `request_tool_approval(tool_name: str, reason: str, current_seq: int, sla_ticks: int | None=None, *, action: Mapping[str, Any] | None=None)`
+  - Park one exact MCP action for human approval; return its request id.
 - `check(*, tool_name: str, tools_list: Sequence[Mapping[str, Any]], action: Mapping[str, Any] | None=None, receipt: Any=None, current_seq: int=0)`
   - Gate one MCP tool call. Returns a frozen :class:`GateDecision`.
 - `check_simple(*, tool_name: str, tools_list: Sequence[Mapping[str, Any]], action: Mapping[str, Any] | None=None, receipt: Any=None, current_seq: int=0)`
