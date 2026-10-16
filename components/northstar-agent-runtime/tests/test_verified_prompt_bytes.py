@@ -82,12 +82,12 @@ class VerifiedSkillReadTests(RuntimeTestCase):
             captured['runtime'] = runtime
             return runtime
 
-        with patch.object(loop, 'AgentRuntime', side_effect=construct_runtime), \\
-             contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-            code = cli.main(['run', '--workspace', str(root), '--prompt', 'hello',
-                             '--scripted-text', 'ok', '--require-skill-lock', '--dry-run',
-                             '--no-project-context', '--no-memory', '--no-plugins',
-                             '--no-workspace-agents'])
+        with patch.object(loop, 'AgentRuntime', side_effect=construct_runtime):
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                code = cli.main(['run', '--workspace', str(root), '--prompt', 'hello',
+                                 '--scripted-text', 'ok', '--require-skill-lock', '--dry-run',
+                                 '--no-project-context', '--no-memory', '--no-plugins',
+                                 '--no-workspace-agents'])
 
         self.assertEqual(code, 0)
         runtime = captured['runtime']
