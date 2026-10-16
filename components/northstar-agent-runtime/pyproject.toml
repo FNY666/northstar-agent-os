@@ -496,6 +496,7 @@ py-modules = [
     "crdt_map",
     "crdt_set",
     "credential_detector",
+    "defensive_agent",
     "crescendo_probe",
     "crisis_management",
     "critique_model",
