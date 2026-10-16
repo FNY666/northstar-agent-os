@@ -1001,6 +1001,103 @@ class AgentRuntime:
             safe_tools.append(safe)
         return tuple(safe_tools)
 
+    def _screen_provider_messages(
+        self,
+        messages: Sequence[dict[str, Any]],
+        state: _RunState,
+        *,
+        turn_index: int,
+    ) -> tuple[dict[str, Any], ...]:
+        """Screen the final provider payload, including resumed transcripts.
+
+        New runtime-owned boundaries are screened before entering the transcript,
+        but a resumed session can contain records written by an older runtime or
+        imported from another host. This last copy-on-write checkpoint prevents
+        historical tool results, metadata, and tool-use arguments from bypassing
+        the current rules. It never mutates the durable transcript.
+        """
+        from defensive_agent import assess as assess_defensive, sanitize_for_model
+
+        payload = copy.deepcopy(tuple(messages))
+        findings: list[Any] = []
+        changed = False
+
+        def screen_text(value: Any) -> Any:
+            nonlocal changed
+            if not isinstance(value, str):
+                return value
+            safe, assessment = sanitize_for_model(value)
+            findings.extend(assessment.findings)
+            changed = changed or safe != value
+            return safe
+
+        for message in payload:
+            content = message.get("content")
+            if not isinstance(content, list):
+                continue
+            safe_blocks: list[Any] = []
+            for block in content:
+                if not isinstance(block, dict):
+                    safe_blocks.append(block)
+                    continue
+                block_type = block.get("type")
+                if block_type == "thinking":
+                    text = block.get("thinking", block.get("text", ""))
+                    safe, assessment = sanitize_for_model(text) if isinstance(text, str) else (text, None)
+                    if assessment is not None:
+                        findings.extend(assessment.findings)
+                    if assessment is not None and assessment.findings:
+                        # Do not rewrite signed thinking blocks in a resumed
+                        # provider payload; dropping the block keeps signatures
+                        # from becoming unverifiable.
+                        changed = True
+                        continue
+                    if "thinking" in block:
+                        block["thinking"] = safe
+                    elif "text" in block:
+                        block["text"] = safe
+                elif block_type == "tool_use":
+                    raw_input = block.get("input", {})
+                    assessment = assess_defensive(
+                        json.dumps(raw_input, ensure_ascii=False, sort_keys=True, default=str),
+                        tool_name=str(block.get("name") or "(resumed-tool)"),
+                    )
+                    findings.extend(assessment.findings)
+                    if assessment.decision.value == "block":
+                        block["input"] = {"_redacted_by_defensive_agent": True}
+                        changed = True
+                elif block_type == "tool_result":
+                    result_content = block.get("content")
+                    if isinstance(result_content, str):
+                        block["content"] = screen_text(result_content)
+                    elif isinstance(result_content, list):
+                        for item in result_content:
+                            if isinstance(item, dict) and item.get("type") == "text":
+                                item["text"] = screen_text(item.get("text", ""))
+                elif block_type in {"text", "document"}:
+                    if "text" in block:
+                        block["text"] = screen_text(block.get("text"))
+                safe_blocks.append(block)
+            message["content"] = safe_blocks
+
+        if findings:
+            self.sessions.append(
+                "defensive_assessment",
+                {
+                    "agent": self.config.agent,
+                    "tool": "(provider-context)",
+                    "turn_index": turn_index,
+                    "decision": "block" if any(item.severity >= 90 for item in findings) else "review",
+                    "sanitized": changed,
+                    "finding_count": len(findings),
+                    "findings": [
+                        {"rule_id": item.rule_id, "category": item.category, "severity": item.severity}
+                        for item in findings[:8]
+                    ],
+                },
+            )
+        return tuple(payload)
+
     def describe(self) -> dict[str, Any]:
         return {
             "config": self.config.as_dict(),
@@ -1762,9 +1859,12 @@ class AgentRuntime:
         stream_withheld)``. ``generation`` or ``breakdown`` is None when the turn failed.
         """
         config = self.config
+        provider_messages = self._screen_provider_messages(
+            transcript_to_api(state.transcript), state, turn_index=turn_index
+        )
         request = GenerationRequest(
             system=config.system_prompt,
-            messages=tuple(transcript_to_api(state.transcript)),
+            messages=provider_messages,
             tools=self.api_tools(),
             model=config.model,
             max_tokens=config.max_output_tokens,

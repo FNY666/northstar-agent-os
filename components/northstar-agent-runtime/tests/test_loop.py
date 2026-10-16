@@ -19,6 +19,15 @@ from tools import ToolLimits, ToolProvenance, ToolRegistry, ToolResult, ToolSpec
 
 
 class InitEventTests(RuntimeTestCase):
+    def test_resumed_provider_context_is_screened_before_request(self):
+        secret = "api_key=sk-1234567890abcdef"
+        provider = self.provider([text_turn("done")])
+        runtime = self.runtime(provider=provider)
+        runtime.run_collect("continue", resume=(UserMessage.text_block(secret),))
+        request_text = str(provider.requests[0].messages)
+        self.assertNotIn(secret, request_text)
+        self.assertIn("blocked by defensive agent", request_text)
+
     def test_hook_context_is_screened_before_provider_request(self):
         store = self.session_store()
         hooks = HookRegistry()
