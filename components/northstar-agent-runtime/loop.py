@@ -1445,36 +1445,44 @@ class AgentRuntime:
                     stop_reason=generation.stop_reason,
                 )
                 # The model's own text is an egress boundary too. Apply the
-                # same bounded detector before persisting or yielding a final
-                # answer; tool-use blocks remain untouched so authorization
-                # still sees the exact structured call.
-                if not assistant.tool_uses and not config.stream:
+                # same bounded detector before persisting or yielding it. Tool
+                # blocks stay byte-for-byte unchanged so authorization still
+                # sees the exact structured call; stream mode was screened in
+                # _stream_turn before any delta was released.
+                if not config.stream:
                     from defensive_agent import sanitize_for_model
+                    from providers.base import TextBlock
 
-                    sanitized_text, defensive = sanitize_for_model(assistant.text)
-                    if defensive.findings:
+                    safe_blocks: list[Any] = []
+                    defensive_findings: list[Any] = []
+                    changed = False
+                    for content_block in assistant.content:
+                        if isinstance(content_block, TextBlock):
+                            safe_text, assessment = sanitize_for_model(content_block.text)
+                            safe_blocks.append(TextBlock(text=safe_text))
+                            defensive_findings.extend(assessment.findings)
+                            changed = changed or safe_text != content_block.text
+                        else:
+                            safe_blocks.append(content_block)
+                    if defensive_findings:
+                        decision = "block" if any(item.severity >= 90 for item in defensive_findings) else "review"
                         self.sessions.append(
                             "defensive_assessment",
                             {
                                 "agent": config.agent,
                                 "tool": "(generation)",
                                 "turn_index": turn_index,
-                                "decision": defensive.decision.value,
-                                "sanitized": sanitized_text != assistant.text,
-                                "finding_count": len(defensive.findings),
+                                "decision": decision,
+                                "sanitized": changed,
+                                "finding_count": len(defensive_findings),
                                 "findings": [
                                     {"rule_id": item.rule_id, "category": item.category, "severity": item.severity}
-                                    for item in defensive.findings[:8]
+                                    for item in defensive_findings[:8]
                                 ],
                             },
                         )
-                        if sanitized_text != assistant.text:
-                            from providers.base import TextBlock
-
-                            assistant = replace(
-                                assistant,
-                                content=(TextBlock(text=sanitized_text),),
-                            )
+                    if changed:
+                        assistant = replace(assistant, content=tuple(safe_blocks))
                 if config.stream:
                     if (yield from self._stream_mismatch(state, turn_index, turn_span, assistant, streamed, stream_withheld)):
                         return
