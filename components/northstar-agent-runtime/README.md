@@ -186,6 +186,9 @@ whitespace, so security filtering cannot silently disable context ceilings.
 Unicode format/control characters are removed at the model boundary and mixed
 script or other adversarial-perturbation signals are recorded as review
 findings; a clean result still means only that no known tripwire fired.
+Tool descriptions and JSON Schema `description` annotations are screened before
+they are sent to the provider as well, while schema keys and enum values remain
+unchanged so the authorization contract cannot drift during sanitization.
 
 Transcripts are append-only JSONL, but they are meant to be read back:
 

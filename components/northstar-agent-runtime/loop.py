@@ -973,7 +973,32 @@ class AgentRuntime:
         return self.tools.names()
 
     def api_tools(self) -> tuple[dict[str, Any], ...]:
-        return self.tools.to_api()
+        # MCP and other extension registries may supply descriptions and JSON
+        # Schema annotations from outside the host. They are model-visible
+        # instructions, not merely documentation, so screen only descriptive
+        # strings while leaving property names/enums unchanged for dispatch.
+        from defensive_agent import sanitize_for_model
+
+        def sanitize_schema(value: Any) -> Any:
+            if isinstance(value, dict):
+                result = {}
+                for key, item in value.items():
+                    if key == "description" and isinstance(item, str):
+                        result[key] = sanitize_for_model(item)[0]
+                    else:
+                        result[key] = sanitize_schema(item)
+                return result
+            if isinstance(value, list):
+                return [sanitize_schema(item) for item in value]
+            return value
+
+        safe_tools: list[dict[str, Any]] = []
+        for descriptor in self.tools.to_api():
+            safe = dict(descriptor)
+            safe["description"] = sanitize_for_model(str(descriptor.get("description", "")))[0]
+            safe["input_schema"] = sanitize_schema(descriptor.get("input_schema", {}))
+            safe_tools.append(safe)
+        return tuple(safe_tools)
 
     def describe(self) -> dict[str, Any]:
         return {
