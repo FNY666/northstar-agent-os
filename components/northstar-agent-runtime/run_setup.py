@@ -140,6 +140,7 @@ class HookSetup:
     registry: Any
     command_hooks: tuple[Any, ...]
     plugin_hook_count: int
+    declared_stop_count: int = 0
 
 
 def load_hooks(args: argparse.Namespace, policy: Any, plugins: Any, registry: Any) -> HookSetup:
@@ -184,7 +185,16 @@ def load_hooks(args: argparse.Namespace, policy: Any, plugins: Any, registry: An
                 )
         except CommandHookError as error:
             raise RunConfigurationError(str(error)) from error
-    return HookSetup(registry=hook_registry, command_hooks=command_hooks, plugin_hook_count=len(plugin_hook_tables))
+    declared_stop_count = sum(
+        1 for hook in declared_hooks
+        if isinstance(hook, Mapping) and hook.get("event") == "Stop"
+    )
+    return HookSetup(
+        registry=hook_registry,
+        command_hooks=command_hooks,
+        plugin_hook_count=len(plugin_hook_tables),
+        declared_stop_count=declared_stop_count,
+    )
 
 
 def load_postconditions(args: argparse.Namespace, policy: Any) -> tuple[Any, ...]:

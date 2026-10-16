@@ -21,6 +21,7 @@ Hooks are plain callables. They receive a :class:`HookInput` and return
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Literal, Sequence
 
@@ -71,6 +72,7 @@ CONTEXT_INJECT_EVENTS: tuple[HookEvent, ...] = ("UserPromptSubmit", "SessionStar
 BLOCK_EVENTS: tuple[HookEvent, ...] = ("Stop", "SubagentStop")
 
 HookDecisionKind = Literal["noop", "allow", "deny", "modify_input", "inject_context", "block"]
+MAX_AUDIT_DATA_BYTES = 64_000
 
 
 @dataclass(frozen=True)
@@ -239,7 +241,7 @@ class HookOutcome:
         return self.denied
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "event": self.event,
             "denied": self.denied,
             "deny_reason": self.deny_reason,
@@ -252,6 +254,14 @@ class HookOutcome:
             "errors": list(self.errors),
             "rewrote_input": self.updated_input is not None,
         }
+        if self.data:
+            try:
+                encoded = json.dumps(self.data, ensure_ascii=False, allow_nan=False).encode("utf-8")
+            except (TypeError, ValueError, OverflowError):
+                encoded = b""
+            if encoded and len(encoded) <= MAX_AUDIT_DATA_BYTES:
+                result["data"] = dict(self.data)
+        return result
 
 
 @dataclass
@@ -359,6 +369,11 @@ class HookRegistry:
                     return outcome
                 continue
             outcome.fired.append(registration.name)
+            for key, value in result.data.items():
+                if key == "workspace_check":
+                    outcome.data.setdefault("workspace_checks", []).append(value)
+                else:
+                    outcome.data[key] = value
             if result.decision == "deny":
                 if event not in VETO_EVENTS:
                     outcome.ignored.append(f"{registration.name} (deny is not applicable to {event})")
@@ -366,7 +381,6 @@ class HookRegistry:
                 outcome.denied = True
                 outcome.deny_reason = result.reason
                 outcome.denied_by = registration.name
-                outcome.data.update(result.data)
                 # Anything after a deny is skipped: the verdict cannot be overturned.
                 outcome.skipped.extend(other.name for other in registrations[registrations.index(registration) + 1 :])
                 return outcome
@@ -387,7 +401,6 @@ class HookRegistry:
                 if event in BLOCK_EVENTS:
                     outcome.blocked = True
                     outcome.block_reason = result.reason or "stop refused by hook"
-                    outcome.data.update(result.data)
                     # A block is also terminal: later hooks get nothing to argue with.
                     outcome.skipped.extend(other.name for other in registrations[registrations.index(registration) + 1 :])
                     return outcome

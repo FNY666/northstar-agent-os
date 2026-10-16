@@ -1057,8 +1057,8 @@ The rules that make this governance rather than a linter:
   what the run may *not* do - and the tool layer, not the model, decides that.
 - **`contains` is a convenience, not proof.** The structural kinds
   (`exists`/`absent`/`changed`/`unchanged`) are what a report should be signed off
-  on; for "the tests actually pass", declare a `Stop` command hook that runs the
-  test script - it can veto finishing, and it is a vetted script, not a shell.
+  on. For "the tests actually pass", declare a `Stop` hook that runs the test
+  script; its failure blocks completion and returns the reason to the agent.
 - **Digests are taken before the first event**, so neither a hook nor a tool can
   redefine "before". A symlink or a path that resolves outside the workspace is
   refused at configuration time (exit 64): evidence from outside the boundary is
@@ -1081,8 +1081,12 @@ backend, and isolation), with a delegation path for child calls.
 It also summarizes any host-evaluated `--verify` or policy `[[verify]]` checks in
 the same receipt, including kind, path, verdict, and structural pass/total counts.
 Expected text for `contains` checks is omitted from this summary.
-The receipt distinguishes checks that were not configured from configured checks
-that never reached evaluation.
+Enabled repository `Stop` checks also appear as `workspace_checks`, with the final
+verdict, exit code, duration, and number of attempts. A failed check can block
+completion, return its failure to the agent, and run again after the agent responds.
+They run on the top-level agent's proposed stop; delegated subagent stops skip them.
+The receipt distinguishes checks that were not configured, disabled, or configured
+but never reached evaluation.
 Command text and command output are omitted from this summary; use each `call_id` and
 `agent_path` to locate the corresponding call in the run transcript. The receipt detects
 changes to files that were already dirty before the run by hashing those paths at both
@@ -1137,6 +1141,7 @@ to stop, feeding its reason back as a new user turn) · `SubagentStart` ·
   dropped, so a mis-wired hook shows up in the report.
 - A hook that raises on a veto-capable event **fails closed** (the call is
   refused). On an observation-only event it is logged and the run continues.
+- A `Stop` hook may block completion and feed its reason back to the agent.
 - `PreToolUse` runs *before* the permission gate so a hook can rewrite arguments
   that policy then inspects — a rewrite can narrow what is allowed, never bypass
   the gate.
@@ -1157,21 +1162,45 @@ timeout_ms = 2000
 
 The hook receives the event JSON on stdin and may print one verdict JSON on stdout
 (`{"decision": "deny", "reason": "..."}`, coerced by the same rules as a Python
-handler). Exit code 2 denies with stderr as the reason.
+handler). Exit code 2 denies a veto event; on `Stop`, it blocks completion. A
+`Stop` script uses its exit status as the verdict: exit 0 passes, and any nonzero
+exit blocks completion. Stdout does not participate in the verdict; a bounded
+stdout tail and bounded stderr are returned to the agent when the check fails. For example:
+
+```toml
+[[hooks]]
+event = "Stop"
+script = ".northstar/hooks/check.sh"
+interpreter = "sh"
+timeout_ms = 10000
+description = "Run the reviewed project checks before finishing"
+```
+
+That script can run the project's formatter, type checker, or test suite. A nonzero
+exit, timeout, or execution error blocks completion, records a failed check, and
+gives the reason to the agent so it can make another repair pass.
+The check runs again at the next top-level proposed stop; delegated subagent stops
+skip project checks and return their partial result to the parent agent.
 
 What makes this safe enough to enable, and what it deliberately is not:
 
 - **Off by default.** `--enable-workspace-hooks` is required; `doctor` and
   `--dry-run` both report declared-but-ignored hooks. Cloning a repository must
   not mean executing it.
-- **Veto-capable events only** (`PreToolUse`, `UserPromptSubmit`, `SessionStart`,
-  `PreCompact`, `SubagentStart`). A repository file may add a veto, never a power:
-  declaring `PostToolUse` is a configuration error, not an ignore.
-- **No shell, no arguments, no environment.** There is no `command` key to inject
-  into; `;`, `|`, `&&` and `$( )` cannot be expressed. The child gets `PATH`/`LANG`
-  only, so model credentials never cross into hook code.
-- **Bounded and reaped.** Output caps, a 100 ms–10 s timeout, and TERM-then-KILL of
-  the whole process group. A hang or a crash is a denial on a veto event.
+- **Allowed events are narrow:** veto events plus `Stop`; declaring `PostToolUse`
+  is a configuration error, not an ignore. Plugin manifests remain limited to
+  veto events.
+- **No shell command field, arguments, or custom environment.** There is no
+  `command` key to inject into; the reviewed script itself may run its project's
+  checks. The child gets `PATH`/`LANG` only, so model credentials do not cross into
+  hook code.
+- **Bounded and reaped.** Veto hooks have a 100 ms–10 s timeout; `Stop` checks
+  may use up to 120 s. Output is drained or capped, and timeout cleanup sends
+  TERM-then-KILL to the whole process group. A failure denies a veto event or
+  blocks `Stop`.
+- **Explicit execution.** Hooks remain off unless `--enable-workspace-hooks` is
+  passed. The script is still executable repository code, not an OS sandbox; review
+  it before enabling it.
 
 ## Permissions
 

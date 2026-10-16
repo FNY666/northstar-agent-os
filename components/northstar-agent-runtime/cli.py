@@ -1296,19 +1296,31 @@ def _stream_events(
     return exit_code
 
 
-def _print_coding_evidence(args: argparse.Namespace, before: Any, run_report: Any) -> None:
+def _print_coding_evidence(args: argparse.Namespace, before: Any, run_report: Any, hook_setup: Any = None) -> None:
     """Print a host-observed workspace receipt after all run-owned clients stop."""
     from coding_evidence import (
         compare_snapshots,
         postcondition_evidence,
         shell_execution_evidence,
         snapshot_workspace,
+        workspace_check_evidence,
     )
 
     evidence = compare_snapshots(before, snapshot_workspace(args.workspace))
     evidence["shell_execution_scope"] = "top_level_and_subagents"
     evidence["shell_executions"] = shell_execution_evidence(run_report)
     evidence["postconditions"] = postcondition_evidence(run_report)
+    evidence["workspace_checks"] = workspace_check_evidence(run_report)
+    if hook_setup is not None and hook_setup.declared_stop_count and not args.enable_workspace_hooks:
+        evidence["workspace_checks"] = {
+            "source": "workspace_stop_hooks",
+            "status": "disabled",
+            "configured": hook_setup.declared_stop_count,
+            "checked": 0,
+            "passed": 0,
+            "failed": 0,
+            "results": [],
+        }
     if args.json:
         # A CLI receipt follows the runtime event stream. It is separate from
         # model-authored text and keeps --json usable by automation.
@@ -1375,6 +1387,24 @@ def _print_coding_evidence(args: argparse.Namespace, before: Any, run_report: An
                 print(
                     f"    failed: {item.get('kind', '?')} {path}: "
                     f"{item.get('detail', 'check failed')}"
+                )
+    workspace_checks = evidence["workspace_checks"]
+    if workspace_checks["status"] == "not_configured":
+        print("  workspace_checks=not_configured")
+    elif workspace_checks["status"] == "disabled":
+        print(f"  workspace_checks=disabled configured={workspace_checks['configured']} (pass --enable-workspace-hooks to run)")
+    elif workspace_checks["status"] == "not_evaluated":
+        print(f"  workspace_checks=not_evaluated configured={workspace_checks['configured']}")
+    else:
+        print(
+            f"  workspace_checks={workspace_checks['passed']}/{workspace_checks['checked']} "
+            f"status={workspace_checks['status']} configured={workspace_checks['configured']}"
+        )
+        for item in workspace_checks["results"]:
+            if item["status"] == "failed":
+                print(
+                    f"    failed: {item['script']} exit={item.get('exit_code', 'n/a')} "
+                    f"timed_out={str(item.get('timed_out', False)).lower()} attempts={item['attempts']}"
                 )
 
 
@@ -1562,7 +1592,7 @@ def _run(args: argparse.Namespace) -> int:
         for client in mcp_clients:
             client.close()
     if coding_snapshot is not None:
-        _print_coding_evidence(args, coding_snapshot, runtime.last_report)
+        _print_coding_evidence(args, coding_snapshot, runtime.last_report, hooks)
     return exit_code
 
 

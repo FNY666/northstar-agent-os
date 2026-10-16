@@ -570,3 +570,95 @@ def postcondition_evidence(run_report: Any) -> dict[str, Any]:
         "structural_failed": structural_checked - structural_passed,
         "results": results,
     }
+
+
+def workspace_check_evidence(run_report: Any) -> dict[str, Any]:
+    """Summarize repository Stop checks, retaining only bounded verdict metadata."""
+    empty = {
+        "source": "workspace_stop_hooks",
+        "status": "unknown",
+        "configured": 0,
+        "checked": 0,
+        "passed": 0,
+        "failed": 0,
+        "results": [],
+    }
+    if run_report is None:
+        return {**empty, "status": "unavailable"}
+
+    configured: int | None = None
+    for event in getattr(run_report, "events", ()):
+        if type(event).__name__ != "SystemMessage" or getattr(event, "subtype", "") != "init":
+            continue
+        data = getattr(event, "data", {})
+        hook_counts = data.get("hooks", {}) if isinstance(data, dict) else {}
+        raw_count = hook_counts.get("Stop") if isinstance(hook_counts, dict) else None
+        if isinstance(raw_count, int) and not isinstance(raw_count, bool) and raw_count >= 0:
+            configured = raw_count
+        break
+
+    latest: dict[tuple[str, str], dict[str, Any]] = {}
+    attempts: dict[tuple[str, str], int] = {}
+    for event in getattr(run_report, "hook_fires", ()):
+        if not isinstance(event, dict) or event.get("event") != "Stop":
+            continue
+        data = event.get("data", {})
+        if not isinstance(data, dict):
+            continue
+        checks = data.get("workspace_checks", ())
+        if not isinstance(checks, (list, tuple)):
+            # Accept an individual record emitted by an older runtime.
+            check = data.get("workspace_check")
+            checks = [check] if isinstance(check, dict) else []
+        for check in checks:
+            if not isinstance(check, dict):
+                continue
+            name = check.get("name")
+            script = check.get("script")
+            status = check.get("status")
+            if not isinstance(name, str) or not isinstance(script, str) or status not in {"passed", "failed"}:
+                continue
+            check_id = check.get("id")
+            key = (str(check_id) if isinstance(check_id, str) else name, script)
+            attempts[key] = attempts.get(key, 0) + 1
+            result = {"name": name, "script": script, "status": status}
+            if isinstance(check_id, str):
+                result["id"] = check_id
+            exit_code = check.get("exit_code")
+            if isinstance(exit_code, int) and not isinstance(exit_code, bool):
+                result["exit_code"] = exit_code
+            if isinstance(check.get("timed_out"), bool):
+                result["timed_out"] = check["timed_out"]
+            duration_ms = check.get("duration_ms")
+            if isinstance(duration_ms, int) and not isinstance(duration_ms, bool) and duration_ms >= 0:
+                result["duration_ms"] = duration_ms
+            latest[key] = result
+
+    results = [
+        {**latest[key], "attempts": attempts[key]}
+        for key in sorted(latest)
+    ]
+    checked = len(results)
+    passed = sum(item["status"] == "passed" for item in results)
+    failed = checked - passed
+    if configured is None and checked == 0:
+        status = "unknown"
+    elif configured == 0:
+        status = "not_configured"
+    elif checked == 0:
+        status = "not_evaluated"
+    elif failed:
+        status = "failed"
+    elif configured is not None and checked < configured:
+        status = "partial"
+    else:
+        status = "passed"
+    return {
+        "source": "workspace_stop_hooks",
+        "status": status,
+        "configured": configured if configured is not None else checked,
+        "checked": checked,
+        "passed": passed,
+        "failed": failed,
+        "results": results,
+    }

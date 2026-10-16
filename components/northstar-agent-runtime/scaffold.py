@@ -221,20 +221,28 @@ policy in a pull request is the whole change:
     timeout_ms = 2000
 
 The script receives the event JSON on stdin and may print one verdict JSON on
-stdout (`{"decision": "deny", "reason": "..."}`). Exit code 2 denies, using stderr
-as the reason; a timeout, a crash, or an unparseable verdict is also a denial - a
-hook that cannot answer is never a green light.
+stdout (`{"decision": "deny", "reason": "..."}`). Exit code 2 denies a veto hook,
+using stderr as the reason. For `Stop`, exit status is the check verdict: zero
+passes, and any nonzero exit blocks completion; test output does not affect the
+verdict, while a bounded stdout tail and bounded stderr are sent to the agent on
+failure. A timeout or execution error also blocks a `Stop` check.
+Project checks run when the top-level agent proposes to finish; delegated subagent
+stops skip them and return their partial result to the parent.
 
 **Nothing in section 2 runs unless you pass `--enable-workspace-hooks`.**
 Cloning a repository must not mean executing it, which is why the surface is
-narrow on purpose: veto-capable events only (`PreToolUse`, `UserPromptSubmit`,
-`SessionStart`, `PreCompact`, `SubagentStart`); no `command` key and no shell
-anywhere in the schema; the script must live inside this workspace (symlinks are
-resolved before the check, never followed); output is capped; and the child sees
-only `PATH` and `LANG`, so no model credential crosses into hook code.
+narrow on purpose: veto-capable events plus `Stop`; no `command` or `args` key;
+the script must live inside this workspace (symlinks are resolved before the
+check, never followed); veto hooks time out within 10 seconds and `Stop` checks
+within 120 seconds; output is drained or bounded; and
+the child sees only `PATH` and `LANG`, so no model credential crosses into hook
+code. The script is executable code and is not an OS sandbox; review it before
+enabling workspace hooks. Plugin bundles remain limited to veto-capable events.
 
-`Write` and `Edit` cannot touch this directory at all: `.northstar` is write-
-protected, so a run can neither plant a hook nor rewrite the policy that gates it.
+The `Write` and `Edit` tools cannot touch this directory: `.northstar` is write-
+protected through the tool layer. An enabled hook script is separately trusted
+executable code, so review it for writes to `.northstar` as well as other project
+files.
 
 Scripts that must run regardless of any flag belong behind your own supervisor
 (CI, host automation) - not in `.northstar/hooks/`. A repository file may only

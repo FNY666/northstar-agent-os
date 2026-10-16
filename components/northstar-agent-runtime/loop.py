@@ -2875,7 +2875,7 @@ class AgentRuntime:
         if payload.tool_name:
             record["tool"] = payload.tool_name
         state.hook_fires.append(record)
-        if outcome.errors or outcome.ignored:
+        if outcome.errors or outcome.ignored or "data" in record:
             self.sessions.append("hook", {"agent": self.config.agent, **record})
         return outcome
 

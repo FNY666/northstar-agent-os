@@ -6,13 +6,14 @@ file. Northstar wants the same reach, but a workspace-declared hook is *code the
 agent's environment can influence*, so this module implements the narrow,
 fail-closed version of the idea:
 
-- **Veto-capable events only.** A repository file may add a veto, never a power.
-  ``PostToolUse``-style "observe and maybe allow" hooks are refused here because
-  they are the half that could widen behaviour (``hooks.VETO_EVENTS`` is the set).
-- **No shell.** The schema has no ``command`` string and never calls a shell: a
-  declared hook is ``script`` (a workspace-relative file) plus an ``interpreter``
-  drawn from a fixed allowlist. ``;``, ``|``, ``&&``, backticks, and ``$( )``
-  have no way to exist here, so a poisoned config cannot compose a command.
+- **Veto-capable events, plus ``Stop`` checks.** Repository hooks may veto a tool,
+  prompt, session start, compaction, or delegation, and a ``Stop`` script may block
+  completion until its check passes. Observation hooks such as ``PostToolUse`` are
+  refused because a repository file cannot add a new authorization path.
+- **No command-line fields.** The schema has no ``command`` or ``args`` string;
+  it runs a workspace-relative ``script`` with an allowlisted interpreter. The
+  script is executable code and may run project commands, so it must be reviewed
+  before enabling hooks.
 - **Workspace containment, symlink-first.** The script is resolved with the same
   rule the file tools use: it must live inside the workspace root after
   ``realpath``, be an existing regular file, and not be a symlink. A skill or
@@ -26,13 +27,13 @@ fail-closed version of the idea:
   hook code.
 - **Off by default.** ``--enable-workspace-hooks`` is required. Cloning a
   repository must not mean executing it.
-- **Fail closed.** A timeout, a non-zero exit with no verdict, or unparseable
-  output on a veto event is a denial, not a shrug.
+- **Fail closed.** A timeout or execution error denies a veto event or blocks a
+  ``Stop`` check. Non-zero exits block ``Stop``; malformed verdicts deny veto hooks.
 
-The hook protocol is a JSON request on stdin (``HookInput.as_dict()``) and an
-optional JSON verdict on stdout, coerced by :func:`hooks.coerce_result` - the same
-vocabulary an in-process Python hook returns, so one hook can be promoted from a
-script to a callback without changing meaning.
+Veto hooks receive a JSON request on stdin (``HookInput.as_dict()``) and may print
+an optional JSON verdict on stdout, coerced by :func:`hooks.coerce_result`. A
+``Stop`` check uses its exit status as the verdict, never parses stdout as a hook
+response, and retains only a bounded tail to help the agent repair a failed check.
 """
 from __future__ import annotations
 
@@ -55,12 +56,17 @@ from hooks import VETO_EVENTS, HookInput, HookResult, coerce_result
 #: reviewer never saw.
 ALLOWED_INTERPRETERS: tuple[str, ...] = ("python3", "python", "node", "sh", "bash")
 
+#: Workspace hooks may also use Stop to run an explicit end-of-run check. Plugin
+#: manifests remain restricted to VETO_EVENTS in plugin_manifest.py.
+WORKSPACE_HOOK_EVENTS: tuple[str, ...] = (*VETO_EVENTS, "Stop")
+
 #: Keys one ``[[hooks]]`` entry may carry. ``command``/``args``/``env``/``shell``
 #: are absent on purpose; an unknown key is an error, never an ignore.
 _ALLOWED_KEYS = frozenset({"event", "script", "interpreter", "tool", "agent", "timeout_ms", "description"})
 
 MIN_TIMEOUT_MS = 100
 MAX_TIMEOUT_MS = 10_000
+MAX_STOP_TIMEOUT_MS = 120_000
 DEFAULT_TIMEOUT_MS = 2_000
 MAX_HOOKS = 16
 MAX_STDOUT_BYTES = 64_000
@@ -87,6 +93,7 @@ class CommandHook:
     timeout_ms: int = DEFAULT_TIMEOUT_MS
     description: str = ""
     script_digest: str = ""
+    entry_index: int = 0
 
     def as_dict(self) -> dict[str, Any]:
         """Display form only: the resolved absolute script path is never printed."""
@@ -152,8 +159,8 @@ def parse_hooks(
                 f"{', '.join(sorted(_ALLOWED_KEYS))} (there is no 'command' key: hooks name a script, never a shell line)"
             )
         event = entry.get("event")
-        if not isinstance(event, str) or event not in VETO_EVENTS:
-            raise _fail(f"hooks[{index}]: 'event' must be one of {', '.join(VETO_EVENTS)} (only veto-capable events may be declared by a repository file)")
+        if not isinstance(event, str) or event not in WORKSPACE_HOOK_EVENTS:
+            raise _fail(f"hooks[{index}]: 'event' must be one of {', '.join(WORKSPACE_HOOK_EVENTS)} (repository hooks may veto actions or block Stop)")
         script = _script_path(root, entry.get("script"), index=index)
         script_bytes = script.read_bytes()
         relative_script = script.relative_to(Path(workspace).resolve()).as_posix()
@@ -190,8 +197,9 @@ def parse_hooks(
             raise _fail(f"hooks[{index}]: 'agent' must be a non-empty string when present")
         agent = agent.strip() if isinstance(agent, str) and agent.strip() else None
         timeout_ms = entry.get("timeout_ms", DEFAULT_TIMEOUT_MS)
-        if isinstance(timeout_ms, bool) or not isinstance(timeout_ms, int) or not MIN_TIMEOUT_MS <= timeout_ms <= MAX_TIMEOUT_MS:
-            raise _fail(f"hooks[{index}]: 'timeout_ms' must be an integer between {MIN_TIMEOUT_MS} and {MAX_TIMEOUT_MS}")
+        timeout_limit = MAX_STOP_TIMEOUT_MS if event == "Stop" else MAX_TIMEOUT_MS
+        if isinstance(timeout_ms, bool) or not isinstance(timeout_ms, int) or not MIN_TIMEOUT_MS <= timeout_ms <= timeout_limit:
+            raise _fail(f"hooks[{index}]: 'timeout_ms' must be an integer between {MIN_TIMEOUT_MS} and {timeout_limit} for {event}")
         description = entry.get("description", "")
         if not isinstance(description, str):
             raise _fail(f"hooks[{index}]: 'description' must be a string")
@@ -207,6 +215,7 @@ def parse_hooks(
                 timeout_ms=int(timeout_ms),
                 description=description.strip()[:600],
                 script_digest=hashlib.sha256(script_bytes).hexdigest(),
+                entry_index=index,
             )
         )
     return tuple(hooks)
@@ -236,34 +245,94 @@ def build_callback(
     """
     root = Path(os.path.realpath(str(workspace)))
 
+    def stop_check_result(
+        *,
+        passed: bool,
+        started: float,
+        exit_code: int | None = None,
+        timed_out: bool = False,
+        reason: str = "",
+    ) -> HookResult:
+        check = {
+            "name": hook.name,
+            "id": f"{hook.name}#{hook.entry_index}",
+            "script": hook.script.relative_to(root).as_posix(),
+            "status": "passed" if passed else "failed",
+            "exit_code": exit_code,
+            "timed_out": timed_out,
+            "duration_ms": max(0, int((time.monotonic() - started) * 1000)),
+        }
+        result_data = {"workspace_check": check}
+        if passed:
+            return HookResult(decision="allow", data=result_data)
+        return HookResult(decision="block", reason=reason or f"{hook.name} check failed", data=result_data)
+
     def callback(hook_input: HookInput) -> HookResult:
         payload = hook_input.as_dict()
+        started = time.monotonic()
+        is_stop_check = hook.event == "Stop"
+        # Workspace Stop checks verify the completed top-level task. A child agent
+        # returning its partial result must not launch the project suite early.
+        if is_stop_check and hook_input.depth > 0:
+            return HookResult()
         try:
             current = hook.script.read_bytes()
         except OSError as error:
+            if is_stop_check:
+                return stop_check_result(passed=False, started=started, reason=f"{hook.name} script is no longer readable: {error}")
             return HookResult.deny(f"{hook.name} script is no longer readable: {error}")
         if hashlib.sha256(current).hexdigest() != hook.script_digest:
+            if is_stop_check:
+                return stop_check_result(passed=False, started=started, reason=f"{hook.name} script changed since registration; refusing check")
             return HookResult.deny(f"{hook.name} script changed since registration; refusing dispatch")
         # Preserve the original path/interpreter semantics after verifying current bytes.
         # Residual: a same-user adversary can still race this check against the OS open in Popen.
         argv = ([hook.interpreter] if hook.interpreter else []) + [str(hook.script)]
         try:
-            completed = (runner or _run_bounded)(
-                argv,
-                cwd=str(root),
-                input_text=json.dumps(payload, ensure_ascii=False, sort_keys=True),
-                timeout_s=hook.timeout_ms / 1000,
-            )
+            run = runner or _run_bounded
+            run_kwargs: dict[str, Any] = {
+                "cwd": str(root),
+                "input_text": json.dumps(payload, ensure_ascii=False, sort_keys=True),
+                "timeout_s": hook.timeout_ms / 1000,
+            }
+            if runner is None:
+                run_kwargs["capture_stdout"] = not is_stop_check
+                if is_stop_check:
+                    run_kwargs["stdout_tail_bytes"] = MAX_STDERR_BYTES
+            completed = run(argv, **run_kwargs)
         except subprocess.TimeoutExpired:
             # A hook that will not answer is a veto, not a green light.
+            if is_stop_check:
+                return stop_check_result(
+                    passed=False,
+                    started=started,
+                    timed_out=True,
+                    reason=f"{hook.name} check timed out after {hook.timeout_ms}ms",
+                )
             return HookResult.deny(
                 f"{hook.name} timed out after {hook.timeout_ms}ms; veto-capable events fail closed"
             )
         except OSError as error:
+            if is_stop_check:
+                return stop_check_result(passed=False, started=started, reason=f"{hook.name} could not be executed: {error}")
             raise _fail(f"{hook.name} could not be executed: {error}") from error
+        except Exception as error:  # output caps, cleanup failures, and decode errors
+            if is_stop_check:
+                return stop_check_result(passed=False, started=started, reason=f"{hook.name} could not complete: {type(error).__name__}: {error}")
+            raise
         stdout = (completed.stdout or "")[:MAX_STDOUT_BYTES]
         stderr = (completed.stderr or "")[:MAX_STDERR_BYTES]
         code = int(getattr(completed, "returncode", 0) or 0)
+        if is_stop_check:
+            if code == 0:
+                return stop_check_result(passed=True, started=started, exit_code=code)
+            return stop_check_result(
+                passed=False,
+                started=started,
+                exit_code=code,
+                reason=f"{hook.name} check exited {code}: "
+                + (("\n".join(part.strip() for part in (stdout, stderr) if part.strip()))[-MAX_STDERR_BYTES:] or "no output"),
+            )
         if code == 2:
             return HookResult.deny(f"{hook.name} denied: {stderr.strip() or 'no reason given'}")
         if code != 0:
@@ -275,7 +344,8 @@ def build_callback(
             verdict = json.loads(text)
         except (TypeError, ValueError) as error:
             raise _fail(f"{hook.name} printed a non-JSON verdict: {error}") from error
-        return coerce_result(verdict)
+        result = coerce_result(verdict)
+        return result
 
     return callback
 
@@ -286,6 +356,8 @@ def _run_bounded(
     cwd: str,
     input_text: str,
     timeout_s: float,
+    capture_stdout: bool = True,
+    stdout_tail_bytes: int = 0,
 ) -> subprocess.CompletedProcess:
     """Run ``argv`` with a scrubbed environment, capped output, and group cleanup.
 
@@ -347,6 +419,12 @@ def _run_bounded(
                     selector.unregister(stream)
                     stream.close()
                     continue
+                if name == "stdout" and not capture_stdout:
+                    if stdout_tail_bytes > 0:
+                        captured[name].extend(chunk)
+                        if len(captured[name]) > stdout_tail_bytes:
+                            del captured[name][:-stdout_tail_bytes]
+                    continue
                 if len(captured[name]) + len(chunk) > limits[name]:
                     raise _fail(f"hook output {name} exceeds byte limit {limits[name]}; refusing verdict")
                 captured[name].extend(chunk)
@@ -384,7 +462,8 @@ def _run_bounded(
                 primary_error.add_note(detail)
             else:  # Python 3.10: preserve the original exception, with explicit context.
                 primary_error.__context__ = cleanup_errors[0]
-    stdout = captured["stdout"].decode("utf-8")
+    stdout_errors = "strict" if capture_stdout else "replace"
+    stdout = captured["stdout"].decode("utf-8", errors=stdout_errors)
     stderr = captured["stderr"].decode("utf-8")
     return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
 
@@ -447,8 +526,10 @@ __all__ = [
     "ALLOWED_INTERPRETERS",
     "DEFAULT_TIMEOUT_MS",
     "MAX_HOOKS",
+    "MAX_STOP_TIMEOUT_MS",
     "CommandHook",
     "CommandHookError",
+    "WORKSPACE_HOOK_EVENTS",
     "build_callback",
     "parse_hooks",
     "register_into",
