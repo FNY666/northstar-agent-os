@@ -1361,11 +1361,13 @@ def _print_coding_evidence(args: argparse.Namespace, before: Any, run_report: An
     postconditions = evidence["postconditions"]
     if postconditions["status"] == "not_configured":
         print("  postconditions=not_configured")
+    elif postconditions["status"] == "not_evaluated":
+        print(f"  postconditions=not_evaluated configured={postconditions['configured']}")
     else:
         print(
             f"  postconditions={postconditions['passed']}/{postconditions['checked']} "
             f"status={postconditions['status']} "
-            f"structural_passed={postconditions['structural_passed']}"
+            f"structural={postconditions['structural_passed']}/{postconditions['structural_checked']}"
         )
         for item in postconditions["results"]:
             if not item["ok"]:

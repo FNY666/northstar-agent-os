@@ -488,56 +488,85 @@ def shell_execution_evidence(run_report: Any) -> list[dict[str, Any]]:
 
 
 def postcondition_evidence(run_report: Any) -> dict[str, Any]:
-    """Summarize host-evaluated postconditions without copying expected text."""
+    """Summarize host-evaluated checks without copying expected text."""
     empty = {
         "source": "runtime_postconditions",
-        "status": "not_configured",
+        "status": "unknown",
+        "configured": 0,
         "checked": 0,
         "passed": 0,
         "failed": 0,
+        "structural_checked": 0,
         "structural_passed": 0,
+        "structural_failed": 0,
         "results": [],
     }
     if run_report is None:
-        return empty
+        return {**empty, "status": "unavailable"}
+    initialized = False
+    configured: int | None = None
+    verdict_data: dict[str, Any] | None = None
     for event in getattr(run_report, "events", ()):
-        if type(event).__name__ != "SystemMessage" or getattr(event, "subtype", "") != "postconditions":
+        if type(event).__name__ != "SystemMessage":
             continue
         data = getattr(event, "data", {})
         if not isinstance(data, dict):
             return {**empty, "status": "unavailable"}
-        raw_results = data.get("results", ())
-        if not isinstance(raw_results, (list, tuple)):
-            return {**empty, "status": "unavailable"}
-        results: list[dict[str, Any]] = []
-        for item in raw_results:
-            if not isinstance(item, dict):
-                continue
-            # The full event may contain the expected ``contains`` text. Keep
-            # the check identity and verdict, never the user-supplied needle.
-            result = {
-                key: item[key]
-                for key in (
-                    "kind", "path", "ok", "detail", "structural",
-                    "digest_before", "digest_after",
-                )
-                if key in item
-            }
-            if isinstance(result.get("ok"), bool):
-                results.append(result)
-        declared_checked = data.get("checked", len(results))
-        if isinstance(declared_checked, bool) or not isinstance(declared_checked, int) or declared_checked != len(results):
-            return {**empty, "status": "unavailable"}
-        passed = sum(item["ok"] for item in results)
-        failed = len(results) - passed
-        structural_passed = sum(item["ok"] and item.get("structural", False) for item in results)
-        return {
-            "source": "runtime_postconditions",
-            "status": "passed" if failed == 0 and declared_checked else "failed" if failed else "unavailable",
-            "checked": declared_checked,
-            "passed": passed,
-            "failed": failed,
-            "structural_passed": structural_passed,
-            "results": results,
+        subtype = getattr(event, "subtype", "")
+        if subtype == "init":
+            initialized = True
+            conditions = data.get("postconditions", ())
+            if not isinstance(conditions, (list, tuple)):
+                return {**empty, "status": "unavailable"}
+            configured = len(conditions)
+        elif subtype == "postconditions":
+            verdict_data = data
+
+    if verdict_data is None:
+        if not initialized or configured is None:
+            return empty
+        if configured == 0:
+            return {**empty, "status": "not_configured"}
+        return {**empty, "status": "not_evaluated", "configured": configured}
+
+    data = verdict_data
+    raw_results = data.get("results", ())
+    if not isinstance(raw_results, (list, tuple)):
+        return {**empty, "status": "unavailable"}
+    results: list[dict[str, Any]] = []
+    for item in raw_results:
+        if not isinstance(item, dict):
+            continue
+        # The full event may contain the expected ``contains`` text. Keep
+        # the check identity and verdict, never the user-supplied needle.
+        result = {
+            key: item[key]
+            for key in (
+                "kind", "path", "ok", "detail", "structural",
+                "digest_before", "digest_after",
+            )
+            if key in item
         }
-    return empty
+        if isinstance(result.get("ok"), bool):
+            results.append(result)
+    declared_checked = data.get("checked", len(results))
+    if isinstance(declared_checked, bool) or not isinstance(declared_checked, int) or declared_checked != len(results):
+        return {**empty, "status": "unavailable"}
+    if configured is not None and configured != declared_checked:
+        return {**empty, "status": "unavailable"}
+    passed = sum(item["ok"] for item in results)
+    failed = len(results) - passed
+    structural_checked = sum(bool(item.get("structural", False)) for item in results)
+    structural_passed = sum(item["ok"] and item.get("structural", False) for item in results)
+    return {
+        "source": "runtime_postconditions",
+        "status": "passed" if failed == 0 and declared_checked else "failed" if failed else "not_configured",
+        "configured": configured if configured is not None else declared_checked,
+        "checked": declared_checked,
+        "passed": passed,
+        "failed": failed,
+        "structural_checked": structural_checked,
+        "structural_passed": structural_passed,
+        "structural_failed": structural_checked - structural_passed,
+        "results": results,
+    }

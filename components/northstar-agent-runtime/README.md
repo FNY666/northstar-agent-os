@@ -1079,8 +1079,10 @@ changes, whether bounded file hashing covered every changed path, and the main
 agent and delegated subagents' Shell outcomes (execution status, exit code, timeout,
 backend, and isolation), with a delegation path for child calls.
 It also summarizes any host-evaluated `--verify` or policy `[[verify]]` checks in
-the same receipt, including kind, path, verdict, and structural-check count.
+the same receipt, including kind, path, verdict, and structural pass/total counts.
 Expected text for `contains` checks is omitted from this summary.
+The receipt distinguishes checks that were not configured from configured checks
+that never reached evaluation.
 Command text and command output are omitted from this summary; use each `call_id` and
 `agent_path` to locate the corresponding call in the run transcript. The receipt detects
 changes to files that were already dirty before the run by hashing those paths at both
