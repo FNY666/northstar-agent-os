@@ -248,7 +248,8 @@ declares a binary media type; opaque provider signatures remain untouched.
 String, tuple, and single-block content forms are normalized into the same
 screening path for imported provider messages.
 Malformed non-message records in an imported sequence are dropped from the
-copy-on-write request instead of crashing the runtime.
+copy-on-write request instead of crashing the runtime, and recorded as a
+`D-RESUME-001` defensive assessment.
 After Unicode cleanup, the detector rechecks collapsed whitespace so hidden
 instruction spans cannot reassemble into a jailbreak at the release boundary.
 If that second pass finds an instruction pattern, the release is quarantined
