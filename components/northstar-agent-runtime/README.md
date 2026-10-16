@@ -197,6 +197,9 @@ credential bypasses.
 Hook-injected context is screened at the same boundary before it is added to
 the transcript; this keeps extension callbacks from becoming an untracked
 prompt-injection channel.
+On resume, the final provider payload is screened again copy-on-write, so old
+or imported transcripts cannot bypass the current rules; the durable transcript
+itself is never rewritten by this compatibility pass.
 Tool descriptions and JSON Schema `description` annotations are screened before
 they are sent to the provider as well, while schema keys and enum values remain
 unchanged so the authorization contract cannot drift during sanitization.
