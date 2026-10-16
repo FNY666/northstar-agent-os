@@ -109,6 +109,11 @@ class TestEvasionResistance(unittest.TestCase):
             with self.subTest(host=host):
                 self.assertTrue(detect_pivoting(call(url=f"http://{host}/")))
 
+    def test_control_and_format_characters_fail_closed(self):
+        for host in ("local\u200bhost", "127.0.0.\u202e1"):
+            with self.subTest(host=host):
+                self.assertTrue(detect_pivoting(call(url=f"http://{host}/")))
+
     def test_internal_suffix_blocked(self):
         self.assertTrue(detect_pivoting(call(url="http://db.internal/query")))
 

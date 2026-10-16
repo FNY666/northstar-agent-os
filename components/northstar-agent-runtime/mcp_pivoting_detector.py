@@ -165,6 +165,8 @@ def _host_is_blocked(host: str) -> bool:
     """True when the decoded host is an internal target."""
     if not host:
         return True  # empty host: fail closed
+    if any(unicodedata.category(char) in {"Cc", "Cf"} for char in host):
+        return True  # ambiguous/control-bearing authorities fail closed
     if host in BLOCKED_HOSTNAMES:
         return True
     numeric = _parse_numeric_ipv4(host)
