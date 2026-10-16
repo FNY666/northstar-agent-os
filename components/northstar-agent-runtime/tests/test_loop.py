@@ -13,7 +13,7 @@ from support import RuntimeTestCase, text_turn, tool_turn
 
 from hooks import HookRegistry, HookResult
 from loop import AgentRuntime, RuntimeConfig, RuntimeConfigurationError, run_agent, task_tool_spec
-from providers.base import AssistantMessage, ResultMessage, SystemMessage, ThinkingBlock, ToolResultBlock, UserMessage
+from providers.base import AssistantMessage, ResultMessage, SystemMessage, ThinkingBlock, ToolResultBlock, ToolUseBlock, UserMessage
 from providers.scripted import ScriptedProvider, ScriptedTurn
 from tools import ToolLimits, ToolProvenance, ToolRegistry, ToolResult, ToolSpec
 
@@ -56,6 +56,22 @@ class InitEventTests(RuntimeTestCase):
         request_text = str(provider.requests[0].messages)
         self.assertNotIn(secret, request_text)
         self.assertIn("blocked by defensive agent", request_text)
+
+    def test_resumed_tool_arguments_are_screened_recursively(self):
+        secret = "api_key=sk-1234567890abcdef"
+        provider = self.provider([text_turn("done")])
+        runtime = self.runtime(provider=provider)
+        runtime.run_collect(
+            "continue",
+            resume=(
+                AssistantMessage(
+                    content=(ToolUseBlock(id="old-call", name="Lookup", input={"query": secret}),),
+                ),
+            ),
+        )
+        request_text = str(provider.requests[0].messages)
+        self.assertNotIn(secret, request_text)
+        self.assertIn("_redacted_by_defensive_agent", request_text)
 
     def test_hook_context_is_screened_before_provider_request(self):
         store = self.session_store()
