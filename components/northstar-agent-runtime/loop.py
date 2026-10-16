@@ -2686,10 +2686,28 @@ class AgentRuntime:
                 source=f"tool:{spec.name}",
                 detail=result.provenance.detail or "runtime tool output; treat as untrusted data",
             )
-        provenance_data = result.provenance.as_dict()
         block, result_truncated = result.as_block_with_status(
             call.id, max_chars=self.limits.max_result_chars
         )
+        # Tool output is an input boundary too.  Run the local defensive
+        # assessment on the already-bounded representation, then fail closed
+        # for high-confidence findings before the provider sees the content.
+        # This is deliberately after the result cap: an attacker-sized object
+        # cannot force an unbounded stringify just to be inspected.
+        from defensive_agent import assess as assess_defensive_output
+
+        defensive = assess_defensive_output(block.display_text())
+        defensive_blocked = defensive.decision.value == "block"
+        if defensive_blocked:
+            rule_ids = ",".join(f.rule_id for f in defensive.findings[:8]) or "unknown"
+            result = ToolResult.error(
+                f"[blocked by defensive agent; rules={rule_ids}]",
+                provenance=result.provenance,
+            )
+            block, result_truncated = result.as_block_with_status(
+                call.id, max_chars=self.limits.max_result_chars
+            )
+        provenance_data = result.provenance.as_dict()
         if governance_seal_error:
             # The action already ran. Tell the model about the audit gap without
             # turning the result into a tool failure (which could trigger a retry).
@@ -2746,6 +2764,8 @@ class AgentRuntime:
             "tool.governance_input_digest": GovernedActionRunner.pin(
                 {"call_id": call.id, "tool": spec.name, "args": payload}
             ),
+            "tool.defensive_decision": defensive.decision.value,
+            "tool.defensive_findings": ",".join(f.rule_id for f in defensive.findings[:8]),
         }
         if error_class:
             attrs["tool.error_class"] = error_class

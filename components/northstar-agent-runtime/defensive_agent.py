@@ -18,6 +18,7 @@ from mcp_pivoting_detector import check_tool_call
 
 VERSION = "defensive-agent.v1"
 SCHEMA_PIN = "northstar.defensive-agent.v1"
+_MAX_ASSESS_CHARS = 64 * 1024
 
 
 class Decision(str, Enum):
@@ -84,6 +85,13 @@ def assess(
         raise TypeError("url must be a string or None")
     if url is not None and tool_name is None:
         raise ValueError("tool_name is required when url is provided")
+
+    # Keep regex and base64 inspection bounded even when a tool returned a
+    # large but already-capped artifact. Preserve both edges so an injection
+    # appended to a normal header is still visible to the local tripwires.
+    if len(text) > _MAX_ASSESS_CHARS:
+        edge = _MAX_ASSESS_CHARS // 2
+        text = text[:edge] + "\n...[assessment middle omitted]...\n" + text[-edge:]
 
     findings: list[DefensiveFinding] = []
     injection_findings = scan_injection(text)
