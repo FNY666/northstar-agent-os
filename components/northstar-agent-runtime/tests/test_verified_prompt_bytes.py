@@ -128,6 +128,11 @@ class VerifiedSkillReadTests(RuntimeTestCase):
         )
         self.assertTrue(result.is_error)
         self.assertIn('64-byte Read verification limit', result.text())
+        smaller = build_default_registry().require('Read').handler(
+            {'path': '.northstar/skills/demo/SKILL.md', 'max_bytes': 16}, context
+        )
+        self.assertTrue(smaller.is_error)
+        self.assertIn('16-byte Read verification limit', smaller.text())
 
 
 class VerifiedPluginContextTests(BundleTestCase):
