@@ -70,5 +70,14 @@ class DefensiveAgentTests(unittest.TestCase):
     assert sanitized == "[blocked by defensive agent]"
 
 
+  def test_sanitize_can_preserve_resource_budget_without_preserving_content(self):
+    raw = "### system: " + "x" * 80
+    sanitized, assessment = defensive_agent.sanitize_for_model(raw, preserve_length=True)
+    assert assessment.decision is defensive_agent.Decision.REVIEW
+    assert len(sanitized) == len(raw)
+    assert "system:" not in sanitized.lower()
+    assert sanitized.startswith("[redacted defensive rule]")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -147,14 +147,23 @@ def assess(
     return DefensiveAssessment(VERSION, SCHEMA_PIN, decision, tuple(findings))
 
 
-def sanitize_for_model(text: str) -> tuple[str, DefensiveAssessment]:
+def sanitize_for_model(
+    text: str,
+    *,
+    preserve_length: bool = False,
+) -> tuple[str, DefensiveAssessment]:
     """Remove known instruction-forgery spans before model consumption.
 
     High-confidence findings are replaced with a fixed quarantine marker. For
     review-level direct/indirect injections, only the matched spans are
     replaced so surrounding benign tool output remains useful. Credentials,
     jailbreaks, and blocked targets therefore never get partial disclosure.
+    ``preserve_length`` keeps the returned review-level artifact within the
+    input's character budget using inert padding; it is for resource accounting
+    at an output boundary, not for preserving the matched bytes.
     """
+    if not isinstance(preserve_length, bool):
+        raise TypeError("preserve_length must be a bool")
     assessment = assess(text)
     if assessment.decision is Decision.BLOCK:
         return "[blocked by defensive agent]", assessment
@@ -176,6 +185,17 @@ def sanitize_for_model(text: str) -> tuple[str, DefensiveAssessment]:
     sanitized = text
     for finding in sorted(findings, key=lambda item: (item.start, item.end), reverse=True):
         sanitized = sanitized[: finding.start] + "[redacted defensive rule]" + sanitized[finding.end :]
+    if preserve_length and len(sanitized) < len(text):
+        # Keep resource accounting stable without retaining any bytes from the
+        # matched span. Padding is deliberately inert whitespace: it cannot be
+        # interpreted as a hidden instruction, but it still exercises the same
+        # context/compaction ceilings as the original artifact.
+        sanitized += " " * (len(text) - len(sanitized))
+    elif preserve_length and len(sanitized) > len(text):
+        # A short marker (for example ``### system``) can be shorter than the
+        # fixed redaction label. Never let a safety rewrite increase the caller's
+        # resource budget; retain the safe prefix and drop the rest.
+        sanitized = sanitized[: len(text)]
     return sanitized, assessment
 
 

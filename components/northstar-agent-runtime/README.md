@@ -177,6 +177,13 @@ credential exposure, jailbreaks, or internal/metadata targets. Findings keep
 rule identifiers, severities, spans, and masked values only; raw text,
 credentials, and URLs never cross the result boundary.
 
+The same checkpoint runs on context-compaction summaries before they become
+model-visible again. Provider-written summaries that contain a high-confidence
+credential or jailbreak are replaced with a fixed quarantine marker; review
+findings are span-redacted and recorded in the compaction boundary metadata.
+Tool-result redaction preserves the original character budget with inert
+whitespace, so security filtering cannot silently disable context ceilings.
+
 Transcripts are append-only JSONL, but they are meant to be read back:
 
 ```sh

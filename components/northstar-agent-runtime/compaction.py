@@ -26,6 +26,7 @@ from providers.base import (
     UserMessage,
     estimate_transcript_tokens,
 )
+from defensive_agent import sanitize_for_model
 
 DEFAULT_KEEP_MESSAGES = 4
 DEFAULT_MIN_CUT = 1
@@ -48,6 +49,11 @@ class CompactionOutcome:
     summary: str = ""
     boundary: SystemMessage | None = None
     summary_source: str = "extractive"
+    # The summary is a model-visible context boundary. Keep a redaction-safe
+    # decision alongside it so operators can tell when a provider-written (or
+    # extractive) summary was quarantined before it re-entered the prompt.
+    defensive_decision: str = "allow"
+    defensive_findings: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -60,6 +66,8 @@ class CompactionOutcome:
             "tokens_saved": max(0, self.tokens_before - self.tokens_after),
             "summary_chars": len(self.summary),
             "summary_source": self.summary_source,
+            "defensive_decision": self.defensive_decision,
+            "defensive_findings": list(self.defensive_findings),
         }
 
 
@@ -300,12 +308,23 @@ def compact(
         summary = f"{provenance_ledger}\n{summary}"
     if instructions:
         summary = f"{summary}\n- host compaction instruction: {instructions}"
+    # A compaction summary is an input boundary even when it was produced by a
+    # trusted host callback: it is about to become model-visible context. A
+    # provider summarizer can echo credentials or forge instructions, and an
+    # extractive summary can carry hostile text from a replayed transcript.
+    # Sanitize after all provenance and host context are attached so no later
+    # concatenation can reintroduce an unscreened span.
+    summary, defensive = sanitize_for_model(summary)
+    defensive_decision = defensive.decision.value
+    defensive_findings = tuple(item.rule_id for item in defensive.findings[:8])
     boundary_data = {
         "cut": cut,
         "dropped_messages": len(prefix),
         "kept_messages": len(kept),
         "tokens_before": tokens_before,
         "summary_source": source,
+        "defensive_decision": defensive_decision,
+        "defensive_findings": list(defensive_findings),
     }
     boundary = SystemMessage(subtype="compact_boundary", content=summary, data=boundary_data)
     new_transcript = (boundary,) + tuple(kept)
@@ -324,6 +343,8 @@ def compact(
         summary=summary,
         boundary=boundary,
         summary_source=source,
+        defensive_decision=defensive_decision,
+        defensive_findings=defensive_findings,
     )
 
 
