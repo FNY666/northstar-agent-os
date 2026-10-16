@@ -49248,7 +49248,7 @@ Self-check: known-bad samples flag, known-good samples pass.
 
 Source: `components/northstar-agent-runtime/injection_probe.py`
 
-Injection probe harness (InjecAgent-inspired red team), Simulated.
+Offline prompt-injection probe harness, Simulated.
 
 #### `InjectionProbeError`
 
@@ -49260,15 +49260,15 @@ One injection probe.
 
 #### `ProbeResult`
 
-Result of running one probe.
+Outcome for one probe; None means the gate gave no valid decision.
 
 #### `run_probe(probe: Probe, gate_fn: Callable[[str, str], bool])`
 
-Run one probe through a gate function.
+Run one fixture and compare the gate decision with its expectation.
 
 #### `run_all_probes(gate_fn: Callable[[str, str], bool], probes: List[Probe] | None=None)`
 
-Run all probes, return summary.
+Run probes and return confusion counts plus conservative metrics.
 
 #### `stdlib_only()`
 
@@ -49276,7 +49276,7 @@ AST check: stdlib only.
 
 #### `main()`
 
-Self-check with a naive gate (blocks on keywords).
+Self-check with a deliberately weak keyword gate.
 
 ### `inner_alignment`
 
