@@ -1369,6 +1369,7 @@ def _run(args: argparse.Namespace) -> int:
         agents=agents,
         hooks=hooks.registry,
         budget=session.resume_budget,
+        skill_digests={str(skill.path): skill.digest for skill in prompt_setup.skills},
     )
 
     if args.show_pricing:
