@@ -1228,10 +1228,12 @@ through `tools.os_sandbox` (`bwrap` when usable, else an honestly-labelled `proc
 backend). See [docs/concepts/threat-model.md](../../docs/concepts/threat-model.md).
 
 `Read` prints a SHA-256 marker when it returned a complete UTF-8 file. `ApplyPatch`
-uses those hashes as optimistic concurrency guards for up to 32 existing files in
-one governed edit call. It validates every path, file type, size, and hash before
-staging any replacement, then rechecks hashes before each replacement; stale input
-rejects the batch. Each file can provide either full `content` or up to 256 exact,
+uses those hashes as optimistic concurrency guards for up to 32 files in one
+governed edit call. Existing files use the hash from `Read`; new files use
+`expected_sha256: "absent"`. Parent directories for new files must already exist.
+It validates every path, file type, size, hash, and absence precondition before
+staging any change, then rechecks them before each commit; stale input rejects the
+batch. Each file can provide either full `content` or up to 256 exact,
 non-overlapping line `edits` (never both). Each edit gives a 1-based `start_line`,
 `delete_lines`, the exact old text in `expected`, and the inserted `replacement`.
 Use `delete_lines: 0` with `expected: ""` to insert at a line boundary. For example:
@@ -1240,17 +1242,25 @@ Use `delete_lines: 0` with `expected: ""` to insert at a line boundary. For exam
 {"files":[{"path":"src/example.py","expected_sha256":"<Read SHA-256>","edits":[{"start_line":12,"delete_lines":2,"expected":"old_a()\nold_b()\n","replacement":"new_call()\n"}]}]}
 ```
 
-An expected-text mismatch or overlapping range rejects the entire batch. Each
-replacement is atomic, with best-effort rollback if a later
-filesystem replacement fails. Before rollback, the tool checks that the file still
-contains its replacement; if it no longer matches, rollback leaves that file
-untouched and reports it. An external writer can still race the final hash check
-and rename during either commit or rollback. The operation is still mutating: it
+To create a new file in the same batch, use full content and the `absent` version:
+
+```json
+{"files":[{"path":"src/new_module.py","expected_sha256":"absent","content":"def run():\n    return True\n"}]}
+```
+
+An expected-text mismatch, overlapping range, or destination that appeared during
+the batch rejects the entire batch. Existing-file replacements are atomic; new
+files are published with an atomic no-overwrite operation. If a later commit
+fails, best-effort rollback restores prior files only while they still match this
+patch, and removes created files only while their content still matches. Otherwise
+it leaves the changed target untouched and reports it. An external writer can
+still race the final version check and rename or removal during commit or rollback.
+The operation is still mutating: it
 crosses the same permission gate and hooks as `Write`/`Edit`, is refused by
 `--read-only` and `plan`, and cannot write protected `.git` or `.northstar` paths.
-The multi-file sequence is not crash-atomic. File
-contents and permission bits are preserved through same-directory staging;
-ownership, ACLs, and extended attributes are not preserved.
+The multi-file sequence is not crash-atomic. Existing-file permission bits are
+preserved; new files use mode `0644`. Content is published through same-directory
+staging; ownership, ACLs, and extended attributes are not preserved.
 
 Modes: `default`, `acceptEdits`, `plan`, `bypassPermissions`. In `default`, a
 mutating tool with no host approval callback is **denied, not executed** — the

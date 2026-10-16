@@ -333,7 +333,9 @@ def _agents_md(name: str) -> str:
   pass each exact marker as `expected_sha256`; stale hashes refuse the batch.
   Prefer exact line edits for focused changes and full replacement content for
   broad rewrites. Line edits include the exact expected text at each 1-based
-  line range; stale text refuses the entire batch.
+  line range; stale text refuses the entire batch. New files can join that batch
+  with `expected_sha256: "absent"` and full content; their parent directory must
+  already exist.
 """
 
 

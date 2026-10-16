@@ -776,9 +776,9 @@ def build_default_registry(include_describe: bool = True) -> ToolRegistry:
         ToolSpec(
             name="ApplyPatch",
             description=(
-                "Edit up to 32 existing UTF-8 workspace files in one governed call, using either "
-                "full replacement content or exact line edits. Each file must include the exact "
-                "SHA-256 printed by Read; every path and hash is validated before any file is replaced."
+                "Create or edit up to 32 UTF-8 workspace files in one governed call. Existing files "
+                "use the exact SHA-256 printed by Read; new files use expected_sha256='absent'. "
+                "Every path and expected version is validated before any file is changed."
             ),
             input_schema=_schema(
                 {
@@ -789,23 +789,31 @@ def build_default_registry(include_describe: bool = True) -> ToolRegistry:
                         "items": {
                             "type": "object",
                             "properties": {
-                                "path": {"type": "string", "description": "Existing workspace-relative file"},
-                                "expected_sha256": {
+                                "path": {
                                     "type": "string",
-                                    "pattern": "^[0-9a-fA-F]{64}$",
-                                    "description": "The 64-hex digest printed in Read's SHA-256 marker for this file",
+                                    "description": "Workspace-relative file; parent directories must already exist",
+                                },
+                                "expected_sha256": {
+                                    "anyOf": [
+                                        {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"},
+                                        {"type": "string", "enum": ["absent"]},
+                                    ],
+                                    "description": (
+                                        "The 64-hex digest printed in Read's SHA-256 marker, or 'absent' "
+                                        "when creating a new file"
+                                    ),
                                 },
                                 "content": {
                                     "type": "string",
                                     "maxLength": MAX_PATCH_FILE_BYTES,
-                                    "description": "Full replacement UTF-8 file content",
+                                    "description": "Full UTF-8 content for a new file or full replacement of an existing file",
                                 },
                                 "edits": {
                                     "type": "array",
                                     "minItems": 1,
                                     "maxItems": MAX_PATCH_EDITS_PER_FILE,
                                     "description": (
-                                        "Exact non-overlapping line edits. start_line is 1-based; "
+                                        "For an existing file, exact non-overlapping line edits. start_line is 1-based; "
                                         "delete_lines selects the old range; expected must exactly "
                                         "match that range; replacement is inserted there. Use "
                                         "delete_lines=0 and expected='' to insert at a line boundary."

@@ -1,4 +1,4 @@
-"""Hash-bound multi-file workspace replacements for the coding tool surface."""
+"""Hash-bound multi-file workspace changes for the coding tool surface."""
 from __future__ import annotations
 
 import hashlib
@@ -94,6 +94,17 @@ def _read_patch_target(directory_fd: int, name: str) -> tuple[bytes, int]:
         return b"".join(chunks), mode
     finally:
         os.close(descriptor)
+
+
+def _patch_target_is_absent(directory_fd: int, name: str) -> bool:
+    """Check absence without following a final symlink."""
+    try:
+        os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return False
 
 
 def _validate_line_edits(raw_edits: Any, file_index: int) -> list[dict[str, Any]]:
@@ -250,6 +261,8 @@ def _stage_patch_bytes(directory_fd: int, content: bytes, mode: int) -> str:
 def _current_patch_matches(item: Mapping[str, Any]) -> bool:
     from tools import ToolInputError
 
+    if item["was_absent"]:
+        return _patch_target_is_absent(item["directory_fd"], item["name"])
     try:
         current, mode = _read_patch_target(item["directory_fd"], item["name"])
     except (OSError, ToolInputError):
@@ -275,7 +288,7 @@ def _current_patch_is_applied(item: Mapping[str, Any]) -> bool:
 
 
 def apply_patch(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
-    """Apply bounded full-file replacements guarded by the hashes returned by Read."""
+    """Apply bounded file creations and replacements guarded by Read hashes or absence."""
     from tools import ToolAccessError, ToolInputError, ToolResult
 
     raw_files = payload.get("files")
@@ -294,18 +307,25 @@ def apply_patch(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
             raw_path = entry.get("path")
             expected = entry.get("expected_sha256")
             content = entry.get("content")
+            was_absent = expected == "absent"
             has_content = "content" in entry
             has_edits = "edits" in entry
             if not isinstance(raw_path, str) or not raw_path.strip():
                 raise ToolInputError(f"files[{index}].path must be a non-empty workspace-relative path")
             if Path(raw_path.strip()).is_absolute():
                 raise ToolInputError(f"files[{index}].path must be workspace-relative")
-            if not isinstance(expected, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", expected):
-                raise ToolInputError(f"files[{index}].expected_sha256 must be a 64-character SHA-256 hex digest from Read")
+            if not isinstance(expected, str) or (
+                not was_absent and not re.fullmatch(r"[0-9a-fA-F]{64}", expected)
+            ):
+                raise ToolInputError(
+                    f"files[{index}].expected_sha256 must be a Read SHA-256 digest or 'absent'"
+                )
             if has_content == has_edits:
                 raise ToolInputError(f"files[{index}] must provide exactly one of content or edits")
             line_edits = None
             if has_edits:
+                if was_absent:
+                    raise ToolInputError(f"files[{index}] cannot use line edits for a new file")
                 line_edits = _validate_line_edits(entry.get("edits"), index)
             else:
                 if not isinstance(content, str):
@@ -321,25 +341,37 @@ def apply_patch(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
                 if len(new_bytes) > MAX_PATCH_FILE_BYTES:
                     raise ToolInputError(f"files[{index}].content exceeds the {MAX_PATCH_FILE_BYTES}-byte limit")
 
-            target = ctx.resolve(raw_path, for_write=True, must_exist=True)
+            target = ctx.resolve(raw_path, for_write=True, must_exist=not was_absent)
             canonical = os.path.normcase(str(target))
             if canonical in seen_paths:
                 raise ToolInputError(f"files[{index}] duplicates another patch target: {ctx.relative(target)}")
             seen_paths.add(canonical)
             directory_fd, name = _open_patch_parent(ctx, target)
             try:
-                old_bytes, mode = _read_patch_target(directory_fd, name)
-                actual = hashlib.sha256(old_bytes).hexdigest()
-                if actual != expected.lower():
-                    raise ToolInputError(
-                        f"stale patch for {ctx.relative(target)}: expected {expected.lower()}, found {actual}; re-read before editing"
-                    )
-                try:
-                    old_text = old_bytes.decode("utf-8", errors="strict")
-                except UnicodeDecodeError as error:
-                    raise ToolInputError(f"patch target is not UTF-8 text: {ctx.relative(target)}") from error
-                if b"\x00" in old_bytes:
-                    raise ToolInputError(f"patch target is binary, not UTF-8 text: {ctx.relative(target)}")
+                if was_absent:
+                    if not _patch_target_is_absent(directory_fd, name):
+                        raise ToolInputError(
+                            f"stale create for {ctx.relative(target)}: target already exists"
+                        )
+                    old_bytes = b""
+                    old_text = ""
+                    mode = 0o644
+                    actual = None
+                    normalized_expected = "absent"
+                else:
+                    old_bytes, mode = _read_patch_target(directory_fd, name)
+                    actual = hashlib.sha256(old_bytes).hexdigest()
+                    normalized_expected = expected.lower()
+                    if actual != normalized_expected:
+                        raise ToolInputError(
+                            f"stale patch for {ctx.relative(target)}: expected {normalized_expected}, found {actual}; re-read before editing"
+                        )
+                    try:
+                        old_text = old_bytes.decode("utf-8", errors="strict")
+                    except UnicodeDecodeError as error:
+                        raise ToolInputError(f"patch target is not UTF-8 text: {ctx.relative(target)}") from error
+                    if b"\x00" in old_bytes:
+                        raise ToolInputError(f"patch target is binary, not UTF-8 text: {ctx.relative(target)}")
                 if line_edits is not None:
                     new_bytes = _apply_line_edits(old_text, line_edits, index)
                 total_new_bytes += len(new_bytes)
@@ -353,10 +385,11 @@ def apply_patch(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
                         "name": name,
                         "old_bytes": old_bytes,
                         "new_bytes": new_bytes,
-                        "expected_sha256": expected.lower(),
+                        "expected_sha256": normalized_expected,
                         "mode": mode,
                         "before_sha256": actual,
                         "after_sha256": hashlib.sha256(new_bytes).hexdigest(),
+                        "was_absent": was_absent,
                         "staged_name": None,
                     }
                 )
@@ -369,7 +402,9 @@ def apply_patch(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
         return ToolResult.error(str(error))
 
     applied: list[dict[str, Any]] = []
-    changed_items = [item for item in prepared if item["new_bytes"] != item["old_bytes"]]
+    changed_items = [
+        item for item in prepared if item["was_absent"] or item["new_bytes"] != item["old_bytes"]
+    ]
     try:
         for item in changed_items:
             item["staged_name"] = _stage_patch_bytes(
@@ -386,35 +421,54 @@ def apply_patch(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
         for item in changed_items:
             if not _current_patch_matches(item):
                 raise _PatchConflictError(
-                    f"workspace changed before replacing {item['relative']}; re-read and rebuild the patch"
+                    f"workspace changed before applying {item['relative']}; re-read and rebuild the patch"
                 )
-            os.replace(
-                item["staged_name"],
-                item["name"],
-                src_dir_fd=item["directory_fd"],
-                dst_dir_fd=item["directory_fd"],
-            )
+            if item["was_absent"]:
+                try:
+                    os.link(
+                        item["staged_name"],
+                        item["name"],
+                        src_dir_fd=item["directory_fd"],
+                        dst_dir_fd=item["directory_fd"],
+                        follow_symlinks=False,
+                    )
+                except FileExistsError as conflict:
+                    raise _PatchConflictError(
+                        f"workspace changed before creating {item['relative']}; target now exists"
+                    ) from conflict
+                applied.append(item)
+                os.unlink(item["staged_name"], dir_fd=item["directory_fd"])
+            else:
+                os.replace(
+                    item["staged_name"],
+                    item["name"],
+                    src_dir_fd=item["directory_fd"],
+                    dst_dir_fd=item["directory_fd"],
+                )
+                applied.append(item)
             item["staged_name"] = None
-            applied.append(item)
     except (OSError, _PatchConflictError) as error:
         rollback_incomplete: list[tuple[str, str]] = []
         for item in reversed(applied):
             backup: str | None = None
             try:
-                backup = _stage_patch_bytes(item["directory_fd"], item["old_bytes"], item["mode"])
                 if not _current_patch_is_applied(item):
-                    os.unlink(backup, dir_fd=item["directory_fd"])
-                    backup = None
                     rollback_incomplete.append(
                         (item["relative"], "no longer matches this patch; left untouched")
                     )
                     continue
-                os.replace(
-                    backup,
-                    item["name"],
-                    src_dir_fd=item["directory_fd"],
-                    dst_dir_fd=item["directory_fd"],
-                )
+                if item["was_absent"]:
+                    os.unlink(item["name"], dir_fd=item["directory_fd"])
+                else:
+                    backup = _stage_patch_bytes(
+                        item["directory_fd"], item["old_bytes"], item["mode"]
+                    )
+                    os.replace(
+                        backup,
+                        item["name"],
+                        src_dir_fd=item["directory_fd"],
+                        dst_dir_fd=item["directory_fd"],
+                    )
             except OSError as rollback_error:
                 if backup:
                     try:
@@ -429,7 +483,7 @@ def apply_patch(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
                 f"patch commit failed: {error}; rollback was incomplete for {details}",
                 files_maybe_changed=partial,
             )
-        return ToolResult.error(f"patch commit failed and prior replacements were rolled back: {error}")
+        return ToolResult.error(f"patch commit failed and prior changes were rolled back: {error}")
     finally:
         for item in prepared:
             staged_name = item.get("staged_name")
@@ -445,18 +499,19 @@ def apply_patch(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
             "path": item["relative"],
             "before_sha256": item["before_sha256"],
             "after_sha256": item["after_sha256"],
-            "changed": item["new_bytes"] != item["old_bytes"],
+            "created": item["was_absent"],
+            "changed": item["was_absent"] or item["new_bytes"] != item["old_bytes"],
         }
         for item in prepared
     ]
     summary = "\n".join(
-        f"{item['path']}: {'changed' if item['changed'] else 'unchanged'} "
-        f"{item['before_sha256']} -> {item['after_sha256']}"
+        f"{item['path']}: {'created' if item['created'] else 'changed' if item['changed'] else 'unchanged'} "
+        f"{item['before_sha256'] or 'absent'} -> {item['after_sha256']}"
         for item in results
     )
     return ToolResult(
         content=(
-            f"validated {len(results)} file(s), replaced {len(changed_items)} after matching every expected SHA-256:\n{summary}"
+            f"validated {len(results)} file(s), created or replaced {len(changed_items)} after matching every expected version:\n{summary}"
         ),
         data={"files": results, "count": len(results), "changed_count": len(changed_items)},
     )
