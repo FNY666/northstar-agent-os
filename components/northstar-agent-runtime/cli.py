@@ -61,7 +61,6 @@ from plugin_load import add_plugin_arguments
 from mcp_config import add_mcp_arguments
 from mcp_admission import add_admission_arguments
 from skill_check import add_skills_arguments
-from governance_bench import add_bench_arguments
 from run_setup import (  # noqa: F401 - MUTATING_TOOLS and checkpoint_usage stay importable from cli
     MUTATING_TOOLS,
     HookSetup,
@@ -285,7 +284,13 @@ def build_parser() -> argparse.ArgumentParser:
             "Same cases CI and `make bench` run. Never loosens a ceiling."
         ),
     )
-    add_bench_arguments(bench)
+    # Keep the research benchmark out of the ordinary CLI import path.  These
+    # four options intentionally mirror ``governance_bench.add_bench_arguments``;
+    # the benchmark module is imported only when the command actually runs.
+    bench.add_argument("--list", action="store_true", help="list case ids and tracks without running them")
+    bench.add_argument("--json", action="store_true", help="emit one JSON object (machine-readable score)")
+    bench.add_argument("--only", action="append", default=[], metavar="ID", help="run only this case id or track prefix (repeatable)")
+    bench.add_argument("--track", action="append", default=[], metavar="NAME", help="run only this track (repeatable)")
     new_proj = sub.add_parser("new", help="scaffold a governed project (config, agents, hooks guide, CI recipe)")
     new_proj.add_argument("directory", help="directory to create (must not exist, or be empty unless --force)")
     new_proj.add_argument("--force", action="store_true", help="write the template files into a non-empty directory (never deletes)")

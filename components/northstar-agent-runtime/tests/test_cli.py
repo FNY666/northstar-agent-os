@@ -37,6 +37,20 @@ def run_cli(*argv: str, stdin_text: str = "") -> tuple[int, str, str]:
 
 
 class ParserTests(unittest.TestCase):
+    def test_importing_cli_does_not_load_research_benchmark(self):
+        script = "import sys; import cli; print('governance_bench' in sys.modules)"
+        env = dict(os.environ, PYTHONPATH=".")
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=Path(__file__).resolve().parent.parent,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.strip(), "False")
+
     def test_no_subcommand_prints_help_and_exits_64(self):
         code, out, _ = run_cli()
         self.assertEqual(code, USAGE_ERROR)
