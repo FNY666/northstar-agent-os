@@ -2729,6 +2729,7 @@ class AgentRuntime:
                 call, spec, state, payload=payload, turn_index=turn_index, span=span, rewritten=rewritten
             )
 
+        hook_payload = self._safe_hook_value(payload)
         pre = self._fire(
             state,
             "PreToolUse",
@@ -2740,7 +2741,7 @@ class AgentRuntime:
                 turn_index=turn_index,
                 tool_name=spec.name,
                 tool_use_id=call.id,
-                tool_input=payload,
+                tool_input=hook_payload,
                 data={"kind": spec.kind},
             ),
         )

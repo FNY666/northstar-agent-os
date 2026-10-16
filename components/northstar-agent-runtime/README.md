@@ -210,6 +210,8 @@ messages, or durable audit records, so extension diagnostics cannot become a
 credential exfiltration channel.
 Post-tool hooks receive a sanitized copy of tool arguments; execution and
 authorization continue to use the original, schema-validated payload.
+Pre-tool hooks receive the same sanitized copy for review-level findings, while
+high-confidence findings are refused before any hook is invoked.
 Provider and retry failure text is screened before it becomes a result error or
 retry event, preventing upstream response bodies from leaking through failure
 handling.
