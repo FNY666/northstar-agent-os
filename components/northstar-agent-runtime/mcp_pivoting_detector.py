@@ -107,6 +107,36 @@ _LOOPBACK_SPELLINGS = frozenset({
 })
 
 
+def _parse_numeric_ipv4(host: str) -> ipaddress.IPv4Address | None:
+    """Parse legacy integer/hex/dotted IPv4 spellings used in SSRF bypasses."""
+    parts = host.split(".")
+    if not 1 <= len(parts) <= 4:
+        return None
+    values: list[int] = []
+    for part in parts:
+        if not part:
+            return None
+        try:
+            if part.lower().startswith("0x"):
+                value = int(part[2:], 16)
+            elif len(part) > 1 and part.startswith("0"):
+                value = int(part[1:] or "0", 8)
+            else:
+                value = int(part, 10)
+        except ValueError:
+            return None
+        if value < 0:
+            return None
+        values.append(value)
+    widths = {1: (32,), 2: (8, 24), 3: (8, 8, 16), 4: (8, 8, 8, 8)}[len(values)]
+    if any(value >= (1 << width) for value, width in zip(values, widths)):
+        return None
+    packed = 0
+    for value, width in zip(values, widths):
+        packed = (packed << width) | value
+    return ipaddress.IPv4Address(packed)
+
+
 def _decode_host(raw_host: str) -> str:
     """Percent-decode the host and strip brackets/ports/trailing dots."""
     host = unquote(raw_host or "").strip().lower()
@@ -125,8 +155,9 @@ def _host_is_blocked(host: str) -> bool:
         return True  # empty host: fail closed
     if host in BLOCKED_HOSTNAMES:
         return True
-    if host in _LOOPBACK_SPELLINGS:
-        return True
+    numeric = _parse_numeric_ipv4(host)
+    if numeric is not None:
+        host = str(numeric)
     for suffix in BLOCKED_SUFFIXES:
         if host.endswith(suffix):
             return True
@@ -135,6 +166,11 @@ def _host_is_blocked(host: str) -> bool:
         addr = ipaddress.ip_address(host)
     except ValueError:
         return False  # not an IP literal and not a blocked name: external
+    # IPv4-mapped IPv6 addresses are still IPv4 destinations. Normalize them
+    # before the network checks so ::ffff:127.0.0.1 cannot evade loopback rules.
+    mapped = getattr(addr, "ipv4_mapped", None)
+    if mapped is not None:
+        addr = mapped
     return any(addr in net for net in BLOCKED_NETWORKS)
 
 

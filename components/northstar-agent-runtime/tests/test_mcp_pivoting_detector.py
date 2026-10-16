@@ -58,6 +58,14 @@ class TestLoopback(unittest.TestCase):
         # 2130706433 == 127.0.0.1
         self.assertTrue(detect_pivoting(call(url="http://2130706433/")))
 
+    def test_ipv4_mapped_ipv6_loopback_blocked(self):
+        self.assertTrue(detect_pivoting(call(url="http://[::ffff:127.0.0.1]/")))
+
+    def test_hex_and_octal_loopback_spellings_blocked(self):
+        for host in ("0x7f000001", "017700000001", "0x7f.1"):
+            with self.subTest(host=host):
+                self.assertTrue(detect_pivoting(call(url=f"http://{host}/")))
+
 
 class TestPrivateRanges(unittest.TestCase):
     def test_rfc1918_10_blocked(self):
@@ -72,6 +80,9 @@ class TestPrivateRanges(unittest.TestCase):
     def test_internal_ip_reason_vocabulary(self):
         rec = inspect_tool_call(call(url="http://10.1.2.3/"))
         self.assertEqual(rec.reason, "internal-ip")
+
+    def test_ipv4_mapped_ipv6_metadata_blocked(self):
+        self.assertTrue(detect_pivoting(call(url="http://[::ffff:169.254.169.254]/")))
 
 
 class TestEvasionResistance(unittest.TestCase):
