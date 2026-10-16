@@ -211,6 +211,8 @@ credential exfiltration channel.
 Provider and retry failure text is screened before it becomes a result error or
 retry event, preventing upstream response bodies from leaking through failure
 handling.
+Unexpected runtime and delivery-protocol errors use the same boundary before
+they enter traces or result records.
 On resume, the final provider payload is screened again copy-on-write, so old
 or imported transcripts cannot bypass the current rules; the durable transcript
 itself is never rewritten by this compatibility pass.

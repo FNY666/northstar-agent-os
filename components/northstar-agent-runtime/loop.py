@@ -1553,8 +1553,11 @@ class AgentRuntime:
                 state.events.append(state.result)
                 yield state.result
         except Exception as error:  # noqa: BLE001 - every expected failure is an event
-            state.errors.append(f"unexpected runtime failure: {type(error).__name__}: {error}")
-            run_span.record_error(f"{type(error).__name__}: {error}")
+            from defensive_agent import sanitize_for_model
+
+            safe_error = sanitize_for_model(str(error))[0]
+            state.errors.append(f"unexpected runtime failure: {type(error).__name__}: {safe_error}")
+            run_span.record_error(f"{type(error).__name__}: {safe_error}")
             if state.result is None:
                 state.result = self._result(state, "error_during_execution")
                 if not finished:
@@ -2171,7 +2174,9 @@ class AgentRuntime:
             try:
                 config.code_phase_machine.begin_verification()
             except (TypeError, ValueError) as error:
-                state.errors.append(f"code phase protocol: {error}")
+                from defensive_agent import sanitize_for_model
+
+                state.errors.append(f"code phase protocol: {sanitize_for_model(str(error))[0]}")
                 subtype = "error_postconditions_failed"
         if config.verification_commands and subtype == "success":
             verification_context = ToolContext(
@@ -2231,7 +2236,9 @@ class AgentRuntime:
             try:
                 config.code_phase_machine.seal_verification()
             except (OSError, TypeError, ValueError) as error:
-                state.errors.append(f"code delivery seal: {error}")
+                from defensive_agent import sanitize_for_model
+
+                state.errors.append(f"code delivery seal: {sanitize_for_model(str(error))[0]}")
                 subtype = "error_postconditions_failed"
         if (
             subtype == "success"
