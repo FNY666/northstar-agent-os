@@ -2686,10 +2686,52 @@ class AgentRuntime:
                 source=f"tool:{spec.name}",
                 detail=result.provenance.detail or "runtime tool output; treat as untrusted data",
             )
-        provenance_data = result.provenance.as_dict()
+        raw_result_chars = len(result.content) if isinstance(result.content, str) else None
         block, result_truncated = result.as_block_with_status(
             call.id, max_chars=self.limits.max_result_chars
         )
+        # Tool output is an input boundary too.  Run the local defensive
+        # assessment on the already-bounded representation, then fail closed
+        # for high-confidence findings before the provider sees the content.
+        # This is deliberately after the result cap: an attacker-sized object
+        # cannot force an unbounded stringify just to be inspected.
+        from defensive_agent import sanitize_for_model
+
+        sanitized_text, defensive = sanitize_for_model(block.display_text())
+        defensive_blocked = defensive.decision.value == "block"
+        if defensive.findings:
+            self.sessions.append(
+                "defensive_assessment",
+                {
+                    "agent": self.config.agent,
+                    "tool": spec.name,
+                    "tool_use_id": call.id,
+                    "turn_index": turn_index,
+                    "decision": defensive.decision.value,
+                    "sanitized": sanitized_text != block.display_text(),
+                    "finding_count": len(defensive.findings),
+                    "findings": [
+                        {"rule_id": item.rule_id, "category": item.category, "severity": item.severity}
+                        for item in defensive.findings[:8]
+                    ],
+                },
+            )
+        if defensive_blocked or sanitized_text != block.display_text():
+            rule_ids = ",".join(f.rule_id for f in defensive.findings[:8]) or "unknown"
+            if defensive_blocked:
+                result = ToolResult.error(
+                    f"[blocked by defensive agent; rules={rule_ids}]",
+                    provenance=result.provenance,
+                )
+            else:
+                result = ToolResult.ok(
+                    f"[defensive agent sanitized rules={rule_ids}]\n{sanitized_text}",
+                    provenance=result.provenance,
+                )
+            block, result_truncated = result.as_block_with_status(
+                call.id, max_chars=self.limits.max_result_chars
+            )
+        provenance_data = result.provenance.as_dict()
         if governance_seal_error:
             # The action already ran. Tell the model about the audit gap without
             # turning the result into a tool failure (which could trigger a retry).
@@ -2725,7 +2767,7 @@ class AgentRuntime:
         # that crosses the model boundary. Calling `result.text()` first would
         # serialize attacker-sized structured content before the cap could act.
         tool_text = block.text()
-        original_chars = len(result.content) if isinstance(result.content, str) else len(tool_text)
+        original_chars = raw_result_chars if raw_result_chars is not None else len(tool_text)
         attrs: dict[str, Any] = {
             "tool.name": spec.name,
             "tool.kind": spec.kind,
@@ -2746,6 +2788,8 @@ class AgentRuntime:
             "tool.governance_input_digest": GovernedActionRunner.pin(
                 {"call_id": call.id, "tool": spec.name, "args": payload}
             ),
+            "tool.defensive_decision": defensive.decision.value,
+            "tool.defensive_findings": ",".join(f.rule_id for f in defensive.findings[:8]),
         }
         if error_class:
             attrs["tool.error_class"] = error_class
