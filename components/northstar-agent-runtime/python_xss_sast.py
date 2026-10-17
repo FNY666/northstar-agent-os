@@ -4,8 +4,10 @@ This rule follows common request, CLI, environment, and interactive-input
 sources into raw HTML response constructors, strings returned from Flask route
 handlers, and APIs that mark strings safe. It recognizes a small set of standard
 HTML escapers, while static-template rendering remains outside its sink set. It
-follows bounded direct calls to same-file top-level helpers, but does not resolve
-method dispatch, cross-file flows, template filters, or output subcontexts.
+follows bounded direct calls to same-file top-level helpers and explicitly named
+methods in top-level classes, including simple local `self` / `cls` aliases. It
+does not resolve inherited or dynamic method dispatch, cross-file flows,
+template filters, or output subcontexts.
 """
 from __future__ import annotations
 

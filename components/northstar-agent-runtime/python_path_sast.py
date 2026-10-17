@@ -3,8 +3,10 @@
 The scanner follows common request, CLI, environment, and interactive-input
 sources into filesystem paths and file APIs. It handles import aliases,
 multiline calls, assignments, and bounded direct calls to same-file top-level
-helpers. It does not resolve method dispatch or cross-file flows, or prove that
-path containment and symlink protections are correct.
+helpers and explicitly named methods in top-level classes, including simple
+local `self` / `cls` aliases. It does not resolve inherited or dynamic method
+dispatch or cross-file flows, or prove that path containment and symlink
+protections are correct.
 """
 from __future__ import annotations
 

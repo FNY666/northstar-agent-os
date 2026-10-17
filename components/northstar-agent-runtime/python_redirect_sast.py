@@ -4,8 +4,10 @@ The scanner follows common request, CLI, environment, and interactive-input
 sources into framework redirect helpers. It treats relative and absolute
 destinations alike because attacker-controlled protocol-relative URLs can also
 redirect off-site. This is a single-file heuristic: it follows bounded direct
-calls to same-file top-level helpers, but does not resolve method dispatch or
-cross-file calls, or prove a destination allowlist.
+calls to same-file top-level helpers and explicitly named methods in top-level
+classes, including simple local `self` / `cls` aliases. It does not resolve
+inherited or dynamic method dispatch or cross-file calls, or prove a destination
+allowlist.
 """
 from __future__ import annotations
 

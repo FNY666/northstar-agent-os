@@ -220,10 +220,11 @@ custom allowlists.
 
 These Python flow rules also follow explicit calls to methods declared directly
 in top-level classes in the same file, through `self.helper()`, `cls.helper()`,
-and `Class.method()` calls. They propagate direct `self.field` and `cls.field`
-taint through bounded same-class helper calls. Field tracking does not identify
-aliases to the same object. Inherited or dynamically selected methods and
-cross-file calls remain outside the analysis boundary.
+and `Class.method()` calls. They recognize simple local aliases assigned
+directly from `self` or `cls`, including aliases passed to same-class helpers,
+and propagate direct field taint through bounded calls. Computed object aliases,
+inherited or dynamically selected methods, and cross-file calls remain outside
+the analysis boundary.
 
 Go files also receive `GO001_UNTRUSTED_SSRF` and `GO002_PATH_TRAVERSAL` checks
 for standard `net/http`, chi/mux, and common Gin request values flowing through

@@ -3,9 +3,10 @@
 The scanner follows common request, CLI, environment, and interactive-input
 sources into pickle-like APIs and unsafe PyYAML loaders. It handles assignments,
 aliases, multiline calls, and basic control-flow joins through a shared AST taint
-engine. It follows bounded direct calls to same-file top-level helpers, but does
-not resolve method dispatch or cross-file flows, or verify that serialized bytes
-are authenticated.
+engine. It follows bounded direct calls to same-file top-level helpers and
+explicitly named methods in top-level classes, including simple local `self` /
+`cls` aliases. It does not resolve inherited or dynamic method dispatch or
+cross-file flows, or verify that serialized bytes are authenticated.
 """
 from __future__ import annotations
 

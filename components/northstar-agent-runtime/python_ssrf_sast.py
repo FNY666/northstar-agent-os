@@ -3,8 +3,10 @@
 The scanner follows common request, CLI, environment, and interactive-input
 sources into outbound HTTP client URL arguments. It recognizes common import
 aliases and multiline calls, and follows bounded direct calls to same-file
-top-level helpers. It does not resolve method dispatch or cross-file flows, and
-cannot prove that a destination allowlist is correct.
+top-level helpers and explicitly named methods in top-level classes, including
+simple local `self` / `cls` aliases. It does not resolve inherited or dynamic
+method dispatch or cross-file flows, and cannot prove that a destination
+allowlist is correct.
 """
 from __future__ import annotations
 

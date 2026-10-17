@@ -5,9 +5,10 @@ interactive input sources to shell-backed process APIs. It handles multiline
 calls, assignments, f-strings, imports, basic control-flow joins, and bounded
 calls to direct same-file functions and explicitly named methods in top-level
 classes, including direct `self` / `cls` field flow through called helpers. It
-remains a heuristic: it does not
-resolve inherited or dynamic method dispatch, cross-file or dynamic-alias flows,
-custom sanitizers, or whether non-shell subprocess arguments are dangerous.
+also follows simple local aliases of `self` / `cls`. It remains a heuristic: it
+does not resolve inherited or dynamic method dispatch, cross-file or computed
+alias flows, custom sanitizers, or whether non-shell subprocess arguments are
+dangerous.
 """
 from __future__ import annotations
 
@@ -45,6 +46,7 @@ _REQUEST_FIELDS = {
 @dataclass(frozen=True)
 class _Taint:
     source_line: int
+    receiver_alias: str | None = None
 
 
 @dataclass(frozen=True)
@@ -96,7 +98,7 @@ class _Analyzer:
         self._return_frames: list[list[_Taint]] = []
         self._current_class: str | None = None
         self._local_call_cache: dict[
-            tuple[int, tuple[tuple[str, int], ...]],
+            tuple[int, tuple[tuple[str, int, str], ...]],
             tuple[bool, _Taint | None, str | None, tuple[tuple[str, int], ...]],
         ] = {}
         self._statements(tree.body, {})
@@ -141,8 +143,9 @@ class _Analyzer:
         if source_line is not None:
             return _Taint(source_line)
         if isinstance(node, ast.Name):
-            return env.get(node.id)
-        field_key = self._field_key(node)
+            taint = env.get(node.id)
+            return taint if taint is not None and taint.receiver_alias is None else None
+        field_key = self._field_key(node, env)
         if field_key is not None:
             return env.get(field_key)
         if isinstance(node, ast.Call):
@@ -150,7 +153,7 @@ class _Analyzer:
             if name in _SUBPROCESS_SINKS | _DIRECT_SHELL_SINKS:
                 # A process API's result is not the command string it consumed.
                 return None
-            if self._function_name(node) in self._local_functions:
+            if self._function_name(node, env) in self._local_functions:
                 analyzed, helper_result = self._local_call_result(node, env)
                 if analyzed:
                     return helper_result
@@ -158,28 +161,38 @@ class _Analyzer:
         tainted = [origin for origin in origins if origin is not None]
         return min(tainted, key=lambda origin: origin.source_line) if tainted else None
 
-    def _field_key(self, node: ast.AST) -> str | None:
+    def _receiver_alias(self, node: ast.AST, env: dict[str, _Taint]) -> str | None:
+        if not isinstance(node, ast.Name):
+            return None
+        tracked = env.get(node.id)
+        if tracked is not None:
+            return tracked.receiver_alias
+        return node.id if node.id in {"self", "cls"} else None
+
+    def _field_key(self, node: ast.AST, env: dict[str, _Taint]) -> str | None:
         if (
             self._current_class is None
             or not isinstance(node, ast.Attribute)
-            or not isinstance(node.value, ast.Name)
-            or node.value.id not in {"self", "cls"}
         ):
             return None
-        return f"{_FIELD_ENV_PREFIX}{self._current_class}:{node.value.id}:{node.attr}"
+        owner = self._receiver_alias(node.value, env)
+        if owner is None:
+            return None
+        return f"{_FIELD_ENV_PREFIX}{self._current_class}:{owner}:{node.attr}"
 
-    def _function_name(self, call: ast.Call) -> str | None:
+    def _function_name(self, call: ast.Call, env: dict[str, _Taint]) -> str | None:
         if isinstance(call.func, ast.Name):
             return call.func.id if call.func.id in self._local_functions else None
         if not isinstance(call.func, ast.Attribute) or not isinstance(call.func.value, ast.Name):
             return None
 
-        receiver = call.func.value.id
-        if receiver in {"self", "cls"} and self._current_class is not None:
+        receiver = self._receiver_alias(call.func.value, env)
+        if receiver is not None and self._current_class is not None:
             name = f"{self._current_class}.{call.func.attr}"
             return name if name in self._local_functions else None
-        if receiver in self._local_classes:
-            name = f"{receiver}.{call.func.attr}"
+        class_receiver = call.func.value.id
+        if class_receiver in self._local_classes:
+            name = f"{class_receiver}.{call.func.attr}"
             return name if name in self._local_functions else None
         return None
 
@@ -192,21 +205,42 @@ class _Analyzer:
         return any(_dotted_name(decorator) == "staticmethod" for decorator in function.decorator_list)
 
     def _is_bound_method_call(
-        self, call: ast.Call, function: ast.FunctionDef | ast.AsyncFunctionDef
+        self,
+        call: ast.Call,
+        function: ast.FunctionDef | ast.AsyncFunctionDef,
+        env: dict[str, _Taint],
     ) -> bool:
         if not isinstance(call.func, ast.Attribute) or not isinstance(call.func.value, ast.Name):
             return False
-        receiver = call.func.value.id
         parameters = [*function.args.posonlyargs, *function.args.args]
         if not parameters:
             return False
-        if receiver in {"self", "cls"} and self._current_class is not None:
+        receiver_alias = self._receiver_alias(call.func.value, env)
+        if receiver_alias is not None and self._current_class is not None:
             if self._is_staticmethod(function):
                 return False
-            if receiver == "cls" and not self._is_classmethod(function):
+            if receiver_alias == "cls" and not self._is_classmethod(function):
                 return False
             return True
-        return receiver in self._local_classes and self._is_classmethod(function) and parameters[0].arg == "cls"
+        receiver = call.func.value.id
+        return (
+            receiver in self._local_classes
+            and self._is_classmethod(function)
+            and parameters[0].arg == "cls"
+        )
+
+    def _value_alias_or_taint(self, node: ast.AST, env: dict[str, _Taint]) -> _Taint | None:
+        alias = self._receiver_alias(node, env)
+        if alias is not None:
+            return _Taint(0, alias)
+        return self._taint(node, env)
+
+    @staticmethod
+    def _environment_signature(env: dict[str, _Taint]) -> tuple[tuple[str, int, str], ...]:
+        return tuple(sorted(
+            (name, taint.source_line, taint.receiver_alias or "")
+            for name, taint in env.items()
+        ))
 
     def _local_call_environment(
         self,
@@ -215,7 +249,8 @@ class _Analyzer:
         caller_env: dict[str, _Taint],
     ) -> dict[str, _Taint]:
         positional = [*function.args.posonlyargs, *function.args.args]
-        positional_parameters = positional[1:] if self._is_bound_method_call(call, function) else positional
+        bound_method = self._is_bound_method_call(call, function, caller_env)
+        positional_parameters = positional[1:] if bound_method else positional
         keyword_only = list(function.args.kwonlyargs)
         parameters = [*positional, *keyword_only]
         values: dict[str, ast.AST] = {}
@@ -235,14 +270,17 @@ class _Analyzer:
                 values[keyword.arg] = keyword.value
 
         environment: dict[str, _Taint] = {}
+        if bound_method and positional:
+            bound_owner = "cls" if self._is_classmethod(function) else "self"
+            environment[positional[0].arg] = _Taint(0, bound_owner)
         for parameter in parameters:
             argument = values.get(parameter.arg)
             if argument is not None:
-                taint = self._taint(argument, caller_env)
+                taint = self._value_alias_or_taint(argument, caller_env)
                 if taint is not None:
                     environment[parameter.arg] = taint
 
-        field_prefix = self._shared_field_prefix(call, function)
+        field_prefix = self._shared_field_prefix(call, function, caller_env)
         if field_prefix is not None:
             environment.update({
                 key: taint for key, taint in caller_env.items()
@@ -285,8 +323,9 @@ class _Analyzer:
         self,
         call: ast.Call,
         function: ast.FunctionDef | ast.AsyncFunctionDef,
+        caller_env: dict[str, _Taint],
     ) -> str | None:
-        name = self._function_name(call)
+        name = self._function_name(call, caller_env)
         class_name = self._function_classes.get(name or "")
         if class_name is None or class_name != self._current_class:
             return None
@@ -297,14 +336,13 @@ class _Analyzer:
         if self._is_classmethod(function):
             field_owner = "cls"
         elif isinstance(call.func, ast.Attribute) and isinstance(call.func.value, ast.Name):
-            receiver = call.func.value.id
+            receiver = self._receiver_alias(call.func.value, caller_env)
             if receiver == "self":
                 field_owner = "self"
             elif (
-                receiver in self._local_classes
+                (call.func.value.id in self._local_classes or receiver == "cls")
                 and call.args
-                and isinstance(call.args[0], ast.Name)
-                and call.args[0].id == "self"
+                and self._receiver_alias(call.args[0], caller_env) == "self"
             ):
                 # A direct unbound call passes the current instance explicitly.
                 field_owner = "self"
@@ -316,7 +354,7 @@ class _Analyzer:
     def _local_call_result(
         self, call: ast.Call, caller_env: dict[str, _Taint]
     ) -> tuple[bool, _Taint | None]:
-        name = self._function_name(call)
+        name = self._function_name(call, caller_env)
         function = self._local_functions.get(name or "")
         if (
             function is None
@@ -326,9 +364,7 @@ class _Analyzer:
             return False, None
 
         function_env = self._local_call_environment(call, function, caller_env)
-        cache_key = (id(call), tuple(sorted(
-            (parameter, taint.source_line) for parameter, taint in function_env.items()
-        )))
+        cache_key = (id(call), self._environment_signature(function_env))
         if cache_key in self._local_call_cache:
             summary = self._local_call_cache[cache_key]
             self._apply_field_summary(caller_env, summary[2], summary[3])
@@ -342,7 +378,7 @@ class _Analyzer:
         returns: list[_Taint] = []
         self._return_frames.append(returns)
         saved_class = self._current_class
-        field_prefix = self._shared_field_prefix(call, function)
+        field_prefix = self._shared_field_prefix(call, function, caller_env)
         self._current_class = self._function_classes.get(name or "")
         try:
             result_env = self._scoped(function.body, function_env)
@@ -373,9 +409,7 @@ class _Analyzer:
             post_call_env.update({
                 key: _Taint(source_line) for key, source_line in field_state
             })
-        post_call_key = (id(call), tuple(sorted(
-            (parameter, taint.source_line) for parameter, taint in post_call_env.items()
-        )))
+        post_call_key = (id(call), self._environment_signature(post_call_env))
         self._local_call_cache.setdefault(post_call_key, summary)
         return True, result
 
@@ -400,22 +434,32 @@ class _Analyzer:
             return [name for child in target.elts for name in _Analyzer._target_names(child)]
         return []
 
-    def _tracked_target_keys(self, target: ast.AST) -> list[str]:
+    def _tracked_target_keys(self, target: ast.AST, env: dict[str, _Taint]) -> list[str]:
         if isinstance(target, (ast.Tuple, ast.List)):
-            return [key for child in target.elts for key in self._tracked_target_keys(child)]
+            return [
+                key for child in target.elts
+                for key in self._tracked_target_keys(child, env)
+            ]
         names = self._target_names(target)
-        field_key = self._field_key(target)
+        field_key = self._field_key(target, env)
         if field_key is not None:
             names.append(field_key)
         return names
 
     def _assign(self, target: ast.AST, value: ast.AST | None, env: dict[str, _Taint]) -> None:
-        taint = self._taint(value, env)
-        for name in self._tracked_target_keys(target):
+        alias = (
+            self._receiver_alias(value, env)
+            if isinstance(target, ast.Name)
+            else None
+        )
+        taint = None if alias is not None else self._taint(value, env)
+        for name in self._tracked_target_keys(target, env):
             if taint is None:
                 env.pop(name, None)
             else:
                 env[name] = taint
+        if alias is not None and isinstance(target, ast.Name):
+            env[target.id] = _Taint(0, alias)
 
     def _call_sink(self, call: ast.Call, env: dict[str, _Taint]) -> None:
         name = self._canonical_name(call.func)
@@ -464,18 +508,27 @@ class _Analyzer:
         for child in ast.walk(node):
             if isinstance(child, ast.Call):
                 self._call_sink(child, env)
-                name = self._function_name(child)
+                name = self._function_name(child, env)
                 if name in self._local_functions:
                     self._local_call_result(child, env)
 
     @staticmethod
     def _merge(*environments: dict[str, _Taint]) -> dict[str, _Taint]:
         merged: dict[str, _Taint] = {}
-        for env in environments:
-            for name, taint in env.items():
-                previous = merged.get(name)
-                if previous is None or taint.source_line < previous.source_line:
-                    merged[name] = taint
+        names = set().union(*(env.keys() for env in environments)) if environments else set()
+        for name in names:
+            values = [env[name] for env in environments if name in env]
+            taints = [value for value in values if value.receiver_alias is None]
+            if taints:
+                merged[name] = min(taints, key=lambda item: item.source_line)
+                continue
+            aliases = {value.receiver_alias for value in values}
+            if (
+                len(values) == len(environments)
+                and len(aliases) == 1
+                and None not in aliases
+            ):
+                merged[name] = values[0]
         return merged
 
     def _scoped(self, statements: list[ast.stmt], env: dict[str, _Taint]) -> dict[str, _Taint]:
@@ -514,14 +567,14 @@ class _Analyzer:
             elif isinstance(statement, ast.AugAssign):
                 self._expression(statement.value, env)
                 origin = self._taint(statement.target, env) or self._taint(statement.value, env)
-                for name in self._tracked_target_keys(statement.target):
+                for name in self._tracked_target_keys(statement.target, env):
                     if origin is None:
                         env.pop(name, None)
                     else:
                         env[name] = origin
             elif isinstance(statement, ast.Delete):
                 for target in statement.targets:
-                    for name in self._tracked_target_keys(target):
+                    for name in self._tracked_target_keys(target, env):
                         env.pop(name, None)
             elif isinstance(statement, ast.Expr):
                 self._expression(statement.value, env)
