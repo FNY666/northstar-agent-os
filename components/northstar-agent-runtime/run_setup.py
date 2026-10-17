@@ -365,7 +365,13 @@ def compose_system_prompt(args: argparse.Namespace, definition: Any, policy: Any
     """
     from loop import DEFAULT_SYSTEM_PROMPT
     from policy_file import append_project_context, discover_project_context
-    from skills import SkillError, discover_skill_resource_digests, discover_skills, skill_listing
+    from skills import (
+        SkillError,
+        discover_skill_resource_digests,
+        discover_skills,
+        model_visible_skills,
+        skill_listing,
+    )
 
     system_prompt: str | None = None
     if args.system_prompt:
@@ -407,6 +413,7 @@ def compose_system_prompt(args: argparse.Namespace, definition: Any, policy: Any
             )
         except SkillError as error:
             raise RunConfigurationError(str(error)) from error
+    model_skills = model_visible_skills(skills)
     skill_digests = {
         Path(skill.path).relative_to(Path(args.workspace).resolve()).as_posix(): skill.digest
         for skill in skills
@@ -415,22 +422,25 @@ def compose_system_prompt(args: argparse.Namespace, definition: Any, policy: Any
         skill_digests.update(discover_skill_resource_digests(args.workspace, skills))
     except SkillError as error:
         raise RunConfigurationError(str(error)) from error
-    if skills:
+    if model_skills:
         base_prompt = system_prompt if system_prompt is not None else DEFAULT_SYSTEM_PROMPT
-        system_prompt = base_prompt + skill_listing(skills, args.workspace)
-        # Skill-bundled scripts: listed for progressive disclosure; execution is
-        # only via Shell (still default-deny). Discovery never runs them.
+        system_prompt = base_prompt + skill_listing(model_skills, args.workspace)
+
+    if skills:
+        # Discover and pin scripts for every skill, including manual-only skills.
+        # Only scripts from model-invocable skills enter the model's catalog.
         try:
             from tools.skill_scripts import discover_skill_scripts, skill_scripts_listing
 
             skill_scripts = discover_skill_scripts(args.workspace, skills)
         except SkillError as error:
             raise RunConfigurationError(str(error)) from error
-        if skill_scripts:
-            for script in skill_scripts:
-                skill_digests[script.relative] = script.digest
+        for script in skill_scripts:
+            skill_digests[script.relative] = script.digest
+        model_scripts = tuple(script for script in skill_scripts if script.model_invocable)
+        if model_scripts:
             base_prompt = system_prompt if system_prompt is not None else DEFAULT_SYSTEM_PROMPT
-            system_prompt = base_prompt + skill_scripts_listing(skill_scripts)
+            system_prompt = base_prompt + skill_scripts_listing(model_scripts)
 
     # Workspace memory (P4): workspace-scoped only, digest-labelled, opt-out.
     # Never a user-home / global MEMORY store (blueprint C7).
