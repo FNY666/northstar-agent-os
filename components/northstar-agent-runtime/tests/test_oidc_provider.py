@@ -18,6 +18,7 @@ from oidc_provider import (
     SCHEMA_PIN,
     DEFAULT_TOKEN_LIFETIME_SEQS,
     oidc_provider_audit_event,
+    _b64url,
 )
 
 
@@ -249,6 +250,19 @@ class TestVerify(unittest.TestCase):
         rep = p.verify_id_token(tokens.id_token.token, "other", now_seq=11, seq=4)
         self.assertFalse(rep.valid)
         self.assertEqual(rep.reason, "audience-mismatch")
+
+    def test_verify_rejects_ambiguous_jwt_json(self):
+        import json
+
+        p = make_provider()
+        registered(p)
+        header = _b64url(b'{"alg":"HS256","alg":"none","typ":"JWT"}')
+        payload = _b64url(json.dumps({"iss": "https://idp.example.com", "aud": "web", "exp": 100}).encode())
+        signing_input = f"{header}.{payload}"
+        token = f"{signing_input}.{_b64url(p._sign(signing_input.encode('ascii')))}"
+        rep = p.verify_id_token(token, "web", now_seq=11, seq=4)
+        self.assertFalse(rep.valid)
+        self.assertEqual(rep.reason, "bad-json")
 
     def test_verify_expired(self):
         p = make_provider()
