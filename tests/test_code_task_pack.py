@@ -71,6 +71,16 @@ class CodeTaskPackTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "do not support"):
             CONTROLS.summarize_controls({"complete": True, "ok": True, "failed": 0, "declared": 24, "checked": 24, "passed": 24, "tasks": []})
 
+    def test_typescript_controls_require_node_24_before_running(self):
+        for unsupported in ("v22.13.0", "v23.9.0"):
+            with self.subTest(version=unsupported), self.assertRaisesRegex(ValueError, "require Node.js >=24"):
+                CONTROLS._require_node24(unsupported)
+        for supported in ("v24.0.0", "24.22.0", "v25.0.0"):
+            with self.subTest(version=supported):
+                CONTROLS._require_node24(supported)
+        with self.assertRaisesRegex(ValueError, "invalid version"):
+            CONTROLS._require_node24("unknown")
+
     def test_flaky_test_fixture_rejects_unconditional_replacement_assertions(self):
         with tempfile.TemporaryDirectory() as directory:
             candidate = Path(directory) / "flaky"
@@ -229,22 +239,27 @@ class CodeTaskPackTests(unittest.TestCase):
                     "        raise ValueError('max_attempts must be positive')\n"
                     "    for _ in range(max_attempts):",
                 )
-                report = run_code(
-                    CodeTask(
-                        goal=public["prompt"], workspace=str(workspace),
-                        checks=("python3 -m unittest discover -s tests -v",),
-                    ),
-                    options=RunOptions(scripted_turns=[
-                        {"tool": {"name": "SubmitPlan", "input": {
-                            "summary": "bound retries and reject non-positive limits",
-                            "files": ["retry.py"], "steps": ["validate limit", "bound attempts"],
-                            "risks": ["preserve the final exception object"], "check_indices": [0],
-                        }}},
-                        {"tool": {"name": "Write", "input": {"path": "retry.py", "content": repair}}},
-                        {"text": "retry helper repaired"},
-                    ]),
-                    evidence_dir=str(root / "evidence"),
-                )
+                with patch.dict("os.environ", {
+                    "GIT_CONFIG_COUNT": "1",
+                    "GIT_CONFIG_KEY_0": "color.ui",
+                    "GIT_CONFIG_VALUE_0": "always",
+                }):
+                    report = run_code(
+                        CodeTask(
+                            goal=public["prompt"], workspace=str(workspace),
+                            checks=("python3 -m unittest discover -s tests -v",),
+                        ),
+                        options=RunOptions(scripted_turns=[
+                            {"tool": {"name": "SubmitPlan", "input": {
+                                "summary": "bound retries and reject non-positive limits",
+                                "files": ["retry.py"], "steps": ["validate limit", "bound attempts"],
+                                "risks": ["preserve the final exception object"], "check_indices": [0],
+                            }}},
+                            {"tool": {"name": "Write", "input": {"path": "retry.py", "content": repair}}},
+                            {"text": "retry helper repaired"},
+                        ]),
+                        evidence_dir=str(root / "evidence"),
+                    )
                 self.assertTrue(report.ok)
                 self.assertEqual((workspace / "retry.py").read_text(encoding="utf-8"), original)
                 evaluation = RUNNER.evaluate_patch("py-bug-001-bounded-retry", Path(report.patch_path).read_bytes())
