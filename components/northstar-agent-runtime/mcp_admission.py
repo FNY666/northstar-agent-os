@@ -335,7 +335,7 @@ def _published_package_cves(spec: _PackageSpec) -> tuple[str, ...]:
         return ()
     # The only current range is mcp-remote 0.1.N; do not interpret arbitrary
     # semver selectors as exact evidence about what a registry will install.
-    match = re.fullmatch(r"0\\.1\\.(\\d+)", spec.version)
+    match = re.fullmatch(r"0\.1\.(\d+)", spec.version)
     if match is None:
         return ()
     patch = int(match.group(1))
