@@ -12,6 +12,7 @@ import importlib.util
 import json
 import sys
 import unittest
+from unittest.mock import patch
 
 import support  # noqa: F401  (bootstraps sys.path)
 from support import RuntimeTestCase, tool_turn
@@ -297,9 +298,26 @@ class NormaliseTests(unittest.TestCase):
 
 class ClientConstructionTests(unittest.TestCase):
     def test_a_local_endpoint_needs_no_real_key(self):
-        provider = OpenAICompatProvider(base_url="http://127.0.0.1:11434/v1")
+        with patch.dict("os.environ", {"OPENAI_API_KEY": ""}):
+            provider = OpenAICompatProvider(base_url="http://127.0.0.1:11434/v1")
         self.assertEqual(provider._client_kwargs["base_url"], "http://127.0.0.1:11434/v1")
         self.assertEqual(provider._client_kwargs["api_key"], "not-needed", "the SDK requires a key; local servers ignore it")
+
+    def test_a_credentialed_gateway_keeps_sdk_environment_authentication(self):
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "fixture-env-key"}):
+            provider = OpenAICompatProvider(base_url="https://gateway.example.invalid/v1")
+        self.assertNotIn("api_key", provider._client_kwargs, "the SDK must read the environment key, not a placeholder")
+        self.assertEqual(provider._client_kwargs["base_url"], "https://gateway.example.invalid/v1")
+
+    def test_an_explicit_key_wins_over_environment_and_placeholder(self):
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "fixture-env-key"}):
+            provider = OpenAICompatProvider(base_url="https://gateway.example.invalid/v1", api_key="fixture-explicit-key")
+        self.assertEqual(provider._client_kwargs["api_key"], "fixture-explicit-key")
+
+    def test_an_explicit_key_also_works_without_an_environment_key(self):
+        with patch.dict("os.environ", {"OPENAI_API_KEY": ""}):
+            provider = OpenAICompatProvider(base_url="http://127.0.0.1:11434/v1", api_key="fixture-explicit-key")
+        self.assertEqual(provider._client_kwargs["api_key"], "fixture-explicit-key")
 
     @unittest.skipIf(importlib.util.find_spec("openai") is not None, "the openai package is installed here")
     def test_a_missing_sdk_is_reported_as_a_provider_error(self):
