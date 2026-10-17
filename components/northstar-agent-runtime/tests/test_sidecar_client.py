@@ -291,6 +291,15 @@ class RoundTripTests(unittest.TestCase):
         self.assertTrue(result.truncated)
         self.assertIn("truncated", json.dumps(result.as_dict()))
 
+    def test_deeply_nested_response_is_a_protocol_error_not_a_crash(self):
+        nested = "[" * 2_000 + "0" + "]" * 2_000
+        client, _ = client_with(
+            '{"status":"ok","text":"hello","debug":' + nested + '}'
+        )
+        result = client.execute("go")
+        self.assertEqual(result.status, "protocol_error")
+        self.assertIn("depth limit", result.error)
+
     def test_probe_uses_a_short_bounded_deadline(self):
         client, sent = client_with({"status": "ok", "text": "OK"})
         result = client.probe()
