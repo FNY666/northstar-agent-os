@@ -202,6 +202,12 @@ templates do not trigger this rule. The analysis does not follow custom wrappers
 template filters, or cross-function flows, and it does not model HTML subcontexts
 such as JavaScript or CSS.
 
+Python also receives `PY018_OPEN_REDIRECT_FLOW` for untrusted values passed to
+Flask, Django, Starlette, or FastAPI redirect helpers. It treats relative and
+absolute targets alike because protocol-relative URLs can still leave the site.
+Fixed `url_for()` and Django `reverse()` destinations are treated as
+server-owned. It cannot prove custom allowlists or trace across functions.
+
 Go files also receive `GO001_UNTRUSTED_SSRF` and `GO002_PATH_TRAVERSAL` checks
 for standard `net/http`, chi/mux, and common Gin request values flowing through
 simple assignments to `net/http` client calls, `os` / `ioutil` file APIs,
