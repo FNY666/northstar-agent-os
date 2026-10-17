@@ -1,0 +1,7 @@
+{
+  "northstar.javascript.child-process-exec": "high",
+  "northstar.python.eval-exec": "high",
+  "northstar.python.requests-tls-verify-false": "medium",
+  "northstar.python.subprocess-shell-true": "high",
+  "northstar.python.yaml-unsafe-load": "high"
+}

@@ -1,0 +1,21 @@
+{
+  "accessed_at": "2026-10-17",
+  "sources": [
+    {
+      "url": "https://docs.semgrep.dev/semgrep-appsec-platform/json-and-sarif",
+      "claim": "Semgrep native JSON errors/paths/results/skipped_rules; raw severity is not host authorization"
+    },
+    {
+      "url": "https://google.github.io/osv-scanner/usage/offline-mode/",
+      "claim": "Offline full mode, read-only prepared ecosystem all.zip directory layout"
+    },
+    {
+      "url": "https://google.github.io/osv-scanner/usage/scan-source",
+      "claim": "Explicit lockfiles; Rust call analysis executes build.rs and must be disabled for read-only scope"
+    },
+    {
+      "url": "https://api.github.com/repos/google/osv-scanner/releases/tags/v2.7.0",
+      "claim": "Fixed release 2.7.0 linux_amd64 SHA256 160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b"
+    }
+  ]
+}

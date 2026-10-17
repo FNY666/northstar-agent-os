@@ -1,0 +1,54 @@
+rules:
+  - id: northstar.python.eval-exec
+    languages: [python]
+    message: Dynamic execution through eval or exec can execute untrusted source text.
+    severity: ERROR
+    patterns:
+      - pattern-either:
+          - pattern: eval($EXPR)
+          - pattern: exec($SOURCE)
+
+  - id: northstar.python.subprocess-shell-true
+    languages: [python]
+    message: shell=True invokes a command shell; use a fixed argument vector and shell=False.
+    severity: ERROR
+    patterns:
+      - pattern-either:
+          - pattern: subprocess.run(..., shell=True, ...)
+          - pattern: subprocess.call(..., shell=True, ...)
+          - pattern: subprocess.check_call(..., shell=True, ...)
+          - pattern: subprocess.check_output(..., shell=True, ...)
+          - pattern: subprocess.Popen(..., shell=True, ...)
+
+  - id: northstar.python.yaml-unsafe-load
+    languages: [python]
+    message: yaml.load with a permissive loader can construct unsafe Python objects; use yaml.safe_load.
+    severity: ERROR
+    patterns:
+      - pattern-either:
+          - pattern: yaml.load($DOCUMENT)
+          - pattern: yaml.load($DOCUMENT, Loader=yaml.Loader)
+          - pattern: yaml.load($DOCUMENT, Loader=yaml.UnsafeLoader)
+
+  - id: northstar.python.requests-tls-verify-false
+    languages: [python]
+    message: Disabling TLS certificate verification permits man-in-the-middle attacks; keep verify=True.
+    severity: ERROR
+    patterns:
+      - pattern-either:
+          - pattern: requests.get(..., verify=False, ...)
+          - pattern: requests.post(..., verify=False, ...)
+          - pattern: requests.put(..., verify=False, ...)
+          - pattern: requests.patch(..., verify=False, ...)
+          - pattern: requests.delete(..., verify=False, ...)
+          - pattern: requests.request(..., verify=False, ...)
+
+  - id: northstar.javascript.child-process-exec
+    languages: [javascript]
+    message: child_process.exec invokes a shell; prefer a fixed executable and argument vector with execFile.
+    severity: ERROR
+    patterns:
+      - pattern-either:
+          - pattern: child_process.exec($COMMAND, ...)
+          - pattern: require("child_process").exec($COMMAND, ...)
+          - pattern: require('child_process').exec($COMMAND, ...)
