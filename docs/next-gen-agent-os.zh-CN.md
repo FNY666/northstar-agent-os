@@ -98,6 +98,8 @@ northstar agent "…"          ← 唯一推荐入口
 
 攻防工具不开放任意公网目标扫描，也不提供隐蔽驻留、凭据窃取或数据外传能力。红队验证和蓝队扫描使用分开的工具权限；扫描发现本身不自动授权写入或外部操作。
 
+`SecurityScan` 已扩展为同时审计应用代码/部署配置与 agent 供应链面：已知 agent 指令、技能、Codex/Claude/Cursor 项目权限配置和 MCP 配置走离线只读规则；对应恶意/干净样例由 `SecurityProbe` 在内存中核对，不启动仓库内 skill 或 MCP server。公开来源和适用限制见[Agent 安全生态调研记录](research/agent-security-ecosystem-2026-10.zh-CN.md)。
+
 ### 明确不做（防漂移）
 
 自建云/托管；重型 IDE 插件优先；无签名插件市场；模型微调；浏览器/计算机操控（无隔离前）；  

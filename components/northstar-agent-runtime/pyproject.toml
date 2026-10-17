@@ -66,6 +66,7 @@ py-modules = [
     "adtech_agents",
     "adversarial_detector",
     "adversarial_robustness",
+    "agent_surface_scanner",
     "agb_smoke_corpus",
     "agent_files",
     "agent_identity",

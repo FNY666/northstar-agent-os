@@ -131,8 +131,19 @@ python3 -m cli security probe --format json
 ```
 
 The scan runs offline and makes no file changes. It checks likely secrets,
-Python, JavaScript/TypeScript, and Go SAST patterns, dependency source and pinning,
-and selected Docker, Compose, Kubernetes, GitHub Actions, and Terraform risks.
+agent instruction and skill files for prompt-injection, policy self-edit,
+credential access, and unsafe execution signals; Codex, Claude Code, and Cursor
+project settings for high-risk permission modes; recognized MCP configs for
+compromised packages, prompt injection in tool metadata, unencrypted endpoints,
+and credential forwarding; Python, JavaScript/TypeScript, and Go SAST patterns;
+dependency source and pinning; and selected Docker, Compose, Kubernetes,
+GitHub Actions, and Terraform risks. These agent-surface checks reuse the local
+skill audit and MCP admission rules. They are static triage, do not execute
+skills or server commands, and omit matched instruction, endpoint, environment,
+and secret values from findings. The human summary and JSON receipt report how
+many recognized instruction files and MCP servers were scanned.
+The public-source coverage record is in
+[`docs/research/agent-security-ecosystem-2026-10.zh-CN.md`](../../docs/research/agent-security-ecosystem-2026-10.zh-CN.md).
 Kubernetes rules cover privileged containers, privilege escalation, root UIDs,
 host namespace sharing, hostPath volumes, all Linux capabilities, and floating
 `latest` image tags. Results are heuristics, not a YAML/schema validator or a
