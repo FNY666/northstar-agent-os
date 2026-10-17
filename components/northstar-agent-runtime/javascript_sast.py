@@ -2,14 +2,81 @@
 
 This is a bounded line-pattern scanner, not a JavaScript parser or full
 dataflow engine. It reports common dangerous APIs and configurations without
-importing, building, or executing the scanned project. A small within-file
-taint pass tracks request-derived URL variables to outbound HTTP calls; it does
-not model JavaScript scope, sanitizers, or multi-function flows.
+importing, building, or executing the scanned project. Small within-file taint
+passes track request-derived values to outbound HTTP and filesystem sinks; they
+do not model JavaScript scope, sanitizers, or multi-function flows.
 """
 from __future__ import annotations
 
 import re
 from typing import Any
+
+
+_FILE_PATH_METHODS = (
+    "readFile|readFileSync|writeFile|writeFileSync|appendFile|appendFileSync|"
+    "open|openSync|unlink|unlinkSync|rm|rmSync|rmdir|rmdirSync|mkdir|mkdirSync|"
+    "readdir|readdirSync|stat|statSync|lstat|lstatSync|access|accessSync|"
+    "createReadStream|createWriteStream|realpath|realpathSync|rename|renameSync|"
+    "copyFile|copyFileSync|cp|cpSync|link|symlink"
+)
+_FILE_PATH_SINK = re.compile(
+    rf"\b(?:fs\s*(?:\.\s*promises\s*)?\.\s*(?P<fs_method>{_FILE_PATH_METHODS})"
+    r"|(?:res|response)\s*\.\s*(?P<response_method>sendFile|download))\s*\("
+)
+_FILE_PATH_SOURCE = re.compile(
+    r"\b(?:req|request)\s*\.\s*(?:query|params|body|headers|cookies|path)\b"
+)
+_FILE_PATH_TWO_ARGUMENT_SINKS = {
+    "rename", "renameSync", "copyFile", "copyFileSync", "cp", "cpSync", "link", "symlink"
+}
+
+
+def _call_arguments(line: str, start: int) -> list[tuple[str, int]]:
+    """Split one same-line call while respecting nested delimiters and strings."""
+    arguments: list[tuple[str, int]] = []
+    segment_start = start
+    stack: list[str] = []
+    pairs = {"(": ")", "[": "]", "{": "}"}
+    quote: str | None = None
+    escaped = False
+    index = start
+    while index < len(line):
+        char = line[index]
+        if quote is not None:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+        elif char in "'\"`":
+            quote = char
+        elif line.startswith("//", index):
+            break
+        elif char in pairs:
+            stack.append(pairs[char])
+        elif char in ")]}":
+            if not stack:
+                if char == ")":
+                    raw = line[segment_start:index]
+                    leading = len(raw) - len(raw.lstrip())
+                    if raw.strip():
+                        arguments.append((raw.strip(), segment_start + leading))
+                break
+            if char == stack[-1]:
+                stack.pop()
+        elif char == "," and not stack:
+            raw = line[segment_start:index]
+            leading = len(raw) - len(raw.lstrip())
+            arguments.append((raw.strip(), segment_start + leading))
+            segment_start = index + 1
+        index += 1
+    else:
+        raw = line[segment_start:]
+        leading = len(raw) - len(raw.lstrip())
+        if raw.strip():
+            arguments.append((raw.strip(), segment_start + leading))
+    return arguments
 
 
 RULES: tuple[tuple[str, str, str, str, re.Pattern[str]], ...] = (
@@ -42,10 +109,13 @@ RULES: tuple[tuple[str, str, str, str, re.Pattern[str]], ...] = (
     ),
     (
         "JS005_UNTRUSTED_SSRF", "high", "request-derived value used as an outbound URL",
-        "Resolve outbound requests through a strict destination allowlist and reject private, loopback, and link-local addresses after DNS resolution.",
+        "Resolve outbound requests through a strict destination allowlist and reject private, "
+        "loopback, and link-local addresses after DNS resolution.",
         re.compile(
-            r"\b(?:fetch|got)\s*\(\s*(?:req|request)\s*\.\s*(?:query|params|body|headers)\b"
-            r"|\baxios\s*\.\s*(?:get|post|put|delete|request)\s*\(\s*(?:req|request)\s*\.\s*(?:query|params|body|headers)\b"
+            r"\b(?:fetch|got)\s*\(\s*(?:req|request)\s*\.\s*"
+            r"(?:query|params|body|headers|cookies|path)\b"
+            r"|\baxios\s*\.\s*(?:get|post|put|delete|request)\s*\(\s*"
+            r"(?:req|request)\s*\.\s*(?:query|params|body|headers|cookies|path)\b"
         ),
     ),
     (
@@ -63,10 +133,18 @@ RULES: tuple[tuple[str, str, str, str, re.Pattern[str]], ...] = (
         "Pin JWT verification to an explicit allowlist of signed algorithms and validate issuer and audience.",
         re.compile(r"\balgorithms\s*:\s*\[\s*['\"]none['\"]", re.IGNORECASE),
     ),
+    (
+        "JS009_PATH_TRAVERSAL", "high", "request-derived value used as a filesystem path",
+        "Constrain user-selected paths to a trusted root after resolution; reject traversal and "
+        "symlink escapes, and use race-safe file APIs.",
+        _FILE_PATH_SINK,
+    ),
 )
 _RULE_BY_ID = {rule[0]: rule for rule in RULES}
 
-_REQUEST_URL_SOURCE = re.compile(r"\b(?:req|request)\s*\.\s*(?:query|params|body|headers)\b")
+_REQUEST_URL_SOURCE = re.compile(
+    r"\b(?:req|request)\s*\.\s*(?:query|params|body|headers|cookies|path)\b"
+)
 _ASSIGNMENT = re.compile(
     r"^\s*(?:(?:const|let|var)\s+)?([A-Za-z_$][\w$]*)\s*=(?!=|>)\s*(.*?)\s*;?\s*$"
 )
@@ -85,28 +163,37 @@ def scan_source(source: Any) -> list[dict[str, Any]]:
     if not isinstance(source, str):
         raise TypeError("source must be a string")
     findings: list[dict[str, Any]] = []
-    tainted_url_variables: set[str] = set()
+    tainted_request_variables: set[str] = set()
     for line_no, line in enumerate(source.splitlines(), start=1):
         assignment = _ASSIGNMENT.match(line)
         if assignment:
             variable, expression = assignment.groups()
-            # A fetched response is data derived from the remote server, not an
-            # alias for the URL argument. Keep this tiny flow model URL-focused.
-            if _OUTBOUND_URL_SINK.search(expression) is None:
-                tainted = bool(_REQUEST_URL_SOURCE.search(expression)) or any(
+            # HTTP and filesystem responses are data, not aliases for their arguments.
+            assignment_is_sink = bool(
+                _OUTBOUND_URL_SINK.search(expression) or _FILE_PATH_SINK.search(expression)
+            )
+            if assignment_is_sink:
+                tainted_request_variables.discard(variable)
+            else:
+                tainted = bool(
+                    _REQUEST_URL_SOURCE.search(expression) or _FILE_PATH_SOURCE.search(expression)
+                ) or any(
                     _references_variable(expression, name)
-                    for name in tainted_url_variables
+                    for name in tainted_request_variables
                 )
                 if tainted:
-                    tainted_url_variables.add(variable)
+                    tainted_request_variables.add(variable)
                 else:
-                    tainted_url_variables.discard(variable)
+                    tainted_request_variables.discard(variable)
 
         line_rules: set[str] = set()
         for rule, severity, message, remediation, pattern in RULES:
             match = pattern.search(line)
             if match:
                 line_rules.add(rule)
+                if rule == "JS009_PATH_TRAVERSAL":
+                    # The filesystem pass below reports the tainted argument location.
+                    continue
                 findings.append({
                     "rule": rule,
                     "severity": severity,
@@ -119,15 +206,47 @@ def scan_source(source: Any) -> list[dict[str, Any]]:
             sink = _OUTBOUND_URL_SINK.search(line)
             if sink:
                 url_variable = sink.group("url_arg") or sink.group("axios_url_arg")
-                if url_variable in tainted_url_variables:
+                if url_variable in tainted_request_variables:
                     findings.append({
                         "rule": "JS005_UNTRUSTED_SSRF",
                         "severity": _RULE_BY_ID["JS005_UNTRUSTED_SSRF"][1],
                         "message": _RULE_BY_ID["JS005_UNTRUSTED_SSRF"][2],
                         "remediation": _RULE_BY_ID["JS005_UNTRUSTED_SSRF"][3],
                         "line": line_no,
-                        "column": sink.start("url_arg") + 1 if sink.group("url_arg") else sink.start("axios_url_arg") + 1,
+                        "column": (
+                            sink.start("url_arg") + 1
+                            if sink.group("url_arg")
+                            else sink.start("axios_url_arg") + 1
+                        ),
                     })
+        for sink in _FILE_PATH_SINK.finditer(line):
+            method = sink.group("fs_method") or sink.group("response_method")
+            argument_indexes = (0, 1) if method in _FILE_PATH_TWO_ARGUMENT_SINKS else (0,)
+            arguments = _call_arguments(line, sink.end())
+            for index in argument_indexes:
+                if index >= len(arguments):
+                    continue
+                expression, expression_start = arguments[index]
+                source_match = _FILE_PATH_SOURCE.search(expression)
+                tainted_variable = next((
+                    variable for variable in sorted(tainted_request_variables)
+                    if _references_variable(expression, variable)
+                ), None)
+                if source_match is None and tainted_variable is None:
+                    continue
+                offset = (
+                    source_match.start()
+                    if source_match is not None
+                    else expression.find(tainted_variable or "")
+                )
+                findings.append({
+                    "rule": "JS009_PATH_TRAVERSAL",
+                    "severity": _RULE_BY_ID["JS009_PATH_TRAVERSAL"][1],
+                    "message": _RULE_BY_ID["JS009_PATH_TRAVERSAL"][2],
+                    "remediation": _RULE_BY_ID["JS009_PATH_TRAVERSAL"][3],
+                    "line": line_no,
+                    "column": expression_start + offset + 1,
+                })
     return findings
 
 

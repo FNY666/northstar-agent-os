@@ -818,6 +818,9 @@ const response = await fetch(targetUrl);
 const agent = new https.Agent({ rejectUnauthorized: false });
 const sessionToken = Math.random().toString(36);
 jwt.verify(token, secret, { algorithms: ["none"] });
+const requestedFile = req.params.file;
+const fileContents = await fs.promises.readFile(requestedFile, "utf8");
+res.send(fileContents);
 """
     hardened = """const operation = operations[input.action];
 execFile("convert", ["--", validatedFile]);
@@ -828,6 +831,9 @@ const response = await fetch(safeTargetUrl);
 const agent = new https.Agent({ rejectUnauthorized: true });
 const sessionToken = randomBytes(32).toString("hex");
 jwt.verify(token, secret, { algorithms: ["RS256"], issuer: expectedIssuer });
+const fileId = validatedFileId;
+const safeFile = allowedFiles.get(fileId);
+const fileContents = await fs.promises.readFile(safeFile, "utf8");
 """
     expected_rules = {rule[0] for rule in RULES}
 
@@ -865,10 +871,21 @@ jwt.verify(token, secret, { algorithms: ["RS256"], issuer: expectedIssuer });
             if item.get("ruleId") == expected_sarif_rule
             and item["locations"][0]["physicalLocation"]["artifactLocation"]["uri"] == "vulnerable.ts"
         ), None)
+        expected_path_sarif_rule = "javascript-sast-scanner:JS009_PATH_TRAVERSAL"
+        path_sarif_result = next((
+            item for item in sarif_run["results"]
+            if item.get("ruleId") == expected_path_sarif_rule
+            and item["locations"][0]["physicalLocation"]["artifactLocation"]["uri"] == "vulnerable.ts"
+        ), None)
         sarif_rule_index = sarif_result.get("ruleIndex", -1) if sarif_result is not None else -1
         sarif_index_matches = (
             0 <= sarif_rule_index < len(sarif_rule_descriptors)
             and sarif_rule_descriptors[sarif_rule_index].get("id") == expected_sarif_rule
+        )
+        path_sarif_rule_index = path_sarif_result.get("ruleIndex", -1) if path_sarif_result is not None else -1
+        path_sarif_index_matches = (
+            0 <= path_sarif_rule_index < len(sarif_rule_descriptors)
+            and sarif_rule_descriptors[path_sarif_rule_index].get("id") == expected_path_sarif_rule
         )
         sarif_passed = bool(
             sarif.get("version") == "2.1.0"
@@ -878,7 +895,15 @@ jwt.verify(token, secret, { algorithms: ["RS256"], issuer: expectedIssuer });
             and sarif_result["locations"][0]["physicalLocation"]["region"]["startLine"] == 6
             and sarif_result["properties"].get("remediation")
         )
-        passed = not missing and not hardened_findings and sarif_passed
+        path_sarif_passed = bool(
+            sarif.get("version") == "2.1.0"
+            and expected_path_sarif_rule in sarif_rule_ids
+            and path_sarif_index_matches
+            and path_sarif_result is not None
+            and path_sarif_result["locations"][0]["physicalLocation"]["region"]["startLine"] == 11
+            and path_sarif_result["properties"].get("remediation")
+        )
+        passed = not missing and not hardened_findings and sarif_passed and path_sarif_passed
         return {
             "check": "javascript-typescript-sast-rules",
             "passed": passed,
@@ -894,6 +919,12 @@ jwt.verify(token, secret, { algorithms: ["RS256"], issuer: expectedIssuer });
                 "ssrf_location_line": (
                     sarif_result["locations"][0]["physicalLocation"]["region"]["startLine"]
                     if sarif_result is not None else None
+                ),
+                "path_traversal_result_found": path_sarif_result is not None,
+                "path_traversal_rule_index_matches": path_sarif_index_matches,
+                "path_traversal_location_line": (
+                    path_sarif_result["locations"][0]["physicalLocation"]["region"]["startLine"]
+                    if path_sarif_result is not None else None
                 ),
             },
             "scope": "fixed temporary source examples; analyzed without execution and automatically removed",

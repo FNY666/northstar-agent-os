@@ -141,11 +141,13 @@ secure.
 
 JavaScript and TypeScript files also receive line-pattern checks for dynamic
 code execution, shell commands, interpolated SQL, HTML injection, direct
-request-derived URL flows to outbound HTTP calls, disabled TLS verification,
-weak security tokens, and JWT `none` algorithms. These checks are heuristic and do not replace
-parser-backed analysis. The URL-flow heuristic follows simple variable
-assignments in one file; it does not understand scopes, sanitizers, or
-cross-function flows.
+request-derived URL flows to outbound HTTP calls, and request-derived paths
+(`JS009_PATH_TRAVERSAL`) flowing to common Node.js `fs` and Express file response APIs, disabled TLS
+verification, weak security tokens, and JWT `none` algorithms. These checks
+are heuristic and do not replace parser-backed analysis. The flow checks follow
+simple variable assignments in one file; they do not resolve imports or aliases,
+understand scopes and sanitizers, prove root containment or symlink protections,
+or trace cross-function and multi-line calls.
 
 Python files also receive a request-to-HTTP URL-flow check for common Flask,
 Django, and Starlette request fields flowing through simple assignments into
