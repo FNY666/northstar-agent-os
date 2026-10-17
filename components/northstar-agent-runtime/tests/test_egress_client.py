@@ -4,7 +4,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from egress_client import EgressClient
+from egress_client import EgressClient, EgressClientError
 
 
 class EgressResponseBoundaryTests(unittest.TestCase):
@@ -12,6 +12,11 @@ class EgressResponseBoundaryTests(unittest.TestCase):
         client = EgressClient("/var/run/northstar-egress/egress.sock")
         client._round_trip = lambda _wire: response  # type: ignore[method-assign]
         return client
+
+    def test_response_budget_is_validated_at_construction(self):
+        for value in (0, -1, True, "10"):
+            with self.subTest(value=value), self.assertRaises(EgressClientError):
+                EgressClient("/var/run/northstar-egress/egress.sock", max_response_bytes=value)
 
     def test_unknown_status_is_a_protocol_error(self):
         client = self._client(json.dumps({"request_id": "r", "status": "future"}))

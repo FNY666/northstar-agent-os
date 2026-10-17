@@ -129,6 +129,11 @@ class ConstructionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             SidecarClient("/tmp/x/sidecar.sock", timeout_ms=500)
 
+    def test_response_budget_is_validated_at_construction(self):
+        for value in (0, -1, True, "10"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                SidecarClient("/tmp/x/sidecar.sock", max_response_bytes=value)
+
     def test_request_ids_are_prefixed_and_unique(self):
         client, _ = client_with({"status": "ok"})
         first, second = client.new_request_id(), client.new_request_id()
