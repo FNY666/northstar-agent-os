@@ -1,8 +1,8 @@
 # P3-4 可观测进阶 — 完成记录（中文评估）
 
 > 批次：P3-4（路线图 `docs/dx-benchmark-2026.zh-CN.md` 第 254 行）
-> 日期：2026-09-07 · 版本：仍为对齐 `0.1.0.dev0`，**未发布**（守就绪门）
-> 全仓测试：**812 全绿**（sidecar 51 / run-contract 41 / host 37 / durable-run 65 / interop 54 / runtime 536（skip 4）/ 仓库文档 28）
+> 日期：2026-09-07；当前状态复核：2026-10-02。版本仍为对齐 `0.1.0.dev0`，**未发布**。
+> 本文的 812 项测试数字是当时的历史快照；当前仓库测试口径见 [current-status.md](current-status.md)。
 
 ## TL;DR
 
@@ -55,11 +55,8 @@ session-panel）；docbuild 检查的 md 文件 48→50。
 - 面板 JS 无浏览器执行环境：有 node 时做 `--check`，无 node 跳过——两条路都绿。
 - **不改任何组件行为**：runtime/interop 等 6 组件测试零改动、536 项原样全绿。
 
-## 下一步（T5 的入口）
+## 历史批次说明
 
-P3-3 评估留下的 ops 缺口与 P3-4 的边界在此汇合：compose 是"本地开发栈"，
-T5 已把缺口实质化——deployment/monitoring 操作指南（含本节 Jaeger/Grafana
-的运维用法）与传输 spec/身份 story/真实 canary 配方均已交付（见
-`docs/dx-benchmark-2026.zh-CN.md` T5 记录与三份概念/指南页）；剩两项为
-实现项（传输代码 + 真实主机 canary 实跑）。另：`sessions export` + 面板的
-"回放/恢复"读法，是 T3 checkpoint/restore 的最小交互雏形。
+P3-3/T5 是历史批次标签。当前 Profile A 的本地 SSH channel helper 已实现，
+但还没有真实主机 canary 结果；当前边界和 97/100 静态评估见 [current-status.md](current-status.md)
+和 [dx-remote-worker-assessment.zh-CN.md](dx-remote-worker-assessment.zh-CN.md)。

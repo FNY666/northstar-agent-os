@@ -1,11 +1,11 @@
 # Remote transport for a hosted worker (T5 specification)
 
-> **Status: specification only.** No transport code ships in this repository
-> and nothing on this page has ever run against a real host. It is the T5
+> **Status: Profile A helper implemented; managed transport not shipped.** The
+> repository now includes a local SSH Unix-socket channel helper and fake-SSH
+> tests. Nothing on this page has run against a real host. It is the T5
 > answer to the P3-3 ops gap *"network transport for a hosted worker"* — the
-> design an implementer (or the T5b increment) builds from. Readiness
-> measured by `remote_worker.py` stays unchanged by this page: a spec is not
-> a transport.
+> design an implementer or the T5b increment builds from. Readiness is measured
+> by `remote_worker.py`; the remaining missing item is a real non-fake canary.
 
 A hosted worker is a **transport variant of the sidecar**, not a new
 governance surface (see [`northstar-remote-worker.md`](northstar-remote-worker.md)).
@@ -111,15 +111,15 @@ execution, at-least-once on evidence**.
 
 ## 5. What "done" would mean (T5b checklist)
 
-- [ ] Profile A channel helper: spawn/monitor the SSH forward, verify socket
+- [x] Profile A channel helper: spawn/monitor the SSH forward, verify socket
       readiness, surface ssh exits as `transport_unavailable`; local-only
       tests over a loopback pair.
 - [ ] Profile B: a network transport around `DurableRunner` (framing reused),
       with identity from the rotation story below.
 - [ ] A real (non-fake) end-to-end canary run against a real SSH worker —
       the recipe exists (`examples/remote-canary`) but has not run in CI.
-- [ ] `remote_worker.py` ops probe flips from MISSING only when the above
-      code exists *and* a canary has passed on a real host.
+- [x] `remote_worker.py` ops probe records Profile A channel code.
+- [ ] The real-host canary must pass before the final ops gap can flip.
 
 Related: [identity/rotation story](northstar-remote-identity.md),
 [the remote-worker evaluation](northstar-remote-worker.md),

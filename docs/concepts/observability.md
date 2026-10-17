@@ -55,8 +55,8 @@ provisioned core Jaeger data source) and `otel_bootstrap.py`, a template
 that attaches a `TracerProvider` with a `BatchSpanProcessor` and then hands
 the arguments over to `cli.main`. Traces go straight from the process to
 Jaeger (`:4318`) — no collector, because a collector is deployment
-infrastructure and deployment/monitoring is an open work item, not a
-local-dev default.
+infrastructure, not a local-dev default. A deployment/monitoring operator guide
+exists; a production collector or managed monitoring service is not included.
 
 ## 2. The offline plane: transcripts, export, panel
 
@@ -101,5 +101,5 @@ Docker and never executes the page's JavaScript in a browser; the checks in
 (the example is on the index, the compose stays minimal, the bootstrap keeps
 the ambient seam, the panel stays network-free, its script parses when a
 Node runtime is present). Deployment and fleet monitoring of the OTEL path
-remains an open work item (see `docs/dx-benchmark-2026.zh-CN.md`, ops
-section), as do the remote-worker ops gaps it was filed under.
+remains the operator's responsibility; see the [operations guide](../guides/remote-worker-operations.md)
+and [current status](../current-status.md) for the remaining transport and real-host verification gaps.

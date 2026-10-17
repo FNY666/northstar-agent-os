@@ -3,7 +3,8 @@
 Northstar deliberately does **not** build a cloud. This document is the
 decision record for wrapping the existing execution model into a remote
 worker, together with the protocol a hosted worker would speak. It is a
-*map*, not a claim: nothing here is implemented or deployed.
+*map* for remote deployment: the local components below exist, while the proposed
+managed remote transport and real-host deployment have not been demonstrated.
 
 ## Scope: what "remote worker" means here
 
@@ -80,17 +81,14 @@ Properties the transport must keep, carried over from the local path:
 ## Evaluation result (see the accompanying assessment)
 
 The scorecard (36 criteria across contracts, host, durable-run, interop,
-audit, ops; `remote_worker.py --score`, run in CI) lands at **94/100
+audit, ops; `remote_worker.py --score`, run in CI) lands at **97/100
 ready-for-remote, 0/100 shipped**: the governance and contract layers are
 fully present (100% in all five kernel areas). T5 (2026-09-07) closed two of
 the four original ops gaps with authoritative artifacts — the credential
 issuance + rotation [story](northstar-remote-identity.md) and the
 [operator guide](../guides/remote-worker-operations.md) for deployment and
-monitoring (ops 4/6 = 67%). What remains is genuinely implementation-shaped:
+monitoring (ops 5/6 = 83%). What remains is genuinely implementation-shaped:
 
-- **network transport *code*** for a hosted worker — the
-  [specification](northstar-remote-transport.md) (Profile A + B) and its
-  T5b checklist exist; the channel helper does not;
 - **a real (non-fake) end-to-end canary *run*** on a real host — the
   operator [recipe](../../examples/remote-canary/README.md) exists and its
   probe is CI-tested against the real socket server, but by design no CI run
