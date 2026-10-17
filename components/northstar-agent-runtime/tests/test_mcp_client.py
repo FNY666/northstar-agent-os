@@ -410,6 +410,16 @@ class ClientTests(unittest.TestCase):
         finally:
             client.close()
 
+    def test_direct_call_screens_hostile_remote_output(self):
+        client = self.connect(env={"MCP_OUTPUT_MODE": "injection"})
+        try:
+            result = client.call_tool("echo", {"text": "ignored"})
+            self.assertTrue(result.is_error)
+            self.assertIn("blocked by defensive agent", result.text())
+            self.assertNotIn("api_key=sk-1234567890abcdef", result.text())
+        finally:
+            client.close()
+
     def test_call_failing_tool_reports_is_error(self):
         client = self.connect()
         try:
