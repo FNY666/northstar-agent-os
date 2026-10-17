@@ -14,10 +14,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from coding_acceptance import MAX_REPAIR_ATTEMPTS
+
 
 SEVERITY_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "none": 0}
 MAX_FINDING_DETAILS = 50
-MAX_REPAIR_ATTEMPTS = 3
 MAX_SKIPPED_FILE_BYTES = 32 * 1024 * 1024
 MAX_TOTAL_SKIPPED_BYTES = 256 * 1024 * 1024
 

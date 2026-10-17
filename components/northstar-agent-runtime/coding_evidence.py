@@ -565,6 +565,7 @@ def postcondition_evidence(run_report: Any) -> dict[str, Any]:
         "results": [],
         "security_gate": None,
         "security_gate_history": [],
+        "repair": None,
     }
     if run_report is None:
         return {**empty, "status": "unavailable"}
@@ -684,6 +685,24 @@ def postcondition_evidence(run_report: Any) -> dict[str, Any]:
             )
             if key in item
         })
+    repair = data.get("repair")
+    if isinstance(repair, dict):
+        attempts_used = repair.get("attempts_used", 0)
+        attempt_limit = repair.get("attempt_limit", 0)
+        issued = repair.get("issued", False)
+        if (
+            isinstance(attempts_used, bool) or not isinstance(attempts_used, int) or attempts_used < 0
+            or isinstance(attempt_limit, bool) or not isinstance(attempt_limit, int) or attempt_limit < 0
+            or not isinstance(issued, bool)
+        ):
+            return {**empty, "status": "unavailable"}
+        repair = {
+            "issued": issued,
+            "attempts_used": attempts_used,
+            "attempt_limit": attempt_limit,
+        }
+    else:
+        repair = None
     return {
         "source": "runtime_postconditions",
         "status": "passed" if failed == 0 and declared_checked else "failed" if failed else "not_configured",
@@ -697,6 +716,7 @@ def postcondition_evidence(run_report: Any) -> dict[str, Any]:
         "results": results,
         "security_gate": gate_receipt,
         "security_gate_history": safe_gate_history,
+        "repair": repair,
     }
 
 

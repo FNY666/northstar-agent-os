@@ -1420,11 +1420,20 @@ def _print_coding_evidence(args: argparse.Namespace, before: Any, run_report: An
         )
         for item in postconditions["results"]:
             if not item["ok"]:
-                path = json.dumps(item.get("path", "?"), ensure_ascii=True)
+                identity = json.dumps(
+                    item.get("name", "?") if item.get("kind") == "shell_command" else item.get("path", "?"),
+                    ensure_ascii=True,
+                )
                 print(
-                    f"    failed: {item.get('kind', '?')} {path}: "
+                    f"    failed: {item.get('kind', '?')} {identity}: "
                     f"{item.get('detail', 'check failed')}"
                 )
+        repair = postconditions.get("repair")
+        if repair is not None:
+            print(
+                f"  acceptance_repair_attempts={repair.get('attempts_used', 0)}/"
+                f"{repair.get('attempt_limit', 0)} feedback={'sent' if repair.get('issued') else 'not_sent'}"
+            )
     security_gate = postconditions.get("security_gate")
     if security_gate is not None:
         for attempt in postconditions.get("security_gate_history", ())[:-1]:

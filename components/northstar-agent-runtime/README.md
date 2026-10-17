@@ -164,9 +164,10 @@ byte fingerprint proves they did not change. The gate is read-only and does not
 grant tools; it records the verdict in the runtime transcript and coding receipt.
 Each scan examines up to 4,000 candidate files by default; use
 `--security-gate-max-files` to raise that bound to at most 10,000.
-On a failed gate, the runtime returns sanitized finding details to the agent and
-allows up to two repair turns before ending with the failure result. Tool
-permissions and command approvals remain unchanged throughout.
+On a failed gate or required command, the runtime returns a combined acceptance
+report and allows up to two repair turns before ending with the failure result.
+Each turn records which checks failed and whether another repair was issued.
+Tool permissions and command approvals remain unchanged throughout.
 
 JavaScript and TypeScript files also receive line-pattern checks for dynamic
 code execution, shell commands, interpolated SQL, HTML injection, direct
@@ -1252,6 +1253,10 @@ When `--security-gate` is enabled, the same receipt reports scan coverage,
 baseline/current finding counts, new findings, and the configured severity gate.
 The verdict is produced by the host before the runtime's final result, so an
 agent cannot ignore a failed scan and report success.
+Required `[[verify_shell]]` and `--verify-shell` results join the same acceptance
+record. Failed command and security checks share a two-turn repair budget;
+combined failures are returned together, and `repair` records attempts used,
+the limit, and whether another feedback turn was issued.
 Command text and command output are omitted from this summary; use each `call_id` and
 `agent_path` to locate the corresponding call in the run transcript. The receipt detects
 changes to files that were already dirty before the run by hashing those paths at both

@@ -31,6 +31,7 @@ from typing import Any, Callable, Generator, Iterable, Iterator, Mapping, Sequen
 
 from agents import AgentDefinition, AgentRegistry, Verdict, builtin_registry, parse_verdict
 from budget import Budget
+from coding_acceptance import MAX_REPAIR_ATTEMPTS
 from compaction import CompactionOutcome, compact, should_compact
 from forward_seal_ledger import ForwardSealLedger
 from governed_action_runner import GovernedActionRunner, GovernedRunnerError
@@ -696,7 +697,7 @@ class AgentRuntime:
         except PostConditionError as error:
             raise RuntimeConfigurationError(f"postconditions: {error}") from error
         self.security_gate = None
-        self._security_gate_attempts = 0
+        self._acceptance_repair_attempts = 0
         self._security_gate_evaluations = 0
         if self.config.security_gate is not None:
             if self.config.depth:
@@ -1585,6 +1586,8 @@ class AgentRuntime:
         subtype = "success"
         gate_failed = False
         gate: dict[str, Any] = {}
+        shell_results: list[dict[str, Any]] = []
+        should_repair = False
         if self.postconditions or self.security_gate is not None or config.required_shell_checks:
             summary = summarise_postconditions(
                 self.postconditions.evaluate() if self.postconditions else ()
@@ -1605,8 +1608,6 @@ class AgentRuntime:
                 self._security_gate_evaluations += 1
                 gate["attempt"] = self._security_gate_evaluations
                 gate_failed = not gate["ok"]
-                if gate_failed:
-                    self._security_gate_attempts += 1
                 summary["security_gate"] = gate
                 summary["checked"] += 1
                 if gate["ok"]:
@@ -1627,6 +1628,22 @@ class AgentRuntime:
                     "files_scanned_after": gate.get("files_scanned_after"),
                 })
                 summary["ok"] = summary["failed"] == 0
+            repairable_failure = bool(
+                any(item.get("kind") == "shell_command" and not item.get("ok") for item in shell_results)
+                or gate_failed
+            )
+            should_repair = (
+                not summary["ok"]
+                and repairable_failure
+                and self._acceptance_repair_attempts < MAX_REPAIR_ATTEMPTS
+            )
+            if should_repair:
+                self._acceptance_repair_attempts += 1
+            summary["repair"] = {
+                "issued": should_repair,
+                "attempts_used": self._acceptance_repair_attempts,
+                "attempt_limit": MAX_REPAIR_ATTEMPTS,
+            }
             record = SystemMessage(
                 subtype="postconditions",
                 content=(
@@ -1642,48 +1659,17 @@ class AgentRuntime:
                 # The model asked to stop and the workspace disagrees.
                 # "It said it was done" is not the evidence we accept.
                 subtype = "error_postconditions_failed"
-                shell_failed = [item for item in summary["results"] if item.get("kind") == "shell_command" and not item.get("ok")]
-                if shell_failed:
+                if should_repair:
+                    from coding_acceptance import repair_message
+
                     follow_up = UserMessage.text_block(
-                        "Required build/test command checks failed. Run each command listed in the run's required_shell_checks through the governed Shell tool, fix any reported failures, and finish again.",
+                        repair_message(
+                            shell_results=shell_results,
+                            security_gate=gate if self.security_gate is not None and gate_failed else None,
+                            attempt=self._acceptance_repair_attempts,
+                        ),
                         is_meta=True,
-                        meta_reason="Required command verification",
-                    )
-                    state.transcript.append(follow_up)
-                    self.sessions.append(
-                        "user_prompt",
-                        {"agent": config.agent, "role": "user", "is_meta": True, "content": [block.to_api() for block in follow_up.content]},
-                    )
-                    yield follow_up
-                    return False
-                if (
-                    self.security_gate is not None
-                    and gate_failed
-                    and self._security_gate_attempts < self.security_gate.max_repair_attempts
-                ):
-                    reason_lines = [
-                        "The independent security gate blocked completion.",
-                        f"Status: {gate.get('status', 'failed')}; {gate.get('detail', 'scan failed')}.",
-                    ]
-                    for item in gate.get("new", ())[:20]:
-                        safe_path = json.dumps(str(item.get("path", "?")), ensure_ascii=True)
-                        reason_lines.append(
-                            f"- {item.get('severity', 'unknown')} {safe_path}:{item.get('line', '?')} "
-                            f"[{item.get('rule', '?')}] {item.get('message', 'new finding')}; "
-                            f"remediation: {item.get('remediation', 'review the affected flow')}"
-                        )
-                    for path in gate.get("unverified_paths", ())[:20]:
-                        reason_lines.append(
-                            f"- scan coverage needs review: {json.dumps(str(path), ensure_ascii=True)}"
-                        )
-                    reason_lines.append(
-                        "Address the reported new findings or scan-coverage change, then finish again. "
-                        "All edits and commands still require their usual permission decisions."
-                    )
-                    follow_up = UserMessage.text_block(
-                        "\n".join(reason_lines),
-                        is_meta=True,
-                        meta_reason="Security gate",
+                        meta_reason="Coding acceptance",
                     )
                     state.transcript.append(follow_up)
                     self.sessions.append(
