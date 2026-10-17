@@ -128,6 +128,10 @@ export type RunOptions = {
   noPlugins?: boolean;
   enableWorkspaceHooks?: boolean;
   allowPolicyWrites?: boolean;
+  /** Host-side pre/post scan gate; implies the CLI coding workflow. */
+  securityGate?: boolean;
+  securityGateFailOn?: "critical" | "high" | "medium" | "low" | "none";
+  securityGateMaxFiles?: number;
   contextFile?: string;
   noProjectContext?: boolean;
   runId?: string;
@@ -192,6 +196,9 @@ const OPTION_FLAGS: Record<Exclude<keyof RunOptions, "retry" | "mcp" | "sidecar"
   noPlugins: "--no-plugins",
   enableWorkspaceHooks: "--enable-workspace-hooks",
   allowPolicyWrites: "--allow-policy-writes",
+  securityGate: "--security-gate",
+  securityGateFailOn: "--security-gate-fail-on",
+  securityGateMaxFiles: "--security-gate-max-files",
   contextFile: "--context-file",
   noProjectContext: "--no-project-context",
   runId: "--run-id",
@@ -351,6 +358,16 @@ export function toArgv(options: RunOptions): string[] {
     if (!(PERMISSION_MODES as readonly string[]).includes(value)) fail(`--permission-mode must be one of ${PERMISSION_MODES.join(", ")}`);
     push(value, "--permission-mode", argv);
   }
+  if ((options.securityGateFailOn !== undefined || options.securityGateMaxFiles !== undefined) && !options.securityGate) {
+    fail("security gate threshold and file-limit options require `securityGate: true`");
+  }
+  if (options.securityGateFailOn !== undefined) {
+    const value = checkString(options.securityGateFailOn, "--security-gate-fail-on");
+    if (!(["critical", "high", "medium", "low", "none"] as string[]).includes(value)) {
+      fail("--security-gate-fail-on must be critical, high, medium, low, or none");
+    }
+    push(value, "--security-gate-fail-on", argv);
+  }
 
   const numbers: [keyof RunOptions, { min?: number; max?: number }][] = [
     ["maxOutputTokens", { min: 1 }],
@@ -362,6 +379,7 @@ export function toArgv(options: RunOptions): string[] {
     ["checkpointTurns", { min: 0 }],
     ["sessionLeaseSeconds", { min: 1 }],
     ["resumeRecord", { min: 0 }],
+    ["securityGateMaxFiles", { min: 1, max: 10_000 }],
   ];
   for (const [key, bounds] of numbers) {
     const value = options[key];
@@ -430,6 +448,7 @@ export function toArgv(options: RunOptions): string[] {
     "noPlugins",
     "enableWorkspaceHooks",
     "allowPolicyWrites",
+    "securityGate",
     "noProjectContext",
   ] as const) {
     const value = options[key];

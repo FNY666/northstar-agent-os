@@ -75,6 +75,9 @@ class RunOptions:
     workspace_agents: bool = True  # register .northstar/agents/*.md definitions
     checkpoint_turns: int = 0  # append a resumable boundary record every N turns (0 = off)
     resume_from: str | None = None  # session id to fork from its latest checkpoint; the parent file is never written
+    security_gate: bool = False  # host compares bounded offline scans before/after the run
+    security_gate_fail_on: str | None = None  # new-finding threshold: critical/high/medium/low/none
+    security_gate_max_files: int | None = None  # candidate-file bound, 1..10000 (default 4000)
 
 
 @dataclass
@@ -182,6 +185,15 @@ def _build(options: RunOptions, resume: str | None = None) -> tuple[Any, Any, li
         "record_tool_output_in_session": not options.redact_tool_output,
         "stream": options.stream,
     }
+    if options.security_gate:
+        from security_gate import SecurityGateConfig
+
+        config_kwargs["security_gate"] = SecurityGateConfig(
+            fail_on=(options.security_gate_fail_on if options.security_gate_fail_on is not None else "high"),
+            max_files=(options.security_gate_max_files if options.security_gate_max_files is not None else 4_000),
+        )
+    elif options.security_gate_fail_on is not None or options.security_gate_max_files is not None:
+        raise ValueError("security gate options require security_gate=True")
     if options.system_prompt is not None:
         config_kwargs["system_prompt"] = options.system_prompt
     provider = _build_provider(options)

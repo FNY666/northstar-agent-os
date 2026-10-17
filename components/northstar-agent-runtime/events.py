@@ -22,9 +22,10 @@ from __future__ import annotations
 
 from typing import Any
 
-#: Terminal convention for each result subtype (0 success … 5 permission, 6 postconditions,
-#: 7 session contention). Only 64 means "nothing was run and the operator should fix the
-#: command"; 7 means "the command was fine, another run owns the session - wait, retry".
+#: Terminal convention for each result subtype (0 success … 5 permission,
+#: 6 postconditions/security gate, 7 session contention. Only 64 means
+#: "nothing was run and the operator should fix the command"; 7 means "the
+#: command was fine, another run owns the session - wait, retry".
 EXIT_CODES: dict[str, int] = {
     "success": 0,
     "error_during_execution": 1,

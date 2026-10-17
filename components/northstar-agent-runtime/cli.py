@@ -20,7 +20,7 @@ exit code, so the shell can tell the outcomes apart:
 3      error_max_tool_calls
 4      error_max_budget_usd
 5      error_permission_denied
-6      error_postconditions_failed (a --verify / [[verify]] check did not hold)
+6      error_postconditions_failed (a --verify / [[verify]] check or security gate did not hold)
 7      error_session_busy (another live run holds the session transcript)
 64     usage or configuration error (nothing was run)
 =====  ==============================================
@@ -344,6 +344,28 @@ def _add_policy_arguments(parser: argparse.ArgumentParser) -> None:
                 "guide coding tasks and emit Git change plus independent verification evidence; "
                 "permissions remain unchanged"
             ),
+        )
+        policy.add_argument(
+            "--security-gate",
+            action="store_true",
+            help=(
+                "independently compare bounded offline security scans before and after the run; "
+                "new findings at the selected severity, changed skipped files, or scan errors block completion"
+            ),
+        )
+        policy.add_argument(
+            "--security-gate-fail-on",
+            choices=("critical", "high", "medium", "low", "none"),
+            default=None,
+            metavar="SEVERITY",
+            help="severity threshold for new findings when --security-gate is enabled (default: high)",
+        )
+        policy.add_argument(
+            "--security-gate-max-files",
+            type=int,
+            default=None,
+            metavar="N",
+            help="maximum candidate files per security-gate scan (1..10000; default: 4000)",
         )
         policy.add_argument(
             "--enable-security-tools",
@@ -1396,6 +1418,29 @@ def _print_coding_evidence(args: argparse.Namespace, before: Any, run_report: An
                     f"    failed: {item.get('kind', '?')} {path}: "
                     f"{item.get('detail', 'check failed')}"
                 )
+    security_gate = postconditions.get("security_gate")
+    if security_gate is not None:
+        for attempt in postconditions.get("security_gate_history", ())[:-1]:
+            print(
+                f"    security_gate_attempt={attempt.get('attempt', '?')} "
+                f"status={attempt.get('status', 'unknown')} "
+                f"threshold={attempt.get('threshold_findings', 'n/a')} "
+                f"detail={attempt.get('detail', '')}"
+            )
+        print(
+            f"  security_gate={security_gate.get('status', 'unknown')} "
+            f"fail_on={security_gate.get('fail_on', 'high')} "
+            f"new={security_gate.get('new_findings', 'n/a')} "
+            f"threshold={security_gate.get('threshold_findings', 'n/a')} "
+            f"attempt={security_gate.get('attempt', 'n/a')} "
+            f"coverage={security_gate.get('coverage', 'unknown')}"
+        )
+        for item in security_gate.get("new", ()):
+            path = json.dumps(item.get("path", "?"), ensure_ascii=True)
+            print(
+                f"    {item.get('severity', 'unknown')}: {path}:{item.get('line', '?')} "
+                f"[{item.get('rule', '?')}] count={item.get('count', 1)}"
+            )
     workspace_checks = evidence["workspace_checks"]
     if workspace_checks["status"] == "not_configured":
         print("  workspace_checks=not_configured")
@@ -1439,6 +1484,15 @@ def _run(args: argparse.Namespace) -> int:
     from agents import builtin_registry
     from loop import AgentRuntime, RuntimeConfig, RuntimeConfigurationError
     from tools import ToolLimits, build_default_registry
+
+    if args.security_gate:
+        # The gate is a coding workflow verifier; keep its host receipt and
+        # coding instructions paired with it automatically.
+        args.coding_mode = True
+    elif args.security_gate_fail_on is not None or args.security_gate_max_files is not None:
+        raise RunConfigurationError("security-gate options require --security-gate")
+    if args.security_gate_max_files is not None and not 1 <= args.security_gate_max_files <= 10_000:
+        raise RunConfigurationError("--security-gate-max-files must be between 1 and 10000")
 
     try:
         args.model = resolve_model(args.provider, args.model)
@@ -1523,6 +1577,13 @@ def _run(args: argparse.Namespace) -> int:
         "record_tool_output_in_session": not args.redact_tool_output,
         "stream": args.stream,
     }
+    if args.security_gate:
+        from security_gate import SecurityGateConfig
+
+        config_kwargs["security_gate"] = SecurityGateConfig(
+            fail_on=args.security_gate_fail_on or "high",
+            max_files=(args.security_gate_max_files if args.security_gate_max_files is not None else 4_000),
+        )
     if postconditions:
         config_kwargs["postconditions"] = postconditions
     if args.run_id:
@@ -1601,6 +1662,10 @@ def _run(args: argparse.Namespace) -> int:
     # Connect MCP servers only now (never for --dry-run/--show-pricing/--probe):
     # each remote tool lands in the run's registry as a mutating-by-default
     # mcp__<server>__<tool> spec and still crosses the permission gate and hooks.
+    if runtime.security_gate is not None:
+        # Capture the security baseline before MCP servers start, so their
+        # startup side effects count as run changes.
+        runtime.security_gate.snapshot()
     coding_snapshot = None
     if getattr(args, "coding_mode", False):
         from coding_evidence import snapshot_workspace

@@ -139,6 +139,22 @@ host namespace sharing, hostPath volumes, all Linux capabilities, and floating
 vulnerability database lookup; a clean report is not proof that a project is
 secure.
 
+For coding runs, `northstar agent --security-gate TASK` automatically enables
+coding mode and runs the same bounded scan before the first model turn and again
+before a would-be successful result. Existing findings are grandfathered; new
+findings at `high` severity or above fail the result with
+`error_postconditions_failed` (exit 6). `--security-gate-fail-on` can select
+`critical`, `high`, `medium`, `low`, or `none`. A new skipped candidate, a
+changed skipped candidate, a scan error, or a file-limit hit also fails closed.
+Pre-existing skipped files are allowed only when a bounded
+byte fingerprint proves they did not change. The gate is read-only and does not
+grant tools; it records the verdict in the runtime transcript and coding receipt.
+Each scan examines up to 4,000 candidate files by default; use
+`--security-gate-max-files` to raise that bound to at most 10,000.
+On a failed gate, the runtime returns sanitized finding details to the agent and
+allows up to two repair turns before ending with the failure result. Tool
+permissions and command approvals remain unchanged throughout.
+
 JavaScript and TypeScript files also receive line-pattern checks for dynamic
 code execution, shell commands, interpolated SQL, HTML injection, direct
 request-derived URL flows to outbound HTTP calls, and request-derived paths
@@ -1216,6 +1232,10 @@ isolation: an edit that is reverted between snapshots can go undetected, and par
 coverage is reported as `unknown` rather than a match.
 The receipt distinguishes checks that were not configured, disabled, or configured
 but never reached evaluation.
+When `--security-gate` is enabled, the same receipt reports scan coverage,
+baseline/current finding counts, new findings, and the configured severity gate.
+The verdict is produced by the host before the runtime's final result, so an
+agent cannot ignore a failed scan and report success.
 Command text and command output are omitted from this summary; use each `call_id` and
 `agent_path` to locate the corresponding call in the run transcript. The receipt detects
 changes to files that were already dirty before the run by hashing those paths at both
@@ -1244,7 +1264,7 @@ condition arrives as an event, never as a raised exception:
 | `error_max_tool_calls`      | `max_tool_calls` reached                            |
 | `error_max_budget_usd`      | `max_budget_usd` reached                            |
 | `error_permission_denied`   | a denial ended the run (`halt_on_denial`)           |
-| `error_postconditions_failed` | the model stopped, but a declared workspace check did not hold |
+| `error_postconditions_failed` | the model stopped, but a declared workspace check or security gate did not pass |
 | `error_session_busy` | another live run holds this session's transcript; nothing was written |
 | `error_during_execution`    | provider failure, malformed tool input, internal bug |
 

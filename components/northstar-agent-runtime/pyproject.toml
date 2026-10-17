@@ -1259,6 +1259,7 @@ py-modules = [
     "secure_enclave",
     "secure_inference",
     "security_cli",
+    "security_gate",
     "seed_manager",
     "self_critique",
     "self_modification_probes",

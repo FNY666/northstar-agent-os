@@ -22,6 +22,7 @@ tool, which is registered only when a socket path is supplied.
 """
 from __future__ import annotations
 
+import json
 import os
 import time
 from dataclasses import dataclass, field, replace
@@ -158,6 +159,9 @@ class RuntimeConfig:
     #: Workspace claims checked after the run by an independent evaluator, so a
     #: model saying "done" is not the evidence that it is. See postconditions.py.
     postconditions: Any = ()
+    #: Optional pre/post static-security comparison. It is top-level only and
+    #: never grants a tool or filesystem write capability.
+    security_gate: Any = None
     #: Append one checkpoint transcript record every N turn boundaries (0 = off).
     #: Off by default because a new record type in every transcript is a format
     #: change, and a format change should be chosen, not inherited.
@@ -683,6 +687,18 @@ class AgentRuntime:
             self.postconditions = PostConditionSet(self.sandbox.root_real, self.config.postconditions)
         except PostConditionError as error:
             raise RuntimeConfigurationError(f"postconditions: {error}") from error
+        self.security_gate = None
+        self._security_gate_attempts = 0
+        self._security_gate_evaluations = 0
+        if self.config.security_gate is not None:
+            if self.config.depth:
+                raise RuntimeConfigurationError("security gate is available only on the top-level run")
+            from security_gate import SecurityGate, SecurityGateError
+
+            try:
+                self.security_gate = SecurityGate(self.sandbox.root_real, self.config.security_gate)
+            except SecurityGateError as error:
+                raise RuntimeConfigurationError(f"security gate: {error}") from error
         self.limits = self.config.tool_limits
         self.budget = budget if isinstance(budget, Budget) else Budget(max_budget_usd=self.config.max_budget_usd)
         self.tools = tools if isinstance(tools, ToolRegistry) else build_default_registry(include_describe=self.config.include_describe_tool)
@@ -1165,6 +1181,8 @@ class AgentRuntime:
             self.postconditions.snapshot()
         except PostConditionError as error:
             raise RuntimeConfigurationError(f"postconditions: {error}") from error
+        if self.security_gate is not None:
+            self.security_gate.snapshot()
         init = SystemMessage(subtype="init", content=f"runtime ready: {self.provider_name}/{config.model}", data=init_data)
         self.sessions.record_system(init, agent=config.agent)
         yield init
@@ -1301,8 +1319,12 @@ class AgentRuntime:
             }
         except Exception:  # noqa: BLE001 - init must not fail because of a probe
             init_data["sandbox"] = {"backend": config.shell_backend, "isolation": "unknown"}
-        if self.postconditions:
-            init_data["postconditions"] = [condition.as_dict() for condition in self.postconditions.conditions]
+        configured_checks = [condition.as_dict() for condition in self.postconditions.conditions]
+        if self.security_gate is not None:
+            init_data["security_gate"] = self.security_gate.config.as_dict()
+            configured_checks.append({"kind": "security_gate"})
+        if configured_checks:
+            init_data["postconditions"] = configured_checks
         if state.resumed_from is not None:
             init_data["resumed_from"] = state.resumed_from
         if config.parent_session and state.resumed_from is None:
@@ -1551,8 +1573,39 @@ class AgentRuntime:
         state.final_text = assistant.text
         self._checkpoint(state, boundary="after_text")
         subtype = "success"
-        if self.postconditions:
-            summary = summarise_postconditions(self.postconditions.evaluate())
+        gate_failed = False
+        gate: dict[str, Any] = {}
+        if self.postconditions or self.security_gate is not None:
+            summary = summarise_postconditions(
+                self.postconditions.evaluate() if self.postconditions else ()
+            )
+            if self.security_gate is not None:
+                gate = self.security_gate.evaluate()
+                self._security_gate_evaluations += 1
+                gate["attempt"] = self._security_gate_evaluations
+                gate_failed = not gate["ok"]
+                if gate_failed:
+                    self._security_gate_attempts += 1
+                summary["security_gate"] = gate
+                summary["checked"] += 1
+                if gate["ok"]:
+                    summary["passed"] += 1
+                else:
+                    summary["failed"] += 1
+                summary["results"].append({
+                    "kind": "security_gate",
+                    "ok": gate["ok"],
+                    "detail": gate.get("detail", "security gate failed"),
+                    "structural": False,
+                    "status": gate.get("status"),
+                    "attempt": gate.get("attempt"),
+                    "fail_on": gate.get("fail_on"),
+                    "threshold_findings": gate.get("threshold_findings"),
+                    "new_findings": gate.get("new_findings"),
+                    "files_scanned_before": gate.get("files_scanned_before"),
+                    "files_scanned_after": gate.get("files_scanned_after"),
+                })
+                summary["ok"] = summary["failed"] == 0
             record = SystemMessage(
                 subtype="postconditions",
                 content=(
@@ -1568,6 +1621,47 @@ class AgentRuntime:
                 # The model asked to stop and the workspace disagrees.
                 # "It said it was done" is not the evidence we accept.
                 subtype = "error_postconditions_failed"
+                if (
+                    self.security_gate is not None
+                    and gate_failed
+                    and self._security_gate_attempts < self.security_gate.max_repair_attempts
+                ):
+                    reason_lines = [
+                        "The independent security gate blocked completion.",
+                        f"Status: {gate.get('status', 'failed')}; {gate.get('detail', 'scan failed')}.",
+                    ]
+                    for item in gate.get("new", ())[:20]:
+                        safe_path = json.dumps(str(item.get("path", "?")), ensure_ascii=True)
+                        reason_lines.append(
+                            f"- {item.get('severity', 'unknown')} {safe_path}:{item.get('line', '?')} "
+                            f"[{item.get('rule', '?')}] {item.get('message', 'new finding')}; "
+                            f"remediation: {item.get('remediation', 'review the affected flow')}"
+                        )
+                    for path in gate.get("unverified_paths", ())[:20]:
+                        reason_lines.append(
+                            f"- scan coverage needs review: {json.dumps(str(path), ensure_ascii=True)}"
+                        )
+                    reason_lines.append(
+                        "Address the reported new findings or scan-coverage change, then finish again. "
+                        "All edits and commands still require their usual permission decisions."
+                    )
+                    follow_up = UserMessage.text_block(
+                        "\n".join(reason_lines),
+                        is_meta=True,
+                        meta_reason="Security gate",
+                    )
+                    state.transcript.append(follow_up)
+                    self.sessions.append(
+                        "user_prompt",
+                        {
+                            "agent": config.agent,
+                            "role": "user",
+                            "is_meta": True,
+                            "content": [block.to_api() for block in follow_up.content],
+                        },
+                    )
+                    yield follow_up
+                    return False
         yield self._finish(state, subtype)
         return True
 

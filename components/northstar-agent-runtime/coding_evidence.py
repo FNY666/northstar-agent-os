@@ -562,12 +562,16 @@ def postcondition_evidence(run_report: Any) -> dict[str, Any]:
         "structural_passed": 0,
         "structural_failed": 0,
         "results": [],
+        "security_gate": None,
+        "security_gate_history": [],
     }
     if run_report is None:
         return {**empty, "status": "unavailable"}
     initialized = False
     configured: int | None = None
     verdict_data: dict[str, Any] | None = None
+    gate_config: dict[str, Any] | None = None
+    gate_history: list[dict[str, Any]] = []
     for event in getattr(run_report, "events", ()):
         if type(event).__name__ != "SystemMessage":
             continue
@@ -581,15 +585,32 @@ def postcondition_evidence(run_report: Any) -> dict[str, Any]:
             if not isinstance(conditions, (list, tuple)):
                 return {**empty, "status": "unavailable"}
             configured = len(conditions)
+            raw_gate = data.get("security_gate")
+            if isinstance(raw_gate, dict):
+                gate_config = {
+                    key: raw_gate[key]
+                    for key in ("fail_on", "max_files", "max_file_bytes")
+                    if key in raw_gate
+                }
         elif subtype == "postconditions":
             verdict_data = data
+            raw_gate = data.get("security_gate")
+            if isinstance(raw_gate, dict):
+                gate_history.append(raw_gate)
 
     if verdict_data is None:
         if not initialized or configured is None:
             return empty
         if configured == 0:
             return {**empty, "status": "not_configured"}
-        return {**empty, "status": "not_evaluated", "configured": configured}
+        gate = {"status": "not_evaluated", **gate_config} if gate_config is not None else None
+        return {
+            **empty,
+            "status": "not_evaluated",
+            "configured": configured,
+            "security_gate": gate,
+            "security_gate_history": [],
+        }
 
     data = verdict_data
     raw_results = data.get("results", ())
@@ -606,6 +627,8 @@ def postcondition_evidence(run_report: Any) -> dict[str, Any]:
             for key in (
                 "kind", "path", "ok", "detail", "structural",
                 "digest_before", "digest_after",
+                "status", "fail_on", "threshold_findings", "new_findings",
+                "attempt", "files_scanned_before", "files_scanned_after",
             )
             if key in item
         }
@@ -620,6 +643,42 @@ def postcondition_evidence(run_report: Any) -> dict[str, Any]:
     failed = len(results) - passed
     structural_checked = sum(bool(item.get("structural", False)) for item in results)
     structural_passed = sum(item["ok"] and item.get("structural", False) for item in results)
+    gate_receipt: dict[str, Any] | None = None
+    raw_gate = data.get("security_gate")
+    if isinstance(raw_gate, dict):
+        gate_receipt = {
+            key: raw_gate[key]
+            for key in (
+                "kind", "ok", "status", "fail_on", "coverage", "detail",
+                "attempt", "unverified_paths",
+                "files_scanned_before", "files_scanned_after",
+                "files_skipped_before", "files_skipped_after",
+                "baseline_findings", "current_findings", "new_findings",
+                "threshold_findings", "details_truncated",
+            )
+            if key in raw_gate
+        }
+        safe_new: list[dict[str, Any]] = []
+        for item in raw_gate.get("new", ()):
+            if isinstance(item, dict):
+                safe_new.append({
+                    key: item[key]
+                    for key in ("path", "line", "column", "rule", "severity", "message", "count")
+                    if key in item
+                })
+        gate_receipt["new"] = safe_new
+    safe_gate_history: list[dict[str, Any]] = []
+    for item in gate_history:
+        safe_gate_history.append({
+            key: item[key]
+            for key in (
+                "attempt", "status", "fail_on", "coverage", "detail",
+                "new_findings", "threshold_findings",
+                "files_scanned_before", "files_scanned_after",
+                "files_skipped_before", "files_skipped_after",
+            )
+            if key in item
+        })
     return {
         "source": "runtime_postconditions",
         "status": "passed" if failed == 0 and declared_checked else "failed" if failed else "not_configured",
@@ -631,6 +690,8 @@ def postcondition_evidence(run_report: Any) -> dict[str, Any]:
         "structural_passed": structural_passed,
         "structural_failed": structural_checked - structural_passed,
         "results": results,
+        "security_gate": gate_receipt,
+        "security_gate_history": safe_gate_history,
     }
 
 

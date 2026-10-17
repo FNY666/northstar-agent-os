@@ -497,6 +497,7 @@ def _scan_root(
     findings_count = 0
     threshold_hits = 0
     skipped = 0
+    skipped_paths: list[str] = []
     files_scanned = 0
 
     def finding_order(item: dict[str, Any]) -> tuple[Any, ...]:
@@ -525,6 +526,8 @@ def _scan_root(
         if max_findings is None:
             findings.append(item)
             return
+        if max_findings <= 0:
+            return
         findings.append(item)
         findings.sort(key=finding_order)
         if len(findings) > max_findings:
@@ -537,19 +540,23 @@ def _scan_root(
             stat_result = safe_path.stat()
             if not safe_path.is_file() or stat_result.st_size > max_file_bytes:
                 skipped += 1
+                skipped_paths.append(relative)
                 continue
             with safe_path.open("rb") as handle:
                 raw = handle.read(max_file_bytes + 1)
         except (OSError, ToolAccessError, ValueError):
             skipped += 1
+            skipped_paths.append(relative)
             continue
         if len(raw) > max_file_bytes or b"\x00" in raw:
             skipped += 1
+            skipped_paths.append(relative)
             continue
         try:
             text = raw.decode("utf-8")
         except UnicodeDecodeError:
             skipped += 1
+            skipped_paths.append(relative)
             continue
         files_scanned += 1
         if text:
@@ -705,6 +712,7 @@ def _scan_root(
         "findings_count": findings_count,
         "findings_truncated": findings_count > len(findings),
         "_finding_groups": list(group_counts.values()),
+        "_skipped_paths": sorted(set(skipped_paths)),
         "fail_on": fail_on,
         "threshold_findings": threshold_hits,
         "limitations": [
@@ -779,6 +787,7 @@ def scan_workspace(args: Any) -> int:
         print(f"configuration error: {error}", file=sys.stderr)
         return 64
     finding_groups = summary.pop("_finding_groups", [])
+    summary.pop("_skipped_paths", None)
     gate_incomplete = False
 
     if args.format == "json":
@@ -2084,6 +2093,7 @@ def security_tool_specs() -> tuple[Any, Any]:
         except Exception as error:  # noqa: BLE001 - scan errors fail closed without leaking file contents
             return ToolResult.error(f"SecurityScan could not complete: {type(error).__name__}")
         groups = summary.pop("_finding_groups", [])
+        summary.pop("_skipped_paths", None)
         if compare_to is not None:
             baseline = scan_baselines[compare_to]
             if summary["file_limit_reached"]:
