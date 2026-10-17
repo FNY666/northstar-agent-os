@@ -4,7 +4,7 @@ The analyzer tracks simple values from common request, CLI, environment, and
 interactive input sources to shell-backed process APIs. It handles multiline
 calls, assignments, f-strings, imports, basic control-flow joins, and bounded
 calls to direct same-file functions and explicitly named methods in top-level
-classes, including direct `self` / `cls` field flow into called helpers. It
+classes, including direct `self` / `cls` field flow through called helpers. It
 remains a heuristic: it does not
 resolve inherited or dynamic method dispatch, cross-file or dynamic-alias flows,
 custom sanitizers, or whether non-shell subprocess arguments are dangerous.
@@ -96,7 +96,8 @@ class _Analyzer:
         self._return_frames: list[list[_Taint]] = []
         self._current_class: str | None = None
         self._local_call_cache: dict[
-            tuple[int, tuple[tuple[str, int], ...]], tuple[bool, _Taint | None]
+            tuple[int, tuple[tuple[str, int], ...]],
+            tuple[bool, _Taint | None, str | None, tuple[tuple[str, int], ...]],
         ] = {}
         self._statements(tree.body, {})
 
@@ -329,7 +330,9 @@ class _Analyzer:
             (parameter, taint.source_line) for parameter, taint in function_env.items()
         )))
         if cache_key in self._local_call_cache:
-            return self._local_call_cache[cache_key]
+            summary = self._local_call_cache[cache_key]
+            self._apply_field_summary(caller_env, summary[2], summary[3])
+            return summary[0], summary[1]
 
         cost = self._function_cost.get(name, _MAX_AST_NODES + 1)
         if cost > self._helper_work_remaining:
@@ -339,21 +342,55 @@ class _Analyzer:
         returns: list[_Taint] = []
         self._return_frames.append(returns)
         saved_class = self._current_class
+        field_prefix = self._shared_field_prefix(call, function)
         self._current_class = self._function_classes.get(name or "")
         try:
-            self._scoped(function.body, function_env)
+            result_env = self._scoped(function.body, function_env)
         except RecursionError:
             # Deeply nested hostile ASTs are ignored at this helper boundary.
             result = None
+            field_state: tuple[tuple[str, int], ...] = ()
+            field_prefix = None
         else:
             result = min(returns, key=lambda item: item.source_line) if returns else None
+            field_state = tuple(sorted(
+                (key, taint.source_line)
+                for key, taint in result_env.items()
+                if field_prefix is not None and key.startswith(field_prefix)
+            ))
         finally:
             self._current_class = saved_class
             self._return_frames.pop()
             self._helper_stack.pop()
-        analyzed_result = (True, result)
-        self._local_call_cache[cache_key] = analyzed_result
-        return analyzed_result
+        summary = (True, result, field_prefix, field_state)
+        self._local_call_cache[cache_key] = summary
+        self._apply_field_summary(caller_env, summary[2], summary[3])
+        post_call_env = dict(function_env)
+        if field_prefix is not None:
+            for key in tuple(post_call_env):
+                if key.startswith(field_prefix):
+                    post_call_env.pop(key, None)
+            post_call_env.update({
+                key: _Taint(source_line) for key, source_line in field_state
+            })
+        post_call_key = (id(call), tuple(sorted(
+            (parameter, taint.source_line) for parameter, taint in post_call_env.items()
+        )))
+        self._local_call_cache.setdefault(post_call_key, summary)
+        return True, result
+
+    @staticmethod
+    def _apply_field_summary(
+        env: dict[str, _Taint],
+        field_prefix: str | None,
+        field_state: tuple[tuple[str, int], ...],
+    ) -> None:
+        if field_prefix is None:
+            return
+        for key in tuple(env):
+            if key.startswith(field_prefix):
+                env.pop(key, None)
+        env.update({key: _Taint(source_line) for key, source_line in field_state})
 
     @staticmethod
     def _target_names(target: ast.AST) -> list[str]:
@@ -429,9 +466,7 @@ class _Analyzer:
                 self._call_sink(child, env)
                 name = self._function_name(child)
                 if name in self._local_functions:
-                    function = self._local_functions[name]
-                    if self._local_call_environment(child, function, env):
-                        self._local_call_result(child, env)
+                    self._local_call_result(child, env)
 
     @staticmethod
     def _merge(*environments: dict[str, _Taint]) -> dict[str, _Taint]:
@@ -443,14 +478,18 @@ class _Analyzer:
                     merged[name] = taint
         return merged
 
-    def _scoped(self, statements: list[ast.stmt], env: dict[str, _Taint]) -> None:
+    def _scoped(self, statements: list[ast.stmt], env: dict[str, _Taint]) -> dict[str, _Taint]:
         saved_modules = self.module_aliases
         saved_imports = self.imported_names
         self.module_aliases = dict(saved_modules)
         self.imported_names = dict(saved_imports)
-        self._statements(statements, dict(env))
-        self.module_aliases = saved_modules
-        self.imported_names = saved_imports
+        scoped_env = dict(env)
+        try:
+            self._statements(statements, scoped_env)
+        finally:
+            self.module_aliases = saved_modules
+            self.imported_names = saved_imports
+        return scoped_env
 
     def _statements(self, statements: list[ast.stmt], env: dict[str, _Taint]) -> dict[str, _Taint]:
         for statement in statements:
