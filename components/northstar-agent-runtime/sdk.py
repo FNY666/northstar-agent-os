@@ -79,6 +79,7 @@ class RunOptions:
     workspace_agents: bool = True  # register .northstar/agents/*.md definitions
     checkpoint_turns: int = 0  # append a resumable boundary record every N turns (0 = off)
     resume_from: str | None = None  # session id to fork from its latest checkpoint; the parent file is never written
+    allow_checkpoint_tool_replay: bool = False  # acknowledge possible replay of tools after the selected checkpoint
     verification_commands: Sequence[str] = ()  # host-owned checks run after the model stops
     require_verification: bool = False  # report success_unverified when no host-owned check exists
     code_tools: bool = False  # add the structured repository tool profile
@@ -208,6 +209,9 @@ def _build(options: RunOptions, resume: str | None = None) -> tuple[Any, Any, li
         )
     provider = _build_provider(options)
 
+    if options.allow_checkpoint_tool_replay and not options.resume_from:
+        raise ValueError("allow_checkpoint_tool_replay requires resume_from")
+
     # A checkpoint resume forks: new session id, new file, counters and cost carried
     # over from the parent, and the parent transcript never opened for writing.
     resume_transcript: list[Any] = []
@@ -232,6 +236,7 @@ def _build(options: RunOptions, resume: str | None = None) -> tuple[Any, Any, li
                 f"session {options.resume_from!r} has no checkpoints: run it with checkpoint_turns=N first"
             )
         config_kwargs["resume_from"] = checkpoint
+        config_kwargs["allow_checkpoint_tool_replay"] = options.allow_checkpoint_tool_replay
         config_kwargs["parent_session"] = options.resume_from
         config_kwargs["max_turns"] = max(int(options.max_turns), checkpoint.turns)
         budget = Budget(

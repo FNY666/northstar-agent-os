@@ -597,6 +597,14 @@ def _add_output_arguments(parser: argparse.ArgumentParser) -> None:
             metavar="INDEX",
             help="with --resume-from: resume from the checkpoint at this transcript record index (default: the latest)",
         )
+        output.add_argument(
+            "--allow-checkpoint-tool-replay",
+            action="store_true",
+            help=(
+                "acknowledge that tools after the selected checkpoint may be called again; "
+                "their effects are not rolled back and calls still pass current policy"
+            ),
+        )
         output.add_argument("--redact-tool-output", action="store_true", help="record tool results in the session without output bodies")
         output.add_argument(
             "--redact-session-content",

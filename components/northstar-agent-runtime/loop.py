@@ -39,7 +39,13 @@ from hooks import HookInput, HookRegistry
 from observer_verdict_ledger import ObserverVerdictLedger
 from safr_checkpoint import SafrCheckpoint
 from sealed_audit_sink import SealedAuditSink
-from checkpoints import CheckpointError, build as build_checkpoint, digest_transcript, prepare_resume
+from checkpoints import (
+    CheckpointError,
+    build as build_checkpoint,
+    digest_transcript,
+    _post_checkpoint_tool_call_count,
+    prepare_resume,
+)
 from dataflow_policy import DataflowPolicy, SessionDataflow
 from egress_scope import canonical_egress_host, validate_egress_target_scope
 from postconditions import (
@@ -201,6 +207,8 @@ class RuntimeConfig:
     #: The boundary a resumed run continues from (checkpoints.Checkpoint). Setting
     #: this without carrying the parent's cost over is refused, not forgiven.
     resume_from: Any = None
+    #: Explicitly acknowledge that tools recorded after the selected checkpoint may be called again.
+    allow_checkpoint_tool_replay: bool = False
     #: Session id this run was forked from, recorded for the audit only.
     parent_session: str = ""
     max_output_tokens: int = 4096
@@ -1509,6 +1517,14 @@ class AgentRuntime:
                     "resume_from needs the parent transcript as run(resume=...): the checkpoint says where to cut, "
                     "but the messages to cut come from the session store"
                 )
+            post_checkpoint_tool_calls = _post_checkpoint_tool_call_count(checkpoint, state.transcript)
+            if post_checkpoint_tool_calls and not self.config.allow_checkpoint_tool_replay:
+                raise RuntimeConfigurationError(
+                    f"resume refused: checkpoint at turn {checkpoint.turns} would discard "
+                    f"{post_checkpoint_tool_calls} post-checkpoint tool call(s); their effects may already "
+                    "have run. Inspect the parent session and pass "
+                    "--allow-checkpoint-tool-replay only when replay is intentional"
+                )
             try:
                 state.transcript = prepare_resume(
                     checkpoint, state.transcript, expected_session_id=self.config.parent_session or None
@@ -1553,6 +1569,9 @@ class AgentRuntime:
                 "transcript_digest": checkpoint.transcript_digest[:12],
                 "forked": bool(self.config.parent_session),
             }
+            if post_checkpoint_tool_calls:
+                state.resumed_from["post_checkpoint_tool_calls"] = post_checkpoint_tool_calls
+                state.resumed_from["replay_acknowledged"] = True
         self._pending_state = state
         self._last_report = None
         # A subagent's run hangs off the span its parent opened for it, so the

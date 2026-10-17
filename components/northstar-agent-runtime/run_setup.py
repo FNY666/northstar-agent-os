@@ -514,6 +514,8 @@ def validate_session_flags(args: argparse.Namespace, ceilings: Ceilings) -> None
         )
     if args.resume_record is not None and not args.resume_from:
         raise RunConfigurationError("--resume-record only means something with --resume-from")
+    if getattr(args, "allow_checkpoint_tool_replay", False) and not args.resume_from:
+        raise RunConfigurationError("--allow-checkpoint-tool-replay only means something with --resume-from")
     if args.resume and args.resume_from:
         raise RunConfigurationError(
             "choose one of --resume (append to the same transcript) or "
@@ -558,6 +560,7 @@ def resolve_session(args: argparse.Namespace, ceilings: Ceilings) -> SessionSetu
                 f"(run it with --checkpoint-turns N to make boundaries resumable)",
             )
         config_kwargs["resume_from"] = checkpoint
+        config_kwargs["allow_checkpoint_tool_replay"] = bool(getattr(args, "allow_checkpoint_tool_replay", False))
         # A fork gets its own id and its own file; the parent stays byte-for-byte
         # what it was. --resume keeps the older append-in-place behaviour.
         config_kwargs["parent_session"] = args.resume_from
