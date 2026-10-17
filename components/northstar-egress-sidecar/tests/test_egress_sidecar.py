@@ -187,6 +187,8 @@ class ValidationTests(unittest.TestCase):
         line = encode_response({"a": 1})
         self.assertEqual(decode_request(line.rstrip("\n")), {"a": 1})
         self.assertIsNone(decode_request("not json"))
+        self.assertIsNone(decode_request('{"a":1,"a":2}'))
+        self.assertIsNone(decode_request('{"a":NaN}'))
 
     def test_socket_reader_enforces_wire_cap_including_newline(self):
         original = egress_socket.MAX_LINE_BYTES
