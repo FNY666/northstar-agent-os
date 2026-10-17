@@ -53911,11 +53911,11 @@ One MCP server over stdio: modern (per-request metadata) or legacy (handshake).
 - `tool_names()`
 - `tool(name: str)`
 - `quarantined` (property)
-  - True when tool-definition drift was detected; calls are denied.
+  - True after tool-definition drift or an uncertain call outcome; calls are denied.
 - `refresh_tools()`
   - Re-list tools and compare against the admission baseline.
 - `distrusted` (property)
-  - True when repeated quarantines escalated to distrust.
+  - True when an uncertain tool-call outcome or repeated quarantines require explicit re-admission.
 - `re_admit()`
   - Explicit operator re-admission after quarantine/distrust.
 - `call_tool(tool_name: str, arguments: dict[str, Any])`

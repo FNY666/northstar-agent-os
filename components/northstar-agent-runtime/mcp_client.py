@@ -20,9 +20,10 @@ Scope is deliberately small and fail-closed:
   existing permission gate and hooks. MCP is a tool *transport*, never a policy
   bypass.
 - Output is bounded: per-line and per-call caps apply on the client side. A
-  server that stops answering surfaces a timeout error and stays alive for
-  reuse; the process group is TERM→KILLed on ``close()`` and on connect
-  failure.
+  timed-out ``tools/call`` has an unknown external outcome, so the client
+  quarantines and stops that server until explicit re-admission rather than
+  inviting a blind replay. Process groups are TERM→KILLed on ``close()``
+  and on connect failure.
 - No third-party dependency: plain ``json`` + ``select`` on POSIX.
 
 Not implemented here (documented limits): MCP sampling/roots/prompts, image and
@@ -123,6 +124,10 @@ _TOOL_PART_RE = re.compile(TOOL_NAME_PART_RE)
 
 class McpError(ValueError):
     """MCP transport, protocol, or configuration error. Operator-facing."""
+
+
+class _McpCallOutcomeUnknown(McpError):
+    """A tools/call timed out after dispatch; its external effect may have committed."""
 
 
 def _strict_json_loads(raw: str, *, server: str) -> Any:
@@ -965,7 +970,7 @@ class McpStdioClient:
 
     @property
     def quarantined(self) -> bool:
-        """True when tool-definition drift was detected; calls are denied."""
+        """True after tool-definition drift or an uncertain call outcome; calls are denied."""
         return self._quarantined
 
     def refresh_tools(self) -> tuple[ToolDrift, ...]:
@@ -1056,22 +1061,31 @@ class McpStdioClient:
         reason: str,
         drifts: list[ToolDrift] | None = None,
         at: str | None = None,
+        *,
+        event_type: str = "mcp.tool_drift",
+        distrust_immediately: bool = False,
+        tool_name: str | None = None,
+        outcome: str | None = None,
     ) -> None:
-        """Quarantine the server, escalating to distrusted on repeated flaps."""
+        """Quarantine the server, escalating repeated flaps or uncertain tool effects."""
         self._quarantined = True
         self._quarantine_reason = reason
         self._quarantine_count += 1
-        if self._quarantine_count >= 3:
+        if distrust_immediately or self._quarantine_count >= 3:
             self._distrusted = True
         if callable(self.audit):
             record: dict[str, Any] = {
-                "type": "mcp.tool_drift",
+                "type": event_type,
                 "server": self.name,
                 "quarantine_count": self._quarantine_count,
                 "distrusted": self._distrusted,
             }
             if at is not None:
                 record["at"] = at
+            if tool_name is not None:
+                record["tool"] = tool_name
+            if outcome is not None:
+                record["outcome"] = outcome
             if drifts is not None:
                 record["drifts"] = [
                     {
@@ -1090,7 +1104,7 @@ class McpStdioClient:
 
     @property
     def distrusted(self) -> bool:
-        """True when repeated quarantines escalated to distrust."""
+        """True when an uncertain tool-call outcome or repeated quarantines require explicit re-admission."""
         return self._distrusted
 
     def re_admit(self) -> None:
@@ -1173,6 +1187,26 @@ class McpStdioClient:
         while True:
             try:
                 result = self._request("tools/call", params)
+            except _McpCallOutcomeUnknown:
+                reason = (
+                    f"tools/call for {tool_name!r} timed out; its external outcome is unknown, "
+                    "so re-admission requires downstream state reconciliation"
+                )
+                self._cancel_in_flight(reason)
+                self._quarantine(
+                    reason,
+                    at="call_timeout",
+                    event_type="mcp.call_outcome_unknown",
+                    distrust_immediately=True,
+                    tool_name=tool_name,
+                    outcome="unknown",
+                )
+                self.close()
+                return ToolResult.error(
+                    f"mcp {self.name}/{tool_name}: external outcome is unknown after timeout. "
+                    "The server was stopped and blocked until explicit re-admission; reconcile "
+                    "downstream state before re-admitting it."
+                )
             except McpError as error:
                 return ToolResult.error(f"mcp {self.name}/{tool_name}: {error}")
             if self._quarantined:
@@ -1399,7 +1433,10 @@ class McpStdioClient:
             detail = error.get("message", "unknown error") if isinstance(error, dict) else error
             raise McpError(f"mcp server {self.name!r}: {method}: {detail}")
         if timed_out:
-            raise McpError(f"mcp server {self.name!r}: {method} timed out after {self.timeout_ms} ms")
+            detail = f"mcp server {self.name!r}: {method} timed out after {self.timeout_ms} ms"
+            if method == "tools/call":
+                raise _McpCallOutcomeUnknown(detail)
+            raise McpError(detail)
         if not isinstance(result, dict):
             raise McpError(f"mcp server {self.name!r}: {method}: result is not an object")
         return result
