@@ -21,7 +21,7 @@ What one run gives back (printed by the demo):
 subtype       success
 exit_code     0        # 0 = success (see events.EXIT_CODES)
 session_id    ns-2026…
-num_turns     4
+num_turns     3
 tool_calls    2
 denials       1
   refused: Write (… refused by the permission gate …)
@@ -65,6 +65,7 @@ their parent's transcript file, and the parent's claim covers them until the par
 last record is on disk.
 
 Deep repository features (policy files, AGENTS.md/context files, skills, MCP
-servers) stay on the CLI by design; the SDK is the stable embedding contract.
+servers) stay on the CLI by design; the SDK is an unreleased embedding surface. Workspace agent loading is opt-in
+through `RunOptions.workspace_agents`; it is not automatic CLI configuration loading.
 Full reference: `docs/api/northstar-agent-runtime.md` (`sdk` and `events`
 modules), and the [governance concept](../../docs/concepts/governance.md).
