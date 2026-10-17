@@ -738,6 +738,47 @@ class GenerationFlagTests(unittest.TestCase):
         self.assertIn("echo:still fine", out)
 
 
+class McpConnectPaginationTests(unittest.TestCase):
+    def test_connect_lists_tools_from_every_page_before_exposing_them(self):
+        client = McpStdioClient(
+            "demo", ["python3", str(FIXTURE)], timeout_ms=4000,
+            protocol="legacy", env={}, network="allowed",
+        )
+        pages = iter((
+            {
+                "tools": [{
+                    "name": "first",
+                    "description": "first tool",
+                    "inputSchema": {"type": "object", "properties": {}},
+                }],
+                "nextCursor": "second-page",
+            },
+            {
+                "tools": [{
+                    "name": "second",
+                    "description": "second tool",
+                    "inputSchema": {"type": "object", "properties": {}},
+                }],
+            },
+        ))
+        calls = []
+        original_request = client._request
+
+        def request(method, params=None):
+            if method == "tools/list":
+                calls.append(params)
+                return next(pages)
+            return original_request(method, params)
+
+        client._request = request  # type: ignore[method-assign]
+        try:
+            client.connect()
+            self.assertEqual(client.tool_names(), ("first", "second"))
+            self.assertEqual(calls, [{}, {"cursor": "second-page"}])
+        finally:
+            client.close()
+
+
 class ToolListPaginationTests(unittest.TestCase):
     def client(self) -> McpStdioClient:
         return McpStdioClient("demo", ["true"], env={})
@@ -837,6 +878,44 @@ class ToolPinningTests(unittest.TestCase):
         try:
             self.assertEqual(client.refresh_tools(), ())
             self.assertFalse(client.quarantined)
+        finally:
+            client.close()
+
+    def test_refresh_checks_later_pages_before_returning_no_drift(self):
+        client = self.connect()
+        try:
+            echo = client._tools["echo"]
+            echo_definition = {
+                "name": echo.name,
+                "description": echo.description,
+                "inputSchema": echo.input_schema,
+            }
+            if echo.output_schema is not None:
+                echo_definition["outputSchema"] = echo.output_schema
+            pages = iter((
+                {"tools": [echo_definition], "nextCursor": "later-tools"},
+                {
+                    "tools": [{
+                        "name": "new_tool",
+                        "description": "added on page two",
+                        "inputSchema": {"type": "object", "properties": {}},
+                    }],
+                },
+            ))
+            calls = []
+
+            def request(method, params):
+                calls.append((method, params))
+                return next(pages)
+
+            client._request = request  # type: ignore[method-assign]
+            drifts = client.refresh_tools()
+            self.assertEqual(calls, [
+                ("tools/list", {}),
+                ("tools/list", {"cursor": "later-tools"}),
+            ])
+            self.assertIn("added", {drift.kind for drift in drifts})
+            self.assertTrue(client.quarantined)
         finally:
             client.close()
 
