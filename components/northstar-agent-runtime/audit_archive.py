@@ -34,6 +34,8 @@ ANCHOR_NAME = "anchor-manifest.json"
 EXTERNAL_ANCHOR_NAME = "external-anchor.json"
 MANIFEST_NAME = "archive-manifest.json"
 DEFAULT_RETENTION_DAYS = 180  # EU AI Act Art. 12: six months
+_MAX_MANIFEST_BYTES = 1 << 20
+_MAX_JSON_DEPTH = 128
 
 
 @dataclass
@@ -45,6 +47,46 @@ class ArchiveResult:
     head_chain_hash: str | None = None
     retain_until: str | None = None
     external_anchor: dict[str, Any] = field(default_factory=dict)
+
+
+def _read_json_file(path: Path) -> Any:
+    raw = path.read_bytes()
+    if len(raw) > _MAX_MANIFEST_BYTES:
+        raise ValueError(f"JSON file exceeds {_MAX_MANIFEST_BYTES}-byte limit")
+    text = raw.decode("utf-8")
+    depth = 0
+    in_string = False
+    escaped = False
+    for character in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            continue
+        if character == '"':
+            in_string = True
+        elif character in "[{":
+            depth += 1
+            if depth > _MAX_JSON_DEPTH:
+                raise ValueError(f"JSON depth limit exceeded ({_MAX_JSON_DEPTH} containers)")
+        elif character in "]}":
+            depth -= 1
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON key {key!r}")
+            result[key] = value
+        return result
+
+    def reject_constant(value: str):
+        raise ValueError(f"non-standard JSON constant {value}")
+
+    return json.loads(text, object_pairs_hook=unique_object, parse_constant=reject_constant)
 
 
 def _sha256_file(path: Path) -> str:
@@ -117,9 +159,11 @@ def verify_archive(
     target = Path(directory)
     manifest_path = target / MANIFEST_NAME
     try:
-        archive_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as error:
+        archive_manifest = _read_json_file(manifest_path)
+    except (OSError, UnicodeDecodeError, ValueError, RecursionError) as error:
         return ArchiveResult(ok=False, reason=f"cannot read {MANIFEST_NAME}: {error}")
+    if not isinstance(archive_manifest, dict):
+        return ArchiveResult(ok=False, reason=f"{MANIFEST_NAME} must be a JSON object")
     if archive_manifest.get("archive") != ARCHIVE_VERSION:
         return ArchiveResult(ok=False, reason="not a northstar audit archive manifest")
 
@@ -144,9 +188,11 @@ def verify_archive(
 
     anchor_path = target / ANCHOR_NAME
     try:
-        anchor_manifest = json.loads(anchor_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as error:
+        anchor_manifest = _read_json_file(anchor_path)
+    except (OSError, UnicodeDecodeError, ValueError, RecursionError) as error:
         return ArchiveResult(ok=False, reason=f"cannot read {ANCHOR_NAME}: {error}")
+    if not isinstance(anchor_manifest, dict):
+        return ArchiveResult(ok=False, reason=f"{ANCHOR_NAME} must be a JSON object")
     anchor_ok, anchor_note = check_anchor(feed_path, anchor_manifest)
     if not anchor_ok:
         return ArchiveResult(ok=False, reason=f"offline anchor mismatch: {anchor_note}")
@@ -156,9 +202,11 @@ def verify_archive(
     if external_path.is_file():
         external_state["present"] = True
         try:
-            external_anchor = json.loads(external_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as error:
+            external_anchor = _read_json_file(external_path)
+        except (OSError, UnicodeDecodeError, ValueError, RecursionError) as error:
             return ArchiveResult(ok=False, reason=f"cannot read {EXTERNAL_ANCHOR_NAME}: {error}")
+        if not isinstance(external_anchor, dict):
+            return ArchiveResult(ok=False, reason=f"{EXTERNAL_ANCHOR_NAME} must be a JSON object")
         from audit_rekor import RekorError, verify_anchor_in_log, verify_anchor_offline
 
         head = anchor_manifest.get("head_chain_hash")
