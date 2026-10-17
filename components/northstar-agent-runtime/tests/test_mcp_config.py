@@ -237,6 +237,16 @@ class EnvironmentTests(WorkspaceCase):
 
 
 class BoundaryTests(WorkspaceCase):
+    def test_duplicate_json_keys_are_refused(self):
+        self.declare('{"mcpServers":{"demo":{"command":"x"}},"mcpServers":{}}')
+        with self.assertRaisesRegex(McpConfigError, "duplicate JSON key"):
+            self.report()
+
+    def test_non_standard_json_constants_are_refused(self):
+        self.declare('{"mcpServers":{"demo":{"command":NaN}}}')
+        with self.assertRaisesRegex(McpConfigError, "non-standard JSON constant"):
+            self.report()
+
     def test_cwd_stays_inside_the_workspace(self):
         self.declare(document({"demo": {"command": "x", "cwd": "../outside"}}))
         with self.assertRaises(McpConfigError) as caught:

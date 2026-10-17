@@ -467,7 +467,9 @@ def scan_document(path: Path) -> tuple[AdmissionFinding, ...]:
     ``mcp_config`` already refuses it loudly; the scanner does not double as a
     parser."""
     try:
-        document = json.loads(path.read_text(encoding="utf-8"))
+        from mcp_config import _load_json
+
+        document = _load_json(path)
     except (OSError, ValueError):
         return ()
     if not isinstance(document, Mapping):
@@ -502,7 +504,9 @@ def scan_workspace(
         file_findings = scan_document(path)
         findings.extend(file_findings)
         try:
-            document = json.loads(path.read_text(encoding="utf-8"))
+            from mcp_config import _load_json
+
+            document = _load_json(path)
             table = document.get("mcpServers", document.get("servers")) if isinstance(document, dict) else None
             if isinstance(table, dict):
                 servers += len(table)
