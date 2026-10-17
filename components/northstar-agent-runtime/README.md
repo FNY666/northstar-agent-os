@@ -327,7 +327,8 @@ python3 -m cli run --sidecar-socket /var/run/northstar-codex/sidecar.sock \
 Sidecar responses are screened at the client boundary too: direct SDK callers
 receive a blocked marker or sanitized text before remote output can become an
 instruction channel. The main loop applies its own result-boundary checks as a
-second defense.
+second defense. Malformed or excessively recursive response JSON is reported as
+`protocol_error` rather than escaping as a client exception.
 
 ## Creating a governed project (`new`)
 

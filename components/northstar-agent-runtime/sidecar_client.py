@@ -283,12 +283,16 @@ class SidecarClient:
             payload = json.loads(line)
         except (TypeError, json.JSONDecodeError) as error:
             return self._failure(rid, "protocol_error", f"sidecar returned a non-JSON response: {error}", started)
+        except RecursionError:
+            return self._failure(rid, "protocol_error", "sidecar response exceeds the parser depth limit", started)
         try:
             result = self._normalise(payload, expected_request_id=rid)
         except SidecarProtocolError as error:
             # A peer that answers with the wrong shape is an expected condition: the
             # docstring above promises no raises, so honour it here too.
             return self._failure(rid, "protocol_error", str(error), started)
+        except RecursionError:
+            return self._failure(rid, "protocol_error", "sidecar response exceeds the sanitizer depth limit", started)
         return SidecarResult(
             request_id=result.request_id or rid,
             status=result.status,
