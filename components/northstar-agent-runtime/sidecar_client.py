@@ -60,6 +60,17 @@ def _safe_diagnostic(value: Any) -> str:
     return sanitize_for_model(str(value))[0]
 
 
+def _safe_model_text(value: str) -> str:
+    """Screen a successful sidecar answer before it leaves the client boundary."""
+    from defensive_agent import sanitize_for_model
+
+    safe, assessment = sanitize_for_model(value, preserve_length=True)
+    if assessment.decision.value == "block":
+        rule_ids = ",".join(item.rule_id for item in assessment.findings[:8]) or "unknown"
+        return f"[blocked by defensive agent; rules={rule_ids}]"
+    return safe
+
+
 def _safe_raw(value: Any, *, key: str = "") -> Any:
     """Copy remote diagnostic payloads while preserving binary/signature fields."""
     if isinstance(value, str):
@@ -445,7 +456,7 @@ class SidecarClient:
         return SidecarResult(
             request_id=request_id if isinstance(request_id, str) else expected_request_id,
             status=status,
-            text=text if status == "ok" else "",
+            text=_safe_model_text(text) if status == "ok" else "",
             error=_safe_diagnostic(payload.get("error")) if isinstance(payload.get("error"), str) else "",
             errors=normalised_errors,
             raw=_safe_raw(dict(payload)),
