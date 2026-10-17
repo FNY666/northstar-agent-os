@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from typing import Any, Mapping, Sequence
 
 
@@ -38,7 +39,12 @@ def evaluate_required_shell(
             result = results.get(str(getattr(call, "call_id", "")))
             text = result.text() if result is not None and callable(getattr(result, "text", None)) else ""
             first_line = text.splitlines()[0] if text else ""
-            if first_line.startswith("exit=0 ") and "timed_out=true" not in first_line and not getattr(call, "is_error", False):
+            metadata_line = text.splitlines()[1] if len(text.splitlines()) > 1 else ""
+            if (
+                re.fullmatch(r"exit=0 timed_out=false", first_line) is not None
+                and re.fullmatch(r"backend=[^\s]+ isolation=[^\s]+", metadata_line) is not None
+                and not getattr(call, "is_error", False)
+            ):
                 matched = True
                 break
         verdicts.append({

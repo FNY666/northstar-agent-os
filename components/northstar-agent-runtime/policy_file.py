@@ -369,7 +369,10 @@ def load_policy_file(
         shell_checks_raw = ()
     if not isinstance(shell_checks_raw, (list, tuple)):
         fail("verify_shell must be an array of tables ([[verify_shell]])")
+    if len(shell_checks_raw) > 16:
+        fail("verify_shell may declare at most 16 required commands")
     shell_checks: list[dict[str, Any]] = []
+    shell_check_names: set[str] = set()
     for position, entry in enumerate(shell_checks_raw):
         if not isinstance(entry, Mapping):
             fail(f"verify_shell[{position}] must be a table")
@@ -380,16 +383,22 @@ def load_policy_file(
         argv = entry.get("argv")
         if not isinstance(name, str) or not name.strip():
             fail(f"verify_shell[{position}] name must be a non-empty string")
+        if len(name.strip()) > 80 or name.strip() in shell_check_names:
+            fail(f"verify_shell[{position}] name must be unique and at most 80 characters")
+        shell_check_names.add(name.strip())
         if (isinstance(command, str) and command.strip()) == (isinstance(argv, (list, tuple)) and bool(argv) and all(isinstance(arg, str) and arg for arg in argv)):
             fail(f"verify_shell[{position}] must provide exactly one of command or non-empty argv")
         shell_check: dict[str, Any] = {"name": name.strip()}
         if command is not None:
-            if not isinstance(command, str) or not command.strip():
-                fail(f"verify_shell[{position}] command must be a non-empty string")
+            if not isinstance(command, str) or not command.strip() or len(command) > 4096:
+                fail(f"verify_shell[{position}] command must be a non-empty string of at most 4096 characters")
             shell_check["command"] = command
         else:
-            if not isinstance(argv, (list, tuple)) or not argv or not all(isinstance(arg, str) and arg for arg in argv):
-                fail(f"verify_shell[{position}] argv must be a non-empty list of strings")
+            if (
+                not isinstance(argv, (list, tuple)) or not argv or len(argv) > 64
+                or not all(isinstance(arg, str) and arg and len(arg) <= 1024 for arg in argv)
+            ):
+                fail(f"verify_shell[{position}] argv must contain 1..64 non-empty strings of at most 1024 characters")
             shell_check["argv"] = list(argv)
         shell_checks.append(shell_check)
 

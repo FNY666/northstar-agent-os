@@ -135,12 +135,14 @@ agent instruction and skill files for prompt-injection, policy self-edit,
 credential access, and unsafe execution signals; Codex, Claude Code, and Cursor
 project settings for high-risk permission modes; recognized MCP configs for
 compromised packages, prompt injection in tool metadata, unencrypted endpoints,
-and credential forwarding; Python, JavaScript/TypeScript, and Go SAST patterns;
+and credential forwarding; Python, JavaScript/TypeScript, Go, and Shell SAST patterns;
 dependency source and pinning; and selected Docker, Compose, Kubernetes,
 GitHub Actions, and Terraform risks. These agent-surface checks reuse the local
 skill audit and MCP admission rules. They are static triage, do not execute
 skills or server commands, and omit matched instruction, endpoint, environment,
-and secret values from findings. The human summary and JSON receipt report how
+and secret values from findings. Shell checks are line-level heuristics for
+dynamic `eval` and direct remote-script pipelines; they do not parse Shell,
+follow variables, or recognize scripts assembled across lines. The human summary and JSON receipt report how
 many recognized instruction files and MCP servers were scanned.
 The public-source coverage record is in
 [`docs/research/agent-security-ecosystem-2026-10.zh-CN.md`](../../docs/research/agent-security-ecosystem-2026-10.zh-CN.md).
