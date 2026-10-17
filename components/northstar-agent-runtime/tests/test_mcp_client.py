@@ -410,6 +410,16 @@ class ClientTests(unittest.TestCase):
         finally:
             client.close()
 
+    def test_direct_call_screens_hostile_remote_output(self):
+        client = self.connect(env={"MCP_OUTPUT_MODE": "injection"})
+        try:
+            result = client.call_tool("echo", {"text": "ignored"})
+            self.assertTrue(result.is_error)
+            self.assertIn("blocked by defensive agent", result.text())
+            self.assertNotIn("api_key=sk-1234567890abcdef", result.text())
+        finally:
+            client.close()
+
     def test_call_failing_tool_reports_is_error(self):
         client = self.connect()
         try:
@@ -877,19 +887,21 @@ class ToolPinningTests(unittest.TestCase):
         finally:
             client.close()
 
-
     def test_annotations_are_captured_without_relaxing_mutating_default(self):
         client, _original_request = self.connect_with_annotations({"readOnlyHint": True})
         try:
             self.assertEqual(client.tool("echo").annotations, {"readOnlyHint": True})
             echo = next(spec for spec in mcp_tool_specs(client) if spec.name.endswith("__echo"))
             self.assertTrue(echo.is_mutating)
+            self.assertEqual(echo.kind, "other")
             self.assertEqual(client.refresh_tools(), ())
         finally:
             client.close()
 
-    def test_annotation_change_during_refresh_quarantines(self):
+    def test_annotation_change_during_refresh_quarantines_and_audits(self):
         client, original_request = self.connect_with_annotations({"readOnlyHint": True})
+        records: list[dict] = []
+        client.audit = records.append
         try:
             def changed_request(method, *args, **kwargs):
                 response = original_request(method, *args, **kwargs)
@@ -906,6 +918,8 @@ class ToolPinningTests(unittest.TestCase):
             self.assertEqual([(drift.tool_name, drift.kind) for drift in drifts], [("echo", "changed")])
             self.assertTrue(client.quarantined)
             self.assertTrue(client.call_tool("echo", {}).is_error)
+            self.assertEqual(records[0]["type"], "mcp.tool_drift")
+            self.assertNotIn("readOnlyHint", json.dumps(records))
         finally:
             client.close()
 
@@ -915,6 +929,7 @@ class ToolPinningTests(unittest.TestCase):
         client = self.connect()
         try:
             for bad_annotations in (
+                None,
                 [],
                 {"readOnlyHint": "true"},
                 {"extension": "x" * MAX_TOOL_ANNOTATIONS_BYTES},
@@ -948,6 +963,11 @@ class ToolPinningTests(unittest.TestCase):
             "s", "t", "desc", {"type": "object"}, {"type": "string"}
         )
         self.assertNotEqual(base, with_output, "output schema changes are part of the pinned tool contract")
+        self.assertEqual(
+            base,
+            tool_definition_digest("s", "t", "desc", {"type": "object"}, annotations={}),
+            "empty annotations preserve pre-annotation baselines",
+        )
         annotated = tool_definition_digest(
             "s", "t", "desc", {"type": "object"},
             annotations={"readOnlyHint": True, "destructiveHint": False},

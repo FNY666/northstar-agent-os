@@ -16,6 +16,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest import mock
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from types import MappingProxyType
@@ -35,6 +36,7 @@ from egress_sidecar import (  # noqa: E402
 from egress_enforcer import DestinationRule, EgressPolicy, EgressPolicyError  # noqa: E402
 from transport import decode_request, encode_response  # noqa: E402
 import egress_socket  # noqa: E402
+import egress_sidecar  # noqa: E402
 
 POLICY_TOML = """\
 schema_version = "northstar.egress.v1"
@@ -77,6 +79,36 @@ def wire(**overrides):
 
 
 class ValidationTests(unittest.TestCase):
+    def test_response_cap_marks_exactly_one_extra_byte_as_truncated(self):
+        class FakeResponse:
+            status = 200
+
+            def getheaders(self):
+                return []
+
+            def read(self, _size):
+                return b"x" * (egress_sidecar.MAX_RESPONSE_BYTES + 1)
+
+        class FakeConnection:
+            def request(self, *_args, **_kwargs):
+                pass
+
+            def getresponse(self):
+                return FakeResponse()
+
+            def close(self):
+                pass
+
+        with mock.patch.object(egress_sidecar, "_PinnedHTTPConnection", return_value=FakeConnection()):
+            status, headers, body, truncated = egress_sidecar._perform_http(
+                host="svc.local", dial_ip="127.0.0.1", port=18090,
+                tls=False, method="GET", path="/", headers={}, body=b"", timeout_s=1,
+            )
+        self.assertEqual(status, 200)
+        self.assertEqual(headers, {})
+        self.assertEqual(len(body), egress_sidecar.MAX_RESPONSE_BYTES)
+        self.assertTrue(truncated)
+
     def test_production_signing_seed_is_required_and_strictly_parsed(self):
         self.assertEqual(
             egress_socket.signing_seed_from_environment({"NORTHSTAR_EGRESS_SIGNING_SEED": "ab" * 32}),
@@ -155,6 +187,8 @@ class ValidationTests(unittest.TestCase):
         line = encode_response({"a": 1})
         self.assertEqual(decode_request(line.rstrip("\n")), {"a": 1})
         self.assertIsNone(decode_request("not json"))
+        self.assertIsNone(decode_request('{"a":1,"a":2}'))
+        self.assertIsNone(decode_request('{"a":NaN}'))
 
     def test_socket_reader_enforces_wire_cap_including_newline(self):
         original = egress_socket.MAX_LINE_BYTES

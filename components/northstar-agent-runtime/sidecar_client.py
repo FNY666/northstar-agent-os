@@ -46,6 +46,7 @@ MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 #: One escaped BMP char is 6 bytes and one astral char is 12; 12 per char covers
 #: the worst case for a prompt the validator accepts, with framing headroom.
 MAX_REQUEST_BYTES = 12 * SIDECAR_MAX_PROMPT_CHARS + 65_536
+MAX_JSON_DEPTH = 128
 #: Sourced from the contract bridge so there is exactly one definition of the
 #: boundary shared by the runtime, ``northstar-run-contract``, and the sidecar.
 REQUEST_FIELDS: frozenset[str] = WIRE_FIELDS
@@ -53,11 +54,59 @@ CONNECT_ATTEMPTS = 3
 CONNECT_RETRY_DELAY = 0.1
 
 
+def _strict_json_loads(raw: str) -> Any:
+    """Parse sidecar output without duplicate keys or non-standard constants."""
+    depth = 0
+    in_string = False
+    escaped = False
+    for character in raw:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            continue
+        if character == '"':
+            in_string = True
+        elif character in "[{":
+            depth += 1
+            if depth > MAX_JSON_DEPTH:
+                raise ValueError(f"JSON depth limit exceeded ({MAX_JSON_DEPTH} containers)")
+        elif character in "]}":
+            depth -= 1
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON key {key!r}")
+            result[key] = value
+        return result
+
+    def reject_constant(value: str):
+        raise ValueError(f"non-standard JSON constant {value}")
+
+    return json.loads(raw, object_pairs_hook=unique_object, parse_constant=reject_constant)
+
+
 def _safe_diagnostic(value: Any) -> str:
     """Keep sidecar diagnostics from becoming an unfiltered output channel."""
     from defensive_agent import sanitize_for_model
 
     return sanitize_for_model(str(value))[0]
+
+
+def _safe_model_text(value: str) -> str:
+    """Screen a successful sidecar answer before it leaves the client boundary."""
+    from defensive_agent import sanitize_for_model
+
+    safe, assessment = sanitize_for_model(value, preserve_length=True)
+    if assessment.decision.value == "block":
+        rule_ids = ",".join(item.rule_id for item in assessment.findings[:8]) or "unknown"
+        return f"[blocked by defensive agent; rules={rule_ids}]"
+    return safe
 
 
 def _safe_raw(value: Any, *, key: str = "") -> Any:
@@ -221,7 +270,11 @@ class SidecarClient:
         self.run_id = run_id
         #: Optional Run Request document, used only when a host binding is present.
         self.run_document = run_document
-        self.max_response_bytes = int(max_response_bytes)
+        if isinstance(max_response_bytes, bool) or not isinstance(max_response_bytes, int):
+            raise ValueError("max_response_bytes must be an integer")
+        if not 1 <= max_response_bytes <= MAX_RESPONSE_BYTES:
+            raise ValueError(f"max_response_bytes must be between 1 and {MAX_RESPONSE_BYTES}")
+        self.max_response_bytes = max_response_bytes
         #: Test seam: an object with connect()/send()/recvall()/close() semantics.
         self._transport = transport
 
@@ -269,15 +322,19 @@ class SidecarClient:
             return self._failure(rid, "protocol_error", str(error), started)
         latency_ms = int((time.monotonic() - started) * 1000)
         try:
-            payload = json.loads(line)
-        except (TypeError, json.JSONDecodeError) as error:
+            payload = _strict_json_loads(line)
+        except (TypeError, ValueError) as error:
             return self._failure(rid, "protocol_error", f"sidecar returned a non-JSON response: {error}", started)
+        except RecursionError:
+            return self._failure(rid, "protocol_error", "sidecar response exceeds the parser depth limit", started)
         try:
             result = self._normalise(payload, expected_request_id=rid)
         except SidecarProtocolError as error:
             # A peer that answers with the wrong shape is an expected condition: the
             # docstring above promises no raises, so honour it here too.
             return self._failure(rid, "protocol_error", str(error), started)
+        except RecursionError:
+            return self._failure(rid, "protocol_error", "sidecar response exceeds the sanitizer depth limit", started)
         return SidecarResult(
             request_id=result.request_id or rid,
             status=result.status,
@@ -405,6 +462,8 @@ class SidecarClient:
                     break
                 newline = chunk.find(b"\n")
                 if newline >= 0:
+                    if total + newline + 1 > self.max_response_bytes:
+                        raise SidecarProtocolError("sidecar response exceeded the byte cap")
                     chunks.append(chunk[: newline + 1])
                     total += newline + 1
                     break
@@ -445,7 +504,7 @@ class SidecarClient:
         return SidecarResult(
             request_id=request_id if isinstance(request_id, str) else expected_request_id,
             status=status,
-            text=text if status == "ok" else "",
+            text=_safe_model_text(text) if status == "ok" else "",
             error=_safe_diagnostic(payload.get("error")) if isinstance(payload.get("error"), str) else "",
             errors=normalised_errors,
             raw=_safe_raw(dict(payload)),

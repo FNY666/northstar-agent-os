@@ -26,9 +26,10 @@ const ASSISTANT =
 const RESULT =
   '{"type":"result","subtype":"error_permission_denied","is_error":true,"num_turns":2,"duration_ms":12,"total_cost_usd":0.004,"total_usage":{"input_tokens":5,"output_tokens":2,"cache_read_input_tokens":0,"cache_creation_input_tokens":0},"session_id":"ns-1","pricing_estimated":true,"errors":["Write refused"],"permission_denials":[{"tool":"Write","source":"policy:deny","reason":"refused by the permission gate","agent":"main","turn_index":1,"kind":"tool"}],"tool_call_reports":[{"name":"Write","call_id":"call-write-1","is_error":true,"denied":true,"permission_source":"policy:deny","duration_ms":0,"result_chars":0,"truncated":false,"input_rewritten":false,"result_source":"","result_trust":"","result_detail":"","execution_status":"not_started","execution_gate":"","governance_input_digest":"sha256:abc","permission_details":{"dataflow":{"trust":"confidential","audience_labeled":true,"audience_unknown":false,"audience_count":1,"source_rule":"Read","sink_escalated":true}},"turn_index":1,"agent":"main"}],"subagents":[]}';
 
-test("the exit-code table is the runtime's table, eight subtypes and 64", () => {
+test("the exit-code table is the runtime's table, nine subtypes and 64", () => {
   assert.deepEqual(EXIT_CODES, {
     success: 0,
+    success_unverified: 0,
     error_during_execution: 1,
     error_max_turns: 2,
     error_max_tool_calls: 3,

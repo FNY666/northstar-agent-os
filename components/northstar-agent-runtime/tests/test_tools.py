@@ -207,6 +207,10 @@ class ContainmentTests(RuntimeTestCase):
         ctx = context_for(root, registry=registry)
         with self.assertRaises(ToolAccessError):
             registry.require("Write").handler({"path": ".git/HEAD", "content": "hijacked"}, ctx)
+        with self.assertRaises(ToolAccessError):
+            registry.require("Edit").handler(
+                {"path": ".git/HEAD", "old_string": "refs/heads/main", "new_string": "refs/heads/hijacked"}, ctx
+            )
         self.assertEqual((root / ".git" / "HEAD").read_text(), "ref: refs/heads/main")
         # Reading repository metadata is still allowed: it is not a mutation.
         self.assertIn("ref:", registry.require("Read").handler({"path": ".git/HEAD"}, ctx).text())

@@ -333,6 +333,16 @@ class FeedIntegrationTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "no records"):
                 read_chain_hashes(empty)
 
+    def test_duplicate_json_keys_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            feed = Path(directory) / "duplicate.ndjson"
+            feed.write_text(
+                '{"chain_hash":"' + "a" * 64 + '","chain_hash":"' + "b" * 64 + '"}\n',
+                encoding="utf-8",
+            )
+            with self.assertRaises(ValueError):
+                read_chain_hashes(feed)
+
     def test_bad_leaves_rejected(self):
         with self.assertRaises(ValueError):
             MerkleTree([b"too short"])

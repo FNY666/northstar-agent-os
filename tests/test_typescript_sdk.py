@@ -110,7 +110,7 @@ class TypeScriptEventMirrorTest(unittest.TestCase):
         self.assertEqual(events.EXIT_CODES.get("error_not_a_real_subtype", 1), 1)
 
     def test_result_subtypes_are_the_exit_code_keys(self) -> None:
-        """The subtypes a run may end with, and the table of codes, must be the same eight."""
+        """The subtypes a run may end with, and the table of codes, must be the same nine."""
         from providers.base import RESULT_SUBTYPES
 
         self.assertEqual(

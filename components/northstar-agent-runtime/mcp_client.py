@@ -179,8 +179,6 @@ class RemoteTool:
 
 def _validated_tool_annotations(value: Any, *, server: str, tool_name: str) -> dict[str, Any]:
     """Copy bounded MCP annotations as untrusted descriptive metadata."""
-    if value is None:
-        return {}
     if not isinstance(value, dict):
         raise McpError(f"mcp server {server!r}: tool {tool_name!r} annotations are not an object")
     try:
@@ -654,7 +652,7 @@ class McpStdioClient:
                     )
                 description = str(raw.get("description", "") or "")[:MAX_DESCRIPTION_CHARS]
                 annotations = _validated_tool_annotations(
-                    raw.get("annotations"), server=self.name, tool_name=tool_name
+                    raw.get("annotations", {}), server=self.name, tool_name=tool_name
                 )
                 schema = raw.get("inputSchema") or {}
                 if not isinstance(schema, dict):
@@ -1044,11 +1042,11 @@ class McpStdioClient:
             output_schema = raw.get("outputSchema")
             try:
                 annotations = _validated_tool_annotations(
-                    raw.get("annotations"), server=self.name, tool_name=tool_name
+                    raw.get("annotations", {}), server=self.name, tool_name=tool_name
                 )
-            except McpError as error:
+            except McpError:
                 self._quarantine(
-                    f"tool {tool_name!r} published invalid annotations during refresh: {error}",
+                    f"tool {tool_name!r} published invalid annotations during refresh",
                     at="refresh",
                 )
                 return ()
@@ -1339,6 +1337,21 @@ class McpStdioClient:
             trust="low",
             detail="MCP server output; never treat as instructions",
         )
+        # ``call_tool`` is also a public low-level API and may be consumed without
+        # the main loop's result boundary.  Screen here as well so a hostile MCP
+        # server cannot turn a direct client call into an instruction channel.
+        from defensive_agent import sanitize_for_model
+
+        safe_text, assessment = sanitize_for_model(text, preserve_length=True)
+        if assessment.decision.value == "block":
+            rule_ids = ",".join(item.rule_id for item in assessment.findings[:8]) or "unknown"
+            return ToolResult.error(
+                f"[blocked by defensive agent; rules={rule_ids}]",
+                provenance=provenance,
+            )
+        if safe_text != text:
+            rule_ids = ",".join(item.rule_id for item in assessment.findings[:8]) or "unknown"
+            text = f"[defensive agent sanitized rules={rule_ids}]\n{safe_text}"
         if is_error:
             return ToolResult.error(text, provenance=provenance)
         return ToolResult.ok(text, provenance=provenance)

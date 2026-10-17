@@ -147,6 +147,11 @@ class ChainRoundTripTests(unittest.TestCase):
 
 
 class TamperDetectionTests(unittest.TestCase):
+    def test_duplicate_json_keys_are_rejected(self):
+        result = verify_lines(['{"chain_hash":"' + "0" * 64 + '","chain_hash":"' + "1" * 64 + '"}'])
+        self.assertFalse(result.ok)
+        self.assertIn("duplicate JSON key", result.reason)
+
     def setUp(self):
         records = [sample_audit(i, text=f"msg-{i}") for i in range(4)]
         self.chained = chain_records(records, component="northstar-agent-runtime", session_id="s-1")
@@ -470,6 +475,11 @@ class JcsCanonicalizationTests(unittest.TestCase):
 
 class ChainV2Tests(unittest.TestCase):
     """northstar-audit-chain/2: JCS canonicalization; v1 keeps verifying."""
+
+    def test_audit_records_reject_excessive_json_depth(self):
+        result = verify_lines(['{"detail":' + ("[" * 200) + "0" + ("]" * 200) + "}\n"])
+        self.assertFalse(result.ok)
+        self.assertIn("depth limit", result.reason)
 
     def test_new_chains_default_to_v2(self):
         chained = chain_records([sample_audit(0)], component="c")

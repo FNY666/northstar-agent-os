@@ -513,15 +513,10 @@ def read_chain_hashes(feed: str | Path) -> list[str]:
     chain integrity before minting proofs.)
     """
     hashes: list[str] = []
+    from audit_chain import _iter_records
+
     with open(feed, "r", encoding="utf-8") as handle:
-        for number, raw in enumerate(handle, start=1):
-            line = raw.strip()
-            if not line:
-                continue
-            try:
-                record = json.loads(line)
-            except json.JSONDecodeError as error:
-                raise ValueError(f"line {number} is not valid JSON: {error}") from error
+        for number, record in _iter_records(handle):
             chain_hash = record.get("chain_hash") if isinstance(record, dict) else None
             if not isinstance(chain_hash, str) or not _HEX64_RE.match(chain_hash):
                 raise ValueError(f"line {number}: missing or malformed chain_hash (not a sealed log)")

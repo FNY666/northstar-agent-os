@@ -56,6 +56,7 @@ ENTRY_KIND = "dsse"
 ENTRY_API_VERSION = "0.0.1"
 PAYLOAD_TYPE = "application/vnd.northstar.audit-anchor+json"
 ANCHOR_RECORD_VERSION = "northstar-rekor-anchor/1"
+MAX_REKOR_RESPONSE_BYTES = 1_000_000
 
 # 12-byte DER prefix for an Ed25519 SubjectPublicKeyInfo.
 _ED25519_SPKI_PREFIX = bytes.fromhex("302a300506032b6570032100")
@@ -122,13 +123,34 @@ def _post_json(url: str, payload: dict[str, Any], *, timeout: float) -> Any:
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            return json.loads(response.read().decode("utf-8"))
+            raw = response.read(MAX_REKOR_RESPONSE_BYTES + 1)
+            if len(raw) > MAX_REKOR_RESPONSE_BYTES:
+                raise RekorError("rekor response exceeds the 1 MiB byte cap")
+
+            def unique_object(pairs):
+                result = {}
+                for key, value in pairs:
+                    if key in result:
+                        raise ValueError(f"duplicate JSON key {key!r}")
+                    result[key] = value
+                return result
+
+            def reject_constant(value: str):
+                raise ValueError(f"non-standard JSON constant {value}")
+
+            return json.loads(
+                raw.decode("utf-8"),
+                object_pairs_hook=unique_object,
+                parse_constant=reject_constant,
+            )
     except urllib.error.HTTPError as error:
         detail = error.read().decode("utf-8", "replace")[:300]
         raise RekorError(f"rekor rejected the request (HTTP {error.code}): {detail}") from None
     except (OSError, TimeoutError) as error:
         raise RekorError(f"cannot reach {url}: {error}") from None
-    except (ValueError, UnicodeDecodeError) as error:
+    except RekorError:
+        raise
+    except (ValueError, UnicodeDecodeError, RecursionError) as error:
         raise RekorError(f"bad response from {url}: {error}") from None
 
 

@@ -41,6 +41,59 @@ SOCKET_NAME = "egress.sock"
 MIN_TIMEOUT_MS = 1_000
 MAX_TIMEOUT_MS = 120_000
 MAX_RESPONSE_BYTES = 5_000_000
+MAX_JSON_DEPTH = 128
+MAX_REQUEST_BODY_BYTES = 1_048_576
+EGRESS_STATUSES: frozenset[str] = frozenset(
+    {"ok", "denied", "rejected", "error", "transport_unavailable", "protocol_error"}
+)
+
+
+def _strict_json_loads(raw: str) -> Any:
+    """Parse sidecar output without ambiguous keys or non-standard numbers."""
+    depth = 0
+    in_string = False
+    escaped = False
+    for character in raw:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            continue
+        if character == '"':
+            in_string = True
+        elif character in "[{":
+            depth += 1
+            if depth > MAX_JSON_DEPTH:
+                raise ValueError(f"JSON depth limit exceeded ({MAX_JSON_DEPTH} containers)")
+        elif character in "]}":
+            depth -= 1
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON key {key!r}")
+            result[key] = value
+        return result
+
+    def reject_constant(value: str):
+        raise ValueError(f"non-standard JSON constant {value}")
+
+    return json.loads(raw, object_pairs_hook=unique_object, parse_constant=reject_constant)
+
+
+def _safe_remote_text(value: Any) -> str:
+    """Keep sidecar diagnostics from becoming a direct model input channel."""
+    from defensive_agent import sanitize_for_model
+
+    safe, assessment = sanitize_for_model(str(value))
+    if assessment.decision.value == "block":
+        rule_ids = ",".join(item.rule_id for item in assessment.findings[:8]) or "unknown"
+        return f"[blocked by defensive agent; rules={rule_ids}]"
+    return safe
 
 
 class EgressClientError(ValueError):
@@ -91,10 +144,16 @@ class EgressClient:
             raise EgressClientError("refusing to build an egress client: " + "; ".join(errors))
         if not MIN_TIMEOUT_MS <= int(timeout_ms) <= MAX_TIMEOUT_MS:
             raise EgressClientError(f"timeout_ms must be between {MIN_TIMEOUT_MS} and {MAX_TIMEOUT_MS}")
+        if isinstance(max_response_bytes, bool) or not isinstance(max_response_bytes, int):
+            raise EgressClientError("max_response_bytes must be an integer")
+        if not 1 <= max_response_bytes <= MAX_RESPONSE_BYTES:
+            raise EgressClientError(
+                f"max_response_bytes must be between 1 and {MAX_RESPONSE_BYTES}"
+            )
         self.socket_path = text
         self.timeout_ms = int(timeout_ms)
         self.connect_timeout_s = float(connect_timeout_s)
-        self.max_response_bytes = int(max_response_bytes)
+        self.max_response_bytes = max_response_bytes
 
     def new_request_id(self) -> str:
         return f"egress-{secrets.token_hex(8)}"
@@ -121,6 +180,25 @@ class EgressClient:
         expected condition (denial, rejection, transport failure)."""
         rid = request_id or self.new_request_id()
         started = time.monotonic()
+        validation_errors = self._validate_request_inputs(
+            rid=rid,
+            agent_id=agent_id,
+            run_id=run_id,
+            host=host,
+            port=port,
+            method=method,
+            path=path,
+            headers=headers,
+            body=body,
+            timeout_ms=timeout_ms,
+            call_id=call_id,
+            arguments=arguments,
+            card=card,
+            approval_receipt=approval_receipt,
+        )
+        if validation_errors:
+            return self._failure(rid if isinstance(rid, str) else "", "rejected", "; ".join(validation_errors), started)
+        effective_timeout = self.timeout_ms if timeout_ms is None else timeout_ms
         wire: dict[str, Any] = {
             "request_id": rid,
             "agent_id": agent_id,
@@ -131,7 +209,7 @@ class EgressClient:
             "path": path,
             "headers": dict(headers or {}),
             "body_b64": base64.b64encode(body or b"").decode("ascii"),
-            "timeout_ms": self.timeout_ms if timeout_ms is None else int(timeout_ms),
+            "timeout_ms": effective_timeout,
             "call_id": call_id,
             "arguments": dict(arguments or {}),
         }
@@ -149,12 +227,36 @@ class EgressClient:
             return self._failure(rid, "transport_unavailable", f"egress transport failed: {error}", started)
         latency_ms = int((time.monotonic() - started) * 1000)
         try:
-            payload = json.loads(line)
-        except (TypeError, json.JSONDecodeError) as error:
+            payload = _strict_json_loads(line)
+        except (TypeError, ValueError) as error:
             return self._failure(rid, "protocol_error", f"sidecar returned non-JSON: {error}", started)
+        except RecursionError:
+            return self._failure(rid, "protocol_error", "sidecar response exceeds the parser depth limit", started)
         if not isinstance(payload, dict) or payload.get("request_id") != rid:
             return self._failure(rid, "protocol_error", "sidecar response did not match the request", started)
-        status = str(payload.get("status", "protocol_error"))
+        status = payload.get("status")
+        if not isinstance(status, str) or status not in EGRESS_STATUSES:
+            return self._failure(rid, "protocol_error", "sidecar response contained an unknown status", started)
+        http_status = payload.get("http_status")
+        if http_status is not None and (isinstance(http_status, bool) or not isinstance(http_status, int)):
+            return self._failure(rid, "protocol_error", "sidecar http_status must be an integer", started)
+        headers_out = payload.get("headers", {})
+        if not isinstance(headers_out, dict) or any(
+            not isinstance(key, str) or not isinstance(value, str) for key, value in headers_out.items()
+        ):
+            return self._failure(rid, "protocol_error", "sidecar headers must be a string mapping", started)
+        errors_out = payload.get("errors", ())
+        if errors_out is None:
+            errors_out = ()
+        if not isinstance(errors_out, (list, tuple)) or any(not isinstance(item, str) for item in errors_out):
+            return self._failure(rid, "protocol_error", "sidecar errors must be a list of strings", started)
+        truncated = payload.get("truncated", False)
+        if not isinstance(truncated, bool):
+            return self._failure(rid, "protocol_error", "sidecar truncated must be a boolean", started)
+        for field_name in ("reason", "error", "deny_code"):
+            field_value = payload.get(field_name)
+            if field_value is not None and not isinstance(field_value, str):
+                return self._failure(rid, "protocol_error", f"sidecar {field_name} must be a string", started)
         body_bytes = b""
         raw_body = payload.get("body_b64", "")
         if isinstance(raw_body, str) and raw_body:
@@ -162,20 +264,57 @@ class EgressClient:
                 body_bytes = base64.b64decode(raw_body, validate=True)
             except (binascii.Error, ValueError):
                 return self._failure(rid, "protocol_error", "sidecar returned invalid body_b64", started)
-        headers_out = payload.get("headers")
         return EgressResult(
             request_id=rid,
             status=status,
-            http_status=payload.get("http_status"),
-            headers=dict(headers_out) if isinstance(headers_out, dict) else {},
+            http_status=http_status,
+            headers=dict(headers_out),
             body=body_bytes,
-            truncated=bool(payload.get("truncated", False)),
+            truncated=truncated,
             deny_code=str(payload.get("deny_code", "") or ""),
-            reason=str(payload.get("reason", "") or payload.get("error", "") or ""),
-            errors=tuple(payload.get("errors", ()) or ()),
+            reason=(
+                _safe_remote_text(payload.get("reason", "") or payload.get("error", ""))
+                if payload.get("reason", "") or payload.get("error", "")
+                else ""
+            ),
+            errors=tuple(_safe_remote_text(item) for item in errors_out),
             receipt=payload.get("receipt") if isinstance(payload.get("receipt"), dict) else None,
             latency_ms=latency_ms,
         )
+
+    @staticmethod
+    def _validate_request_inputs(**values: Any) -> tuple[str, ...]:
+        errors: list[str] = []
+        for field_name in ("rid", "agent_id", "run_id", "host", "method", "path", "call_id"):
+            value = values[field_name]
+            if not isinstance(value, str) or (field_name != "call_id" and not value.strip()):
+                errors.append(f"{field_name} must be a string" + ("" if field_name == "call_id" else " and non-empty"))
+        port = values["port"]
+        if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65_535:
+            errors.append("port must be an integer between 1 and 65535")
+        timeout_ms = values["timeout_ms"]
+        if timeout_ms is not None and (
+            isinstance(timeout_ms, bool)
+            or not isinstance(timeout_ms, int)
+            or not MIN_TIMEOUT_MS <= timeout_ms <= MAX_TIMEOUT_MS
+        ):
+            errors.append(f"timeout_ms must be between {MIN_TIMEOUT_MS} and {MAX_TIMEOUT_MS}")
+        body = values["body"]
+        if not isinstance(body, bytes):
+            errors.append("body must be bytes")
+        elif len(body) > MAX_REQUEST_BODY_BYTES:
+            errors.append(f"body exceeds {MAX_REQUEST_BODY_BYTES} bytes")
+        headers = values["headers"]
+        if headers is not None and (
+            not isinstance(headers, dict)
+            or any(not isinstance(key, str) or not isinstance(value, str) for key, value in headers.items())
+        ):
+            errors.append("headers must be a string mapping")
+        for field_name in ("arguments", "card", "approval_receipt"):
+            value = values[field_name]
+            if value is not None and not isinstance(value, dict):
+                errors.append(f"{field_name} must be an object")
+        return tuple(errors)
 
     def _failure(self, rid: str, status: str, message: str, started: float) -> EgressResult:
         return EgressResult(
@@ -202,6 +341,8 @@ class EgressClient:
                     break
                 newline = chunk.find(b"\n")
                 if newline >= 0:
+                    if total + newline + 1 > self.max_response_bytes:
+                        raise OSError("sidecar response exceeded the byte cap")
                     chunks.append(chunk[:newline])
                     return b"".join(chunks).decode("utf-8", "replace")
                 chunks.append(chunk)

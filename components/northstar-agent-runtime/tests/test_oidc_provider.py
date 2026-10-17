@@ -18,6 +18,7 @@ from oidc_provider import (
     SCHEMA_PIN,
     DEFAULT_TOKEN_LIFETIME_SEQS,
     oidc_provider_audit_event,
+    _b64url,
 )
 
 
@@ -250,6 +251,19 @@ class TestVerify(unittest.TestCase):
         self.assertFalse(rep.valid)
         self.assertEqual(rep.reason, "audience-mismatch")
 
+    def test_verify_rejects_ambiguous_jwt_json(self):
+        import json
+
+        p = make_provider()
+        registered(p)
+        header = _b64url(b'{"alg":"HS256","alg":"none","typ":"JWT"}')
+        payload = _b64url(json.dumps({"iss": "https://idp.example.com", "aud": "web", "exp": 100}).encode())
+        signing_input = f"{header}.{payload}"
+        token = f"{signing_input}.{_b64url(p._sign(signing_input.encode('ascii')))}"
+        rep = p.verify_id_token(token, "web", now_seq=11, seq=4)
+        self.assertFalse(rep.valid)
+        self.assertEqual(rep.reason, "bad-json")
+
     def test_verify_expired(self):
         p = make_provider()
         registered(p)
@@ -263,9 +277,18 @@ class TestVerify(unittest.TestCase):
 
     def test_verify_malformed_returns_invalid(self):
         p = make_provider()
+        registered(p)
         for bad in ("not-a-token", "a.b", 123, ""):
             rep = p.verify_id_token(bad, "web", now_seq=1, seq=1)
             self.assertFalse(rep.valid)
+        code = p.authorize("web", "alice", ["openid"], 2)
+        token = p.id_token(code.code, 3, now_seq=10).id_token.token
+        parts = token.split(".")
+        for bad_segment in (parts[0] + "!", parts[1] + "=", "a"):
+            bad = ".".join((bad_segment, parts[1], parts[2]))
+            rep = p.verify_id_token(bad, "web", now_seq=11, seq=4)
+            self.assertFalse(rep.valid)
+            self.assertEqual(rep.reason, "bad-encoding")
 
     def test_verify_wrong_issuer_key_fails(self):
         p1 = make_provider()

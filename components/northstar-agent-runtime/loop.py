@@ -101,6 +101,7 @@ from sidecar_client import SIDECAR_MAX_TIMEOUT_MS, SIDECAR_MIN_TIMEOUT_MS, Sidec
 from tools import (
     MAX_TOOL_RESULT_CHARS,
     ToolContext,
+    ToolWriteDenied,
     ToolLimits,
     ToolRegistry,
     ToolResult,
@@ -1018,13 +1019,12 @@ class AgentRuntime:
         """
         from defensive_agent import assess as assess_defensive, sanitize_for_model
 
-        # Keep a mutable copy so malformed imported records can be removed
-        # without mutating the durable transcript or the caller's sequence.
-        payload = list(copy.deepcopy(tuple(messages)))
+        # Filter record shapes before copying. A hostile non-message object
+        # must not reach ``deepcopy`` and execute a caller-defined copy hook.
+        raw_messages = tuple(messages)
+        malformed_count = sum(not isinstance(message, dict) for message in raw_messages)
+        payload = [copy.deepcopy(message) for message in raw_messages if isinstance(message, dict)]
         findings: list[Any] = []
-        malformed_count = sum(not isinstance(message, dict) for message in payload)
-        if malformed_count:
-            payload = [message for message in payload if isinstance(message, dict)]
         changed = bool(malformed_count)
 
         def screen_text(value: Any) -> Any:
@@ -3668,6 +3668,14 @@ class AgentRuntime:
             effect_id = phases.begin_execution(tool=spec.name, call_id=call_id)
         try:
             result = spec.handler(payload, context)
+        except ToolWriteDenied as error:
+            if effect_id is not None:
+                phases.complete_execution(
+                    effect_id,
+                    status="denied",
+                    error_class=type(error).__name__,
+                )
+            raise
         except BaseException as error:
             if effect_id is not None:
                 phases.complete_execution(

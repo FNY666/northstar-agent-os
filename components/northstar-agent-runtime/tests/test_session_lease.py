@@ -299,6 +299,13 @@ class AcquisitionTests(RuntimeTestCase):
         self.assertFalse(status.metadata_readable)
         self.assertFalse(status.locked)
 
+    def test_ambiguous_envelope_reads_as_owner_unknown(self):
+        path = self.workspace() / "s.lease"
+        path.write_text('{"owner_id":"one","owner_id":"two","expires_at":10}', encoding="utf-8")
+        status = inspect_lease(path)
+        self.assertEqual(status.owner_id, "")
+        self.assertFalse(status.metadata_readable)
+
     def test_inspect_without_a_probe_reports_the_claim_not_the_fact(self):
         path = self.workspace() / "s.lease"
         lease = SessionLease(path, owner_id="run-a", ttl_seconds=60)
