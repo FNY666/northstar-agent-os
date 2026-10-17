@@ -137,3 +137,44 @@ Remote/hosted-worker readiness scorecard (P3-3) — evidence-based, runnable.
 Per-area (met, total, unmet explanations).
 
 #### `total_score()`
+
+### `remote_transport`
+
+Source: `components/northstar-agent-interop/remote_transport.py`
+
+SSH forwarding for a private Northstar Sidecar Unix socket.
+
+#### `SSHForwardError`
+
+Base error for the SSH channel lifecycle.
+
+#### `SSHForwardStartError`
+
+The SSH process could not be started or exited during startup.
+
+#### `SSHForwardTimeout`
+
+The local forwarded socket did not become ready in time.
+
+#### `SSHForwardUnavailable`
+
+The SSH forward exited or became unavailable after startup.
+
+#### `SSHForwardConfig`
+
+Validated configuration for one private SSH Unix-socket forward.
+
+- `local_socket` (property)
+- `control_socket` (property)
+- `argv()`
+  - Return the SSH argv; callers must pass it with ``shell=False``.
+#### `SSHSocketForward`
+
+Manage one SSH process forwarding a remote Sidecar Unix socket.
+
+- `local_socket` (property)
+- `process` (property)
+- `start()`
+- `is_alive()`
+- `wait_ready(*, timeout_seconds: float | None=None)`
+- `close()`
