@@ -192,8 +192,14 @@ def _b64url(data: bytes) -> str:
 
 
 def _b64url_decode(data: str) -> bytes:
+    if not isinstance(data, str) or not data or "=" in data:
+        raise ValueError("invalid base64url segment")
+    if any(character not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_" for character in data):
+        raise ValueError("invalid base64url character")
+    if len(data) % 4 == 1:
+        raise ValueError("invalid base64url length")
     pad = "=" * (-len(data) % 4)
-    return base64.urlsafe_b64decode(data + pad)
+    return base64.b64decode(data + pad, altchars=b"-_", validate=True)
 
 
 def _strict_json_loads(raw: str) -> Any:
