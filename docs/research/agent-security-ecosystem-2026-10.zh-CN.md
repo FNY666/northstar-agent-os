@@ -30,9 +30,9 @@ Northstar 已有源码 SAST、依赖/部署配置检查、MCP 准入扫描、ski
 
 GitHub 官方文档明确说明，`pull_request_target` 使用基仓库的高信任权限；若再 checkout 并运行 fork PR 的代码，攻击者可借 PR 中的 Makefile、构建脚本或依赖在该权限下执行。另一类常见边界是将 `github.event.pull_request.title`、`body` 等不可信上下文直接插入 `run:` 脚本源。对应参考：[Securely using `pull_request_target`](https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target)、[Script injections](https://docs.github.com/en/actions/concepts/security/script-injections) 与 [Secure use reference](https://docs.github.com/en/actions/reference/security/secure-use)。
 
-Northstar 新增 `CFG008_PULL_REQUEST_TARGET_UNTRUSTED_CHECKOUT`，在 `pull_request_target` 中发现 PR head/ref 或 fork repository checkout，或显式启用 `allow-unsafe-pr-checkout`，且同一 job 后续存在 `run` 步骤时提示；新增 `CFG009_ACTIONS_UNTRUSTED_RUN_EXPRESSION`，检测不可信事件字段直接插入 `run` 块。GitHub 也提醒，`workflow_run` 下游工作流下载的上游工件必须视为不可信数据。`CFG010_WORKFLOW_RUN_ARTIFACT_EXECUTION` 会在这类工作流的同一 job 下载工件、随后运行命令时提示，因为该组合可能把不可信工件带入高权限执行环境。运行时探针包含 PR fork checkout、危险工件执行与仅下载/上传数据的固定样例，只扫描临时 YAML 文本，不启动 workflow、action 或脚本。
+Northstar 新增 `CFG008_PULL_REQUEST_TARGET_UNTRUSTED_CHECKOUT`，在 `pull_request_target` 中发现 PR head/ref 或 fork repository checkout，或显式启用 `allow-unsafe-pr-checkout`，且同一 job 后续存在 `run` 步骤时提示；新增 `CFG009_ACTIONS_UNTRUSTED_RUN_EXPRESSION`，检测不可信事件字段直接插入 `run` 块。GitHub 也提醒，`workflow_run` 下游工作流下载的上游工件必须视为不可信数据，且通过 `git fetch`、`gh pr checkout` 等方式取回 PR 代码也可能形成同类危险。`CFG010_WORKFLOW_RUN_ARTIFACT_EXECUTION` 会在这类工作流的同一 job 下载工件、随后运行命令时提示；`CFG011_PRIVILEGED_PR_CODE_FETCH` 检查 `pull_request_target`、`workflow_run` 与 `issue_comment` 中的常见 Shell 拉取模式及后续命令。运行时探针包含 PR fork checkout、Shell 拉取、危险工件执行与仅下载/上传数据的固定样例，只扫描临时 YAML 文本，不启动 workflow、action 或脚本。
 
-这些检查是有限文本启发式：不完整解析 YAML、复合 action、跨 job 数据流、工件路径/来源关联或远程 action 内部实现。CFG010 的下载后命令顺序是风险线索，不能证明命令实际执行了刚下载的工件；反过来，也可能漏掉间接执行、重命名或跨 job 传递。结果应作为人工审查线索。
+这些检查是有限文本启发式：不完整解析 YAML、复合 action、跨 job 数据流、工件路径/来源关联、Shell 变量或远程 action 内部实现。CFG010 的下载后命令顺序是风险线索，不能证明命令实际执行了刚下载的工件；CFG011 也只覆盖显式 `gh pr checkout` 或包含 PR ref 的 `git fetch`/checkout 模式。结果应作为人工审查线索。
 
 静态扫描无法可靠判断自然语言的真实意图、跨文件/远程技能依赖或运行时工具行为，也不能把“未匹配规则”解释为安全。MCP 服务器 package blocklist 是本地知识而非实时漏洞数据库。后续优先级仍是加强编程任务的独立验证和攻防工具的可复现覆盖；不先扩张到图像/音频/视频能力。
 

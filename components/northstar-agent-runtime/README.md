@@ -146,7 +146,10 @@ text in `run` blocks, plus `workflow_run` artifact downloads followed by command
 in the same job. They also catch fork repository selection and the explicit
 `allow-unsafe-pr-checkout` opt-in under `pull_request_target`. They do not fully
 parse YAML, track artifacts across jobs, or prove whether a command executes
-checked-out/downloaded code. Shell checks are heuristics for dynamic `eval`,
+checked-out/downloaded code. Privileged `pull_request_target`, `workflow_run`,
+and `issue_comment` workflows are also checked for `gh pr checkout` and
+PR-ref `git fetch` followed by later commands. This command-flow check is
+pattern based and does not resolve variables, aliases, or helper scripts. Shell checks are heuristics for dynamic `eval`,
 expanded `sh -c` commands, and direct remote-script pipelines; they join explicit
 backslash continuations but do not parse Shell syntax or follow variables. The human summary and JSON receipt report how
 many recognized instruction files and MCP servers were scanned.

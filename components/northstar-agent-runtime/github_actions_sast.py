@@ -1,8 +1,9 @@
-"""Heuristic GitHub Actions checks for two untrusted pull-request flows.
+"""Heuristic GitHub Actions checks for untrusted pull-request flows.
 
 This is a bounded text scanner, not a YAML parser or workflow evaluator. It
-intentionally reports only direct expression interpolation in ``run`` blocks
-and privileged PR-head checkout followed by a workflow ``run`` step.
+intentionally reports direct expression interpolation in ``run`` blocks,
+privileged PR checkout/fetch followed by workflow commands, and
+workflow_run artifact handling.
 """
 from __future__ import annotations
 
@@ -99,6 +100,10 @@ def scan_workflow(relative: str, source: str) -> list[dict[str, Any]]:
         re.search(r"(?m)^\s*on\s*:\s*[^\n]*\bworkflow_run\b", "\n".join(clean_lines))
         or re.search(r"(?m)^\s{2,}['\"]?workflow_run['\"]?\s*:", "\n".join(clean_lines))
     )
+    issue_comment = bool(
+        re.search(r"(?m)^\s*on\s*:\s*[^\n]*\bissue_comment\b", "\n".join(clean_lines))
+        or re.search(r"(?m)^\s{2,}['\"]?issue_comment['\"]?\s*:", "\n".join(clean_lines))
+    )
     if pull_request_target:
         checkout_lines = [
             index for index, line in enumerate(clean_lines)
@@ -166,6 +171,52 @@ def scan_workflow(relative: str, source: str) -> list[dict[str, Any]]:
                     "Treat workflow_run artifacts as untrusted data. Validate and inspect contents; do not execute scripts or binaries from the downloaded artifact in a privileged job.",
                 )
                 break
+
+    if pull_request_target or workflow_run or issue_comment:
+        run_blocks = _run_blocks(clean_lines)
+        risky_fetch: int | None = None
+        for start_line, _, body in run_blocks:
+            commands = body.splitlines()
+            fetch_line: int | None = None
+            for offset, command in enumerate(commands):
+                if re.search(r"(?i)(?:\bgh\s+pr\s+checkout\b)", command):
+                    fetch_line = start_line + offset
+                    break
+                if re.search(r"(?i)\bgit\s+fetch\b", command):
+                    has_pr_ref = bool(re.search(
+                        r"(?i)(?:github\.event\.(?:pull_request|workflow_run)|refs/pull/|pull_request\.head)",
+                        "\n".join(commands[offset:]),
+                    ))
+                    has_checkout = any(
+                        re.search(r"(?i)\bgit\s+(?:checkout|switch)\b", later)
+                        for later in commands[offset + 1:]
+                    )
+                    if has_pr_ref and has_checkout:
+                        fetch_line = start_line + offset
+                        break
+            if fetch_line is None:
+                continue
+            run_index = start_line - 1
+            job_start, job_end = _job_bounds(clean_lines, run_index)
+            later_run = any(
+                later_start - 1 > run_index
+                and later_start - 1 < job_end
+                for later_start, _, _ in run_blocks
+            )
+            runs_retrieved_code = any(
+                re.search(r"(?i)(?:\b(?:make|npm|npx|pnpm|yarn|pytest|cargo|go\s+test|bash|sh|python3?|node)\b|\./\S+)", command)
+                for command in commands[fetch_line - start_line + 1:]
+            )
+            if later_run or runs_retrieved_code:
+                risky_fetch = fetch_line
+                break
+        if risky_fetch is not None:
+            add(
+                risky_fetch,
+                "CFG011_PRIVILEGED_PR_CODE_FETCH",
+                "privileged workflow fetches pull-request code through a shell command and later runs workflow commands",
+                "Do not fetch, build, or run untrusted pull-request code in pull_request_target, workflow_run, or issue_comment. Use an unprivileged pull_request workflow or keep privileged automation limited to metadata operations.",
+            )
 
     for start_line, _, body in _run_blocks(clean_lines):
         match = _UNTRUSTED_CONTEXT.search(body)

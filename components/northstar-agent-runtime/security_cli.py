@@ -1108,10 +1108,17 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         "      - uses: actions/download-artifact@0123456789abcdef0123456789abcdef01234567",
         "        with:", "          name: build-output", "      - uses: actions/upload-artifact@0123456789abcdef0123456789abcdef01234567",
     ])
+    shell_fetch_unsafe = "\n".join([
+        "name: privileged-shell-fetch", "on:", "  issue_comment:", "    types: [created]", "jobs:", "  test:",
+        "    steps:", "      - run: gh pr checkout 123", "      - run: make test",
+        "  second-path:", "    steps:", "      - run: |", "          git fetch origin refs/pull/123/head",
+        "          git checkout FETCH_HEAD", "          npm test",
+    ])
     expected = {
         "CFG008_PULL_REQUEST_TARGET_UNTRUSTED_CHECKOUT",
         "CFG009_ACTIONS_UNTRUSTED_RUN_EXPRESSION",
         "CFG010_WORKFLOW_RUN_ARTIFACT_EXECUTION",
+        "CFG011_PRIVILEGED_PR_CODE_FETCH",
     }
     with tempfile.TemporaryDirectory(prefix="northstar-actions-sast-") as temporary:
         workflows = Path(temporary) / ".github" / "workflows"
@@ -1122,6 +1129,7 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         (workflows / "fork-repository-unsafe.yml").write_text(fork_repository, encoding="utf-8")
         (workflows / "workflow-run-unsafe.yml").write_text(workflow_run_unsafe, encoding="utf-8")
         (workflows / "workflow-run-data-only.yml").write_text(workflow_run_data_only, encoding="utf-8")
+        (workflows / "shell-fetch-unsafe.yml").write_text(shell_fetch_unsafe, encoding="utf-8")
         summary = _scan_root(
             Path(temporary),
             max_files=20,
