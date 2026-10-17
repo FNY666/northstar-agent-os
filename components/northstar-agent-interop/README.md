@@ -7,6 +7,8 @@ vendor product.
 
 ## Concepts, guides and API reference
 
+Current repository scope and verification: [current status](../../docs/current-status.md).
+
 - Concepts: [handoff and contracts](../../docs/concepts/handoff-and-contracts.md)
 - Guides: [packaging and CI](../../docs/guides/packaging-and-ci.md)
 - API reference: [generated from docstrings](../../docs/api/northstar-agent-interop.md)
@@ -14,6 +16,7 @@ vendor product.
 ## Install (pip)
 
 ```sh
+cd components/northstar-agent-interop  # from the repository root
 pip install ../northstar-run-contract ../northstar-host   # declared dependencies
 pip install .                                              # resolves both
 ```
@@ -105,14 +108,17 @@ independent verifiers, rollback plans and explicit deployment authorization.
 `remote_worker.py --score` is the reproducible P3-3 evaluation — how close
 this repository is to wrapping its sidecar execution model into a remote
 worker, measured statically against the tree (36 criteria across contracts,
-host, durable-run, interop, audit, ops; current: 94/100 — kernel areas
-100%, ops 67%). T5 closed two ops gaps with authoritative artifacts (the
-identity/rotation story and the deployment/monitoring guide); the two
-remaining gaps are implementation-shaped (transport code + a real-host
-canary run) and stay MISSING by design. Protocol map and decision record:
+host, durable-run, interop, audit, ops; current: 97/100 — kernel areas
+100%, ops 83%). The Profile A SSH channel helper is now implemented and
+covered by local fake-SSH tests. The identity/rotation story and the
+deployment/monitoring guide are also present; the remaining
+gap is a real-host canary run and stays MISSING by design. Protocol map and
+decision record:
 `docs/concepts/northstar-remote-worker.md`; full assessment:
 `docs/dx-remote-worker-assessment.zh-CN.md`. Run it in CI with
-`python3 -m remote_worker --score`.
+`python3 -m remote_worker --score` from this component's source directory.
+`remote_worker.py` reads sibling source files and documentation and is not included
+in the wheel. The score is static coverage, not proof of remote production readiness.
 
 ## Local CLI process adapter candidate
 

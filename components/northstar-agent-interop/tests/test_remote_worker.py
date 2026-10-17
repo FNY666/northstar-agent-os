@@ -55,6 +55,10 @@ class ScorecardCoverageTests(unittest.TestCase):
                         f"{explanation} now passes - move it out of the gap list on purpose",
                     )
 
+    def test_profile_a_transport_is_present(self):
+        result = rw.score()
+        self.assertEqual(result["ops"][:2], (5, 6))
+
 
 class CliSmokeTests(unittest.TestCase):
     def test_cli_score_exits_zero_and_prints_a_number(self):
