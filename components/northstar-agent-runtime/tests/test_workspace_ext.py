@@ -129,7 +129,7 @@ class SkillTests(unittest.TestCase):
         self.assertNotIn("Bash(git:*)", listing)
 
     def test_claude_invocation_metadata_limits_model_discovery(self):
-        from tools.skill_scripts import discover_skill_scripts
+        from tools.skill_scripts import discover_skill_scripts, skill_scripts_listing
 
         self.write_skill(
             "manual-only",
@@ -164,8 +164,14 @@ class SkillTests(unittest.TestCase):
         self.assertIn("model-only", listing)
         model_skills = skills.model_visible_skills(found)
         self.assertEqual({skill.name for skill in model_skills}, {"model-only"})
-        scripts = discover_skill_scripts(self.ws, model_skills)
-        self.assertEqual([script.skill for script in scripts], ["model-only"])
+        scripts = discover_skill_scripts(self.ws, found)
+        by_skill = {script.skill: script for script in scripts}
+        self.assertFalse(by_skill["manual-only"].model_invocable)
+        self.assertTrue(by_skill["model-only"].model_invocable)
+        self.assertEqual(set(by_skill), {"manual-only", "model-only"})
+        script_listing = skill_scripts_listing(scripts)
+        self.assertNotIn("manual-only/helper.sh", script_listing)
+        self.assertIn("model-only/helper.sh", script_listing)
 
     def test_agent_skills_optional_metadata_types_are_validated(self):
         invalid_fields = (
