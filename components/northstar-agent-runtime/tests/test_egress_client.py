@@ -37,6 +37,23 @@ class EgressResponseBoundaryTests(unittest.TestCase):
         self.assertNotIn(secret, result.reason)
         self.assertNotIn(secret, str(result.errors))
 
+    def test_malformed_response_field_types_are_rejected(self):
+        for field, value in (
+            ("headers", ["not-a-map"]),
+            ("http_status", "200"),
+            ("truncated", "false"),
+            ("errors", "one error"),
+            ("deny_code", 7),
+        ):
+            with self.subTest(field=field):
+                payload = {"request_id": "r", "status": "ok", field: value}
+                client = self._client(json.dumps(payload))
+                result = client.request(
+                    agent_id="a", run_id="run", host="example.com", port=443,
+                    method="GET", path="/", request_id="r",
+                )
+                self.assertEqual(result.status, "protocol_error")
+
     def test_newline_after_byte_cap_is_rejected(self):
         class FakeSocket:
             def settimeout(self, _value): pass
