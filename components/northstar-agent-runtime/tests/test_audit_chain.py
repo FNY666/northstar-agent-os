@@ -476,6 +476,11 @@ class JcsCanonicalizationTests(unittest.TestCase):
 class ChainV2Tests(unittest.TestCase):
     """northstar-audit-chain/2: JCS canonicalization; v1 keeps verifying."""
 
+    def test_audit_records_reject_excessive_json_depth(self):
+        result = verify_lines(['{"detail":' + ("[" * 200) + "0" + ("]" * 200) + "}\n"])
+        self.assertFalse(result.ok)
+        self.assertIn("depth limit", result.reason)
+
     def test_new_chains_default_to_v2(self):
         chained = chain_records([sample_audit(0)], component="c")
         self.assertEqual(chained[0]["genesis"]["chain"], CHAIN_VERSION_V2)
