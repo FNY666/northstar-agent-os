@@ -5,7 +5,7 @@ a consumer or a fork should copy.
 
 ## Repository layout
 
-- `components/<name>/` — six independent components. Most are
+- `components/<name>/` — six components, five pip packages. The Python packages are
   `pyproject.toml`-packaged, pure standard-library modules installed as
   top-level names (no `PYTHONPATH` tricks); the sidecar additionally ships an
   `install.sh`/`rollback.sh` pair and a systemd unit.
@@ -64,6 +64,12 @@ Three jobs:
      generator, so drift is a failed check, not a stale page;
    - *links*: every internal markdown link in the repository resolves.
 
+The release job uses the same repository checkout to build wheels, but it is
+only triggered by an explicit `v*` tag. Local development does not publish:
+`make release-check` validates the development version and `make
+install-smoke` builds into a temporary directory, installs with `--no-index`,
+and removes the temporary environment on exit.
+
 ## Doc tooling
 
 ```sh
@@ -78,9 +84,14 @@ stays hermetic and offline-safe.
 
 - Pin the run contract: it is the versioned structural boundary — a
   `SCHEMA_VERSION` mismatch is a loud failure by design.
-- Treat packaging smoke (`pip install .` then import from `/tmp`) as
-  mandatory: top-level module names are a deliberate trade-off and the smoke
-  is what catches a missing module in `py-modules`.
+- Building wheels with `make install-smoke` requires pip and setuptools >= 61
+  in the invoking Python environment (`--no-build-isolation`). Installing the
+  resulting wheels uses a temporary target directory and `--no-index`; it is
+  not a venv test. The regular CI also exercises installed console scripts.
+- Treat packaging smoke (build wheels, install from those wheels, then import
+  from the installed environment) as mandatory: top-level module names are a
+  deliberate trade-off and the smoke is what catches a missing module in
+  `py-modules` or a broken local dependency boundary.
 - For a governed review loop in your own CI, copy
   [examples/ci-readonly-review](../../examples/ci-readonly-review/README.md),
   not this workflow (it would need your API key).

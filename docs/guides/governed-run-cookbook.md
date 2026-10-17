@@ -2,7 +2,10 @@
 
 End-to-end walk of one governed run with the offline tools, then with a live
 provider. All switches shown here are validated by the runtime's own tests and
-demo; exit codes follow the table in the runtime README.
+demo; exit codes follow the table in the runtime README. Commands using
+`python3 -m cli` require an installed runtime or a working directory of
+`components/northstar-agent-runtime`. From the repository root without installing,
+use `bin/northstar` instead and keep workspace paths explicit.
 
 ## 1. Bring up the components
 
@@ -16,7 +19,7 @@ make demo          # offline demo smoke (see step 2)
 To install into a virtualenv (`components/*` are local path-installable):
 
 ```sh
-make install       # creates ./.venv with all six components
+make install       # creates ./.venv with five Python packages; Sidecar is separate
 ./.venv/bin/northstar doctor --workspace .
 ```
 
@@ -41,7 +44,8 @@ bin/northstar agent --workspace . --prompt "summarise the repo" \
 ```
 
 Prints the plan — provider, pricing, tools, skills, MCP servers, sessions —
-and exits 0 **without sending a request or spawning a child process**.
+and exits 0 **without sending a model request or executing the proposed task**.
+Configuration checks may probe local executables (for example bubblewrap).
 `--dry-run` is the cheapest way to validate a configuration.
 
 ## 4. Tighten, then run
@@ -74,7 +78,7 @@ the scripted provider. Any denial under `--halt-on-denial` ends the run with
 
 ```sh
 python3 -m cli sessions list
-python3 -m cli sessions view <session-id>     # read-only
+python3 -m cli sessions show <session-id>     # read-only
 ```
 
 Transcripts are append-only JSONL; the final summary line prints

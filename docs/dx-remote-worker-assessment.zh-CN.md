@@ -1,6 +1,6 @@
 # 远程/托管 worker 评估（P3-3，T5 已修订）— 中文
 
-> 编制 2026-09-07（P3-3）；**修订 2026-09-07（T5 实质化）**：就绪度 89 → 94，
+> 编制 2026-09-07（P3-3）；**修订 2026-10-18（Profile A helper）**；当前状态复核：2026-10-18。就绪度 97，
 > ops 缺口由四项收窄为两项实现项；本页为 living 文档，历史基线见
 > `docs/dx-benchmark-2026.zh-CN.md` 的 P3-3/P3-4/T5 批次记录。范围：
 > **不自建云**——评估把既有 sidecar/执行模型包装为远程 worker 的对接协议与
@@ -10,13 +10,12 @@
 
 ## 0. TL;DR
 
-- **就绪度 94/100"可远程化"，0/100"已上云"**（`remote_worker.py --score`
+- **就绪度 97/100"可远程化"，0/100"已上云"**（`remote_worker.py --score`
   实算，36 条判据，CI 随 `make test` 重算）：契约、治理、审计、进程边界
-  这些"决策内核"五域 100%；**ops 域 67%（4/6）** —— T5 已交付身份签发与
+  这些"决策内核"五域 100%；**ops 域 83%（5/6）** —— T5 已交付身份签发与
   密钥轮换 story（`docs/concepts/northstar-remote-identity.md`）与部署/监控
-  操作指南（`docs/guides/remote-worker-operations.md`）；仍缺的是**网络传输
-  代码**（spec 已就位：`docs/concepts/northstar-remote-transport.md`，Profile A
-  helper 与 T5b 清单见该页）与**真实端到端 canary 实跑**（操作配方：
+  操作指南（`docs/guides/remote-worker-operations.md`）；仍缺的是**真实端到端
+  canary 实跑**（操作配方：
   `examples/remote-canary/`，探针在 CI 里对真实 socket 服务端回路验证，但按
   设计从未在 CI 触碰真实主机）。
 - **推荐路径不是自建云**：短期 = sidecar socket 走 SSH（成本最低、复用现有
@@ -68,17 +67,16 @@ opaque workspace / 有界且版本钉死 / 可审计 / 可验证。
   `python3 -m remote_worker --score` 与每次 `make test` 都会重算，**评估不
   会与代码漂移**。
 - 域得分（/100）：contracts **100**、host **100**、durable-run **100**、
-  interop **100**、audit **100**、ops **67**（4/6）。综合 **94**（34/36）。
-- 剩余缺口明细（评估器注释与本文档同步）：**网络传输代码**（spec +
-  T5b 清单已交付）与**真实 canary 实跑**（配方已交付）——两项都是实现项，
+  interop **100**、audit **100**、ops **83**（5/6）。综合 **97**（35/36）。
+- 剩余缺口明细（评估器注释与本文档同步）：**真实 canary 实跑**（配方已交付），
   需真实主机才能翻转；编排调度、远程 API 面不在当前批范围。
 
 ## 5. 结论与后续
 
 - P3-3 交付 = **协议文档 + 评估文档 + 可运行评估器（含 CI）**；零部署、
   零网络、零自建云，未引入任何运行时依赖。
-- T5（docs phase）已把四项 ops 缺口实质化两项（story/指南 = 仓库内权威
-  工件，计分器随之 89→94），另两项转为带明确翻转条件的实现项（T5b）：
-  Profile A 传输 helper + 真实主机 canary 实跑；或按生态路线走 interop
+- T5（docs phase）已把四项 ops 缺口实质化两项；本轮已实现 Profile A
+  SSH channel helper，计分器随之更新为 97/100；剩余真实主机 canary 实跑仍需
+  操作员在目标 worker 上执行，或按生态路线走 interop
   托管适配器。
-- 版本仍为对齐 `0.1.0.dev0` **未发布**（守就绪门）。
+- 版本仍为对齐 `0.1.0.dev0` **未发布**（守就绪门）。当前总状态见 [current-status.md](current-status.md)。
