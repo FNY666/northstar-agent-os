@@ -24,26 +24,33 @@ Claims of completion should be supported by fresh command output. Static inspect
 
 ## Releasing
 
-All six components are unreleased (`0.1.0.dev0`) and each carries its version in
-`pyproject.toml` (`components/*/pyproject.toml`); the agent runtime mirrors it in
-`_version.py` and the test suite asserts the two match.
+Five components have `pyproject.toml` and share `0.1.0.dev0`; the runtime's
+`_version.py` must match. The sixth component, Codex Sidecar, is installed with
+shell/systemd scripts and is not a pip package. See [current status](docs/current-status.md).
 
-To publish a component version `X.Y.Z`:
+Development checks do not publish anything:
 
-1. Confirm `make test` is green from a clean checkout (all component suites run
-   offline and without `PYTHONPATH`).
-2. Decide the release order by the dependency graph:
-   `northstar-run-contract` → `northstar-host` → `northstar-durable-run` and
-   `northstar-agent-interop` → `northstar-agent-runtime`. A component must be on
-   an index before any package that declares it as a dependency.
-3. Bump the version in that component's `pyproject.toml` (and `_version.py` for
-   the runtime), note the change under the matching heading in `CHANGELOG.md`,
-   and add a short "Install (pip)" verification: build the wheel, install it in
-   a clean virtualenv from an empty directory, and run the documented import or
-   console-script command.
-4. Tag the repository `vX.Y.Z` at the merge commit and open a GitHub Release
-   from the tag with the changelog entry. Releases are immutable: if a wheel is
-   broken, release `X.Y.Z+1`, never rewrite `X.Y.Z`.
+```sh
+make test
+make release-check
+make install-smoke
+python3 tests/docbuild.py verify
+```
+
+Only when a release is separately authorized, follow the
+[release guide](docs/guides/releasing-and-versioning.md). All five package versions
+and the runtime version change together. Install dependencies from local paths
+or the same wheel set; publishing them to an index is not required for local use.
+The tag-triggered workflow creates a GitHub Release, so pushing a tag is a
+publishing action. Do not treat building wheels as permission to publish them.
+
+## Documentation changes
+
+Update the root README, affected component/guide pages and language entries when
+behavior changes. Record verification in [current status](docs/current-status.md),
+including skipped tests and environment limitations. Keep historical reports dated;
+do not replace their original test counts with today's counts. Generated API pages
+come from `python3 tests/docbuild.py build`; verify their freshness afterwards.
 
 Contractual components (run-contract, host, interop, durable-run) prefer
 semantic-version majors for breaking schema or trust-boundary changes, because
