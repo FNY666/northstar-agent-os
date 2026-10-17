@@ -547,16 +547,15 @@ def _perform_http(
         resp_headers = {k.lower(): v for k, v in response.getheaders()}
         chunks: list[bytes] = []
         remaining = MAX_RESPONSE_BYTES + 1
-        truncated = False
         while remaining > 0:
             chunk = response.read(min(65536, remaining))
             if not chunk:
                 break
             chunks.append(chunk)
             remaining -= len(chunk)
-        else:
-            truncated = True
-        return status, resp_headers, b"".join(chunks)[:MAX_RESPONSE_BYTES], truncated
+        raw_body = b"".join(chunks)
+        truncated = len(raw_body) > MAX_RESPONSE_BYTES
+        return status, resp_headers, raw_body[:MAX_RESPONSE_BYTES], truncated
     finally:
         conn.close()
 
