@@ -1,0 +1,12 @@
+{
+  "tested_at": "2026-10-17",
+  "python": "3.12.3",
+  "tests_passed": 185,
+  "subtests_passed": 27,
+  "cryptography": "50.0.1",
+  "packaging": "26.3",
+  "real_scanners_executed": false,
+  "real_build_executed": false,
+  "github_workflow_activated": false,
+  "production_keys_generated": false
+}

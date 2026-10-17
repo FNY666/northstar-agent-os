@@ -1,0 +1,4 @@
+# Intentionally empty OSV-Scanner policy.
+# This is supplied to the scanner explicitly as its config file. It declares no
+# IgnoredVulns and no PackageOverrides, so this local rule pack cannot suppress
+# advisory findings through policy.

@@ -1304,7 +1304,12 @@ class SessionViewTests(unittest.TestCase):
                     "session_id": session,
                     "type": "user_prompt",
                     "content": [{"type": "text", "text": "inspect"}],
-                    "metrics": {"score": float("nan"), "limit": float("inf")},
+                    "metrics": {
+                        "score": float("nan"),
+                        "limit": float("inf"),
+                        "floor": float("-inf"),
+                        "literal": "NaN",
+                    },
                 }
             ) + "\n",
             encoding="utf-8",
@@ -1316,9 +1321,30 @@ class SessionViewTests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         page = output.read_text(encoding="utf-8")
         data = page.split('<script id="session-data" type="application/json">', 1)[1].split("</script>", 1)[0]
-        self.assertEqual(json.loads(data)["records"][0]["metrics"], {"score": None, "limit": None})
+        self.assertEqual(
+            json.loads(data)["records"][0]["metrics"],
+            {"score": None, "limit": None, "floor": None, "literal": "NaN"},
+        )
         self.assertNotIn(":NaN", data)
         self.assertNotIn(":Infinity", data)
+        self.assertNotIn(":-Infinity", data)
+
+    def test_sessions_ui_still_rejects_duplicate_keys_after_non_finite_normalization(self):
+        session = "ns-ui-duplicate-key"
+        transcript = Path(self.session_dir) / f"{session}.jsonl"
+        transcript.write_text(
+            "{\"index\":0,\"session_id\":\"ns-ui-duplicate-key\",\"type\":\"user_prompt\","
+            "\"metrics\":{\"score\":NaN,\"score\":1}}\n"
+            "{\"index\":1,\"session_id\":\"ns-ui-duplicate-key\",\"type\":\"session_end\"}\n",
+            encoding="utf-8",
+        )
+        output = Path(self.tmp) / "duplicate-key-replay.html"
+        code, _out, err = run_cli(
+            "sessions", "ui", session, "--session-dir", self.session_dir, "--output", str(output)
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("record 0 is not valid JSON and is not the trailing line", err)
+        self.assertFalse(output.exists(), "a rejected local transcript must not produce a replay page")
 
     def test_sessions_ui_disables_playback_for_one_visible_event(self):
         session = "ns-ui-single-event"

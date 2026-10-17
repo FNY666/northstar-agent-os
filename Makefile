@@ -1,4 +1,4 @@
-.PHONY: help demo test ts-test install bench install-smoke
+.PHONY: help demo test ts-test install bench install-smoke security-test security-lab
 
 help:
 	@echo "northstar-agent-os targets:"
@@ -10,6 +10,8 @@ help:
 	@echo "  make install install every component into a virtualenv (python3 -m venv .venv)"
 	@echo "  make bench   public governance benchmark (denial / injection / budget / redteam)"
 	@echo "  make install-smoke  clean-venv wheel install + northstar --version + bench"
+	@echo "  make security-test  host evidence and native adapter contract regression"
+	@echo "  make security-lab   fixed local paired evidence attack-defense lab"
 	@echo ""
 	@echo "product entry (checkout, no pip):"
 	@echo "  bin/northstar --version"
@@ -84,3 +86,10 @@ bench:
 # never touched. Implemented as a small shell script for dash/bash portability.
 install-smoke:
 	@sh examples/install_smoke.sh
+
+# Requires security/requirements.txt, pytest and PyYAML. No production keys.
+security-test:
+	@PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q security/tests security/native_tests security/cicd-evidence-integration/tests security/cicd-evidence-integration/security-evidence-contract/tests
+
+security-lab:
+	@PYTHONDONTWRITEBYTECODE=1 python3 security/run-native-security-lab.py --json

@@ -1,0 +1,241 @@
+# 可复用工作流参考；尚未激活。必须先发布/审阅固定工具链镜像、配置外部公钥根和环境保护。
+# 镜像必须含本包 /opt/northstar-trust 和已hash锁定依赖的 /opt/northstar-trust/venv。
+# 这里不实现上游原生scanner/normalizer/可信builder，不为任意上传JSON制造capture签名。
+name: Northstar trusted expectation and release seal
+on:
+  workflow_call:
+    inputs:
+      plan-artifact-id:
+        required: true
+        type: string
+      capture-artifact-id:
+        required: true
+        type: string
+      evidence-artifact-id:
+        required: true
+        type: string
+      build-capture-artifact-id:
+        required: true
+        type: string
+      wheels-artifact-id:
+        required: true
+        type: string
+      expected-nonce:
+        description: Protected bootstrap output, never inferred from downloaded receipts
+        required: true
+        type: string
+    outputs:
+      sealed-artifact-id:
+        value: ${{ jobs.seal-release.outputs.artifact-id }}
+permissions:
+  contents: read
+jobs:
+  sign-expectation:
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ vars.NORTHSTAR_TRUSTED_IMAGE }}
+    environment: security-signing
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    env:
+      TRUSTED_IMAGE: ${{ vars.NORTHSTAR_TRUSTED_IMAGE }}
+      ENABLED: ${{ vars.NORTHSTAR_TRUSTED_PRODUCER_ENABLED }}
+      EXPECT_NONCE: ${{ inputs.expected-nonce }}
+      PLAN_ID: ${{ inputs.plan-artifact-id }}
+      CAPTURE_ID: ${{ inputs.capture-artifact-id }}
+      EVIDENCE_ID: ${{ inputs.evidence-artifact-id }}
+      BUILD_ID: ${{ inputs.build-capture-artifact-id }}
+      WHEELS_ID: ${{ inputs.wheels-artifact-id }}
+    steps:
+      - name: Reject unconfigured toolchain and validate control-plane selectors
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$ENABLED" = true || exit 78
+          test "$GITHUB_REPOSITORY" = FNY666/northstar-agent-os || exit 78
+          [[ "$TRUSTED_IMAGE" =~ ^ghcr\.io/fny666/northstar-trust@sha256:[0-9a-f]{64}$ ]] || exit 78
+          test -x /opt/northstar-trust/venv/bin/python || exit 78
+          test -f /opt/northstar-trust/roots/trust-store.json || exit 78
+          for id in "$PLAN_ID" "$CAPTURE_ID" "$EVIDENCE_ID" "$BUILD_ID" "$WHEELS_ID"; do
+            [[ "$id" =~ ^[1-9][0-9]{0,31}$ ]] || exit 2
+          done
+          [[ "$EXPECT_NONCE" =~ ^[0-9a-f]{64}$ ]] || exit 2
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP
+          export PYTHONNOUSERSITE=1
+          /opt/northstar-trust/venv/bin/python - <<'PY'
+          import os, sys
+          sys.path.insert(0, '/opt/northstar-trust')
+          from bootstrap_identity import build_identity
+          from trusted_common import validate_identity, publish_directory, wire
+          identity = build_identity(os.environ)
+          identity['nonce'] = os.environ['EXPECT_NONCE']
+          validate_identity(identity)
+          publish_directory(os.environ['RUNNER_TEMP'] + '/control', {'identity.json': wire(identity)})
+          PY
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: ${{ inputs.plan-artifact-id }}
+          path: ${{ runner.temp }}/plan-input
+          merge-multiple: true
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: ${{ inputs.capture-artifact-id }}
+          path: ${{ runner.temp }}/capture-input
+          merge-multiple: true
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: ${{ inputs.evidence-artifact-id }}
+          path: ${{ runner.temp }}/scan-files
+          merge-multiple: true
+      - name: Authenticate captures and produce signed expectation
+        shell: bash
+        env:
+          NORTHSTAR_KEY_PEM: ${{ secrets.NORTHSTAR_EXPECTATION_KEY_PEM }}
+        run: |
+          set -euo pipefail
+          set +x
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP
+          export PYTHONNOUSERSITE=1
+          PY=/opt/northstar-trust/venv/bin/python
+          KEY="$($PY /opt/northstar-trust/materialize_key.py --env-name NORTHSTAR_KEY_PEM --root "$RUNNER_TEMP")"
+          unset NORTHSTAR_KEY_PEM
+          trap 'rm -f -- "$KEY"; rmdir -- "$(dirname -- "$KEY")"' EXIT
+          "$PY" /opt/northstar-trust/produce_expectation.py \
+            --plan "$RUNNER_TEMP/plan-input/plan.dsse.json" \
+            --capture "$RUNNER_TEMP/capture-input/capture.dsse.json" \
+            --evidence-dir "$RUNNER_TEMP/scan-files" \
+            --output "$RUNNER_TEMP/produced" \
+            --trust-store /opt/northstar-trust/roots/trust-store.json \
+            --identity "$RUNNER_TEMP/control/identity.json" \
+            --signing-key-file "$KEY" > "$RUNNER_TEMP/producer-result.json"
+      - name: Add GitHub workflow-origin attestation to expectation receipt
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        with:
+          subject-path: ${{ runner.temp }}/produced/expectation.dsse.json
+          show-summary: false
+      - id: upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: expectation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/produced/*
+          if-no-files-found: error
+          retention-days: 7
+  seal-release:
+    needs: sign-expectation
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ vars.NORTHSTAR_TRUSTED_IMAGE }}
+    environment: release-signing
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    env:
+      UPSTREAM_RESULT: ${{ needs.sign-expectation.result }}
+      ENABLED: ${{ vars.NORTHSTAR_TRUSTED_PRODUCER_ENABLED }}
+      TRUSTED_IMAGE: ${{ vars.NORTHSTAR_TRUSTED_IMAGE }}
+      EXPECT_NONCE: ${{ inputs.expected-nonce }}
+    steps:
+      - name: Require successful expectation and tag release; re-create current controller identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$UPSTREAM_RESULT" = success || exit 2
+          test "$ENABLED" = true || exit 78
+          test "$GITHUB_REPOSITORY" = FNY666/northstar-agent-os || exit 78
+          test "$GITHUB_EVENT_NAME" = push || exit 2
+          [[ "$GITHUB_REF" == refs/tags/v* ]] || exit 2
+          [[ "$TRUSTED_IMAGE" =~ ^ghcr\.io/fny666/northstar-trust@sha256:[0-9a-f]{64}$ ]] || exit 78
+          [[ "$EXPECT_NONCE" =~ ^[0-9a-f]{64}$ ]] || exit 2
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP
+          export PYTHONNOUSERSITE=1
+          /opt/northstar-trust/venv/bin/python - <<'PY'
+          import os, sys
+          sys.path.insert(0, '/opt/northstar-trust')
+          from bootstrap_identity import build_identity
+          from trusted_common import validate_identity, publish_directory, wire
+          identity = build_identity(os.environ)
+          identity['nonce'] = os.environ['EXPECT_NONCE']
+          validate_identity(identity)
+          publish_directory(os.environ['RUNNER_TEMP'] + '/control', {'identity.json': wire(identity)})
+          PY
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: ${{ needs.sign-expectation.outputs.artifact-id }}
+          path: ${{ runner.temp }}/produced
+          merge-multiple: true
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: ${{ inputs.build-capture-artifact-id }}
+          path: ${{ runner.temp }}/build-capture
+          merge-multiple: true
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: ${{ inputs.wheels-artifact-id }}
+          path: ${{ runner.temp }}/wheels
+          merge-multiple: true
+      - name: Match authenticated release version to the current tag before loading the key
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP
+          export PYTHONNOUSERSITE=1
+          /opt/northstar-trust/venv/bin/python - <<'PY'
+          import os, sys
+          sys.path.insert(0, '/opt/northstar-trust')
+          from trusted_common import _read_path, strict_json_loads, load_trust_store, verify_receipt
+          from seal_release import _release_plan
+          identity = strict_json_loads(_read_path(os.environ['RUNNER_TEMP'] + '/control/identity.json'))
+          root = load_trust_store('/opt/northstar-trust/roots/trust-store.json')
+          raw = _read_path(os.environ['RUNNER_TEMP'] + '/produced/plan.dsse.json', 3 * 1024 * 1024)
+          payload = verify_receipt(raw, root, expected_kind='scan-plan', expected_identity=identity)
+          plan = _release_plan(payload, identity)
+          if os.environ['GITHUB_REF'] != 'refs/tags/v' + plan['release_version']:
+              raise SystemExit(2)
+          PY
+      - name: Re-verify the complete signed graph, re-run gate and seal exact wheel bytes
+        shell: bash
+        env:
+          NORTHSTAR_KEY_PEM: ${{ secrets.NORTHSTAR_RELEASE_KEY_PEM }}
+        run: |
+          set -euo pipefail
+          set +x
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP
+          export PYTHONNOUSERSITE=1
+          PY=/opt/northstar-trust/venv/bin/python
+          KEY="$($PY /opt/northstar-trust/materialize_key.py --env-name NORTHSTAR_KEY_PEM --root "$RUNNER_TEMP")"
+          unset NORTHSTAR_KEY_PEM
+          trap 'rm -f -- "$KEY"; rmdir -- "$(dirname -- "$KEY")"' EXIT
+          "$PY" /opt/northstar-trust/seal_release.py \
+            --produced-dir "$RUNNER_TEMP/produced" \
+            --build-capture "$RUNNER_TEMP/build-capture/build-capture.dsse.json" \
+            --dist-dir "$RUNNER_TEMP/wheels" \
+            --output "$RUNNER_TEMP/sealed" \
+            --trust-store /opt/northstar-trust/roots/trust-store.json \
+            --identity "$RUNNER_TEMP/control/identity.json" \
+            --signing-key-file "$KEY" > "$RUNNER_TEMP/seal-result.json"
+          "$PY" /opt/northstar-trust/consume_release.py \
+            --sealed-dir "$RUNNER_TEMP/sealed" \
+            --trust-store /opt/northstar-trust/roots/trust-store.json \
+            --identity "$RUNNER_TEMP/control/identity.json" > "$RUNNER_TEMP/consume-result.json"
+      - name: Add GitHub workflow-origin attestation to the release seal
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        with:
+          subject-path: ${{ runner.temp }}/sealed/release-seal.dsse.json
+          show-summary: false
+      - id: upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: sealed-release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/sealed/*
+          if-no-files-found: error
+          retention-days: 7
+# publisher位于独立job，仅它可contents:write；审批后再次consume_release且核对当前tag指向。
+# 不将整个sealed包公开当Release资产；raw scanner输出可能含源代码或敏感数据。
