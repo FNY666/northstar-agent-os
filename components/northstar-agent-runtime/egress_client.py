@@ -105,10 +105,16 @@ class EgressClient:
             raise EgressClientError("refusing to build an egress client: " + "; ".join(errors))
         if not MIN_TIMEOUT_MS <= int(timeout_ms) <= MAX_TIMEOUT_MS:
             raise EgressClientError(f"timeout_ms must be between {MIN_TIMEOUT_MS} and {MAX_TIMEOUT_MS}")
+        if isinstance(max_response_bytes, bool) or not isinstance(max_response_bytes, int):
+            raise EgressClientError("max_response_bytes must be an integer")
+        if not 1 <= max_response_bytes <= MAX_RESPONSE_BYTES:
+            raise EgressClientError(
+                f"max_response_bytes must be between 1 and {MAX_RESPONSE_BYTES}"
+            )
         self.socket_path = text
         self.timeout_ms = int(timeout_ms)
         self.connect_timeout_s = float(connect_timeout_s)
-        self.max_response_bytes = int(max_response_bytes)
+        self.max_response_bytes = max_response_bytes
 
     def new_request_id(self) -> str:
         return f"egress-{secrets.token_hex(8)}"

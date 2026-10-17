@@ -232,7 +232,11 @@ class SidecarClient:
         self.run_id = run_id
         #: Optional Run Request document, used only when a host binding is present.
         self.run_document = run_document
-        self.max_response_bytes = int(max_response_bytes)
+        if isinstance(max_response_bytes, bool) or not isinstance(max_response_bytes, int):
+            raise ValueError("max_response_bytes must be an integer")
+        if not 1 <= max_response_bytes <= MAX_RESPONSE_BYTES:
+            raise ValueError(f"max_response_bytes must be between 1 and {MAX_RESPONSE_BYTES}")
+        self.max_response_bytes = max_response_bytes
         #: Test seam: an object with connect()/send()/recvall()/close() semantics.
         self._transport = transport
 
