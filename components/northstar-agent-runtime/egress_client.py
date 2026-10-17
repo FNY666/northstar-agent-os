@@ -42,6 +42,7 @@ MIN_TIMEOUT_MS = 1_000
 MAX_TIMEOUT_MS = 120_000
 MAX_RESPONSE_BYTES = 5_000_000
 MAX_JSON_DEPTH = 128
+MAX_REQUEST_BODY_BYTES = 1_048_576
 EGRESS_STATUSES: frozenset[str] = frozenset(
     {"ok", "denied", "rejected", "error", "transport_unavailable", "protocol_error"}
 )
@@ -179,6 +180,25 @@ class EgressClient:
         expected condition (denial, rejection, transport failure)."""
         rid = request_id or self.new_request_id()
         started = time.monotonic()
+        validation_errors = self._validate_request_inputs(
+            rid=rid,
+            agent_id=agent_id,
+            run_id=run_id,
+            host=host,
+            port=port,
+            method=method,
+            path=path,
+            headers=headers,
+            body=body,
+            timeout_ms=timeout_ms,
+            call_id=call_id,
+            arguments=arguments,
+            card=card,
+            approval_receipt=approval_receipt,
+        )
+        if validation_errors:
+            return self._failure(rid if isinstance(rid, str) else "", "rejected", "; ".join(validation_errors), started)
+        effective_timeout = self.timeout_ms if timeout_ms is None else timeout_ms
         wire: dict[str, Any] = {
             "request_id": rid,
             "agent_id": agent_id,
@@ -189,7 +209,7 @@ class EgressClient:
             "path": path,
             "headers": dict(headers or {}),
             "body_b64": base64.b64encode(body or b"").decode("ascii"),
-            "timeout_ms": self.timeout_ms if timeout_ms is None else int(timeout_ms),
+            "timeout_ms": effective_timeout,
             "call_id": call_id,
             "arguments": dict(arguments or {}),
         }
@@ -261,6 +281,40 @@ class EgressClient:
             receipt=payload.get("receipt") if isinstance(payload.get("receipt"), dict) else None,
             latency_ms=latency_ms,
         )
+
+    @staticmethod
+    def _validate_request_inputs(**values: Any) -> tuple[str, ...]:
+        errors: list[str] = []
+        for field_name in ("rid", "agent_id", "run_id", "host", "method", "path", "call_id"):
+            value = values[field_name]
+            if not isinstance(value, str) or (field_name != "call_id" and not value.strip()):
+                errors.append(f"{field_name} must be a string" + ("" if field_name == "call_id" else " and non-empty"))
+        port = values["port"]
+        if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65_535:
+            errors.append("port must be an integer between 1 and 65535")
+        timeout_ms = values["timeout_ms"]
+        if timeout_ms is not None and (
+            isinstance(timeout_ms, bool)
+            or not isinstance(timeout_ms, int)
+            or not MIN_TIMEOUT_MS <= timeout_ms <= MAX_TIMEOUT_MS
+        ):
+            errors.append(f"timeout_ms must be between {MIN_TIMEOUT_MS} and {MAX_TIMEOUT_MS}")
+        body = values["body"]
+        if not isinstance(body, bytes):
+            errors.append("body must be bytes")
+        elif len(body) > MAX_REQUEST_BODY_BYTES:
+            errors.append(f"body exceeds {MAX_REQUEST_BODY_BYTES} bytes")
+        headers = values["headers"]
+        if headers is not None and (
+            not isinstance(headers, dict)
+            or any(not isinstance(key, str) or not isinstance(value, str) for key, value in headers.items())
+        ):
+            errors.append("headers must be a string mapping")
+        for field_name in ("arguments", "card", "approval_receipt"):
+            value = values[field_name]
+            if value is not None and not isinstance(value, dict):
+                errors.append(f"{field_name} must be an object")
+        return tuple(errors)
 
     def _failure(self, rid: str, status: str, message: str, started: float) -> EgressResult:
         return EgressResult(

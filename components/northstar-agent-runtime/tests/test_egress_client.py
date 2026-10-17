@@ -18,6 +18,24 @@ class EgressResponseBoundaryTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(EgressClientError):
                 EgressClient("/var/run/northstar-egress/egress.sock", max_response_bytes=value)
 
+    def test_invalid_request_inputs_are_rejected_before_transport(self):
+        client = self._client('{"request_id":"r","status":"ok"}')
+        for kwargs, message in (
+            ({"timeout_ms": "fast"}, "timeout_ms"),
+            ({"body": "secret"}, "body must be bytes"),
+            ({"port": True}, "port must be an integer"),
+            ({"headers": {"x": 1}}, "headers must be a string mapping"),
+        ):
+            with self.subTest(kwargs=kwargs):
+                request_kwargs = {
+                    "agent_id": "a", "run_id": "run", "host": "example.com", "port": 443,
+                    "method": "GET", "path": "/", "request_id": "r",
+                }
+                request_kwargs.update(kwargs)
+                result = client.request(**request_kwargs)
+                self.assertEqual(result.status, "rejected")
+                self.assertIn(message, result.errors[0])
+
     def test_unknown_status_is_a_protocol_error(self):
         client = self._client(json.dumps({"request_id": "r", "status": "future"}))
         result = client.request(
