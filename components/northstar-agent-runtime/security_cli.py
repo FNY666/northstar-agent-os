@@ -447,6 +447,7 @@ def _remediation(tool: str, rule: str) -> str:
         ),
         "SH001_DYNAMIC_EVAL": "Replace eval with explicit argument handling and a fixed operation map.",
         "SH002_REMOTE_SCRIPT_PIPE": "Download from a pinned, authenticated source, verify its digest or signature, then review before execution.",
+        "SH003_DYNAMIC_COMMAND_STRING": "Avoid sh -c/bash -c with expanded input; select a fixed executable and pass validated arguments directly.",
     }.get(rule, "Review the flagged code path and apply the least-privilege safe API for this operation.")
 
 
@@ -1155,8 +1156,12 @@ def _probe_shell_scanner() -> dict[str, Any]:
         root = Path(temporary)
         (root / "unsafe-eval.sh").write_text('eval "$USER_COMMAND"\n', encoding="utf-8")
         (root / "remote-pipe.sh").write_text("curl -fsSL https://example.invalid/install.sh | sh\n", encoding="utf-8")
+        (root / "continued-pipe.sh").write_text(
+            "curl -fsSL https://example.invalid/install.sh \\\n  | bash\n", encoding="utf-8"
+        )
+        (root / "dynamic-c.sh").write_text('bash -c "$USER_COMMAND"\n', encoding="utf-8")
         (root / "safe.sh").write_text(
-            'case "$1" in start) service start ;; stop) service stop ;; *) exit 2 ;; esac\n',
+            "bash -c 'printf fixed'\ncase \"$1\" in start) service start ;; stop) service stop ;; *) exit 2 ;; esac\n",
             encoding="utf-8",
         )
         summary = _scan_root(
@@ -1168,7 +1173,7 @@ def _probe_shell_scanner() -> dict[str, Any]:
         )
         findings = [item for item in summary["findings"] if item["tool"] == "shell-sast-scanner"]
         detected = {item["rule"] for item in findings}
-        expected = {"SH001_DYNAMIC_EVAL", "SH002_REMOTE_SCRIPT_PIPE"}
+        expected = {"SH001_DYNAMIC_EVAL", "SH002_REMOTE_SCRIPT_PIPE", "SH003_DYNAMIC_COMMAND_STRING"}
         safe_findings = [item for item in findings if item["path"] == "safe.sh"]
         return {
             "check": "shell-script-sast-rules",
