@@ -147,6 +147,12 @@ parser-backed analysis. The URL-flow heuristic follows simple variable
 assignments in one file; it does not understand scopes, sanitizers, or
 cross-function flows.
 
+Python files also receive a request-to-HTTP URL-flow check for common Flask,
+Django, and Starlette request fields flowing through simple assignments into
+`requests`, `httpx`, `urllib.request.urlopen`, and named session/client calls.
+It does not resolve import aliases, model Python scopes, or understand
+multi-line calls or destination-validation helpers; treat it as a review signal.
+
 `--format sarif` emits a SARIF 2.1.0 document to stdout for import into code
 scanning platforms. The export contains rule identifiers, workspace-relative
 locations, severity, and remediation guidance; it does not include source

@@ -400,6 +400,10 @@ def _remediation(tool: str, rule: str) -> str:
         "PY006": "Use a cryptographic primitive from secrets or hashlib with a modern digest.",
         "PY009": "Set an explicit, bounded network timeout and handle timeout failures.",
         "PY010": "Use a secure temporary-file API and avoid predictable paths.",
+        "PY011_UNTRUSTED_SSRF": (
+            "Resolve outbound requests through a strict destination allowlist and reject private, "
+            "loopback, and link-local addresses after DNS resolution."
+        ),
     }.get(rule, "Review the flagged code path and apply the least-privilege safe API for this operation.")
 
 
@@ -441,6 +445,7 @@ def _scan_root(
     from sast_scanner import SASTScanner
     from secret_scanner import SecretScanner
     from javascript_sast import scan_source as scan_javascript_source
+    from python_ssrf_sast import scan_source as scan_python_ssrf_source
 
     root = root.resolve()
     if not root.is_dir():
@@ -535,6 +540,17 @@ def _scan_root(
                     "severity": item.severity,
                     "message": item.message,
                     "remediation": _remediation("sast-scanner", item.rule_id),
+                })
+            for item in scan_python_ssrf_source(text):
+                add_finding({
+                    "path": relative,
+                    "line": item["line"],
+                    "column": item["column"],
+                    "tool": "python-sast-scanner",
+                    "rule": item["rule"],
+                    "severity": item["severity"],
+                    "message": item["message"],
+                    "remediation": item["remediation"],
                 })
         elif safe_path.suffix.lower() in {".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"}:
             for item in scan_javascript_source(text):
