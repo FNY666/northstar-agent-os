@@ -28,6 +28,7 @@ MAX_SCAN_FILES = 10_000
 MAX_SCAN_FILE_BYTES = 1024 * 1024
 DEFAULT_SCAN_FILES = 4_000
 MAX_CLI_SCAN_FINDINGS = 1_000
+MAX_BASELINE_SARIF_BYTES = 16 * 1024 * 1024
 AGENT_SCAN_FILES = 1_000
 AGENT_SCAN_FILE_BYTES = 256 * 1024
 AGENT_SCAN_FINDINGS = 100
@@ -586,6 +587,31 @@ def scan_workspace(args: Any) -> int:
         print("configuration error: unknown --fail-on severity", file=sys.stderr)
         return 64
 
+    baseline_sarif = None
+    baseline_path = getattr(args, "compare_to", None)
+    if baseline_path is not None:
+        if args.format != "sarif":
+            print("configuration error: --compare-to requires --format sarif", file=sys.stderr)
+            return 64
+        if not str(baseline_path).strip():
+            print("configuration error: --compare-to requires a SARIF file path", file=sys.stderr)
+            return 64
+        try:
+            with Path(baseline_path).expanduser().open("rb") as baseline_file:
+                raw_baseline = baseline_file.read(MAX_BASELINE_SARIF_BYTES + 1)
+            if len(raw_baseline) > MAX_BASELINE_SARIF_BYTES:
+                raise ValueError("baseline SARIF exceeds the 16 MiB limit")
+            baseline_sarif = json.loads(raw_baseline)
+            from sarif_export import validate_baseline_sarif
+
+            validate_baseline_sarif(baseline_sarif)
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError, TypeError, RecursionError):
+            print(
+                "configuration error: --compare-to must name a readable Northstar SARIF 2.1.0 report (maximum 16 MiB)",
+                file=sys.stderr,
+            )
+            return 64
+
     root = Path(args.workspace).expanduser().resolve()
     try:
         summary = _scan_root(
@@ -606,7 +632,15 @@ def scan_workspace(args: Any) -> int:
         from _version import __version__
         from sarif_export import build_sarif
 
-        report = build_sarif(summary, tool_version=__version__)
+        try:
+            report = build_sarif(
+                summary,
+                tool_version=__version__,
+                baseline_sarif=baseline_sarif,
+            )
+        except (ValueError, TypeError, KeyError):
+            print("configuration error: could not compare SARIF baseline", file=sys.stderr)
+            return 64
         print(json.dumps(report, ensure_ascii=False, sort_keys=True))
     else:
         print("Northstar security scan (read-only; network disabled)")

@@ -234,7 +234,8 @@ def build_parser() -> argparse.ArgumentParser:
             "dependency pinning/source risks, and selected Docker, Compose, Kubernetes, CI, and Terraform config over the selected "
             "workspace. `probe` attempts controlled tool calls against a fresh Northstar runtime "
             "in a temporary workspace and checks selected scanner rules against temporary fixtures. "
-            "`scan --format sarif` emits SARIF 2.1.0 to stdout. Neither command contacts remote targets."
+            "`scan --format sarif` emits SARIF 2.1.0 to stdout and `--compare-to` marks new and unchanged findings. "
+            "Neither command contacts remote targets."
         ),
     )
     security_actions = security.add_subparsers(dest="security_action", required=True)
@@ -247,6 +248,7 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--max-file-bytes", type=int, default=1024 * 1024, help="maximum bytes per file (hard cap 1 MiB)")
     scan.add_argument("--fail-on", choices=("critical", "high", "medium", "low", "none"), default="high", help="exit 1 when a finding reaches this severity")
     scan.add_argument("--format", choices=("text", "json", "sarif"), default="text", help="output format; secret values are never printed")
+    scan.add_argument("--compare-to", help="compare SARIF output with a previous Northstar SARIF 2.1.0 report")
     probe = security_actions.add_parser(
         "probe",
         help="probe Northstar default permissions in a temporary local lab",

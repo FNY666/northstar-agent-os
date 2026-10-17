@@ -125,6 +125,7 @@ probe:
 ```sh
 python3 -m cli security scan --workspace . --fail-on high
 python3 -m cli security scan --workspace . --format sarif > northstar.sarif
+python3 -m cli security scan --workspace . --format sarif --compare-to previous.sarif > current.sarif
 python3 -m cli security probe --format json
 ```
 
@@ -148,7 +149,13 @@ cross-function flows.
 `--format sarif` emits a SARIF 2.1.0 document to stdout for import into code
 scanning platforms. The export contains rule identifiers, workspace-relative
 locations, severity, and remediation guidance; it does not include source
-snippets or secret values. Redirect stdout to save an artifact.
+snippets or secret values. Redirect stdout to save an artifact. `--compare-to`
+accepts a previous Northstar SARIF report up to 16 MiB and adds SARIF
+`baselineState` values (`new` or `unchanged`), stable fingerprints, and run-level
+comparison counts. Findings match by rule, path, sanitized message, severity,
+and duplicate occurrence; line movement does not by itself make a finding new.
+Only results included in the current SARIF document are compared when a scan
+reaches its finding-detail limit.
 
 The runtime probe drives fixed tool calls through fresh runtimes backed by a
 temporary workspace. It also scans fixed vulnerable and hardened Kubernetes

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from hashlib import sha256
 from typing import Any
 from urllib.parse import quote
 
@@ -15,7 +16,69 @@ _LEVELS = {
 }
 
 
-def build_sarif(summary: Mapping[str, Any], *, tool_version: str) -> dict[str, Any]:
+def _baseline_counts(report: Mapping[str, Any]) -> dict[tuple[str, str, str, str], int]:
+    if not isinstance(report, Mapping):
+        raise ValueError("baseline SARIF document must be an object")
+    if report.get("version") != "2.1.0":
+        raise ValueError("baseline SARIF version must be 2.1.0")
+    runs = report.get("runs")
+    if not isinstance(runs, Sequence) or isinstance(runs, (str, bytes)) or len(runs) != 1:
+        raise ValueError("baseline must contain exactly one SARIF run")
+    run = runs[0]
+    if not isinstance(run, Mapping):
+        raise ValueError("baseline SARIF run must be an object")
+    tool = run.get("tool")
+    if not isinstance(tool, Mapping):
+        raise ValueError("baseline SARIF tool must be an object")
+    driver = tool.get("driver")
+    if not isinstance(driver, Mapping) or driver.get("name") != "Northstar SecurityScan":
+        raise ValueError("baseline must come from Northstar SecurityScan")
+    results = run.get("results", ())
+    if not isinstance(results, Sequence) or isinstance(results, (str, bytes)):
+        raise ValueError("baseline SARIF results must be an array")
+
+    counts: dict[tuple[str, str, str, str], int] = {}
+    for result in results:
+        if not isinstance(result, Mapping):
+            raise ValueError("baseline SARIF result must be an object")
+        rule_id = result.get("ruleId")
+        message_value = result.get("message")
+        message = message_value.get("text") if isinstance(message_value, Mapping) else None
+        properties = result.get("properties", {})
+        severity = properties.get("severity") if isinstance(properties, Mapping) else None
+        locations = result.get("locations")
+        if not isinstance(locations, Sequence) or isinstance(locations, (str, bytes)) or not locations:
+            raise ValueError("baseline SARIF result must include a location")
+        location = locations[0]
+        if not isinstance(location, Mapping):
+            raise ValueError("baseline SARIF location must be an object")
+        physical = location.get("physicalLocation")
+        if not isinstance(physical, Mapping):
+            raise ValueError("baseline SARIF physical location must be an object")
+        artifact = physical.get("artifactLocation")
+        if not isinstance(artifact, Mapping):
+            raise ValueError("baseline SARIF artifact location must be an object")
+        uri = artifact.get("uri")
+        if not all(isinstance(value, str) and value for value in (rule_id, uri, message, severity)):
+            raise ValueError("baseline SARIF result is missing rule, path, message, or severity")
+        if severity not in _LEVELS:
+            raise ValueError("baseline SARIF result has an unsupported severity")
+        identity = (rule_id, uri, message, severity)
+        counts[identity] = counts.get(identity, 0) + 1
+    return counts
+
+
+def validate_baseline_sarif(report: Any) -> int:
+    """Validate a Northstar SARIF baseline and return its finding count."""
+    return sum(_baseline_counts(report).values())
+
+
+def build_sarif(
+    summary: Mapping[str, Any],
+    *,
+    tool_version: str,
+    baseline_sarif: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     """Convert a bounded scan summary to a SARIF 2.1.0 document.
 
     Finding text comes from the scanner's sanitized messages and remediation
@@ -55,6 +118,11 @@ def build_sarif(summary: Mapping[str, Any], *, tool_version: str) -> dict[str, A
     ordered_rules = sorted(rules.values(), key=lambda item: item["id"])
     rule_indices = {item["id"]: index for index, item in enumerate(ordered_rules)}
     results: list[dict[str, Any]] = []
+    baseline_counts = _baseline_counts(baseline_sarif) if baseline_sarif is not None else None
+    baseline_remaining = dict(baseline_counts) if baseline_counts is not None else None
+    baseline_new_count = 0
+    baseline_unchanged_count = 0
+    occurrence_counts: dict[tuple[str, str, str, str], int] = {}
     for tool, rule, item in normalized:
         rule_id = f"{tool}:{rule}"
         level, _security_severity = _LEVELS[str(item["severity"])]
@@ -63,12 +131,18 @@ def build_sarif(summary: Mapping[str, Any], *, tool_version: str) -> dict[str, A
             "startLine": max(1, int(item["line"])),
             "startColumn": max(1, int(item.get("column", 1))),
         }
-        results.append({
+        message = str(item["message"])
+        severity = str(item["severity"])
+        identity = (rule_id, path, message, severity)
+        occurrence = occurrence_counts.get(identity, 0)
+        occurrence_counts[identity] = occurrence + 1
+        fingerprint_source = "\0".join((*identity, str(occurrence))).encode("utf-8")
+        result = {
             "ruleId": rule_id,
             "ruleIndex": rule_indices[rule_id],
             "level": level,
             "kind": "fail",
-            "message": {"text": str(item["message"])},
+            "message": {"text": message},
             "locations": [{
                 "physicalLocation": {
                     "artifactLocation": {
@@ -84,7 +158,20 @@ def build_sarif(summary: Mapping[str, Any], *, tool_version: str) -> dict[str, A
                 "severity": str(item["severity"]),
                 "remediation": str(item["remediation"]),
             },
-        })
+            "partialFingerprints": {
+                "northstar/v1": sha256(fingerprint_source).hexdigest(),
+            },
+        }
+        if baseline_remaining is not None:
+            remaining = baseline_remaining.get(identity, 0)
+            if remaining:
+                result["baselineState"] = "unchanged"
+                baseline_remaining[identity] = remaining - 1
+                baseline_unchanged_count += 1
+            else:
+                result["baselineState"] = "new"
+                baseline_new_count += 1
+        results.append(result)
 
     notifications: list[dict[str, Any]] = []
     if summary.get("file_limit_reached"):
@@ -107,7 +194,7 @@ def build_sarif(summary: Mapping[str, Any], *, tool_version: str) -> dict[str, A
     if notifications:
         invocation["toolExecutionNotifications"] = notifications
 
-    return {
+    report = {
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "version": "2.1.0",
         "runs": [{
@@ -134,6 +221,13 @@ def build_sarif(summary: Mapping[str, Any], *, tool_version: str) -> dict[str, A
             },
         }],
     }
+    if baseline_remaining is not None:
+        report["runs"][0]["properties"]["baselineComparison"] = {
+            "baselineFindingCount": sum(baseline_counts.values()) if baseline_counts is not None else 0,
+            "newFindingCount": baseline_new_count,
+            "unchangedFindingCount": baseline_unchanged_count,
+        }
+    return report
 
 
-__all__ = ["build_sarif"]
+__all__ = ["build_sarif", "validate_baseline_sarif"]
