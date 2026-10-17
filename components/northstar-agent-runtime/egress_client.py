@@ -41,6 +41,9 @@ SOCKET_NAME = "egress.sock"
 MIN_TIMEOUT_MS = 1_000
 MAX_TIMEOUT_MS = 120_000
 MAX_RESPONSE_BYTES = 5_000_000
+EGRESS_STATUSES: frozenset[str] = frozenset(
+    {"ok", "denied", "rejected", "error", "transport_unavailable", "protocol_error"}
+)
 
 
 class EgressClientError(ValueError):
@@ -152,9 +155,13 @@ class EgressClient:
             payload = json.loads(line)
         except (TypeError, json.JSONDecodeError) as error:
             return self._failure(rid, "protocol_error", f"sidecar returned non-JSON: {error}", started)
+        except RecursionError:
+            return self._failure(rid, "protocol_error", "sidecar response exceeds the parser depth limit", started)
         if not isinstance(payload, dict) or payload.get("request_id") != rid:
             return self._failure(rid, "protocol_error", "sidecar response did not match the request", started)
-        status = str(payload.get("status", "protocol_error"))
+        status = payload.get("status")
+        if not isinstance(status, str) or status not in EGRESS_STATUSES:
+            return self._failure(rid, "protocol_error", "sidecar response contained an unknown status", started)
         body_bytes = b""
         raw_body = payload.get("body_b64", "")
         if isinstance(raw_body, str) and raw_body:
