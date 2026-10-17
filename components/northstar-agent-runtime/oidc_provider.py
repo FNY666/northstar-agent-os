@@ -76,6 +76,7 @@ except ImportError:  # pragma: no cover - fallback for standalone import
 
 #: Module version.
 OIDC_PROVIDER_VERSION = "oidc-provider.v1"
+MAX_JWT_JSON_DEPTH = 64
 
 #: Schema pin for records produced by this module.
 SCHEMA_PIN = "northstar.oidc-provider.v1"
@@ -193,6 +194,45 @@ def _b64url(data: bytes) -> str:
 def _b64url_decode(data: str) -> bytes:
     pad = "=" * (-len(data) % 4)
     return base64.urlsafe_b64decode(data + pad)
+
+
+def _strict_json_loads(raw: str) -> Any:
+    """Parse JWT JSON without duplicate claims or non-standard numbers."""
+    depth = 0
+    in_string = False
+    escaped = False
+    for character in raw:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            continue
+        if character == '"':
+            in_string = True
+        elif character in "[{":
+            depth += 1
+            if depth > MAX_JWT_JSON_DEPTH:
+                raise ValueError(f"JSON depth limit exceeded ({MAX_JWT_JSON_DEPTH} containers)")
+        elif character in "]}":
+            depth -= 1
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON key {key!r}")
+            result[key] = value
+        return result
+
+    def reject_constant(value: str):
+        raise ValueError(f"non-standard JSON constant {value}")
+
+    import json
+
+    return json.loads(raw, object_pairs_hook=unique_object, parse_constant=reject_constant)
 
 
 def _check_redirect_uri(uri: Any) -> str:
@@ -791,12 +831,10 @@ class OIDCProvider:
             sig = _b64url_decode(parts[2])
         except Exception:
             return invalid("bad-encoding")
-        import json as _json
-
         try:
-            header = _json.loads(header_raw.decode("utf-8"))
-            claims = _json.loads(payload_raw.decode("utf-8"))
-        except Exception:
+            header = _strict_json_loads(header_raw.decode("utf-8"))
+            claims = _strict_json_loads(payload_raw.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError, RecursionError):
             return invalid("bad-json")
         if not isinstance(claims, dict):
             return invalid("bad-claims")
