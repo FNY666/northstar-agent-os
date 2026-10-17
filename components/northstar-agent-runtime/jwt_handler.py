@@ -80,6 +80,7 @@ MAX_TOKEN_BYTES = 64 * 1024
 
 #: Hard cap on claim-map size accepted at sign/verify (guardrail).
 MAX_CLAIMS = 256
+MAX_JWT_JSON_DEPTH = 64
 
 
 class JWTError(Exception):
@@ -121,11 +122,52 @@ def _b64url_encode(raw: bytes) -> str:
 def _b64url_decode(text: str) -> bytes:
     if not isinstance(text, str) or not text:
         raise MalformedTokenError("empty segment")
+    if "=" in text or any(character not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_" for character in text):
+        raise MalformedTokenError("segment contains invalid base64url characters")
+    if len(text) % 4 == 1:
+        raise MalformedTokenError("segment has invalid base64url length")
     try:
         padded = text + "=" * (-len(text) % 4)
-        return base64.urlsafe_b64decode(padded.encode("ascii"))
-    except Exception as exc:
+        return base64.b64decode(padded.encode("ascii"), altchars=b"-_", validate=True)
+    except (TypeError, ValueError, base64.binascii.Error) as exc:
         raise MalformedTokenError("segment is not base64url: %r" % text[:32]) from exc
+
+
+def _strict_json_loads(raw: str) -> Any:
+    """Parse JWT JSON without duplicate keys or non-standard numbers."""
+    depth = 0
+    in_string = False
+    escaped = False
+    for character in raw:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            continue
+        if character == '"':
+            in_string = True
+        elif character in "[{":
+            depth += 1
+            if depth > MAX_JWT_JSON_DEPTH:
+                raise ValueError(f"JSON depth limit exceeded ({MAX_JWT_JSON_DEPTH} containers)")
+        elif character in "]}":
+            depth -= 1
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON key {key!r}")
+            result[key] = value
+        return result
+
+    def reject_constant(value: str):
+        raise ValueError(f"non-standard JSON constant {value}")
+
+    return json.loads(raw, object_pairs_hook=unique_object, parse_constant=reject_constant)
 
 
 def _check_seq(seq: int, what: str = "seq") -> int:
@@ -299,9 +341,9 @@ class JWTHandler:
             raise MalformedTokenError("token must have exactly 3 segments")
         header_b64, payload_b64, sig_b64 = parts
         try:
-            header = json.loads(_b64url_decode(header_b64).decode("utf-8"))
-            payload = json.loads(_b64url_decode(payload_b64).decode("utf-8"))
-        except (MalformedTokenError, UnicodeDecodeError, ValueError) as exc:
+            header = _strict_json_loads(_b64url_decode(header_b64).decode("utf-8"))
+            payload = _strict_json_loads(_b64url_decode(payload_b64).decode("utf-8"))
+        except (MalformedTokenError, UnicodeDecodeError, ValueError, RecursionError) as exc:
             raise MalformedTokenError("header/payload are not JSON: %s" % exc) from exc
         if not isinstance(header, dict) or not isinstance(payload, dict):
             raise MalformedTokenError("header/payload must be JSON objects")
