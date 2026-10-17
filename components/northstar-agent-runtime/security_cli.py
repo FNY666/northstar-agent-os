@@ -1090,6 +1090,12 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         "name: metadata-only", "on:", "  pull_request_target:", "jobs:", "  label:",
         "    steps:", "      - uses: actions/github-script@0123456789abcdef0123456789abcdef01234567",
     ])
+    fork_repository = "\n".join([
+        "name: unsafe-fork-checkout", "on:", "  pull_request_target:", "jobs:", "  build:",
+        "    steps:", f"      - uses: actions/checkout@{checkout_sha}", "        with:",
+        "          repository: ${{ github.event.pull_request.head.repo.full_name }}",
+        "          ref: ${{ github.event.pull_request.head.ref }}", "      - run: make test",
+    ])
     workflow_run_unsafe = "\n".join([
         "name: downstream", "on:", "  workflow_run:", "    workflows: [Build]", "    types: [completed]",
         "jobs:", "  privileged:", "    steps:",
@@ -1113,6 +1119,7 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         (workflows / "unsafe.yml").write_text(unsafe, encoding="utf-8")
         (workflows / "safe.yml").write_text(safe, encoding="utf-8")
         (workflows / "metadata.yml").write_text(metadata_only, encoding="utf-8")
+        (workflows / "fork-repository-unsafe.yml").write_text(fork_repository, encoding="utf-8")
         (workflows / "workflow-run-unsafe.yml").write_text(workflow_run_unsafe, encoding="utf-8")
         (workflows / "workflow-run-data-only.yml").write_text(workflow_run_data_only, encoding="utf-8")
         summary = _scan_root(
@@ -1128,11 +1135,11 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
     ]
     hostile = [
         item for item in relevant
-        if item["path"].endswith("unsafe.yml")
+        if item["path"].endswith(("unsafe.yml", "fork-repository-unsafe.yml"))
     ]
     clean = [
         item for item in relevant
-        if not item["path"].endswith("unsafe.yml")
+        if not item["path"].endswith(("unsafe.yml", "fork-repository-unsafe.yml"))
     ]
     detected = {item["rule"] for item in hostile}
     return {

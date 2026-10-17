@@ -22,6 +22,10 @@ _UNTRUSTED_REF = re.compile(
     r"refs/pull/[^\s]+/merge)",
     re.IGNORECASE,
 )
+_UNTRUSTED_REPOSITORY = re.compile(
+    r"github\.event\.pull_request\.head\.repo\.full_name",
+    re.IGNORECASE,
+)
 
 
 def _indent(line: str) -> int:
@@ -104,7 +108,7 @@ def scan_workflow(relative: str, source: str) -> list[dict[str, Any]]:
         for checkout in checkout_lines:
             checkout_indent = _indent(clean_lines[checkout])
             step_end = checkout + 1
-            ref_line: int | None = None
+            untrusted_checkout_line: int | None = None
             while step_end < len(clean_lines):
                 candidate = clean_lines[step_end]
                 same_indent_next_step = (
@@ -113,10 +117,18 @@ def scan_workflow(relative: str, source: str) -> list[dict[str, Any]]:
                 )
                 if candidate.strip() and (_indent(candidate) < checkout_indent or same_indent_next_step):
                     break
-                if re.match(r"^\s{0,}" + r"ref\s*:", candidate) and _UNTRUSTED_REF.search(candidate):
-                    ref_line = step_end
+                if (
+                    re.match(r"^\s{0,}(?:ref|repository)\s*:", candidate)
+                    and (
+                        _UNTRUSTED_REF.search(candidate)
+                        or _UNTRUSTED_REPOSITORY.search(candidate)
+                    )
+                ) or re.match(
+                    r"(?i)^\s*allow-unsafe-pr-checkout\s*:\s*true\b", candidate
+                ):
+                    untrusted_checkout_line = step_end
                 step_end += 1
-            if ref_line is None:
+            if untrusted_checkout_line is None:
                 continue
             job_start, job_end = _job_bounds(clean_lines, checkout)
             # Running any checked-out project script in the workflow makes this
@@ -126,13 +138,13 @@ def scan_workflow(relative: str, source: str) -> list[dict[str, Any]]:
                 for start, _, _ in _run_blocks(clean_lines[job_start:job_end])
             )
             if has_run:
-                risky_checkout = ref_line
+                risky_checkout = untrusted_checkout_line
                 break
         if risky_checkout is not None:
             add(
                 risky_checkout + 1,
                 "CFG008_PULL_REQUEST_TARGET_UNTRUSTED_CHECKOUT",
-                "privileged pull_request_target workflow checks out pull-request code and later runs workflow commands",
+                "privileged pull_request_target workflow selects or explicitly enables pull-request code checkout and later runs workflow commands",
                 "Do not build or run pull-request code in pull_request_target. Use an unprivileged pull_request workflow, or keep privileged automation limited to metadata operations.",
             )
 
