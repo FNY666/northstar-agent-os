@@ -36254,6 +36254,35 @@ Quantified "meaningful command" over an autonomous swarm.
 
 Unquantified command and silent threshold drift fail closed.
 
+### `defensive_agent`
+
+Source: `components/northstar-agent-runtime/defensive_agent.py`
+
+Deterministic blue-team assessment for agent inputs and tool targets.
+
+#### `Decision`
+
+#### `DefensiveFinding`
+
+A safe-to-log finding; raw input and URLs never appear here.
+
+#### `DefensiveAssessment`
+
+The complete deterministic result of one local assessment.
+
+- `as_dict()`
+#### `assess(text: str='', *, tool_name: str | None=None, url: str | None=None)`
+
+Assess untrusted content and an optional tool target.
+
+#### `sanitize_for_model(text: str, *, preserve_length: bool=False)`
+
+Remove known instruction-forgery spans before model consumption.
+
+#### `stdlib_only()`
+
+The orchestrator itself uses only stdlib plus local sibling modules.
+
 ### `delay_queue`
 
 Source: `components/northstar-agent-runtime/delay_queue.py`
@@ -80628,6 +80657,10 @@ Tool registry, uniform handler signature, and the sandbox every path crosses.
 #### `ToolAccessError`
 
 Raised by the sandbox; converted into an errored tool_result, never a crash.
+
+#### `ToolWriteDenied`
+
+A write target was refused during path preflight, before mutation began.
 
 #### `ToolInputError`
 

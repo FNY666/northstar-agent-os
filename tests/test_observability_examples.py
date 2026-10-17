@@ -156,6 +156,12 @@ class SessionPanelTests(unittest.TestCase):
             with self.subTest(kind=kind):
                 self.assertIn(kind, text)
 
+    def test_panel_summarizes_and_filters_defensive_assessments(self):
+        text = _panel_text()
+        self.assertIn('rec.type === "defensive_assessment"', text)
+        self.assertIn('"decision=" + String(assessment.decision || "?")', text)
+        self.assertIn('rec.decision === "block" || rec.decision === "review"', text)
+
     def test_panel_offers_fingerprint_stats_and_filters(self):
         text = _panel_text()
         for marker in (
