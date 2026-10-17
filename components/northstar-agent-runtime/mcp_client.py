@@ -1182,6 +1182,18 @@ class McpStdioClient:
                 )
             if not isinstance(result, dict):
                 return ToolResult.error(f"mcp {self.name}/{tool_name}: tools/call returned a non-object result")
+            # This client does not advertise the MCP Tasks extension. A server
+            # must not return an asynchronous task handle to it; treating that
+            # shape as an ordinary result would report unfinished work as success.
+            if result.get("resultType") == "task":
+                self._quarantine(
+                    f"tool {tool_name!r} returned an asynchronous result without negotiated task support",
+                    at="output_validation",
+                )
+                return ToolResult.error(
+                    f"mcp {self.name}/{tool_name}: server returned an asynchronous task result "
+                    "without negotiated task support; completion is unknown"
+                )
             if result_type(result) != RESULT_INPUT_REQUIRED:
                 break
             rounds += 1

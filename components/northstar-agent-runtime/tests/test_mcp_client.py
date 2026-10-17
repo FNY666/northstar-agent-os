@@ -748,6 +748,40 @@ class ToolPinningTests(unittest.TestCase):
         client.connect()
         return client
 
+    def test_unnegotiated_task_result_is_rejected_and_audited(self):
+        client = self.connect()
+        records: list[dict] = []
+        request_methods: list[str] = []
+        client.audit = records.append
+        try:
+            def task_response(method, *_args, **_kwargs):
+                request_methods.append(method)
+                return {
+                    "resultType": "task",
+                    "taskId": "server-task-secret",
+                    "status": "working",
+                }
+
+            client._request = task_response  # type: ignore[method-assign]
+            self.assertNotIn("extensions", client._capabilities())
+            result = client.call_tool("echo", {})
+            self.assertTrue(result.is_error)
+            self.assertIn("task support is not negotiated", result.text())
+            self.assertNotIn("server-task-secret", result.text())
+            self.assertTrue(client.quarantined)
+            self.assertEqual(request_methods, ["tools/call"])
+            self.assertEqual(len(records), 1)
+            self.assertEqual(records[0]["type"], "mcp.tool_drift")
+            self.assertEqual(records[0]["at"], "output_validation")
+            self.assertNotIn("server-task-secret", json.dumps(records))
+
+            denied = client.call_tool("echo", {})
+            self.assertTrue(denied.is_error)
+            self.assertIn("quarantined", denied.text())
+            self.assertEqual(request_methods, ["tools/call"])
+        finally:
+            client.close()
+
     def test_refresh_with_no_drift_returns_empty(self):
         client = self.connect()
         try:
