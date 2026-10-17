@@ -61,12 +61,13 @@ bin/northstar --version
 bin/northstar agent --workspace . --provider scripted --scripted-text "ok" --prompt "hello"
 bin/northstar resume latest --workspace . --prompt "continue" --scripted-text "ok"
 bin/northstar security scan --workspace .     # 密钥、Python/JS/TS SAST、依赖与部分部署配置检查
+bin/northstar security scan --workspace . --format sarif > northstar.sarif
 bin/northstar security probe                  # 临时靶场验证权限与工作区边界
 bin/northstar sessions list --workspace .
 bin/northstar bench                  # 公开治理基准（离线）
 ```
 
-独立 `security` 命令由操作者手动启动。agent 运行也可通过 `--enable-security-tools` 显式注册本地工具：`SecurityScan` 只读当前工作区；`SecurityProbe` 还必须出现在 `--allow-tool` 中。探针在临时实验室验证默认权限拒绝、目录穿越读写、越界符号链接读写、`.northstar` 治理文件写保护，以及 Shell 的工作区外写入和治理目录写入边界。Shell 只执行固定的无害 `printf` canary，目标和读泄漏标记都由探针创建在临时目录，运行结束后自动清理；不连接公网、不触碰用户项目，也不是通用渗透测试器。bwrap 可将 `.northstar` 重新挂载为只读并保留 runtime 临时目录；process 回退无法隔离工作区内的子目录，会如实报告并使对应检查失败。探针还会用临时 JS/TS 源码验证动态代码执行、Shell 命令、SQL 插值、HTML 注入、请求输入经同文件变量流向出站 URL、关闭 TLS 校验、弱随机 token 与 JWT `none` 算法，源码只作文本分析、不执行；URL 流规则只跟踪同一文件内简单变量赋值，不理解作用域、清洗函数或跨函数调用。扫描覆盖密钥、Python 与 JS/TS SAST、依赖固定 / 来源和部分容器 / CI / Terraform 配置，finding 按严重级别排序并附修复建议；它不查询 CVE 数据库，也不会自动修改文件。规则可能漏报或误报，干净结果不能证明项目安全。
+独立 `security` 命令由操作者手动启动。agent 运行也可通过 `--enable-security-tools` 显式注册本地工具：`SecurityScan` 只读当前工作区；`SecurityProbe` 还必须出现在 `--allow-tool` 中。探针在临时实验室验证默认权限拒绝、目录穿越读写、越界符号链接读写、`.northstar` 治理文件写保护，以及 Shell 的工作区外写入和治理目录写入边界。Shell 只执行固定的无害 `printf` canary，目标和读泄漏标记都由探针创建在临时目录，运行结束后自动清理；不连接公网、不触碰用户项目，也不是通用渗透测试器。bwrap 可将 `.northstar` 重新挂载为只读并保留 runtime 临时目录；process 回退无法隔离工作区内的子目录，会如实报告并使对应检查失败。探针还会用临时 JS/TS 源码验证动态代码执行、Shell 命令、SQL 插值、HTML 注入、请求输入经同文件变量流向出站 URL、关闭 TLS 校验、弱随机 token 与 JWT `none` 算法，源码只作文本分析、不执行；探针还核对 SARIF 中的规则 ID、相对路径、行列和修复建议；URL 流规则只跟踪同一文件内简单变量赋值，不理解作用域、清洗函数或跨函数调用。扫描覆盖密钥、Python 与 JS/TS SAST、依赖固定 / 来源和部分容器 / CI / Terraform 配置，finding 按严重级别排序并附修复建议；它不查询 CVE 数据库，也不会自动修改文件；CLI 可用 `--format sarif` 将 SARIF 2.1.0 写到 stdout，包含规则、工作区相对路径、行列和修复建议，可重定向导入 CI 代码扫描。规则可能漏报或误报，干净结果不能证明项目安全。
 
 ```sh
 # 让 agent 检查当前工作区；只注册只读扫描器

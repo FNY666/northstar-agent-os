@@ -602,6 +602,12 @@ def scan_workspace(args: Any) -> int:
 
     if args.format == "json":
         print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
+    elif args.format == "sarif":
+        from _version import __version__
+        from sarif_export import build_sarif
+
+        report = build_sarif(summary, tool_version=__version__)
+        print(json.dumps(report, ensure_ascii=False, sort_keys=True))
     else:
         print("Northstar security scan (read-only; network disabled)")
         print(
@@ -707,7 +713,9 @@ spec:
 
 def _probe_javascript_scanner() -> dict[str, Any]:
     """Check JS/TS SAST rules against fixed bad and hardened source examples."""
+    from _version import __version__
     from javascript_sast import RULES
+    from sarif_export import build_sarif
 
     vulnerable = """const code = eval(req.query.code);
 child_process.exec("convert " + req.body.file);
@@ -753,7 +761,32 @@ jwt.verify(token, secret, { algorithms: ["RS256"], issuer: expectedIssuer });
             and item["tool"] == "javascript-sast-scanner"
         ]
         missing = sorted(expected_rules - vulnerable_rules)
-        passed = not missing and not hardened_findings
+        sarif = build_sarif(summary, tool_version=__version__)
+        sarif_run = sarif["runs"][0]
+        expected_sarif_rule = "javascript-sast-scanner:JS005_UNTRUSTED_SSRF"
+        sarif_rule_ids = {
+            item["id"] for item in sarif_run["tool"]["driver"].get("rules", [])
+        }
+        sarif_rule_descriptors = sarif_run["tool"]["driver"].get("rules", [])
+        sarif_result = next((
+            item for item in sarif_run["results"]
+            if item.get("ruleId") == expected_sarif_rule
+            and item["locations"][0]["physicalLocation"]["artifactLocation"]["uri"] == "vulnerable.ts"
+        ), None)
+        sarif_rule_index = sarif_result.get("ruleIndex", -1) if sarif_result is not None else -1
+        sarif_index_matches = (
+            0 <= sarif_rule_index < len(sarif_rule_descriptors)
+            and sarif_rule_descriptors[sarif_rule_index].get("id") == expected_sarif_rule
+        )
+        sarif_passed = bool(
+            sarif.get("version") == "2.1.0"
+            and expected_sarif_rule in sarif_rule_ids
+            and sarif_index_matches
+            and sarif_result is not None
+            and sarif_result["locations"][0]["physicalLocation"]["region"]["startLine"] == 6
+            and sarif_result["properties"].get("remediation")
+        )
+        passed = not missing and not hardened_findings and sarif_passed
         return {
             "check": "javascript-typescript-sast-rules",
             "passed": passed,
@@ -761,6 +794,16 @@ jwt.verify(token, secret, { algorithms: ["RS256"], issuer: expectedIssuer });
             "detected_rules": sorted(expected_rules & vulnerable_rules),
             "missing_rules": missing,
             "hardened_fixture_findings": sorted({item["rule"] for item in hardened_findings}),
+            "sarif_export": {
+                "passed": sarif_passed,
+                "version": sarif.get("version"),
+                "ssrf_result_found": sarif_result is not None,
+                "rule_index_matches": sarif_index_matches,
+                "ssrf_location_line": (
+                    sarif_result["locations"][0]["physicalLocation"]["region"]["startLine"]
+                    if sarif_result is not None else None
+                ),
+            },
             "scope": "fixed temporary source examples; analyzed without execution and automatically removed",
         }
 
@@ -1130,6 +1173,12 @@ def probe_runtime(args: Any) -> int:
                 f"{'PASS' if item['passed'] else 'FAIL':<8} {item['check']} "
                 f"detected={len(item['detected_rules'])}/{len(item['expected_rules'])}"
             )
+            sarif = item.get("sarif_export")
+            if sarif is not None:
+                print(
+                    f"{'PASS' if sarif['passed'] else 'FAIL':<8} sarif-export "
+                    f"version={sarif['version']} ssrf_location_line={sarif['ssrf_location_line']}"
+                )
         shell = summary.get("shell") or {}
         for label, key in (
             ("shell_workspace", "workspace_boundary"),

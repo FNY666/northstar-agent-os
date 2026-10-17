@@ -1218,6 +1218,7 @@ py-modules = [
     "sandbox_pypy",
     "sandbox_restrictedpython",
     "sandbox_wasm",
+    "sarif_export",
     "sast_scanner",
     "sat_solver",
     "savepoint_manager",
