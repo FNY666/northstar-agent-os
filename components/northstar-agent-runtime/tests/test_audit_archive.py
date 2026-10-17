@@ -104,6 +104,14 @@ class ArchiveTests(unittest.TestCase):
         result = verify_archive(Path(self.tmp.name) / "nope")
         self.assertFalse(result.ok)
 
+    def test_ambiguous_archive_manifest_is_rejected(self):
+        target = self._build()
+        manifest = target / "archive-manifest.json"
+        manifest.write_text('{"archive":"northstar-audit-archive/1","archive":"forged"}')
+        result = verify_archive(target)
+        self.assertFalse(result.ok)
+        self.assertIn("cannot read", result.reason)
+
     def test_external_anchor_round_trip_offline(self):
         import hashlib as _hl
 
