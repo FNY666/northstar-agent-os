@@ -96,6 +96,16 @@ def fetch_tool_spec() -> Any:
         )
         if result.status == "ok":
             text = result.body.decode("utf-8", errors="replace")
+            # Keep the network tool safe even when an embedding calls its handler
+            # directly instead of routing the result through AgentRuntime's final
+            # model boundary.
+            from defensive_agent import sanitize_for_model
+
+            safe_text, assessment = sanitize_for_model(text, preserve_length=True)
+            if assessment.decision.value == "block":
+                rule_ids = ",".join(item.rule_id for item in assessment.findings[:8]) or "unknown"
+                return ToolResult.error(f"[blocked by defensive agent; rules={rule_ids}]")
+            text = safe_text
             return ToolResult(
                 content=text,
                 data={
