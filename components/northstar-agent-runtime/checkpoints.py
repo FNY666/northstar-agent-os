@@ -241,6 +241,35 @@ def select(records: Sequence[Mapping[str, Any]], *, record_index: int | None = N
     raise CheckpointError(f"no checkpoint at record #{record_index}; this session has {available}")
 
 
+def _post_checkpoint_tool_call_count(checkpoint: Checkpoint, transcript: Sequence[Any]) -> int:
+    """Count tool calls a checkpoint fork would discard from its parent transcript.
+
+    Replaying one can repeat an external effect that already happened after the
+    checkpoint. The runtime uses this count to require explicit operator
+    acknowledgement before it starts a fork from an older boundary.
+    """
+    from providers.base import AssistantMessage, ToolUseBlock
+
+    count = 0
+    for message in transcript[checkpoint.transcript_len:]:
+        if isinstance(message, AssistantMessage):
+            blocks = message.content
+        elif isinstance(message, Mapping) and (
+            message.get("type") == "assistant" or message.get("role") == "assistant"
+        ):
+            blocks = message.get("content", ())
+        else:
+            continue
+        if not isinstance(blocks, Sequence) or isinstance(blocks, (str, bytes)):
+            continue
+        for block in blocks:
+            if isinstance(block, ToolUseBlock):
+                count += 1
+            elif isinstance(block, Mapping) and block.get("type") == "tool_use":
+                count += 1
+    return count
+
+
 def prepare_resume(
     checkpoint: Checkpoint,
     transcript: Sequence[Any],
