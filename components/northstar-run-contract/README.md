@@ -4,6 +4,8 @@ This component defines the versioned structural boundary between an Agent OS orc
 
 ## Concepts, guides and API reference
 
+Current repository scope and verification: [current status](../../docs/current-status.md).
+
 - Concepts: [governance and the permission gate](../../docs/concepts/governance.md) ·
   [handoff and contracts](../../docs/concepts/handoff-and-contracts.md)
 - Guides: [packaging and CI](../../docs/guides/packaging-and-ci.md)
@@ -15,12 +17,11 @@ The contract is pure standard library, so it installs with no dependencies and
 stays importable in the most constrained verification environments:
 
 ```sh
-pip install .          # from a checkout
-# or, once published:
-pip install northstar-run-contract
+cd components/northstar-run-contract  # from the repository root
+python3 -m pip install .
 ```
 
-The three modules are installed under their in-tree names and the version
+The five modules (`contract`, `binding`, `adapter`, `audit`, `policy`) are installed under their in-tree names and the version
 (`0.1.0.dev0`, unreleased) is declared in `pyproject.toml`:
 
 ```python
