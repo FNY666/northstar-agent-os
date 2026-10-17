@@ -73,6 +73,17 @@ class TestRegistration(unittest.TestCase):
         with self.assertRaises(WebhookError):
             self.d.register("p", "https:///no-host", "x", 0)
 
+    def test_register_internal_and_ambiguous_targets_refused(self):
+        for url in (
+            "https://127.0.0.1/hook",
+            "https://[::1]/hook",
+            "https://169.254.169.254/latest/meta-data/",
+            "https://metadata.google.internal/hook",
+            "https://127.0.0.1%2f.evil/hook",
+        ):
+            with self.subTest(url=url), self.assertRaises(WebhookError):
+                self.d.register("p", url, "x", 0)
+
     def test_register_bad_inputs(self):
         with self.assertRaises(WebhookError):
             self.d.register("", "https://example.com/h", "x", 0)
@@ -319,6 +330,7 @@ class TestHouseStyle(unittest.TestCase):
         allowed = {
             "hashlib", "hmac", "threading", "dataclasses", "typing",
             "urllib", "urllib.parse", "__future__", "json", "canonical_json",
+            "mcp_pivoting_detector",
         }
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):

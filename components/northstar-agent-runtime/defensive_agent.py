@@ -214,23 +214,46 @@ def sanitize_for_model(
         or (unicodedata.category(char) == "Cc" and char not in "\t\n\r")
         for char in text
     )
-    if not findings and not has_unicode_controls:
+    has_unicode_separators = any(
+        unicodedata.category(char) in {"Pd", "Zs"} for char in normalized
+    )
+    if not findings and not has_unicode_controls and not has_unicode_separators:
         return text, assessment
     sanitized = scan_text
     for finding in sorted(findings, key=lambda item: (item.start, item.end), reverse=True):
         sanitized = sanitized[: finding.start] + "[redacted defensive rule]" + sanitized[finding.end :]
     # Remove Unicode format and control characters independently of lexical
-    # injection matches. In preserve-length mode use inert spaces so a tool
-    # result's accounting remains stable; otherwise leave an explicit marker
-    # for operators and the model to see that content was altered.
+    # injection matches. In preserve-length mode use a visible one-character
+    # marker so accounting stays stable without reconstructing a readable
+    # instruction; otherwise leave an explicit marker for operators.
     unicode_rewritten: list[str] = []
     for char in sanitized:
         category = unicodedata.category(char)
         if category == "Cf" or (category == "Cc" and char not in "\t\n\r"):
-            unicode_rewritten.append(" " if preserve_length else "[redacted unicode]")
+            unicode_rewritten.append("□" if preserve_length else "[redacted unicode]")
         else:
             unicode_rewritten.append(char)
     sanitized = "".join(unicode_rewritten)
+    # Removing an invisible separator can join words into a fresh jailbreak
+    # phrase that was not present during the first scan. Re-assess the cleaned
+    # representation before releasing it, and fail closed if it now matches a
+    # high-confidence rule.
+    # Collapse only for detection: model-visible spacing is preserved below,
+    # while equivalent whitespace cannot hide a phrase from lexical rules.
+    post_cleanup = assess(" ".join(sanitized.split()))
+    separator_cleanup = "".join(
+        " " if char == "□" or unicodedata.category(char) in {"Pd", "Zs"} else char
+        for char in sanitized
+    )
+    separator_pass = assess(" ".join(separator_cleanup.split()))
+    if separator_pass.findings and any(
+        finding.rule_id.startswith("D-INJ-") for finding in separator_pass.findings
+    ):
+        post_cleanup = replace(separator_pass, decision=Decision.BLOCK)
+    if post_cleanup.decision is Decision.BLOCK or any(
+        finding.rule_id.startswith("D-INJ-") for finding in post_cleanup.findings
+    ):
+        return "[blocked by defensive agent]", replace(post_cleanup, decision=Decision.BLOCK)
     if preserve_length and len(sanitized) < len(text):
         # Keep resource accounting stable without retaining any bytes from the
         # matched span. Padding is deliberately inert whitespace: it cannot be

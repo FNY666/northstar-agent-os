@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Any, Mapping
 from urllib.parse import unquote, urlsplit
@@ -90,11 +91,17 @@ BLOCKED_NETWORKS = (
     ipaddress.ip_network("172.16.0.0/12"),    # RFC 1918
     ipaddress.ip_network("192.168.0.0/16"),   # RFC 1918
     ipaddress.ip_network("169.254.0.0/16"),   # link-local / metadata
+    ipaddress.ip_network("100.64.0.0/10"),    # carrier-grade NAT / shared space
+    ipaddress.ip_network("192.0.0.0/24"),     # IETF protocol assignments
+    ipaddress.ip_network("198.18.0.0/15"),    # benchmarking networks
+    ipaddress.ip_network("224.0.0.0/4"),      # multicast
+    ipaddress.ip_network("240.0.0.0/4"),      # reserved/future use
     ipaddress.ip_network("0.0.0.0/8"),        # unspecified ("this host")
     ipaddress.ip_network("::1/128"),          # IPv6 loopback
     ipaddress.ip_network("fc00::/7"),         # IPv6 unique-local
     ipaddress.ip_network("fe80::/10"),        # IPv6 link-local
     ipaddress.ip_network("::/128"),           # IPv6 unspecified
+    ipaddress.ip_network("ff00::/8"),         # IPv6 multicast
 )
 
 #: Decimal / octal / hex spellings of 127.0.0.1 that bypass naive
@@ -107,12 +114,47 @@ _LOOPBACK_SPELLINGS = frozenset({
 })
 
 
+def _parse_numeric_ipv4(host: str) -> ipaddress.IPv4Address | None:
+    """Parse legacy integer/hex/dotted IPv4 spellings used in SSRF bypasses."""
+    parts = host.split(".")
+    if not 1 <= len(parts) <= 4:
+        return None
+    values: list[int] = []
+    for part in parts:
+        if not part:
+            return None
+        try:
+            if part.lower().startswith("0x"):
+                value = int(part[2:], 16)
+            elif len(part) > 1 and part.startswith("0"):
+                value = int(part[1:] or "0", 8)
+            else:
+                value = int(part, 10)
+        except ValueError:
+            return None
+        if value < 0:
+            return None
+        values.append(value)
+    widths = {1: (32,), 2: (8, 24), 3: (8, 8, 16), 4: (8, 8, 8, 8)}[len(values)]
+    if any(value >= (1 << width) for value, width in zip(values, widths)):
+        return None
+    packed = 0
+    for value, width in zip(values, widths):
+        packed = (packed << width) | value
+    return ipaddress.IPv4Address(packed)
+
+
 def _decode_host(raw_host: str) -> str:
     """Percent-decode the host and strip brackets/ports/trailing dots."""
-    host = unquote(raw_host or "").strip().lower()
+    host = unicodedata.normalize("NFKC", unquote(raw_host or "")).strip().lower()
     # Strip IPv6 brackets.
     if host.startswith("[") and host.endswith("]"):
         host = host[1:-1]
+    # RFC 6874 zone identifiers are routing metadata, not part of the IP
+    # address. Remove them before ipaddress classification so link-local
+    # destinations cannot become "external" merely by adding %25interface.
+    if ":" in host and "%" in host:
+        host = host.split("%", 1)[0]
     # Strip a trailing dot (DNS root).
     if host.endswith("."):
         host = host[:-1]
@@ -123,10 +165,18 @@ def _host_is_blocked(host: str) -> bool:
     """True when the decoded host is an internal target."""
     if not host:
         return True  # empty host: fail closed
+    if any(unicodedata.category(char) in {"Cc", "Cf"} for char in host):
+        return True  # ambiguous/control-bearing authorities fail closed
+    if any(char in host for char in "/\\?#@") or any(char.isspace() for char in host):
+        # Percent-decoded authority delimiters can be interpreted differently
+        # by URL stacks (for example, %2f as a path separator). Refuse the
+        # ambiguous authority before a downstream client gets to reinterpret it.
+        return True
     if host in BLOCKED_HOSTNAMES:
         return True
-    if host in _LOOPBACK_SPELLINGS:
-        return True
+    numeric = _parse_numeric_ipv4(host)
+    if numeric is not None:
+        host = str(numeric)
     for suffix in BLOCKED_SUFFIXES:
         if host.endswith(suffix):
             return True
@@ -135,6 +185,16 @@ def _host_is_blocked(host: str) -> bool:
         addr = ipaddress.ip_address(host)
     except ValueError:
         return False  # not an IP literal and not a blocked name: external
+    # IPv4-mapped IPv6 addresses are still IPv4 destinations. Normalize them
+    # before the network checks so ::ffff:127.0.0.1 cannot evade loopback rules.
+    mapped = getattr(addr, "ipv4_mapped", None)
+    if mapped is not None:
+        addr = mapped
+    if any(
+        getattr(addr, attribute, False)
+        for attribute in ("is_private", "is_loopback", "is_link_local", "is_reserved", "is_unspecified", "is_multicast")
+    ):
+        return True
     return any(addr in net for net in BLOCKED_NETWORKS)
 
 

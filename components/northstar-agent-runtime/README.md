@@ -205,9 +205,61 @@ credential bypasses.
 Hook-injected context is screened at the same boundary before it is added to
 the transcript; this keeps extension callbacks from becoming an untracked
 prompt-injection channel.
+Hook denial reasons are screened before they enter run reports, refusal
+messages, or durable audit records, so extension diagnostics cannot become a
+credential exfiltration channel.
+Post-tool hooks receive a sanitized copy of tool arguments; execution and
+authorization continue to use the original, schema-validated payload.
+Pre-tool hooks receive the same sanitized copy for review-level findings, while
+high-confidence findings are refused before any hook is invoked.
+Provider and retry failure text is screened before it becomes a result error or
+retry event, preventing upstream response bodies from leaking through failure
+handling.
+Unexpected runtime and delivery-protocol errors use the same boundary before
+they enter traces or result records.
+Sidecar transport and remote error fields are screened as well, including the
+diagnostic `raw` payload retained for host inspection.
+The local SSRF checkpoint normalizes IPv4-mapped IPv6 and legacy numeric,
+hexadecimal, and octal IPv4 spellings before applying internal-network rules.
+Special-use destinations such as CGNAT/shared space, protocol-assignment,
+benchmarking, multicast, and reserved ranges are denied as well.
+Host parsing applies NFKC normalization before these checks, closing fullwidth
+dot and digit/letter spellings of internal destinations.
+IPv6 zone identifiers are removed before classification, so link-local
+addresses with an interface suffix cannot evade the SSRF guard.
+Unicode control and format characters in host authorities are rejected
+fail-closed, including zero-width and bidirectional markers.
+Percent-decoded authority delimiters and whitespace are rejected as ambiguous
+hosts before a downstream HTTP client can reinterpret them.
+The standalone literal-URL signal applies the same NFKC, control-character,
+and decoded-authority checks, so callers cannot weaken the policy by choosing
+the older helper.
+Webhook endpoint registration reuses the protocol detector and refuses
+internal, metadata, or ambiguous destinations before a host can deliver.
+The encoded-payload tripwire also rejects repetitive filler as a carrier only
+when it has enough alphabet diversity, reducing long-input false positives.
 On resume, the final provider payload is screened again copy-on-write, so old
 or imported transcripts cannot bypass the current rules; the durable transcript
 itself is never rewritten by this compatibility pass.
+Both structured block content and legacy plain-string message content pass
+through that checkpoint.
+Unknown multimodal `data` fields are screened unless their parent explicitly
+declares a binary media type; opaque provider signatures remain untouched.
+String, tuple, and single-block content forms are normalized into the same
+screening path for imported provider messages.
+Malformed non-message records in an imported sequence are dropped from the
+copy-on-write request instead of crashing the runtime, and recorded as a
+`D-RESUME-001` defensive assessment.
+After Unicode cleanup, the detector rechecks collapsed whitespace so hidden
+instruction spans cannot reassemble into a jailbreak at the release boundary.
+If that second pass finds an instruction pattern, the release is quarantined
+even when the original obfuscated form was only review-level.
+Equivalent Unicode dash and space separators receive the same second-pass
+check, closing punctuation-based variants of known instruction spans.
+Length-preserving cleanup uses a visible one-character marker for hidden
+controls, so budget stability cannot turn obfuscation into ordinary whitespace.
+Nested string fields inside resumed tool arguments are screened recursively,
+including review-level findings, while the original argument shape is retained.
 Delegation prompts receive an additional review-level redaction before a child
 runtime is created, preventing low-confidence injection text from propagating
 through the agent tree.

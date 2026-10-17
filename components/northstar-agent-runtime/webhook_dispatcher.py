@@ -60,6 +60,11 @@ from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Optional, Tuple
 from urllib.parse import urlsplit
 
+try:  # runtime modules are also executable directly from this directory
+    from mcp_pivoting_detector import detect_pivoting
+except ImportError:  # pragma: no cover - package import fallback
+    from .mcp_pivoting_detector import detect_pivoting
+
 try:  # the single canonicalizer
     from canonical_json import jcs_canonical_json
 except ImportError:  # pragma: no cover - fallback for standalone import
@@ -162,6 +167,8 @@ def _check_url(value: Any) -> str:
         raise WebhookError("url must have a host")
     if parts.username or parts.password:
         raise WebhookError("url must not embed userinfo credentials")
+    if detect_pivoting({"url": url}):
+        raise WebhookError("url must not target an internal or ambiguous destination")
     return url
 
 

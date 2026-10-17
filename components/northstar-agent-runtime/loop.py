@@ -1018,9 +1018,14 @@ class AgentRuntime:
         """
         from defensive_agent import assess as assess_defensive, sanitize_for_model
 
-        payload = copy.deepcopy(tuple(messages))
+        # Keep a mutable copy so malformed imported records can be removed
+        # without mutating the durable transcript or the caller's sequence.
+        payload = list(copy.deepcopy(tuple(messages)))
         findings: list[Any] = []
-        changed = False
+        malformed_count = sum(not isinstance(message, dict) for message in payload)
+        if malformed_count:
+            payload = [message for message in payload if isinstance(message, dict)]
+        changed = bool(malformed_count)
 
         def screen_text(value: Any) -> Any:
             nonlocal changed
@@ -1031,8 +1036,66 @@ class AgentRuntime:
             changed = changed or safe != value
             return safe
 
+        def screen_value(value: Any) -> Any:
+            """Screen nested resumed tool arguments without changing their shape."""
+            nonlocal changed
+            if isinstance(value, str):
+                return screen_text(value)
+            if isinstance(value, dict):
+                return {key: screen_value(item) for key, item in value.items()}
+            if isinstance(value, list):
+                return [screen_value(item) for item in value]
+            if isinstance(value, tuple):
+                return tuple(screen_value(item) for item in value)
+            return value
+
+        def screen_unknown_block(
+            value: Any, *, key: str = "", binary_parent: bool = False
+        ) -> Any:
+            """Screen multimodal metadata while leaving known binary blobs intact."""
+            if isinstance(value, str):
+                if key == "data" and binary_parent:
+                    return value
+                if key == "signature":
+                    # Provider signatures are opaque bytes, not model-visible
+                    # instructions; preserve them for transcript verification.
+                    return value
+                return screen_text(value)
+            if isinstance(value, dict):
+                media_type = str(value.get("media_type") or "").casefold()
+                is_binary = binary_parent or media_type.startswith(("image/", "audio/", "video/")) or media_type == "application/octet-stream"
+                return {
+                    item_key: screen_unknown_block(
+                        item,
+                        key=str(item_key),
+                        binary_parent=is_binary,
+                    )
+                    for item_key, item in value.items()
+                }
+            if isinstance(value, list):
+                return [
+                    screen_unknown_block(item, key=key, binary_parent=binary_parent)
+                    for item in value
+                ]
+            return value
+
         for message in payload:
+            if not isinstance(message, dict):
+                # Imported transcripts are untrusted. A malformed record must
+                # not turn the screening checkpoint into a runtime crash.
+                changed = True
+                continue
             content = message.get("content")
+            if isinstance(content, str):
+                message["content"] = screen_text(content)
+                continue
+            if isinstance(content, dict):
+                message["content"] = screen_unknown_block(content)
+                continue
+            if isinstance(content, tuple):
+                # Provider APIs use lists, but imported/resumed records may
+                # retain the runtime's immutable tuple representation.
+                content = list(content)
             if not isinstance(content, list):
                 continue
             safe_blocks: list[Any] = []
@@ -1066,6 +1129,8 @@ class AgentRuntime:
                     if assessment.decision.value == "block":
                         block["input"] = {"_redacted_by_defensive_agent": True}
                         changed = True
+                    else:
+                        block["input"] = screen_value(raw_input)
                 elif block_type == "tool_result":
                     result_content = block.get("content")
                     if isinstance(result_content, str):
@@ -1077,23 +1142,43 @@ class AgentRuntime:
                 elif block_type in {"text", "document"}:
                     if "text" in block:
                         block["text"] = screen_text(block.get("text"))
+                else:
+                    # Resumed image/document/custom blocks may carry captions,
+                    # alt text, URLs, or provider metadata outside the small
+                    # native block vocabulary. Screen those strings too, but
+                    # never rewrite binary data or signed block bytes.
+                    block = screen_unknown_block(block)
                 safe_blocks.append(block)
             message["content"] = safe_blocks
 
-        if findings:
+        if findings or malformed_count:
+            audit_findings = []
+            if malformed_count:
+                audit_findings.append(
+                    {
+                        "rule_id": "D-RESUME-001",
+                        "category": "malformed-provider-message",
+                        "severity": 100,
+                    }
+                )
+            audit_findings.extend(
+                {
+                    "rule_id": item.rule_id,
+                    "category": item.category,
+                    "severity": item.severity,
+                }
+                for item in findings[:8]
+            )
             self.sessions.append(
                 "defensive_assessment",
                 {
                     "agent": self.config.agent,
                     "tool": "(provider-context)",
                     "turn_index": turn_index,
-                    "decision": "block" if any(item.severity >= 90 for item in findings) else "review",
+                    "decision": "block" if malformed_count or any(item.severity >= 90 for item in findings) else "review",
                     "sanitized": changed,
-                    "finding_count": len(findings),
-                    "findings": [
-                        {"rule_id": item.rule_id, "category": item.category, "severity": item.severity}
-                        for item in findings[:8]
-                    ],
+                    "finding_count": len(audit_findings),
+                    "findings": audit_findings[:8],
                 },
             )
         return tuple(payload)
@@ -1133,8 +1218,10 @@ class AgentRuntime:
         if policy is None or not policy.enabled:
             return False, ()
         from provider_retry import classify
+        from defensive_agent import sanitize_for_model
 
         fault = classify(error, already_streamed=already_streamed)
+        safe_fault_detail = sanitize_for_model(fault.detail)[0]
         # Events to hand back for the caller to yield, in order: a boundary, then the note
         # that explains it. Built here rather than yielded here because the method is not a
         # generator - the loop's turn body owns the yielding.
@@ -1172,7 +1259,7 @@ class AgentRuntime:
                     SystemMessage(
                         subtype="informational",
                         content=(
-                            f"turn {turn_index} was refused for being too large ({fault.detail[:120]}) - compacted "
+                            f"turn {turn_index} was refused for being too large ({safe_fault_detail[:120]}) - compacted "
                             "the transcript to "
                             f"{outcome.tokens_after} tokens and re-issued the request once (this attempt costs no "
                             "retry budget)"
@@ -1206,7 +1293,8 @@ class AgentRuntime:
         state.retries += 1
         span.set_attributes({"retry.attempt": attempt, "retry.kind": fault.kind, "retry.delay_ms": decision.delay_ms})
         self._sleep(decision.delay_ms / 1000.0)
-        return True, (SystemMessage(subtype="informational", content=decision.line()),)
+        safe_line = sanitize_for_model(decision.line())[0]
+        return True, (SystemMessage(subtype="informational", content=safe_line),)
 
     def _sleep(self, seconds: float) -> None:
         """The one place a run blocks, so an embedder can hand us a clock it controls."""
@@ -1514,8 +1602,11 @@ class AgentRuntime:
                 state.events.append(state.result)
                 yield state.result
         except Exception as error:  # noqa: BLE001 - every expected failure is an event
-            state.errors.append(f"unexpected runtime failure: {type(error).__name__}: {error}")
-            run_span.record_error(f"{type(error).__name__}: {error}")
+            from defensive_agent import sanitize_for_model
+
+            safe_error = sanitize_for_model(str(error))[0]
+            state.errors.append(f"unexpected runtime failure: {type(error).__name__}: {safe_error}")
+            run_span.record_error(f"{type(error).__name__}: {safe_error}")
             if state.result is None:
                 state.result = self._result(state, "error_during_execution")
                 if not finished:
@@ -1860,7 +1951,8 @@ class AgentRuntime:
         # SessionStart may seed context or refuse the run outright.
         start = self._fire(state, "SessionStart", HookInput(event="SessionStart", session_id=state.session_id, agent=config.agent, depth=config.depth, data={"model": config.model, "tools": list(self.tools.names())}))
         if start.denied:
-            state.denials.append(Denial(tool="", source="hook:SessionStart", reason=start.deny_reason, agent=config.agent, kind="run"))
+            reason = self._safe_hook_text(start.deny_reason, event="SessionStart", turn_index=0)
+            state.denials.append(Denial(tool="", source="hook:SessionStart", reason=reason, agent=config.agent, kind="run"))
             yield self._finish(state, "error_permission_denied")
             return True
         for context in start.additional_context:
@@ -1876,8 +1968,9 @@ class AgentRuntime:
             HookInput(event="UserPromptSubmit", session_id=state.session_id, agent=config.agent, depth=config.depth, prompt=prompt, turn_index=0),
         )
         if submitted.denied:
+            reason = self._safe_hook_text(submitted.deny_reason, event="UserPromptSubmit", turn_index=0)
             state.denials.append(
-                Denial(source="hook:UserPromptSubmit", reason=submitted.deny_reason, agent=config.agent, turn_index=0, kind="prompt")
+                Denial(source="hook:UserPromptSubmit", reason=reason, agent=config.agent, turn_index=0, kind="prompt")
             )
             yield self._finish(state, "error_permission_denied")
             return True
@@ -1995,7 +2088,10 @@ class AgentRuntime:
                 # A provider that breaks its contract is a fault to report, and
                 # the partial text it already streamed must stay unrecorded: the
                 # transcript is only ever written from a complete turn.
-                detail = f"provider failure on turn {turn_index}: {error}"
+                from defensive_agent import sanitize_for_model
+
+                safe_error = sanitize_for_model(str(error))[0]
+                detail = f"provider failure on turn {turn_index}: {safe_error}"
                 if state.retries:
                     # Say what the budget did, in the line that explains the failure:
                     # "it failed" and "it failed after four attempts and 12 s of
@@ -2011,7 +2107,12 @@ class AgentRuntime:
                 if reservation is not None:
                     reservation.charge_unknown()
                     reservation = None
-                state.errors.append(f"provider failure on turn {turn_index}: {type(error).__name__}: {error}")
+                from defensive_agent import sanitize_for_model
+
+                safe_error = sanitize_for_model(str(error))[0]
+                state.errors.append(
+                    f"provider failure on turn {turn_index}: {type(error).__name__}: {safe_error}"
+                )
                 generation_span.record_error(f"{type(error).__name__}")
             else:
                 breakdown = self.budget.observe(
@@ -2122,7 +2223,9 @@ class AgentRuntime:
             try:
                 config.code_phase_machine.begin_verification()
             except (TypeError, ValueError) as error:
-                state.errors.append(f"code phase protocol: {error}")
+                from defensive_agent import sanitize_for_model
+
+                state.errors.append(f"code phase protocol: {sanitize_for_model(str(error))[0]}")
                 subtype = "error_postconditions_failed"
         if config.verification_commands and subtype == "success":
             verification_context = ToolContext(
@@ -2182,7 +2285,9 @@ class AgentRuntime:
             try:
                 config.code_phase_machine.seal_verification()
             except (OSError, TypeError, ValueError) as error:
-                state.errors.append(f"code delivery seal: {error}")
+                from defensive_agent import sanitize_for_model
+
+                state.errors.append(f"code delivery seal: {sanitize_for_model(str(error))[0]}")
                 subtype = "error_postconditions_failed"
         if (
             subtype == "success"
@@ -2673,6 +2778,7 @@ class AgentRuntime:
                 call, spec, state, payload=payload, turn_index=turn_index, span=span, rewritten=rewritten
             )
 
+        hook_payload = self._safe_hook_value(payload)
         pre = self._fire(
             state,
             "PreToolUse",
@@ -2684,7 +2790,7 @@ class AgentRuntime:
                 turn_index=turn_index,
                 tool_name=spec.name,
                 tool_use_id=call.id,
-                tool_input=payload,
+                tool_input=hook_payload,
                 data={"kind": spec.kind},
             ),
         )
@@ -2998,7 +3104,8 @@ class AgentRuntime:
     ) -> _Refused:
         """A PreToolUse hook denied the call; a hook deny is terminal."""
         self._trace_refusal(span, spec.name, source=f"hook:{pre.denied_by}", turn_index=turn_index)
-        reason = f"{spec.name} refused by the {pre.denied_by} hook: {pre.deny_reason}"
+        deny_reason = self._safe_hook_text(pre.deny_reason, event="PreToolUse", turn_index=turn_index)
+        reason = f"{spec.name} refused by the {pre.denied_by} hook: {deny_reason}"
         state.denials.append(
             Denial(
                 tool=spec.name,
@@ -3020,6 +3127,44 @@ class AgentRuntime:
         )
         fatal = "error_permission_denied" if self.config.halt_on_denial else None
         return _Refused(block, report, fatal)
+
+    def _safe_hook_text(self, value: Any, *, event: str, turn_index: int) -> str:
+        """Keep extension-provided denial text out of logs and model messages."""
+        raw = str(value or "hook denied")
+        from defensive_agent import sanitize_for_model
+
+        safe, assessment = sanitize_for_model(raw)
+        if assessment.findings:
+            self.sessions.append(
+                "defensive_assessment",
+                {
+                    "agent": self.config.agent,
+                    "tool": f"(hook:{event})",
+                    "turn_index": turn_index,
+                    "decision": assessment.decision.value,
+                    "sanitized": safe != raw,
+                    "finding_count": len(assessment.findings),
+                    "findings": [
+                        {"rule_id": item.rule_id, "category": item.category, "severity": item.severity}
+                        for item in assessment.findings[:8]
+                    ],
+                },
+            )
+        return safe
+
+    def _safe_hook_value(self, value: Any) -> Any:
+        """Copy a hook-facing JSON value without changing the executed payload."""
+        if isinstance(value, str):
+            from defensive_agent import sanitize_for_model
+
+            return sanitize_for_model(value)[0]
+        if isinstance(value, dict):
+            return {key: self._safe_hook_value(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [self._safe_hook_value(item) for item in value]
+        if isinstance(value, tuple):
+            return tuple(self._safe_hook_value(item) for item in value)
+        return value
 
     def _refuse_by_gate(
         self,
@@ -3286,6 +3431,7 @@ class AgentRuntime:
         # that crosses the model boundary. Calling `result.text()` first would
         # serialize attacker-sized structured content before the cap could act.
         tool_text = block.text()
+        hook_input = self._safe_hook_value(payload)
         original_chars = raw_result_chars if raw_result_chars is not None else len(tool_text)
         attrs: dict[str, Any] = {
             "tool.name": spec.name,
@@ -3328,7 +3474,7 @@ class AgentRuntime:
                     turn_index=turn_index,
                     tool_name=spec.name,
                     tool_use_id=call.id,
-                    tool_input=payload,
+                    tool_input=hook_input,
                     tool_response=tool_text[:500],
                     tool_is_error=True,
                     error=tool_text[:500],
@@ -3351,7 +3497,7 @@ class AgentRuntime:
                     turn_index=turn_index,
                     tool_name=spec.name,
                     tool_use_id=call.id,
-                    tool_input=payload,
+                    tool_input=hook_input,
                     tool_response=tool_text[:500],
                     data={
                         "duration_ms": duration_ms,
@@ -3718,7 +3864,8 @@ class AgentRuntime:
             ),
         )
         if start.denied:
-            reason = f"delegation to {definition.name} refused by the {start.denied_by} hook: {start.deny_reason}"
+            deny_reason = self._safe_hook_text(start.deny_reason, event="SubagentStart", turn_index=turn_index)
+            reason = f"delegation to {definition.name} refused by the {start.denied_by} hook: {deny_reason}"
             state.denials.append(Denial(tool=spec.name, source=f"hook:{start.denied_by}", reason=reason, agent=definition.name, turn_index=turn_index, kind="delegation"))
             return _Refused(
                 ToolResultBlock(tool_use_id=call.id, content=reason, is_error=True),
@@ -4085,9 +4232,10 @@ class AgentRuntime:
             ),
         )
         if pre.denied:
+            deny_reason = self._safe_hook_text(pre.deny_reason, event="PreCompact", turn_index=turn_index)
             outcome = CompactionOutcome(
                 performed=False,
-                reason=f"compaction refused by the {pre.denied_by} hook: {pre.deny_reason}",
+                reason=f"compaction refused by the {pre.denied_by} hook: {deny_reason}",
                 transcript=tuple(state.transcript),
                 tokens_before=estimate_transcript_tokens(state.transcript),
                 tokens_after=estimate_transcript_tokens(state.transcript),
@@ -4111,6 +4259,13 @@ class AgentRuntime:
     def _fire(self, state: _RunState, event: Any, payload: HookInput) -> Any:
         outcome = self.hooks.fire(event, payload)
         record: dict[str, Any] = {"event": event, **outcome.as_dict()}
+        # Hook diagnostics are persisted in the run report. Keep a denial
+        # reason from becoming a second raw-content channel even when the
+        # caller later builds the user-facing refusal from the same outcome.
+        if record.get("deny_reason"):
+            from defensive_agent import sanitize_for_model
+
+            record["deny_reason"] = sanitize_for_model(str(record["deny_reason"]))[0]
         if payload.tool_name:
             record["tool"] = payload.tool_name
         state.hook_fires.append(record)
