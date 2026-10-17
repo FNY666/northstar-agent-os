@@ -1,8 +1,10 @@
 """Small offline JavaScript/TypeScript security rule set.
 
-This is a bounded line-pattern scanner, not a JavaScript parser or dataflow
-engine. It reports common dangerous APIs and configurations without importing,
-building, or executing the scanned project.
+This is a bounded line-pattern scanner, not a JavaScript parser or full
+dataflow engine. It reports common dangerous APIs and configurations without
+importing, building, or executing the scanned project. A small within-file
+taint pass tracks request-derived URL variables to outbound HTTP calls; it does
+not model JavaScript scope, sanitizers, or multi-function flows.
 """
 from __future__ import annotations
 
@@ -39,7 +41,7 @@ RULES: tuple[tuple[str, str, str, str, re.Pattern[str]], ...] = (
         re.compile(r"\.\s*innerHTML\s*=|\.\s*insertAdjacentHTML\s*\("),
     ),
     (
-        "JS005_DIRECT_SSRF", "high", "request input used as an outbound URL",
+        "JS005_UNTRUSTED_SSRF", "high", "request-derived value used as an outbound URL",
         "Resolve outbound requests through a strict destination allowlist and reject private, loopback, and link-local addresses after DNS resolution.",
         re.compile(
             r"\b(?:fetch|got)\s*\(\s*(?:req|request)\s*\.\s*(?:query|params|body|headers)\b"
@@ -62,6 +64,20 @@ RULES: tuple[tuple[str, str, str, str, re.Pattern[str]], ...] = (
         re.compile(r"\balgorithms\s*:\s*\[\s*['\"]none['\"]", re.IGNORECASE),
     ),
 )
+_RULE_BY_ID = {rule[0]: rule for rule in RULES}
+
+_REQUEST_URL_SOURCE = re.compile(r"\b(?:req|request)\s*\.\s*(?:query|params|body|headers)\b")
+_ASSIGNMENT = re.compile(
+    r"^\s*(?:(?:const|let|var)\s+)?([A-Za-z_$][\w$]*)\s*=(?!=|>)\s*(.*?)\s*;?\s*$"
+)
+_OUTBOUND_URL_SINK = re.compile(
+    r"\b(?:fetch|got)\s*\(\s*(?P<url_arg>[A-Za-z_$][\w$]*)\b"
+    r"|\baxios\s*\.\s*(?:get|post|put|delete|request)\s*\(\s*(?P<axios_url_arg>[A-Za-z_$][\w$]*)\b"
+)
+
+
+def _references_variable(expression: str, variable: str) -> bool:
+    return re.search(rf"(?<![\w$.]){re.escape(variable)}(?![\w$])", expression) is not None
 
 
 def scan_source(source: Any) -> list[dict[str, Any]]:
@@ -69,10 +85,28 @@ def scan_source(source: Any) -> list[dict[str, Any]]:
     if not isinstance(source, str):
         raise TypeError("source must be a string")
     findings: list[dict[str, Any]] = []
+    tainted_url_variables: set[str] = set()
     for line_no, line in enumerate(source.splitlines(), start=1):
+        assignment = _ASSIGNMENT.match(line)
+        if assignment:
+            variable, expression = assignment.groups()
+            # A fetched response is data derived from the remote server, not an
+            # alias for the URL argument. Keep this tiny flow model URL-focused.
+            if _OUTBOUND_URL_SINK.search(expression) is None:
+                tainted = bool(_REQUEST_URL_SOURCE.search(expression)) or any(
+                    _references_variable(expression, name)
+                    for name in tainted_url_variables
+                )
+                if tainted:
+                    tainted_url_variables.add(variable)
+                else:
+                    tainted_url_variables.discard(variable)
+
+        line_rules: set[str] = set()
         for rule, severity, message, remediation, pattern in RULES:
             match = pattern.search(line)
             if match:
+                line_rules.add(rule)
                 findings.append({
                     "rule": rule,
                     "severity": severity,
@@ -81,6 +115,19 @@ def scan_source(source: Any) -> list[dict[str, Any]]:
                     "line": line_no,
                     "column": match.start() + 1,
                 })
+        if "JS005_UNTRUSTED_SSRF" not in line_rules:
+            sink = _OUTBOUND_URL_SINK.search(line)
+            if sink:
+                url_variable = sink.group("url_arg") or sink.group("axios_url_arg")
+                if url_variable in tainted_url_variables:
+                    findings.append({
+                        "rule": "JS005_UNTRUSTED_SSRF",
+                        "severity": _RULE_BY_ID["JS005_UNTRUSTED_SSRF"][1],
+                        "message": _RULE_BY_ID["JS005_UNTRUSTED_SSRF"][2],
+                        "remediation": _RULE_BY_ID["JS005_UNTRUSTED_SSRF"][3],
+                        "line": line_no,
+                        "column": sink.start("url_arg") + 1 if sink.group("url_arg") else sink.start("axios_url_arg") + 1,
+                    })
     return findings
 
 

@@ -138,9 +138,11 @@ secure.
 
 JavaScript and TypeScript files also receive line-pattern checks for dynamic
 code execution, shell commands, interpolated SQL, HTML injection, direct
-request-to-URL SSRF, disabled TLS verification, weak security tokens, and JWT
-`none` algorithms. These checks are heuristic and do not replace
-parser-backed analysis.
+request-derived URL flows to outbound HTTP calls, disabled TLS verification,
+weak security tokens, and JWT `none` algorithms. These checks are heuristic and do not replace
+parser-backed analysis. The URL-flow heuristic follows simple variable
+assignments in one file; it does not understand scopes, sanitizers, or
+cross-function flows.
 
 The runtime probe drives fixed tool calls through fresh runtimes backed by a
 temporary workspace. It also scans fixed vulnerable and hardened Kubernetes
