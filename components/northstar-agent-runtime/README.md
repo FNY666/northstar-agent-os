@@ -250,6 +250,8 @@ screening path for imported provider messages.
 Malformed non-message records in an imported sequence are dropped from the
 copy-on-write request instead of crashing the runtime, and recorded as a
 `D-RESUME-001` defensive assessment.
+Non-message values are filtered before any defensive copy operation, so
+untrusted object hooks cannot run during transcript admission.
 After Unicode cleanup, the detector rechecks collapsed whitespace so hidden
 instruction spans cannot reassemble into a jailbreak at the release boundary.
 If that second pass finds an instruction pattern, the release is quarantined
