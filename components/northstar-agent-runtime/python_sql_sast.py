@@ -3,8 +3,10 @@
 The scanner follows common request, CLI, environment, and interactive-input
 sources through assignments and expressions into database ``execute`` APIs.
 Parameterized queries remain clear when untrusted values are passed only as
-separate parameters. This is a single-file heuristic: it does not follow
-interprocedural flows or prove that a database driver's query builder is safe.
+separate parameters. This is a single-file heuristic: it follows bounded direct
+calls to same-file top-level helper functions, but does not resolve method
+dispatch or cross-file flows, or prove that a database driver's query builder is
+safe.
 """
 from __future__ import annotations
 

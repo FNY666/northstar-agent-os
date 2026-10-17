@@ -165,48 +165,55 @@ Treat it as a review signal; it does not automatically fix findings.
 Python also receives `PY013_COMMAND_INJECTION`, an AST-based flow check from
 request fields, `input()`, CLI arguments, and environment values to shell-backed
 `os` and `subprocess` APIs. It handles multiline calls, common import aliases,
-assignments, f-strings, and basic control-flow joins. It does not follow values
-across function boundaries, recognize project-specific validators, or treat
-shell quoting as proof that a command is allowlisted. The scanner reports only
-shell-enabled process calls and remains a review signal.
+assignments, f-strings, basic control-flow joins, and bounded propagation
+through direct calls to top-level helper functions in the same file (up to six
+call levels). It does not resolve methods, dynamic dispatch, or cross-file calls,
+recognize project-specific validators, or treat shell quoting as proof that a
+command is allowlisted. The scanner reports only shell-enabled process calls
+and remains a review signal.
 
 Python also receives `PY014_SQL_INJECTION_FLOW`, which tracks the same untrusted
 input sources through assignments and expressions into `execute`,
 `executemany`, and related database methods. A fixed query with values passed
 separately as parameters does not trigger this flow rule. The existing `PY004`
 sink heuristic can still mark `cursor.execute()` sites for review. The flow rule
-does not follow values across function boundaries or prove that a custom query
-builder safely quotes identifiers.
+follows direct same-file helper calls with a bounded call depth; it does not
+resolve method dispatch or cross-file calls, or prove that a custom query builder
+safely quotes identifiers.
 
 Python also receives `PY015_UNSAFE_DESERIALIZATION_FLOW` for untrusted values
 reaching `pickle`, `dill`, `cloudpickle`, `joblib`, or unsafe PyYAML loaders.
 The flow rule excludes `yaml.safe_load()` and explicit `SafeLoader` /
 `CSafeLoader` calls. The existing `PY003` sink heuristic can still mark any
 `yaml.load()` call site, including one that specifies a safe loader. The flow
-rule does not follow values across function boundaries or verify that
-serialized data is authenticated before loading.
+rule follows direct same-file helper calls with a bounded call depth, but does
+not resolve method dispatch or cross-file calls, or verify that serialized data
+is authenticated before loading.
 
 Python also receives `PY016_SERVER_SIDE_TEMPLATE_INJECTION` for untrusted values
 reaching Flask `render_template_string`, Jinja `Template` / `from_string`, Django
 `Template`, or Mako `Template` compilation. User values passed as context to a
-static `render_template()` file do not trigger this flow rule. It does not resolve
-custom wrappers or cross-function flows; autoescaping and sandboxing do not make
-untrusted template source safe.
+static `render_template()` file do not trigger this flow rule. It follows direct
+same-file helper calls with a bounded call depth, but does not resolve method
+dispatch or cross-file calls; autoescaping and sandboxing do not make untrusted
+template source safe.
 
 Python also receives `PY017_XSS_OUTPUT_FLOW` for untrusted values reaching
 Flask and Django HTML responses, Starlette / FastAPI `HTMLResponse`, or APIs that
 mark content safe with MarkupSafe `Markup` or Django `mark_safe`; it also checks
 tainted values returned directly from Flask `@route` handlers. It recognizes
 `html.escape`, MarkupSafe `escape`, and Django `escape`; static autoescaping
-templates do not trigger this rule. The analysis does not follow custom wrappers,
-template filters, or cross-function flows, and it does not model HTML subcontexts
-such as JavaScript or CSS.
+templates do not trigger this rule. The analysis follows direct same-file helper
+calls with a bounded call depth, but does not resolve method dispatch, cross-file
+calls, template filters, or HTML subcontexts such as JavaScript or CSS.
 
 Python also receives `PY018_OPEN_REDIRECT_FLOW` for untrusted values passed to
 Flask, Django, Starlette, or FastAPI redirect helpers. It treats relative and
 absolute targets alike because protocol-relative URLs can still leave the site.
 Fixed `url_for()` and Django `reverse()` destinations are treated as
-server-owned. It cannot prove custom allowlists or trace across functions.
+server-owned. It follows direct same-file helper calls with a bounded call depth,
+but does not resolve method dispatch or cross-file calls, and cannot prove
+custom allowlists.
 
 Go files also receive `GO001_UNTRUSTED_SSRF` and `GO002_PATH_TRAVERSAL` checks
 for standard `net/http`, chi/mux, and common Gin request values flowing through

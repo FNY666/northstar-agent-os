@@ -3,8 +3,9 @@
 The scanner follows common request, CLI, environment, and interactive-input
 sources into APIs that compile template source. Rendering user data through a
 static template remains clear because values passed as render context are not
-template source. This is a single-file heuristic and does not resolve custom
-template wrappers, template files, or flows across function boundaries.
+template source. This is a single-file heuristic: it follows bounded direct
+calls to same-file top-level helpers, but does not resolve method dispatch,
+cross-file calls, custom template filters, or template files.
 """
 from __future__ import annotations
 

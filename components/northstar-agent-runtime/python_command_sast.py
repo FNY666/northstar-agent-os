@@ -2,10 +2,10 @@
 
 The analyzer tracks simple values from common request, CLI, environment, and
 interactive input sources to shell-backed process APIs. It handles multiline
-calls, assignments, f-strings, imports, and basic control-flow joins. It is a
-single-file heuristic: it does not resolve interprocedural flows, dynamic
-aliases, custom sanitizers, or whether non-shell subprocess arguments are
-semantically dangerous.
+calls, assignments, f-strings, imports, basic control-flow joins, and bounded
+calls to direct same-file helper functions. It remains a heuristic: it does not
+resolve cross-file, method-dispatch, or dynamic-alias flows, custom sanitizers,
+or whether non-shell subprocess arguments are semantically dangerous.
 """
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ REMEDIATION = (
 )
 _MAX_SOURCE_BYTES = 1024 * 1024
 _MAX_AST_NODES = 50_000
+_MAX_HELPER_DEPTH = 6
 _SUBPROCESS_SINKS = {
     "subprocess.run", "subprocess.call", "subprocess.Popen",
     "subprocess.check_call", "subprocess.check_output",
@@ -65,6 +66,25 @@ class _Analyzer:
         self.findings: list[_Finding] = []
         self.module_aliases: dict[str, str] = {}
         self.imported_names: dict[str, str] = {}
+        # The first interprocedural increment is deliberately narrow: direct
+        # calls to top-level functions in this file. A source scan is already
+        # capped at _MAX_AST_NODES; helper visits share the same additional
+        # work budget and recursion is bounded to keep hostile source cheap.
+        self._local_functions = {
+            statement.name: statement
+            for statement in tree.body
+            if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        self._function_cost = {
+            name: sum(1 for _ in ast.walk(function))
+            for name, function in self._local_functions.items()
+        }
+        self._helper_work_remaining = _MAX_AST_NODES
+        self._helper_stack: list[str] = []
+        self._return_frames: list[list[_Taint]] = []
+        self._local_call_cache: dict[
+            tuple[int, tuple[tuple[str, int], ...]], tuple[bool, _Taint | None]
+        ] = {}
         self._statements(tree.body, {})
 
     def _canonical_name(self, node: ast.AST) -> str | None:
@@ -113,9 +133,124 @@ class _Analyzer:
             if name in _SUBPROCESS_SINKS | _DIRECT_SHELL_SINKS:
                 # A process API's result is not the command string it consumed.
                 return None
+            if self._function_name(node) in self._local_functions:
+                analyzed, helper_result = self._local_call_result(node, env)
+                if analyzed:
+                    return helper_result
         origins = [self._taint(child, env) for child in ast.iter_child_nodes(node)]
         tainted = [origin for origin in origins if origin is not None]
         return min(tainted, key=lambda origin: origin.source_line) if tainted else None
+
+    @staticmethod
+    def _function_name(call: ast.Call) -> str | None:
+        # Attribute calls are intentionally excluded: resolving self.foo or
+        # module.foo safely needs class/module identity and dispatch analysis.
+        return call.func.id if isinstance(call.func, ast.Name) else None
+
+    def _local_call_environment(
+        self,
+        call: ast.Call,
+        function: ast.FunctionDef | ast.AsyncFunctionDef,
+        caller_env: dict[str, _Taint],
+    ) -> dict[str, _Taint]:
+        positional = [*function.args.posonlyargs, *function.args.args]
+        keyword_only = list(function.args.kwonlyargs)
+        parameters = [*positional, *keyword_only]
+        values: dict[str, ast.AST] = {}
+        starred_origins: list[_Taint] = []
+        for index, parameter in enumerate(positional):
+            if index < len(call.args):
+                argument = call.args[index]
+                if isinstance(argument, ast.Starred):
+                    values[parameter.arg] = argument.value
+                    origin = self._taint(argument.value, caller_env)
+                    if origin is not None:
+                        starred_origins.append(origin)
+                else:
+                    values[parameter.arg] = argument
+        for keyword in call.keywords:
+            if keyword.arg is not None:
+                values[keyword.arg] = keyword.value
+
+        environment: dict[str, _Taint] = {}
+        for parameter in parameters:
+            argument = values.get(parameter.arg)
+            if argument is not None:
+                taint = self._taint(argument, caller_env)
+                if taint is not None:
+                    environment[parameter.arg] = taint
+
+        # A starred tuple can fill any remaining positional slot. Preserve the
+        # flow conservatively rather than assuming the first slot is the only
+        # destination when the number of expanded values is unknown.
+        if starred_origins:
+            star_origin = min(starred_origins, key=lambda item: item.source_line)
+            for parameter in positional:
+                previous = environment.get(parameter.arg)
+                if previous is None or star_origin.source_line < previous.source_line:
+                    environment[parameter.arg] = star_origin
+
+        if function.args.vararg is not None:
+            extras = call.args[len(positional):]
+            tainted = [self._taint(item.value if isinstance(item, ast.Starred) else item, caller_env)
+                       for item in extras]
+            origins = [item for item in tainted if item is not None]
+            origins.extend(starred_origins)
+            if origins:
+                environment[function.args.vararg.arg] = min(origins, key=lambda item: item.source_line)
+        if function.args.kwarg is not None:
+            extras = [keyword.value for keyword in call.keywords if keyword.arg is None]
+            origins = [self._taint(item, caller_env) for item in extras]
+            origins = [item for item in origins if item is not None]
+            if origins:
+                origin = min(origins, key=lambda item: item.source_line)
+                environment[function.args.kwarg.arg] = origin
+                # Unknown keyword names may bind any declared parameter.
+                for parameter in parameters:
+                    previous = environment.get(parameter.arg)
+                    if previous is None or origin.source_line < previous.source_line:
+                        environment[parameter.arg] = origin
+        return environment
+
+    def _local_call_result(
+        self, call: ast.Call, caller_env: dict[str, _Taint]
+    ) -> tuple[bool, _Taint | None]:
+        name = self._function_name(call)
+        function = self._local_functions.get(name or "")
+        if (
+            function is None
+            or name in self._helper_stack
+            or len(self._helper_stack) >= _MAX_HELPER_DEPTH
+        ):
+            return False, None
+
+        function_env = self._local_call_environment(call, function, caller_env)
+        cache_key = (id(call), tuple(sorted(
+            (parameter, taint.source_line) for parameter, taint in function_env.items()
+        )))
+        if cache_key in self._local_call_cache:
+            return self._local_call_cache[cache_key]
+
+        cost = self._function_cost.get(name, _MAX_AST_NODES + 1)
+        if cost > self._helper_work_remaining:
+            return False, None
+        self._helper_work_remaining -= cost
+        self._helper_stack.append(name)
+        returns: list[_Taint] = []
+        self._return_frames.append(returns)
+        try:
+            self._scoped(function.body, function_env)
+        except RecursionError:
+            # Deeply nested hostile ASTs are ignored at this helper boundary.
+            result = None
+        else:
+            result = min(returns, key=lambda item: item.source_line) if returns else None
+        finally:
+            self._return_frames.pop()
+            self._helper_stack.pop()
+        analyzed_result = (True, result)
+        self._local_call_cache[cache_key] = analyzed_result
+        return analyzed_result
 
     @staticmethod
     def _target_names(target: ast.AST) -> list[str]:
@@ -180,6 +315,11 @@ class _Analyzer:
         for child in ast.walk(node):
             if isinstance(child, ast.Call):
                 self._call_sink(child, env)
+                name = self._function_name(child)
+                if name in self._local_functions:
+                    function = self._local_functions[name]
+                    if self._local_call_environment(child, function, env):
+                        self._local_call_result(child, env)
 
     @staticmethod
     def _merge(*environments: dict[str, _Taint]) -> dict[str, _Taint]:
@@ -230,7 +370,12 @@ class _Analyzer:
             elif isinstance(statement, ast.Expr):
                 self._expression(statement.value, env)
             elif isinstance(statement, (ast.Return, ast.Raise, ast.Assert)):
-                self._expression(getattr(statement, "value", None), env)
+                value = getattr(statement, "value", None)
+                if isinstance(statement, ast.Return) and self._return_frames:
+                    origin = self._taint(value, env)
+                    if origin is not None:
+                        self._return_frames[-1].append(origin)
+                self._expression(value, env)
                 self._expression(getattr(statement, "test", None), env)
                 self._expression(getattr(statement, "exc", None), env)
             elif isinstance(statement, ast.If):
@@ -269,7 +414,15 @@ class _Analyzer:
                     self._expression(decorator, env)
                 for default in (*statement.args.defaults, *statement.args.kw_defaults):
                     self._expression(default, env)
-                self._scoped(statement.body, env)
+                # A nested function's return is not a return from its enclosing
+                # helper. Keep its direct sink scan, but isolate the summary
+                # frame so an uncalled nested function cannot taint a caller's
+                # return value.
+                self._return_frames.append([])
+                try:
+                    self._scoped(statement.body, env)
+                finally:
+                    self._return_frames.pop()
             elif isinstance(statement, ast.ClassDef):
                 for expression in (*statement.bases, *statement.decorator_list):
                     self._expression(expression, env)

@@ -4,8 +4,8 @@ This rule follows common request, CLI, environment, and interactive-input
 sources into raw HTML response constructors, strings returned from Flask route
 handlers, and APIs that mark strings safe. It recognizes a small set of standard
 HTML escapers, while static-template rendering remains outside its sink set. It
-does not follow custom wrappers, template filters, output context, or flows
-across function boundaries.
+follows bounded direct calls to same-file top-level helpers, but does not resolve
+method dispatch, cross-file flows, template filters, or output subcontexts.
 """
 from __future__ import annotations
 
