@@ -121,6 +121,13 @@ class SoftwareAttestorTests(unittest.TestCase):
         with self.assertRaises(AttestedReceiptError):
             attestor.as_verifier().verify(forged, expected_binding=binding)
 
+    def test_verifier_rejects_ambiguous_quote_json(self):
+        attestor = SoftwareAttestor(_secret("ambiguous"))
+        binding = call_binding_digest("a" * 64, "b" * 64)
+        quote = b'{"measured_config":"' + binding.encode() + b'","measured_config":"' + binding.encode() + b'"}'
+        with self.assertRaises(AttestedReceiptError):
+            attestor.as_verifier().verify(quote, expected_binding=binding)
+
     def test_wrong_secret_rejects(self):
         attestor = SoftwareAttestor(_secret("one"))
         other = SoftwareAttestor(_secret("two"))
