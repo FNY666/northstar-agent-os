@@ -96,13 +96,13 @@
 /* ---- record vocabulary (mirrors sessions.py RECORD_TYPES) ---- */
 var RECORD_TYPES = [
   "session_start", "user_prompt", "assistant", "tool_result", "hook",
-  "denial", "compact_boundary", "informational", "postconditions",
+  "denial", "defensive_assessment", "compact_boundary", "informational", "postconditions",
   "checkpoint", "subagent", "result", "session_end"
 ];
 var TYPE_COLOR = {
   session_start: "ok", session_end: "ok", user_prompt: "warn", assistant: "ok",
   tool_result: "ok", hook: "warn", denial: "err", compact_boundary: "warn",
-  informational: "warn", subagent: "ok", result: "ok", postconditions: "audit",
+  defensive_assessment: "audit", informational: "warn", subagent: "ok", result: "ok", postconditions: "audit",
   checkpoint: "audit"
 };
 var MAX_PREVIEW = 300;
@@ -183,6 +183,20 @@ function summarize(rec) {
     return "tool=" + String(rec.tool || "?") + " source=" + String(rec.source || "?") +
       " turn=" + String(rec.turn_index != null ? rec.turn_index : "?") + "\n" + String(rec.reason || "");
   }
+  if (rec.type === "defensive_assessment") {
+    var assessment = rec.data && typeof rec.data === "object" ? rec.data : rec;
+    var summary = [
+      "decision=" + String(assessment.decision || "?"),
+      "tool=" + String(assessment.tool || "?"),
+      "turn=" + String(assessment.turn_index != null ? assessment.turn_index : "?"),
+      "findings=" + String(assessment.finding_count || 0)
+    ];
+    (assessment.findings || []).forEach(function (finding) {
+      summary.push(String(finding.rule_id || "?") + " " + String(finding.category || "?") +
+        " severity=" + String(finding.severity != null ? finding.severity : "?"));
+    });
+    return summary.join("\n");
+  }
   if (rec.type === "user_prompt" || rec.type === "assistant" || rec.type === "tool_result" || rec.type === "subagent") {
     var out = [];
     var blocks = textBlocks(rec);
@@ -255,6 +269,9 @@ function isErrorRecord(rec) {
     return lines.join("\n");
   }
   if (rec.type === "denial") { return true; }
+  if (rec.type === "defensive_assessment") {
+    return rec.decision === "block" || rec.decision === "review";
+  }
   if (rec.is_error === true) { return true; }
   if (rec.subtype && String(rec.subtype).indexOf("error") === 0) { return true; }
   if (rec.type === "tool_result") {

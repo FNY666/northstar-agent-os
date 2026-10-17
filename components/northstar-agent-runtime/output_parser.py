@@ -497,11 +497,43 @@ class _BadJson(Exception):
     """Sentinel: json.loads hit a non-finite constant or bad text."""
 
 
+_MAX_JSON_DEPTH = 128
+
+
 def _load_json(text: str) -> Any:
+    depth = 0
+    in_string = False
+    escaped = False
+    for character in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            continue
+        if character == '"':
+            in_string = True
+        elif character in "[{":
+            depth += 1
+            if depth > _MAX_JSON_DEPTH:
+                raise _BadJson("depth limit")
+        elif character in "]}":
+            depth -= 1
+
     def _const(name: str) -> Any:
         raise _BadJson(name)
 
-    return json.loads(text, parse_constant=_const)
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise _BadJson(f"duplicate key {key!r}")
+            result[key] = value
+        return result
+
+    return json.loads(text, object_pairs_hook=unique_object, parse_constant=_const)
 
 
 def _parse_json_object(text: str, spec: Dict[str, Any]) -> Tuple[bool, Any, str]:

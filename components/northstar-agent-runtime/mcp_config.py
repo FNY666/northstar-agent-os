@@ -209,8 +209,20 @@ def _load_json(path: Path) -> dict[str, Any]:
         raise McpConfigError(f"{path}: cannot read: {error}") from error
     if path.suffix == ".jsonc" or text.lstrip().startswith("//"):
         raise McpConfigError(f"{path}: JSON-with-comments is not accepted here; keep the file plain JSON")
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON key {key!r}")
+            result[key] = value
+        return result
+
+    def reject_constant(value: str):
+        raise ValueError(f"non-standard JSON constant {value}")
+
     try:
-        document = json.loads(text)
+        document = json.loads(text, object_pairs_hook=unique_object, parse_constant=reject_constant)
     except ValueError as error:
         raise McpConfigError(f"{path}: invalid JSON: {error}") from error
     if not isinstance(document, dict):

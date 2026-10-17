@@ -366,6 +366,12 @@ class RecoveryTests(RuntimeTestCase):
         self.assertEqual(len(records), 2)
         self.assertEqual(dropped, 1)
 
+    def test_duplicate_json_keys_are_treated_as_corruption(self):
+        root = self.workspace()
+        path = self.write_lines(root, ['{"index":0,"index":1}', '{"index":2}'])
+        with self.assertRaises(SessionIntegrityError):
+            load_jsonl(path)
+
     def test_session_reader_enforces_total_and_per_line_byte_budgets(self):
         root = self.workspace()
         path = self.write_lines(root, [json.dumps({"content": "x" * 100})])

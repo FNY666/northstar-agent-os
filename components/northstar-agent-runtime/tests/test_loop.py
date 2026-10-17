@@ -134,9 +134,13 @@ class InitEventTests(RuntimeTestCase):
         self.assertNotIn(raw, str(single_messages))
 
     def test_malformed_resumed_message_is_dropped_without_crashing(self):
+        class ExplodingCopy:
+            def __deepcopy__(self, _memo):
+                raise AssertionError("unvalidated record reached deepcopy")
+
         runtime = self.runtime(provider=self.provider([text_turn("done")]))
         messages = runtime._screen_provider_messages(
-            ("not-a-message", ["also-not-a-message"], {"role": "user", "content": "keep"}),
+            (ExplodingCopy(), "not-a-message", ["also-not-a-message"], {"role": "user", "content": "keep"}),
             None,
             turn_index=0,
         )

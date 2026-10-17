@@ -97,6 +97,44 @@ _KINDS = (
 _DIGEST_PREFIX = "sha256:"
 _MAX_SUBJECT_LEN = 256
 _MAX_SCHEMA_BYTES = 1 << 20  # 1 MiB cap on schema bodies.
+_MAX_SCHEMA_DEPTH = 128
+
+
+def _strict_json_loads(raw: str) -> Any:
+    """Parse schema JSON without duplicate keys, non-standard numbers, or bombs."""
+    depth = 0
+    in_string = False
+    escaped = False
+    for character in raw:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            continue
+        if character == '"':
+            in_string = True
+        elif character in "[{":
+            depth += 1
+            if depth > _MAX_SCHEMA_DEPTH:
+                raise ValueError(f"JSON depth limit exceeded ({_MAX_SCHEMA_DEPTH} containers)")
+        elif character in "]}":
+            depth -= 1
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON key {key!r}")
+            result[key] = value
+        return result
+
+    def reject_constant(value: str):
+        raise ValueError(f"non-standard JSON constant {value}")
+
+    return json.loads(raw, object_pairs_hook=unique_object, parse_constant=reject_constant)
 
 
 # ---------------------------------------------------------------------------
@@ -224,7 +262,7 @@ def _parse_schema_body(body: Any) -> tuple[str, Mapping[str, Any]]:
         if len(body.encode("utf-8")) > _MAX_SCHEMA_BYTES:
             raise BadSchemaError("schema body exceeds 1 MiB")
         try:
-            parsed = json.loads(body)
+            parsed = _strict_json_loads(body)
         except (json.JSONDecodeError, ValueError) as exc:
             raise BadSchemaError(f"schema body is not valid JSON: {exc}")
     elif isinstance(body, Mapping):
@@ -352,7 +390,7 @@ class SchemaRecord:
 
     def parsed(self) -> Mapping[str, Any]:
         """The schema body as a parsed mapping."""
-        return json.loads(self.schema_text)
+        return _strict_json_loads(self.schema_text)
 
 
 @dataclass(frozen=True)

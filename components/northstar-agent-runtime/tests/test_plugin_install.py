@@ -107,6 +107,16 @@ class LockfileTests(unittest.TestCase):
                     pl.read_lock(self.root)
                 self.assertIn(expected, str(caught.exception))
 
+    def test_ambiguous_lock_json_is_refused(self):
+        path = pl.lock_path(self.root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            '{"schema_version":"northstar.plugins-lock.v1","schema_version":"other","plugins":{}}',
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(pl.PluginInstallError, "duplicate JSON key"):
+            pl.read_lock(self.root)
+
     def test_broken_json_is_reported_with_the_path(self):
         path = pl.lock_path(self.root)
         path.parent.mkdir(parents=True, exist_ok=True)

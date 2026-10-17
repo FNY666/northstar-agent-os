@@ -28,7 +28,7 @@ manifest and do not authenticate a manifest supplied by another party.
 | `terminal` | The phase outcome is sealed and matches the captured run status. |
 | `interrupted_before_effects` | A versioned effect journal has no effect starts. Phase continuation remains unavailable. |
 | `interrupted_after_receipted_effects` | Recorded effects returned, but the run has no complete terminal delivery. Inspect its retained worktree. |
-| `manual_review_required` | At least one effect is still in flight, raised after a possible partial change, or has a failed legacy receipt. |
+| `manual_review_required` | At least one effect is still in flight, may have partially changed state, or has a failed legacy receipt. A write-path preflight refusal is recorded separately as `denied` because it occurs before mutation. |
 | `insufficient_effect_evidence` | The evidence predates the versioned effect journal. Absence of records cannot prove absence of effects. |
 | `incomplete_terminal_evidence` | A phase outcome exists, but sealing or final capture did not finish. |
 | `invalid_evidence` | Identity, schema, transitions, timestamps, or referenced digests are inconsistent. |
@@ -41,8 +41,9 @@ Every receipt reports `automatic_tool_replay: false` and
 
 A mutating tool writes an atomic `in_flight` record immediately before entering
 its authorized handler. A normal return closes that record as `completed`; a
-raised exception records `unknown`, because the handler may have modified state
-before failing. Parent and delegated child tools share the same phase gate and
+write-path preflight refusal closes it as `denied`; an unexpected exception
+records `unknown`, because the handler may have modified state before failing.
+Parent and delegated child tools share the same phase gate and
 effect journal. Host verification commands use the same start/completion
 protocol under the `HostCheck` tool name. Arguments and command output are not
 copied into the effect journal.

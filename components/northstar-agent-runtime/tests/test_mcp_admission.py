@@ -421,6 +421,17 @@ class TighteningTests(unittest.TestCase):
         from mcp_admission import scan_workspace as _scan_ws
         return _scan_ws(self.ws)
 
+    def test_policy_with_duplicate_keys_fails_closed(self):
+        policy_dir = self.ws / ".northstar"
+        policy_dir.mkdir()
+        (policy_dir / "mcp-admission.json").write_text(
+            '{"levels":{"demo":"allow"},"levels":{"demo":"blocked"}}',
+            encoding="utf-8",
+        )
+        policy = load_policy(self.ws)
+        self.assertEqual(policy.levels, {})
+        self.assertTrue(any("unreadable" in note for note in policy.notes))
+
     def test_critical_proposes_blocked(self):
         scan = self._scan({"bad": {"command": "npx", "args": ["postmark-mcp@1.0.16"]}})
         proposals = propose_tightening(scan, AdmissionPolicy())

@@ -250,6 +250,8 @@ screening path for imported provider messages.
 Malformed non-message records in an imported sequence are dropped from the
 copy-on-write request instead of crashing the runtime, and recorded as a
 `D-RESUME-001` defensive assessment.
+Non-message values are filtered before any defensive copy operation, so
+untrusted object hooks cannot run during transcript admission.
 After Unicode cleanup, the detector rechecks collapsed whitespace so hidden
 instruction spans cannot reassemble into a jailbreak at the release boundary.
 If that second pass finds an instruction pattern, the release is quarantined
@@ -321,6 +323,12 @@ the only switch; without it `CodexReadOnly` is not registered at all:
 python3 -m cli run --sidecar-socket /var/run/northstar-codex/sidecar.sock \
   --probe-sidecar            # one health-check prompt, then exit
 ```
+
+Sidecar responses are screened at the client boundary too: direct SDK callers
+receive a blocked marker or sanitized text before remote output can become an
+instruction channel. The main loop applies its own result-boundary checks as a
+second defense. Malformed or excessively recursive response JSON is reported as
+`protocol_error` rather than escaping as a client exception.
 
 ## Creating a governed project (`new`)
 
@@ -518,7 +526,10 @@ python3 -m cli run --workspace . --prompt "summarise the files" \
   "answered_fields"}`, and a short `[governance] …` note is appended to the tool
   result so the refusal is inside the transcript rather than beside it.
 - Output is bounded client-side (per-line and per-call caps); image/resource
-  content blocks are replaced with a placeholder rather than rendered.
+  content blocks are replaced with a placeholder rather than rendered. The
+  low-level `McpStdioClient.call_tool()` path also runs the defensive-agent
+  output screen, so callers that bypass the main loop still get hostile
+  instruction/credential payloads blocked or sanitized before they see them.
 - `run --dry-run` lists the configured servers **and the stance**
   (`protocol=auto, elicit=off→input_required is declined, roots=off,
   sensitive_input=off, rounds=3`) without spawning them, and appends what an import

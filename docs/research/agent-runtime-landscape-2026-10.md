@@ -405,3 +405,134 @@ backend/resource fields, and dynamic environment/header maps without string valu
 This makes the invariant inspectable before a governed run without running tools or
 network probes as part of this check. It verifies declared contracts only; handler
 behavior and MCP server conformance need separate execution tests.
+
+### OWASP Agent Control Standard wire-contract review (2026-10-17)
+
+OWASP's [Agent Control Standard (ACS)](https://genai.owasp.org/resource/agent-control-standard-acs/)
+defines a portable runtime-control wire contract. Its [reference repository](https://github.com/GenAI-Security-Project/agent-control-standard)
+describes a separate Guardian that can allow, deny, modify, ask, or defer before an
+observed agent performs an action. The repository publishes versioned JSON Schemas;
+the v0.1.0 `toolCallRequest` contract requires `tool` and `arguments`, and represents
+argument values as provenance-bearing objects. The upstream project labels its wire
+specification v0.1.0 and its `integration` branch is mutable; this is an early
+interoperability target, not evidence of a stable cross-framework production guarantee.
+The branch reviewed on 2026-10-17 resolved to `8a459524530b320c70c68d1d0b85bbcabb3771e6`.
+
+**Northstar decision:** do not add a networked Guardian or replace the in-process
+permission engine in Core. Northstar already owns a host-side pre-execution gate,
+three-layer authorization, approval hooks, append-only audit receipts, provenance,
+and host-derived effect verification. A future adapter could translate selected
+Northstar events to ACS-Core, but it must preserve fail-closed local enforcement when
+the Guardian is unreachable, bind replies to the original call and arguments, and
+prove that modify/ask/defer cannot widen Northstar policy. Before implementation,
+pin a released schema revision and add an offline conformance fixture; do not equate
+the ACS reference implementation's demo policy or advertised profiles with Northstar
+conformance.
+
+### Local coding-release gate exposed two environment defects (2026-10-17)
+
+Running the frozen code-task fixture controls against this checkout initially marked
+all 12 TypeScript reference repairs as failures. The receipt showed that this
+environment had Node.js v22.13.0 while the task pack explicitly requires Node 24;
+the tests failed before reaching fixture assertions because Node 22 could not load
+the `.ts` test files. The control runner did not check the declared toolchain before
+execution, so an incompatible environment looked like a benchmark regression. It now
+rejects TypeScript controls before running when Node is below 24, and unit tests cover
+the boundary. Verification was rerun with a checksum-verified Node.js v24.22.0 binary.
+
+That run surfaced an independent product-path bug: a host with `color.ui=always`
+caused the isolated worktree's Git diff to contain ANSI escape codes, so
+`patch-replay.json` reported `No valid patches in input` and the task correctly
+failed `error_postconditions_failed`. Patch capture now explicitly uses `--no-color`.
+An end-to-end regression forces Git color on and verifies that the emitted patch
+still replays and passes the declared check. This is a host-environment correctness
+fix; it does not constitute a real-model coding success measurement or a release
+baseline, and the local fixture evaluator still reports `network_enforced: false`.
+The complete 24-task fixture control was then rerun with Node v24.22.0: all 24
+untouched baselines were rejected and all 24 reference patches passed. This is a
+fixture/reference control, not a real-model benchmark. The final 15-test task-pack
+unit suite passed, as did 43 focused runtime/SDK/CLI tests and `git diff --check`.
+
+The full runtime suite completed 18,661 tests with 3 failures, 1 error, and 19
+environment-conditional skips. The three governance-benchmark assertions share one
+case: default MCP network denial intentionally requires Linux Landlock ABI 10, but
+this host exposes ABI 7. The runtime refused to launch under a weaker default-deny
+claim, as designed; this host therefore cannot validate the newer TCP/UDP boundary.
+The remaining tracing error dereferenced a `None` span in a subagent-cost test. It is
+unrelated to patch capture; it remains an open suite failure pending isolation with
+the supported tracing backend. The first full-suite attempt also showed hundreds of
+`pytest` import errors because that test dependency was absent; `pytest` was installed
+before the final runtime-only rerun. Do not describe the full runtime suite as green.
+
+### Follow-up: resolve runtime-suite MCP and tracing failures (2026-10-17)
+
+The MCP benchmark used ABI 4 as its `enforceable` threshold even though
+`McpStdioClient` correctly requires ABI 10 to guarantee both TCP and UDP denial.
+This mismatch made an ABI-7 host appear to violate the policy instead of passing the
+fail-closed refusal check. The benchmark now uses ABI 10 and describes lower-ABI
+refusal as the expected outcome. Separately, the subagent-cost tracing test put
+`usage: None` inside the Task tool arguments; the strict schema rejected the call,
+so no delegation span existed. Removing that unrelated argument lets the test measure
+the intended child-cost attribute.
+
+After these changes, the governance-benchmark test file passed 53/53, the tracing
+test file passed 22 tests (4 skipped because optional OpenTelemetry SDK is absent),
+and MCP networking tests passed 9 with 4 ABI-gated live checks skipped. A fresh full
+runtime-suite rerun followed and passed as recorded below. ABI-7 live TCP/UDP
+confinement remains untested here; the control continues to fail closed rather than
+weakening enforcement.
+Final verification: after fixing the ABI threshold and Task fixture arguments, the
+complete `northstar-agent-runtime` unittest suite passed: 18,661 tests, 0 failures,
+0 errors, 19 environment-conditional skips (106.223 s). The skipped cases include
+host-dependent live MCP network-denial probes on this ABI-7 kernel and optional
+OpenTelemetry SDK integrations; the policy still refuses MCP startup unless full
+ABI-10 TCP/UDP denial can be enforced.
+
+
+## 2026-10-17 follow-up: programming-first research and security regression
+
+### Cross-project research synthesis
+
+A public-source review covered ten independent areas: coding-agent runtimes and tool interfaces; edit/test loops; software-engineering and terminal benchmarks; sandbox isolation; agent authorization standards; MCP security; prompt-injection evaluation; durable execution and recovery; skill/plugin supply chains; and egress tracing. This is a bounded survey of public primary sources, not an exhaustive search of the internet or private communities. The subagent suggestions were treated as hypotheses and checked against this repository before adoption.
+
+Several commonly suggested capabilities already exist in Northstar and should not be rebuilt merely because another project uses different names. Northstar already has append-only session transcripts, a host-owned code phase/effect journal, a `SubmitPlan` gate, structured code tools, independent verification receipts, `patch-replay`/`patch-audit`/`delivery-seal`, a repository-level skill lock, permission gates, optional OpenTelemetry spans, and a read-only security assessment path. The runtime suite contains about 18,662 cases; even a green run confirms regression coverage, not production security or real-model capability.
+
+The strongest next programming milestone remains evidence, not more speculative modules: the frozen 24-task pack validates fixture quality but explicitly does not measure a real model. A reproducible, budget-bounded real-model baseline and a fixed SWE-bench sample are still missing. Stage reconcile is available and deliberately never replays uncertain effects; automatic phase resume remains unsupported. These are open product gaps, not promises made by upstream projects.
+
+The benchmark sources reinforce version pinning, clean isolated patch replay, independent test-based scoring, and repeated checks for flaky tasks [1] [2]. Coding-agent sources emphasize the tool interface and immediate lint/test feedback after edits [3] [4]. Northstar already offers host-declared `RunCheck` during a run and independently runs declared checks at completion; an automatic post-edit loop would be a product change to measure against the existing workflow, not a missing basic verification primitive.
+
+Isolation comparisons warn against treating a local process as equivalent to a container or VM. Northstar already labels its bwrap/process backend and defaults the `Shell` permission to deny. However, the frozen code-task evaluator explicitly records `network_enforced: false` and `release_eligible: false`; it must not be promoted to a release-grade hostile-code sandbox without OS-level network/resource enforcement [5] [6] [7].
+
+OWASP/NIST and MCP guidance support enforcement outside model text, resource-scoped authorization, token audience checks, and fail-closed behavior [8] [9] [10]. Northstar already enforces tool permissions in the runtime and treats the current ABI-7 host as insufficient for live TCP+UDP MCP-denial claims. NIST's cited document is an initial public draft, not a final standard. AgentDojo, Inspect, and Promptfoo show the value of evaluating attack success separately from benign task utility and injecting untrusted content at explicit sources [11] [12] [13]. Northstar has deterministic defensive checks and red-team tests; the next benchmark should preserve benign utility and false-refusal metrics rather than reward indiscriminate blocking.
+
+Durable-workflow sources distinguish an execution attempt from a confirmed result and caution that retries can repeat side effects without stable idempotency keys [14] [15]. Northstar's current code-run reconcile correctly marks uncertain effects for manual review and forbids automatic replay; it does not yet resume a code phase. Skills and observability sources similarly support immutable source digests, least-privilege grants, and keeping sensitive request bodies out of traces [16] [17] [18] [19]. Northstar already has skill digest pinning and trace redaction; any further authorization-ticket or egress-span work should be driven by a concrete uncovered integration rather than added as vocabulary alone.
+
+### Implemented regression: adversarial attempts to rewrite governance
+
+A new `northstar code` end-to-end red-team case uses a scripted compromised agent that attempts both `Write` and `Edit` against `.northstar/config.toml`, changing the permission mode to `bypassPermissions`. Both attempts are refused, the source policy stays byte-for-byte unchanged, and no forbidden text appears in the delivered patch. The fixture is paired with existing benign-edit CLI coverage so the defense is not accepted merely for blocking all changes.
+
+This case exposed a handling defect: `Write` and `Edit` called `ToolContext.resolve(..., for_write=True)` outside their local error conversion, so a deterministic protected-path refusal escaped the handler. The phase journal then conservatively left the attempted effect unresolved and blocked verification. `ToolContext.resolve` now raises a dedicated `ToolWriteDenied` subtype only for write-target preflight refusals, before mutation begins. The runtime records this as `denied` and re-raises through the existing governed runner, which presents the normal tool error to the model. Other access errors and unexpected exceptions remain `unknown` and require manual review. This preserves the low-level handlers' direct-call contract without misclassifying possible partial side effects. The effect journal and reconcile validator accept the new `denied` receipt; the regression verifies both tool paths, an unchanged policy and patch, and a terminal reconcile receipt with no unknown side effects.
+
+An initial broad error-conversion attempt changed five established test expectations and was discarded. The final implementation is narrower: only write-target preflight denials receive the `denied` status; unexpected exceptions remain `unknown`, and direct low-level tool calls retain their prior exception contract. The governance-write (12), memory (53), runtime red-team (25), code CLI (10), and tools (56) targeted suites all passed. Final full runtime validation passed all 18,662 tests with 19 environment-conditional skips in 111.3 seconds under Node.js 24. The skip count is reported rather than treated as tested behavior.
+
+### References
+
+[1]: https://github.com/swe-bench/SWE-bench "SWE-bench official repository and evaluation documentation"
+[2]: https://github.com/harbor-framework/terminal-bench "Terminal-Bench official repository"
+[3]: https://docs.openhands.dev/sdk/arch/events "OpenHands SDK Events architecture"
+[4]: https://aider.chat/docs/usage/lint-test.html "Aider official lint and test documentation"
+[5]: https://docs.openhands.dev/openhands/usage/sandboxes/overview "OpenHands sandbox overview"
+[6]: https://e2b.dev/security "E2B security and compliance"
+[7]: https://www.daytona.io/docs/en/architecture/ "Daytona architecture documentation"
+[8]: https://cheatsheetseries.owasp.org/cheatsheets/AI_Agent_Security_Cheat_Sheet.html "OWASP AI Agent Security Cheat Sheet"
+[9]: https://csrc.nist.gov/pubs/other/2026/02/05/accelerating-the-adoption-of-software-and-ai-agent-identity-and-authorization/ipd "NIST agent identity and authorization initial public draft"
+[10]: https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization "MCP authorization specification"
+[11]: https://arxiv.org/html/2406.13352v3 "AgentDojo research paper"
+[12]: https://inspect.aisi.org.uk/tutorial.html "Inspect AI official tutorial"
+[13]: https://www.promptfoo.dev/docs/red-team/plugins/indirect-prompt-injection/ "Promptfoo indirect prompt-injection plugin"
+[14]: https://docs.temporal.io/encyclopedia/event-history "Temporal event history"
+[15]: https://docs.aws.amazon.com/durable-execution/patterns/best-practices/idempotency/ "AWS Durable Execution idempotency guidance"
+[16]: https://github.com/agentskills/agentskills "Agent Skills format repository"
+[17]: https://slsa.dev/spec/v1.2/build-provenance "SLSA Build Provenance v1.2"
+[18]: https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-agent-spans.md "OpenTelemetry GenAI agent span conventions"
+[19]: https://www.w3.org/TR/baggage/ "W3C Baggage Recommendation"

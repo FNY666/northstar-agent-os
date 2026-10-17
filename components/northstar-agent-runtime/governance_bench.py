@@ -13581,8 +13581,9 @@ def _case_mcp_network_denied_by_default(h: BenchHarness) -> BenchExpectation:
 
     The largest in-runtime egress gap was MCP server subprocesses inheriting
     full host network (seccomp blocks escape primitives, not sockets). The
-    spawn path now wraps servers in the Landlock TCP-denying profile unless
-    the operator explicitly opts out with --mcp-network allowed.
+    spawn path now wraps servers in the Landlock TCP/UDP-denying profile unless
+    the operator explicitly opts out with --mcp-network allowed. Full denial
+    requires ABI 10; lower ABIs must fail closed before the server starts.
     """
     import sys as _sys
 
@@ -13593,7 +13594,7 @@ def _case_mcp_network_denied_by_default(h: BenchHarness) -> BenchExpectation:
     default_denied = client.network == "denied"
     spec = client._network_spec()
     spec_denies_tcp = spec.get("network") is False and spec.get("mode") == "on"
-    enforceable = _sys.platform.startswith("linux") and landlock_abi_version() >= 4
+    enforceable = _sys.platform.startswith("linux") and landlock_abi_version() >= 10
     try:
         client._apply_network_policy(["echo", "hi"])
         policy_ok = enforceable  # must only succeed where enforceable
