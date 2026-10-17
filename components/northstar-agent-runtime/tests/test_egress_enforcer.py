@@ -221,7 +221,7 @@ class DecisionTests(unittest.TestCase):
             self.assertEqual(v.deny_code, DENY_DESTINATION_DENIED, ip)
 
     def test_ssrf_ipv6_transition_addresses_denied(self):
-        # These prefixes can tunnel or translate to internal IPv4 destinations,
+        # These ranges can route to internal destinations (some embed IPv4),
         # while Python's ipaddress.is_global classification varies by version.
         for ip in (
             "64:ff9b::a9fe:a9fe",       # NAT64 -> 169.254.169.254
