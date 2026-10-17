@@ -68,7 +68,7 @@ from typing import Any, Mapping, Sequence
 #: records the rule version it ran under, so "no findings" from an older rule
 #: set is reported as drift rather than trusted (same habit as
 #: ``skill_audit.RULES_VERSION``).
-RULES_VERSION = "mcp-admission-rules/1"
+RULES_VERSION = "mcp-admission-rules/2"
 
 #: Identity of admission decisions, reported in scan/policy dicts so a log line
 #: can say which rules produced it.
@@ -108,6 +108,22 @@ KNOWN_BAD_PACKAGES: dict[str, tuple[str, ...]] = {
     "@vite-mcp/vite-type": ("1.0.0",),
     # @copilot-mcp/apex: AMOS stealer (Apex macOS infostealer campaign).
     "@copilot-mcp/apex": ("1.0.0",),
+}
+
+#: Exact vulnerable npm release ranges from published MITRE CVE records. Keep
+#: these separate from KNOWN_BAD_PACKAGES: a vulnerable release is not thereby
+#: a malicious supply-chain package. These entries only cover the ranges stated
+#: in the records; they make no claim that later releases fixed every issue.
+#: CVE records: https://github.com/CVEProject/cvelistV5/tree/main/cves/2026
+#: Public MCP report: https://github.com/modelcontextprotocol/modelcontextprotocol/issues/3437
+KNOWN_VULNERABLE_PACKAGE_RANGES: dict[str, tuple[tuple[int, int, tuple[str, ...]], ...]] = {
+    # The five records name mcp-remote 0.1.16–0.1.38, with subsets starting at
+    # 0.1.18 and 0.1.32. Match only exact 0.1.N pins; 0.15.1 is outside them.
+    "mcp-remote": (
+        (16, 38, ("CVE-2026-51996", "CVE-2026-51997")),
+        (18, 38, ("CVE-2026-52001",)),
+        (32, 38, ("CVE-2026-51994", "CVE-2026-51995")),
+    ),
 }
 
 #: Env var names that look like forwarded credentials (same shape as
@@ -313,6 +329,24 @@ def _instruction_strings(settings: Mapping[str, Any]) -> list[tuple[str, str]]:
     return found
 
 
+def _published_package_cves(spec: _PackageSpec) -> tuple[str, ...]:
+    """CVEs matching a registry package's exact pinned version, if any."""
+    if spec.ecosystem != "npm" or spec.version is None:
+        return ()
+    # The only current range is mcp-remote 0.1.N; do not interpret arbitrary
+    # semver selectors as exact evidence about what a registry will install.
+    match = re.fullmatch(r"0\\.1\\.(\\d+)", spec.version)
+    if match is None:
+        return ()
+    patch = int(match.group(1))
+    return tuple(
+        cve
+        for first, last, cves in KNOWN_VULNERABLE_PACKAGE_RANGES.get(spec.name, ())
+        if first <= patch <= last
+        for cve in cves
+    )
+
+
 def scan_server(name: str, settings: Mapping[str, Any]) -> tuple[AdmissionFinding, ...]:
     """Scan one server entry. Pure function: no IO, no network, no model."""
     findings: list[AdmissionFinding] = []
@@ -326,6 +360,24 @@ def scan_server(name: str, settings: Mapping[str, Any]) -> tuple[AdmissionFindin
     if command:
         spec = extract_package_spec(command, args)
         if spec is not None:
+            vulnerability_ids = _published_package_cves(spec)
+            if vulnerability_ids:
+                findings.append(
+                    AdmissionFinding(
+                        rule="MCP_VULNERABLE_SERVER_PACKAGE",
+                        severity="critical",
+                        server=name,
+                        message=(
+                            f'server "{name}" pins {spec.name}@{spec.version}, listed as affected by '
+                            f"{', '.join(vulnerability_ids)}"
+                        ),
+                        recommendation=(
+                            "Refuse this exact release until its remediation is verified against an "
+                            "upstream security notice; this scan does not infer that a later version "
+                            "fixed every listed issue."
+                        ),
+                    )
+                )
             bad_versions = KNOWN_BAD_PACKAGES.get(spec.name)
             if bad_versions is not None and (spec.version is None or spec.version in bad_versions):
                 pinned = f"@{spec.version}" if spec.version else " (unpinned: cannot prove a clean version)"
