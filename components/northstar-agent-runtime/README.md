@@ -562,6 +562,9 @@ halt_on_denial = true           # end with error_permission_denied on a refusal
 [[verify]]                      # checked after the run, by this process, not by the model
 kind = "unchanged"
 path = "uv.lock"
+[[verify_shell]]                # required governed Shell call with exit code 0
+name = "unit tests"
+command = "python -m pytest"
 agent = "explorer"              # run as a built-in agent by default (CLI --agent wins)
 compaction_threshold_tokens = 30000   # 0 disables compaction
 project_context = "AGENTS.md"   # file name inside the workspace, or false to disable

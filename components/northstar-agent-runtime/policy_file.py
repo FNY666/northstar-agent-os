@@ -86,6 +86,7 @@ _ALLOWED_KEYS = frozenset({
     # ``[[verify]]`` adds postconditions. It only ever *adds* an independent check,
     # so a repository declaring one cannot loosen anything.
     "verify",
+    "verify_shell",
     # The provider transport's retry budget. Shape-checked here, like ``hooks``, and
     # interpreted by provider_retry.RetryPolicy.from_mapping - which is where an unknown key
     # or an out-of-range delay becomes an error. A retry table can only ever *add* waiting
@@ -132,6 +133,8 @@ class PolicyFile:
     #: independently of what the model claims. Like hooks, a repository may *add*
     #: checks; it can never weaken or remove one, and nothing is executed.
     verify: tuple[Mapping[str, Any], ...] = ()
+    #: Required governed Shell invocations, checked against this run's call receipts.
+    verify_shell: tuple[Mapping[str, Any], ...] = ()
     #: The raw ``[retry]`` table, validated by :mod:`provider_retry`. Carried as a mapping
     #: rather than a parsed policy so that the module owning the vocabulary is the one that
     #: rejects a typo in it; ``load_policy_file`` still checks it is a table, because
@@ -160,6 +163,7 @@ class PolicyFile:
             "project_context": self.project_context_setting,
             "hooks": [dict(entry) for entry in self.hooks],
             "verify": [dict(entry) for entry in self.verify],
+            "verify_shell": [dict(entry) for entry in self.verify_shell],
             "retry": dict(self.retry) if self.retry else None,
         }
 
@@ -360,6 +364,35 @@ def load_policy_file(
         verify_entries.append(dict(entry))
     verify = tuple(verify_entries)
 
+    shell_checks_raw = raw.get("verify_shell", ())
+    if shell_checks_raw is None:
+        shell_checks_raw = ()
+    if not isinstance(shell_checks_raw, (list, tuple)):
+        fail("verify_shell must be an array of tables ([[verify_shell]])")
+    shell_checks: list[dict[str, Any]] = []
+    for position, entry in enumerate(shell_checks_raw):
+        if not isinstance(entry, Mapping):
+            fail(f"verify_shell[{position}] must be a table")
+        if set(entry) - {"name", "command", "argv"}:
+            fail(f"verify_shell[{position}] allows only name, command, argv")
+        name = entry.get("name")
+        command = entry.get("command")
+        argv = entry.get("argv")
+        if not isinstance(name, str) or not name.strip():
+            fail(f"verify_shell[{position}] name must be a non-empty string")
+        if (isinstance(command, str) and command.strip()) == (isinstance(argv, (list, tuple)) and bool(argv) and all(isinstance(arg, str) and arg for arg in argv)):
+            fail(f"verify_shell[{position}] must provide exactly one of command or non-empty argv")
+        shell_check: dict[str, Any] = {"name": name.strip()}
+        if command is not None:
+            if not isinstance(command, str) or not command.strip():
+                fail(f"verify_shell[{position}] command must be a non-empty string")
+            shell_check["command"] = command
+        else:
+            if not isinstance(argv, (list, tuple)) or not argv or not all(isinstance(arg, str) and arg for arg in argv):
+                fail(f"verify_shell[{position}] argv must be a non-empty list of strings")
+            shell_check["argv"] = list(argv)
+        shell_checks.append(shell_check)
+
     return PolicyFile(
         source=path,
         schema_version=schema_version,
@@ -378,6 +411,7 @@ def load_policy_file(
         project_context=context if context is not DEFAULT_PROJECT_CONTEXT_FILE or "project_context" in raw else None,
         hooks=hooks,
         verify=verify,
+        verify_shell=tuple(shell_checks),
     )
 
 

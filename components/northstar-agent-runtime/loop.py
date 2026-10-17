@@ -160,6 +160,8 @@ class RuntimeConfig:
     #: Workspace claims checked after the run by an independent evaluator, so a
     #: model saying "done" is not the evidence that it is. See postconditions.py.
     postconditions: Any = ()
+    #: Named build/test commands that must have a successful governed Shell receipt.
+    required_shell_checks: Any = ()
     #: Optional pre/post static-security comparison. It is top-level only and
     #: never grants a tool or filesystem write capability.
     security_gate: Any = None
@@ -1326,6 +1328,8 @@ class AgentRuntime:
         except Exception:  # noqa: BLE001 - init must not fail because of a probe
             init_data["sandbox"] = {"backend": config.shell_backend, "isolation": "unknown"}
         configured_checks = [condition.as_dict() for condition in self.postconditions.conditions]
+        if config.required_shell_checks:
+            init_data["required_shell_checks"] = [dict(check) for check in config.required_shell_checks]
         if self.security_gate is not None:
             init_data["security_gate"] = self.security_gate.config.as_dict()
             configured_checks.append({"kind": "security_gate"})
@@ -1581,10 +1585,21 @@ class AgentRuntime:
         subtype = "success"
         gate_failed = False
         gate: dict[str, Any] = {}
-        if self.postconditions or self.security_gate is not None:
+        if self.postconditions or self.security_gate is not None or config.required_shell_checks:
             summary = summarise_postconditions(
                 self.postconditions.evaluate() if self.postconditions else ()
             )
+            if config.required_shell_checks:
+                from shell_verification import evaluate_required_shell
+
+                shell_results = evaluate_required_shell(
+                    config.required_shell_checks, state.tool_reports, state.transcript
+                )
+                summary["checked"] += len(shell_results)
+                summary["passed"] += sum(1 for item in shell_results if item["ok"])
+                summary["failed"] += sum(1 for item in shell_results if not item["ok"])
+                summary["results"].extend(shell_results)
+                summary["ok"] = summary["failed"] == 0
             if self.security_gate is not None:
                 gate = self.security_gate.evaluate()
                 self._security_gate_evaluations += 1
@@ -1627,6 +1642,20 @@ class AgentRuntime:
                 # The model asked to stop and the workspace disagrees.
                 # "It said it was done" is not the evidence we accept.
                 subtype = "error_postconditions_failed"
+                shell_failed = [item for item in summary["results"] if item.get("kind") == "shell_command" and not item.get("ok")]
+                if shell_failed:
+                    follow_up = UserMessage.text_block(
+                        "Required build/test command checks failed. Run each command listed in the run's required_shell_checks through the governed Shell tool, fix any reported failures, and finish again.",
+                        is_meta=True,
+                        meta_reason="Required command verification",
+                    )
+                    state.transcript.append(follow_up)
+                    self.sessions.append(
+                        "user_prompt",
+                        {"agent": config.agent, "role": "user", "is_meta": True, "content": [block.to_api() for block in follow_up.content]},
+                    )
+                    yield follow_up
+                    return False
                 if (
                     self.security_gate is not None
                     and gate_failed

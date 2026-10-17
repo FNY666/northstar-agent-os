@@ -585,7 +585,10 @@ def postcondition_evidence(run_report: Any) -> dict[str, Any]:
             conditions = data.get("postconditions", ())
             if not isinstance(conditions, (list, tuple)):
                 return {**empty, "status": "unavailable"}
-            configured = len(conditions)
+            shell_checks = data.get("required_shell_checks", ())
+            if not isinstance(shell_checks, (list, tuple)):
+                return {**empty, "status": "unavailable"}
+            configured = len(conditions) + len(shell_checks)
             raw_gate = data.get("security_gate")
             if isinstance(raw_gate, dict):
                 gate_config = {
@@ -627,6 +630,7 @@ def postcondition_evidence(run_report: Any) -> dict[str, Any]:
             key: item[key]
             for key in (
                 "kind", "path", "ok", "detail", "structural",
+                "name", "command_digest",
                 "digest_before", "digest_after",
                 "status", "fail_on", "threshold_findings", "new_findings",
                 "attempt", "files_scanned_before", "files_scanned_after",

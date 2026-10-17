@@ -109,6 +109,25 @@ bind a successful exit receipt to a reviewed command while keeping command text
 out of the receipt. It does not itself define a required-command policy; that
 still needs to be declared by the project or CI verifier.
 
+For required checks, a project can declare commands in policy:
+
+```toml
+[[verify_shell]]
+name = "unit tests"
+command = "python -m pytest"
+
+[[verify_shell]]
+name = "static check"
+argv = ["ruff", "check", "."]
+```
+
+Northstar asks the agent to run these commands with the governed `Shell` tool and
+accepts only a matching command receipt with exit code 0. A missing, denied, or
+failing command feeds a repair instruction and prevents successful completion.
+Northstar itself never executes the configured command on the host. These checks
+are top-level run requirements; a command issued only by a subagent does not
+satisfy them.
+
 ## 8. Review Agent Skills, then pin what you reviewed
 
 ```sh
