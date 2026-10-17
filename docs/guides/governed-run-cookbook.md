@@ -99,6 +99,9 @@ kind = "unchanged"          # exists | absent | changed | unchanged | contains
 path = "uv.lock"
 ```
 
+For a one-off required test command, add `--verify-shell "unit tests=python -m pytest"`.
+Repeat the flag for more checks; CLI checks add to the policy file's `[[verify_shell]]` entries.
+
 Two things to keep in mind: the conditions are **not** shown to the model (a model
 that knows the check optimises the check), and `contains` is convenience — the
 structural kinds are what a sign-off should rest on. For "the tests actually pass",
