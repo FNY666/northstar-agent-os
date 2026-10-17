@@ -68,7 +68,7 @@ from typing import Any, Mapping, Sequence
 #: records the rule version it ran under, so "no findings" from an older rule
 #: set is reported as drift rather than trusted (same habit as
 #: ``skill_audit.RULES_VERSION``).
-RULES_VERSION = "mcp-admission-rules/2"
+RULES_VERSION = "mcp-admission-rules/3"
 
 #: Identity of admission decisions, reported in scan/policy dicts so a log line
 #: can say which rules produced it.
@@ -125,6 +125,13 @@ KNOWN_VULNERABLE_PACKAGE_RANGES: dict[str, tuple[tuple[int, int, tuple[str, ...]
         (32, 38, ("CVE-2026-51994", "CVE-2026-51995")),
     ),
 }
+
+#: Exact later stable releases reported to retain parts of the same OAuth
+#: discovery behavior. This is a review-only range from bounded public tests,
+#: not an extension of the published CVE ranges. The upper bound is the latest
+#: checked upstream release, v0.15.1; revisit it when new evidence appears.
+#: Evidence: https://github.com/playb0t/mcp-remote-oauth-security/blob/main/docs/research-2026-10-15/README.md
+MCP_REMOTE_REVIEW_VERSION_RANGE = ((0, 1, 39), (0, 15, 1))
 
 #: Env var names that look like forwarded credentials (same shape as
 #: supply-chain-guard's CREDENTIAL_ENV_REGEX).
@@ -347,6 +354,18 @@ def _published_package_cves(spec: _PackageSpec) -> tuple[str, ...]:
     )
 
 
+def _mcp_remote_needs_review(spec: _PackageSpec) -> bool:
+    """Later exact mcp-remote pins with reported, unconfirmed OAuth behavior."""
+    if spec.ecosystem != "npm" or spec.name != "mcp-remote" or spec.version is None:
+        return False
+    match = re.fullmatch(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)", spec.version)
+    if match is None:
+        return False
+    version = tuple(int(part) for part in match.groups())
+    first, last = MCP_REMOTE_REVIEW_VERSION_RANGE
+    return first <= version <= last
+
+
 def scan_server(name: str, settings: Mapping[str, Any]) -> tuple[AdmissionFinding, ...]:
     """Scan one server entry. Pure function: no IO, no network, no model."""
     findings: list[AdmissionFinding] = []
@@ -375,6 +394,24 @@ def scan_server(name: str, settings: Mapping[str, Any]) -> tuple[AdmissionFindin
                             "Refuse this exact release until its remediation is verified against an "
                             "upstream security notice; this scan does not infer that a later version "
                             "fixed every listed issue."
+                        ),
+                    )
+                )
+            elif _mcp_remote_needs_review(spec):
+                findings.append(
+                    AdmissionFinding(
+                        rule="MCP_UNCONFIRMED_MCP_REMOTE_REMEDIATION",
+                        severity="medium",
+                        server=name,
+                        message=(
+                            f'server "{name}" pins mcp-remote@{spec.version}; published research '
+                            "reports that OAuth discovery behavior remains in releases through v0.15.1. "
+                            "This does not extend the official CVE affected ranges."
+                        ),
+                        recommendation=(
+                            "Review the pinned release against upstream security notices before admission. "
+                            "This advisory warning is based on bounded public tests and does not establish "
+                            "production exploitability."
                         ),
                     )
                 )

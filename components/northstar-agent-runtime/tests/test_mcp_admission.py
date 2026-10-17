@@ -144,13 +144,37 @@ class ScannerTests(unittest.TestCase):
                 self.assertNotIn("MCP_MALICIOUS_SERVER_PACKAGE", {f.rule for f in findings})
 
     def test_mcp_remote_versions_outside_cve_ranges_are_not_mislabeled(self):
-        for version in ("0.1.15", "0.1.39", "0.15.1"):
+        for version in ("0.1.15", "0.1.39", "0.15.1", "0.15.2"):
             with self.subTest(version=version):
                 findings = scan_server(
                     "remote",
                     {"command": "npx", "args": ["-y", f"mcp-remote@{version}", "https://example.test/mcp"]},
                 )
                 self.assertNotIn("MCP_VULNERABLE_SERVER_PACKAGE", {f.rule for f in findings})
+
+    def test_later_mcp_remote_releases_get_nonblocking_review_warning(self):
+        for version in ("0.1.39", "0.14.3", "0.15.1"):
+            with self.subTest(version=version):
+                findings = scan_server(
+                    "remote",
+                    {"command": "npx", "args": ["-y", f"mcp-remote@{version}", "https://example.test/mcp"]},
+                )
+                hits = [f for f in findings if f.rule == "MCP_UNCONFIRMED_MCP_REMOTE_REMEDIATION"]
+                self.assertEqual(len(hits), 1)
+                self.assertEqual(hits[0].severity, "medium")
+                self.assertNotIn("MCP_VULNERABLE_SERVER_PACKAGE", {f.rule for f in findings})
+                self.assertTrue(all(f.severity not in ("critical", "high") for f in findings))
+
+        for version in ("0.1.15", "0.15.2"):
+            with self.subTest(version=version):
+                findings = scan_server(
+                    "remote",
+                    {"command": "npx", "args": ["-y", f"mcp-remote@{version}", "https://example.test/mcp"]},
+                )
+                self.assertNotIn(
+                    "MCP_UNCONFIRMED_MCP_REMOTE_REMEDIATION",
+                    {f.rule for f in findings},
+                )
 
     def test_unpinned_npx_is_low(self):
         findings = scan_server("srv", {"command": "npx", "args": ["-y", "some-benign-pkg"]})
