@@ -73,6 +73,59 @@ def validate_baseline_sarif(report: Any) -> int:
     return sum(_baseline_counts(report).values())
 
 
+def is_complete_baseline_sarif(report: Any) -> bool:
+    """Return whether a validated baseline represents a complete workspace scan."""
+    _baseline_counts(report)
+    run = report["runs"][0]
+    properties = run.get("properties")
+    if not isinstance(properties, Mapping):
+        return False
+    results = run.get("results")
+    findings_count = properties.get("findingsCount")
+    return (
+        properties.get("fileLimitReached") is False
+        and properties.get("findingsTruncated") is False
+        and type(properties.get("filesSkipped")) is int
+        and properties["filesSkipped"] == 0
+        and type(findings_count) is int
+        and isinstance(results, Sequence)
+        and not isinstance(results, (str, bytes))
+        and findings_count == len(results)
+    )
+
+
+def count_new_findings_by_severity(
+    findings: Sequence[Mapping[str, Any]],
+    baseline_sarif: Mapping[str, Any],
+) -> dict[str, int]:
+    """Count all new scan findings by severity, including detail-truncated findings."""
+    baseline_remaining = _baseline_counts(baseline_sarif)
+    new_counts: dict[str, int] = {}
+    for item in findings:
+        if not isinstance(item, Mapping):
+            raise TypeError("each grouped finding must be a mapping")
+        tool = item.get("tool")
+        rule = item.get("rule")
+        severity = item.get("severity")
+        message = item.get("message")
+        path = item.get("path")
+        count = item.get("count", 1)
+        if not all(isinstance(value, str) and value for value in (tool, rule, severity, message, path)):
+            raise ValueError("grouped finding is missing rule, path, message, or severity")
+        if severity not in _LEVELS:
+            raise ValueError("grouped finding has an unsupported severity")
+        if type(count) is not int or count < 1:
+            raise ValueError("grouped finding count must be a positive integer")
+        uri = quote(path.replace("\\", "/"), safe="/-._~")
+        identity = (f"{tool}:{rule}", uri, message, severity)
+        remaining = baseline_remaining.get(identity, 0)
+        matched = min(count, remaining)
+        if matched:
+            baseline_remaining[identity] = remaining - matched
+        new_counts[severity] = new_counts.get(severity, 0) + count - matched
+    return new_counts
+
+
 def build_sarif(
     summary: Mapping[str, Any],
     *,
@@ -120,6 +173,14 @@ def build_sarif(
     results: list[dict[str, Any]] = []
     baseline_counts = _baseline_counts(baseline_sarif) if baseline_sarif is not None else None
     baseline_remaining = dict(baseline_counts) if baseline_counts is not None else None
+    baseline_result_count = sum(baseline_counts.values()) if baseline_counts is not None else 0
+    baseline_finding_count = baseline_result_count
+    if baseline_sarif is not None:
+        baseline_run = baseline_sarif["runs"][0]
+        baseline_properties = baseline_run.get("properties")
+        reported_count = baseline_properties.get("findingsCount") if isinstance(baseline_properties, Mapping) else None
+        if type(reported_count) is int and reported_count >= 0:
+            baseline_finding_count = reported_count
     baseline_new_count = 0
     baseline_unchanged_count = 0
     occurrence_counts: dict[tuple[str, str, str, str], int] = {}
@@ -216,6 +277,7 @@ def build_sarif(
                 "findingsTruncated": bool(summary.get("findings_truncated", False)),
                 "fileLimitReached": bool(summary.get("file_limit_reached", False)),
                 "failOn": str(summary.get("fail_on", "none")),
+                "thresholdScope": "new" if summary.get("new_findings_only") else "all",
                 "thresholdFindings": int(summary.get("threshold_findings", 0)),
                 "limitations": list(summary.get("limitations", ())),
             },
@@ -223,11 +285,25 @@ def build_sarif(
     }
     if baseline_remaining is not None:
         report["runs"][0]["properties"]["baselineComparison"] = {
-            "baselineFindingCount": sum(baseline_counts.values()) if baseline_counts is not None else 0,
+            "baselineFindingCount": baseline_finding_count,
+            "baselineResultCount": baseline_result_count,
             "newFindingCount": baseline_new_count,
             "unchangedFindingCount": baseline_unchanged_count,
+            "comparedFindingCount": len(results),
+            "comparisonComplete": bool(
+                not summary.get("file_limit_reached")
+                and not summary.get("files_skipped")
+                and not summary.get("findings_truncated")
+                and baseline_sarif is not None
+                and is_complete_baseline_sarif(baseline_sarif)
+            ),
         }
     return report
 
 
-__all__ = ["build_sarif", "validate_baseline_sarif"]
+__all__ = [
+    "build_sarif",
+    "count_new_findings_by_severity",
+    "is_complete_baseline_sarif",
+    "validate_baseline_sarif",
+]

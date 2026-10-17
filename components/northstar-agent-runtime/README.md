@@ -126,6 +126,7 @@ probe:
 python3 -m cli security scan --workspace . --fail-on high
 python3 -m cli security scan --workspace . --format sarif > northstar.sarif
 python3 -m cli security scan --workspace . --format sarif --compare-to previous.sarif > current.sarif
+python3 -m cli security scan --workspace . --format sarif --compare-to previous.sarif --new-findings-only --fail-on high > current.sarif
 python3 -m cli security probe --format json
 ```
 
@@ -154,8 +155,14 @@ accepts a previous Northstar SARIF report up to 16 MiB and adds SARIF
 `baselineState` values (`new` or `unchanged`), stable fingerprints, and run-level
 comparison counts. Findings match by rule, path, sanitized message, severity,
 and duplicate occurrence; line movement does not by itself make a finding new.
-Only results included in the current SARIF document are compared when a scan
-reaches its finding-detail limit.
+`--new-findings-only` changes the exit gate to fail only for newly detected
+findings at or above `--fail-on`; existing findings remain in the SARIF report.
+It requires a complete Northstar baseline. The gate counts all scanner findings
+even when SARIF detail output is capped; result-level `baselineState` values
+cover only results present in the document, and `comparisonComplete` reports
+whether that result comparison was complete. A current scan that reaches its
+file limit or skips candidate files exits with status 2 because the gate cannot
+claim a complete scan.
 
 The runtime probe drives fixed tool calls through fresh runtimes backed by a
 temporary workspace. It also scans fixed vulnerable and hardened Kubernetes

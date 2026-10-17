@@ -589,6 +589,13 @@ def scan_workspace(args: Any) -> int:
 
     baseline_sarif = None
     baseline_path = getattr(args, "compare_to", None)
+    new_findings_only = bool(getattr(args, "new_findings_only", False))
+    if new_findings_only and args.format != "sarif":
+        print("configuration error: --new-findings-only requires --format sarif", file=sys.stderr)
+        return 64
+    if new_findings_only and baseline_path is None:
+        print("configuration error: --new-findings-only requires --compare-to", file=sys.stderr)
+        return 64
     if baseline_path is not None:
         if args.format != "sarif":
             print("configuration error: --compare-to requires --format sarif", file=sys.stderr)
@@ -602,14 +609,18 @@ def scan_workspace(args: Any) -> int:
             if len(raw_baseline) > MAX_BASELINE_SARIF_BYTES:
                 raise ValueError("baseline SARIF exceeds the 16 MiB limit")
             baseline_sarif = json.loads(raw_baseline)
-            from sarif_export import validate_baseline_sarif
+            from sarif_export import is_complete_baseline_sarif, validate_baseline_sarif
 
             validate_baseline_sarif(baseline_sarif)
+            if new_findings_only and not is_complete_baseline_sarif(baseline_sarif):
+                raise ValueError("new-finding gate requires a complete SARIF baseline")
         except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError, TypeError, RecursionError):
-            print(
-                "configuration error: --compare-to must name a readable Northstar SARIF 2.1.0 report (maximum 16 MiB)",
-                file=sys.stderr,
+            message = (
+                "configuration error: --new-findings-only requires a complete Northstar SARIF 2.1.0 baseline (maximum 16 MiB)"
+                if new_findings_only else
+                "configuration error: --compare-to must name a readable Northstar SARIF 2.1.0 report (maximum 16 MiB)"
             )
+            print(message, file=sys.stderr)
             return 64
 
     root = Path(args.workspace).expanduser().resolve()
@@ -624,15 +635,24 @@ def scan_workspace(args: Any) -> int:
     except ValueError as error:
         print(f"configuration error: {error}", file=sys.stderr)
         return 64
-    summary.pop("_finding_groups", None)
+    finding_groups = summary.pop("_finding_groups", [])
+    gate_incomplete = False
 
     if args.format == "json":
         print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
     elif args.format == "sarif":
         from _version import __version__
-        from sarif_export import build_sarif
+        from sarif_export import build_sarif, count_new_findings_by_severity
 
         try:
+            if new_findings_only:
+                new_by_severity = count_new_findings_by_severity(finding_groups, baseline_sarif)
+                summary["threshold_findings"] = sum(
+                    count for severity, count in new_by_severity.items()
+                    if args.fail_on != "none" and SEVERITY_RANK[severity] >= SEVERITY_RANK[args.fail_on]
+                )
+                summary["new_findings_only"] = True
+                gate_incomplete = bool(summary["file_limit_reached"] or summary["files_skipped"])
             report = build_sarif(
                 summary,
                 tool_version=__version__,
@@ -659,6 +679,12 @@ def scan_workspace(args: Any) -> int:
                 f"Remediation: {item['remediation']}"
             )
         print("Heuristic results only: clean output does not prove security.")
+    if gate_incomplete:
+        print(
+            "incomplete scan: --new-findings-only requires every selected workspace file to be scanned",
+            file=sys.stderr,
+        )
+        return 2
     return 1 if summary["threshold_findings"] else 0
 
 

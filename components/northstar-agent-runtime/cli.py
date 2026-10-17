@@ -249,6 +249,11 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--fail-on", choices=("critical", "high", "medium", "low", "none"), default="high", help="exit 1 when a finding reaches this severity")
     scan.add_argument("--format", choices=("text", "json", "sarif"), default="text", help="output format; secret values are never printed")
     scan.add_argument("--compare-to", help="compare SARIF output with a previous Northstar SARIF 2.1.0 report")
+    scan.add_argument(
+        "--new-findings-only",
+        action="store_true",
+        help="with --compare-to, fail on new findings at or above --fail-on only",
+    )
     probe = security_actions.add_parser(
         "probe",
         help="probe Northstar default permissions in a temporary local lab",
