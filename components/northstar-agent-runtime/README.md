@@ -154,14 +154,14 @@ Python also receives `PY011_UNTRUSTED_SSRF`, an AST-based flow check from common
 request, CLI, environment, and interactive-input sources to outbound HTTP URL
 arguments. It recognizes common import aliases, multiline calls, named HTTP
 clients, assignments, and bounded direct calls to same-file top-level helpers.
-It does not resolve method dispatch or cross-file calls, or prove that a custom
+It does not follow inherited, dynamically dispatched, or cross-file calls, or prove that a custom
 destination allowlist is correct; treat it as a review signal.
 
 Python also receives `PY012_PATH_TRAVERSAL`, an AST-based flow check from common
 untrusted-input sources to `open`, `Path` read/write methods, file responses,
 and common file deletion or copy APIs. It recognizes common import aliases,
 multiline calls, assignments, and bounded direct calls to same-file top-level
-helpers. It does not resolve method dispatch or cross-file calls, or prove
+helpers. It does not follow inherited, dynamically dispatched, or cross-file calls, or prove
 trusted-root and symlink checks. Treat it as a review signal; it does not
 automatically fix findings.
 
@@ -170,7 +170,7 @@ request fields, `input()`, CLI arguments, and environment values to shell-backed
 `os` and `subprocess` APIs. It handles multiline calls, common import aliases,
 assignments, f-strings, basic control-flow joins, and bounded propagation
 through direct calls to top-level helper functions in the same file (up to six
-call levels). It does not resolve methods, dynamic dispatch, or cross-file calls,
+call levels). It does not follow inherited, dynamically dispatched, or cross-file calls,
 recognize project-specific validators, or treat shell quoting as proof that a
 command is allowlisted. The scanner reports only shell-enabled process calls
 and remains a review signal.
@@ -181,7 +181,7 @@ input sources through assignments and expressions into `execute`,
 separately as parameters does not trigger this flow rule. The existing `PY004`
 sink heuristic can still mark `cursor.execute()` sites for review. The flow rule
 follows direct same-file helper calls with a bounded call depth; it does not
-resolve method dispatch or cross-file calls, or prove that a custom query builder
+follow inherited, dynamically dispatched, or cross-file calls, or prove that a custom query builder
 safely quotes identifiers.
 
 Python also receives `PY015_UNSAFE_DESERIALIZATION_FLOW` for untrusted values
@@ -190,15 +190,15 @@ The flow rule excludes `yaml.safe_load()` and explicit `SafeLoader` /
 `CSafeLoader` calls. The existing `PY003` sink heuristic can still mark any
 `yaml.load()` call site, including one that specifies a safe loader. The flow
 rule follows direct same-file helper calls with a bounded call depth, but does
-not resolve method dispatch or cross-file calls, or verify that serialized data
+not follow inherited, dynamically dispatched, or cross-file calls, or verify that serialized data
 is authenticated before loading.
 
 Python also receives `PY016_SERVER_SIDE_TEMPLATE_INJECTION` for untrusted values
 reaching Flask `render_template_string`, Jinja `Template` / `from_string`, Django
 `Template`, or Mako `Template` compilation. User values passed as context to a
 static `render_template()` file do not trigger this flow rule. It follows direct
-same-file helper calls with a bounded call depth, but does not resolve method
-dispatch or cross-file calls; autoescaping and sandboxing do not make untrusted
+same-file helper calls with a bounded call depth, but does not follow inherited, dynamically dispatched, or cross-file
+calls; autoescaping and sandboxing do not make untrusted
 template source safe.
 
 Python also receives `PY017_XSS_OUTPUT_FLOW` for untrusted values reaching
@@ -207,7 +207,7 @@ mark content safe with MarkupSafe `Markup` or Django `mark_safe`; it also checks
 tainted values returned directly from Flask `@route` handlers. It recognizes
 `html.escape`, MarkupSafe `escape`, and Django `escape`; static autoescaping
 templates do not trigger this rule. The analysis follows direct same-file helper
-calls with a bounded call depth, but does not resolve method dispatch, cross-file
+calls with a bounded call depth, but does not follow inherited, dynamically dispatched, or cross-file
 calls, template filters, or HTML subcontexts such as JavaScript or CSS.
 
 Python also receives `PY018_OPEN_REDIRECT_FLOW` for untrusted values passed to
@@ -215,8 +215,13 @@ Flask, Django, Starlette, or FastAPI redirect helpers. It treats relative and
 absolute targets alike because protocol-relative URLs can still leave the site.
 Fixed `url_for()` and Django `reverse()` destinations are treated as
 server-owned. It follows direct same-file helper calls with a bounded call depth,
-but does not resolve method dispatch or cross-file calls, and cannot prove
+but does not follow inherited, dynamically dispatched, or cross-file calls, and cannot prove
 custom allowlists.
+
+These Python flow rules also follow explicit calls to methods declared directly
+in top-level classes in the same file, through `self.helper()`, `cls.helper()`,
+and `Class.method()` calls. Inherited and dynamically selected methods, as well
+as cross-file calls, remain outside the analysis boundary.
 
 Go files also receive `GO001_UNTRUSTED_SSRF` and `GO002_PATH_TRAVERSAL` checks
 for standard `net/http`, chi/mux, and common Gin request values flowing through

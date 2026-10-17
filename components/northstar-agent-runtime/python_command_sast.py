@@ -3,9 +3,10 @@
 The analyzer tracks simple values from common request, CLI, environment, and
 interactive input sources to shell-backed process APIs. It handles multiline
 calls, assignments, f-strings, imports, basic control-flow joins, and bounded
-calls to direct same-file helper functions. It remains a heuristic: it does not
-resolve cross-file, method-dispatch, or dynamic-alias flows, custom sanitizers,
-or whether non-shell subprocess arguments are semantically dangerous.
+calls to direct same-file functions and explicitly named methods in top-level
+classes. It remains a heuristic: it does not
+resolve inherited or dynamic method dispatch, cross-file or dynamic-alias flows,
+custom sanitizers, or whether non-shell subprocess arguments are dangerous.
 """
 from __future__ import annotations
 
@@ -66,15 +67,24 @@ class _Analyzer:
         self.findings: list[_Finding] = []
         self.module_aliases: dict[str, str] = {}
         self.imported_names: dict[str, str] = {}
-        # The first interprocedural increment is deliberately narrow: direct
-        # calls to top-level functions in this file. A source scan is already
-        # capped at _MAX_AST_NODES; helper visits share the same additional
-        # work budget and recursion is bounded to keep hostile source cheap.
-        self._local_functions = {
-            statement.name: statement
-            for statement in tree.body
-            if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef))
-        }
+        # Follow direct calls to top-level functions and methods declared
+        # directly in top-level classes. A source scan is already capped at
+        # _MAX_AST_NODES; helper visits share an additional work budget and
+        # recursion is bounded to keep hostile source cheap.
+        self._local_functions: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
+        self._function_classes: dict[str, str | None] = {}
+        self._local_classes: set[str] = set()
+        for statement in tree.body:
+            if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                self._local_functions[statement.name] = statement
+                self._function_classes[statement.name] = None
+            elif isinstance(statement, ast.ClassDef):
+                self._local_classes.add(statement.name)
+                for member in statement.body:
+                    if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        name = f"{statement.name}.{member.name}"
+                        self._local_functions[name] = member
+                        self._function_classes[name] = statement.name
         self._function_cost = {
             name: sum(1 for _ in ast.walk(function))
             for name, function in self._local_functions.items()
@@ -82,6 +92,7 @@ class _Analyzer:
         self._helper_work_remaining = _MAX_AST_NODES
         self._helper_stack: list[str] = []
         self._return_frames: list[list[_Taint]] = []
+        self._current_class: str | None = None
         self._local_call_cache: dict[
             tuple[int, tuple[tuple[str, int], ...]], tuple[bool, _Taint | None]
         ] = {}
@@ -141,11 +152,45 @@ class _Analyzer:
         tainted = [origin for origin in origins if origin is not None]
         return min(tainted, key=lambda origin: origin.source_line) if tainted else None
 
+    def _function_name(self, call: ast.Call) -> str | None:
+        if isinstance(call.func, ast.Name):
+            return call.func.id if call.func.id in self._local_functions else None
+        if not isinstance(call.func, ast.Attribute) or not isinstance(call.func.value, ast.Name):
+            return None
+
+        receiver = call.func.value.id
+        if receiver in {"self", "cls"} and self._current_class is not None:
+            name = f"{self._current_class}.{call.func.attr}"
+            return name if name in self._local_functions else None
+        if receiver in self._local_classes:
+            name = f"{receiver}.{call.func.attr}"
+            return name if name in self._local_functions else None
+        return None
+
     @staticmethod
-    def _function_name(call: ast.Call) -> str | None:
-        # Attribute calls are intentionally excluded: resolving self.foo or
-        # module.foo safely needs class/module identity and dispatch analysis.
-        return call.func.id if isinstance(call.func, ast.Name) else None
+    def _is_classmethod(function: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+        return any(_dotted_name(decorator) == "classmethod" for decorator in function.decorator_list)
+
+    @staticmethod
+    def _is_staticmethod(function: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+        return any(_dotted_name(decorator) == "staticmethod" for decorator in function.decorator_list)
+
+    def _is_bound_method_call(
+        self, call: ast.Call, function: ast.FunctionDef | ast.AsyncFunctionDef
+    ) -> bool:
+        if not isinstance(call.func, ast.Attribute) or not isinstance(call.func.value, ast.Name):
+            return False
+        receiver = call.func.value.id
+        parameters = [*function.args.posonlyargs, *function.args.args]
+        if not parameters:
+            return False
+        if receiver in {"self", "cls"} and self._current_class is not None:
+            if self._is_staticmethod(function):
+                return False
+            if receiver == "cls" and not self._is_classmethod(function):
+                return False
+            return True
+        return receiver in self._local_classes and self._is_classmethod(function) and parameters[0].arg == "cls"
 
     def _local_call_environment(
         self,
@@ -154,11 +199,12 @@ class _Analyzer:
         caller_env: dict[str, _Taint],
     ) -> dict[str, _Taint]:
         positional = [*function.args.posonlyargs, *function.args.args]
+        positional_parameters = positional[1:] if self._is_bound_method_call(call, function) else positional
         keyword_only = list(function.args.kwonlyargs)
         parameters = [*positional, *keyword_only]
         values: dict[str, ast.AST] = {}
         starred_origins: list[_Taint] = []
-        for index, parameter in enumerate(positional):
+        for index, parameter in enumerate(positional_parameters):
             if index < len(call.args):
                 argument = call.args[index]
                 if isinstance(argument, ast.Starred):
@@ -185,13 +231,13 @@ class _Analyzer:
         # destination when the number of expanded values is unknown.
         if starred_origins:
             star_origin = min(starred_origins, key=lambda item: item.source_line)
-            for parameter in positional:
+            for parameter in positional_parameters:
                 previous = environment.get(parameter.arg)
                 if previous is None or star_origin.source_line < previous.source_line:
                     environment[parameter.arg] = star_origin
 
         if function.args.vararg is not None:
-            extras = call.args[len(positional):]
+            extras = call.args[len(positional_parameters):]
             tainted = [self._taint(item.value if isinstance(item, ast.Starred) else item, caller_env)
                        for item in extras]
             origins = [item for item in tainted if item is not None]
@@ -238,6 +284,8 @@ class _Analyzer:
         self._helper_stack.append(name)
         returns: list[_Taint] = []
         self._return_frames.append(returns)
+        saved_class = self._current_class
+        self._current_class = self._function_classes.get(name or "")
         try:
             self._scoped(function.body, function_env)
         except RecursionError:
@@ -246,6 +294,7 @@ class _Analyzer:
         else:
             result = min(returns, key=lambda item: item.source_line) if returns else None
         finally:
+            self._current_class = saved_class
             self._return_frames.pop()
             self._helper_stack.pop()
         analyzed_result = (True, result)
@@ -426,7 +475,12 @@ class _Analyzer:
             elif isinstance(statement, ast.ClassDef):
                 for expression in (*statement.bases, *statement.decorator_list):
                     self._expression(expression, env)
-                self._scoped(statement.body, env)
+                saved_class = self._current_class
+                self._current_class = statement.name
+                try:
+                    self._scoped(statement.body, env)
+                finally:
+                    self._current_class = saved_class
             elif isinstance(statement, (ast.Try, getattr(ast, "TryStar", ast.Try))):
                 branch_envs: list[dict[str, _Taint]] = []
                 body_env = dict(env)
