@@ -173,6 +173,26 @@ class EgressClient:
         status = payload.get("status")
         if not isinstance(status, str) or status not in EGRESS_STATUSES:
             return self._failure(rid, "protocol_error", "sidecar response contained an unknown status", started)
+        http_status = payload.get("http_status")
+        if http_status is not None and (isinstance(http_status, bool) or not isinstance(http_status, int)):
+            return self._failure(rid, "protocol_error", "sidecar http_status must be an integer", started)
+        headers_out = payload.get("headers", {})
+        if not isinstance(headers_out, dict) or any(
+            not isinstance(key, str) or not isinstance(value, str) for key, value in headers_out.items()
+        ):
+            return self._failure(rid, "protocol_error", "sidecar headers must be a string mapping", started)
+        errors_out = payload.get("errors", ())
+        if errors_out is None:
+            errors_out = ()
+        if not isinstance(errors_out, (list, tuple)) or any(not isinstance(item, str) for item in errors_out):
+            return self._failure(rid, "protocol_error", "sidecar errors must be a list of strings", started)
+        truncated = payload.get("truncated", False)
+        if not isinstance(truncated, bool):
+            return self._failure(rid, "protocol_error", "sidecar truncated must be a boolean", started)
+        for field_name in ("reason", "error", "deny_code"):
+            field_value = payload.get(field_name)
+            if field_value is not None and not isinstance(field_value, str):
+                return self._failure(rid, "protocol_error", f"sidecar {field_name} must be a string", started)
         body_bytes = b""
         raw_body = payload.get("body_b64", "")
         if isinstance(raw_body, str) and raw_body:
@@ -180,21 +200,20 @@ class EgressClient:
                 body_bytes = base64.b64decode(raw_body, validate=True)
             except (binascii.Error, ValueError):
                 return self._failure(rid, "protocol_error", "sidecar returned invalid body_b64", started)
-        headers_out = payload.get("headers")
         return EgressResult(
             request_id=rid,
             status=status,
-            http_status=payload.get("http_status"),
-            headers=dict(headers_out) if isinstance(headers_out, dict) else {},
+            http_status=http_status,
+            headers=dict(headers_out),
             body=body_bytes,
-            truncated=bool(payload.get("truncated", False)),
+            truncated=truncated,
             deny_code=str(payload.get("deny_code", "") or ""),
             reason=(
                 _safe_remote_text(payload.get("reason", "") or payload.get("error", ""))
                 if payload.get("reason", "") or payload.get("error", "")
                 else ""
             ),
-            errors=tuple(_safe_remote_text(item) for item in (payload.get("errors", ()) or ())),
+            errors=tuple(_safe_remote_text(item) for item in errors_out),
             receipt=payload.get("receipt") if isinstance(payload.get("receipt"), dict) else None,
             latency_ms=latency_ms,
         )
