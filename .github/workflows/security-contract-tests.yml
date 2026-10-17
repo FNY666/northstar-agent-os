@@ -50,7 +50,7 @@ jobs:
         run: |
           lab='security/run-native-security-lab.py'
           if [ -f "$lab" ]; then
-            python "$lab"
+            python "$lab" --json
           else
             echo '::notice title=Native attack-defense lab not present::Only existing contract unit tests ran; no native scan, isolation, or signing result is claimed.'
           fi

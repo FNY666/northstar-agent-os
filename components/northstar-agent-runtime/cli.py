@@ -47,6 +47,7 @@ import json
 import os
 import stat
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -969,6 +970,116 @@ def _run_security_assess(args: argparse.Namespace) -> int:
     return 0 if result.decision.value != "block" else 5
 
 
+_JSON_VALUE_BOUNDARIES = frozenset(b" \t\r\n[]{}:,")
+
+
+def _sanitize_local_session_nonfinite_json(raw: bytes) -> bytes:
+    """Map legacy bare non-finite values in a local transcript to JSON ``null``.
+
+    This is deliberately a display-only compatibility path.  It recognises only
+    Python's non-standard JSON constants outside string values; the temporary
+    transcript is subsequently read by :func:`sessions.load_jsonl`, whose strict
+    decoder still rejects duplicate keys and every other malformed construct.
+    Model JSON never calls this helper.
+    """
+    sanitized = bytearray()
+    in_string = False
+    escaped = False
+    cursor = 0
+    constants = ((b"-Infinity", b"null"), (b"Infinity", b"null"), (b"NaN", b"null"))
+
+    def is_boundary(position: int) -> bool:
+        return position < 0 or position >= len(raw) or raw[position] in _JSON_VALUE_BOUNDARIES
+
+    while cursor < len(raw):
+        character = raw[cursor]
+        if in_string:
+            sanitized.append(character)
+            if escaped:
+                escaped = False
+            elif character == ord("\\"):
+                escaped = True
+            elif character == ord('"'):
+                in_string = False
+            cursor += 1
+            continue
+        if character == ord('"'):
+            in_string = True
+            sanitized.append(character)
+            cursor += 1
+            continue
+        for constant, replacement in constants:
+            end = cursor + len(constant)
+            if raw.startswith(constant, cursor) and is_boundary(cursor - 1) and is_boundary(end):
+                sanitized.extend(replacement)
+                cursor = end
+                break
+        else:
+            sanitized.append(character)
+            cursor += 1
+    return bytes(sanitized)
+
+
+def _read_local_session_ui_source(path: Path) -> bytes:
+    """Read one UI source transcript with the session reader's no-follow bounds."""
+    from sessions import MAX_SESSION_FILE_BYTES, SessionIntegrityError, _open_regular_nofollow
+
+    descriptor = _open_regular_nofollow(path, os.O_RDONLY)
+    with os.fdopen(descriptor, "rb") as stream:
+        raw = stream.read(MAX_SESSION_FILE_BYTES + 1)
+    if len(raw) > MAX_SESSION_FILE_BYTES:
+        raise SessionIntegrityError(
+            f"{path.name}: transcript exceeds the {MAX_SESSION_FILE_BYTES}-byte read limit"
+        )
+    return raw
+
+
+def _run_sessions_ui(args: argparse.Namespace) -> int:
+    """Write a replay page while preserving strict parsing for local history.
+
+    Older host-written transcripts can contain Python's ``NaN``/``Infinity``
+    spellings.  Only this read-only UI export turns those values into ``null``;
+    the regular strict loader then validates the result before rendering it.
+    """
+    from session_ui import open_replay_page, write_replay_page
+    from session_view import _resolve_session_arg, resolve_view_session_dir
+    from sessions import SESSION_FILE_SUFFIX, SessionIntegrityError
+
+    try:
+        directory = resolve_view_session_dir(args)
+    except Exception as error:  # noqa: BLE001 - path math only
+        print(f"sessions: {error}", file=sys.stderr)
+        return USAGE_ERROR
+    try:
+        session_id = _resolve_session_arg(args.session_id, directory)
+    except ValueError as error:
+        print(f"sessions: {error}", file=sys.stderr)
+        return USAGE_ERROR
+
+    source = directory / f"{session_id}{SESSION_FILE_SUFFIX}"
+    try:
+        raw = _read_local_session_ui_source(source)
+        sanitized = _sanitize_local_session_nonfinite_json(raw)
+        if sanitized == raw:
+            output = write_replay_page(directory, session_id, getattr(args, "output", None))
+        else:
+            # The renderer owns secure output creation.  The input copy merely
+            # confines legacy-value normalisation to this one UI export, after
+            # which its normal strict JSONL loader re-validates every record.
+            with tempfile.TemporaryDirectory(prefix="northstar-session-ui-") as staging:
+                staged = Path(staging) / f"{session_id}{SESSION_FILE_SUFFIX}"
+                staged.write_bytes(sanitized)
+                output = write_replay_page(staging, session_id, getattr(args, "output", None))
+    except (OSError, SessionIntegrityError) as error:
+        print(f"sessions: {error}", file=sys.stderr)
+        return 1
+
+    print(f"sessions ui: wrote {output} (owner-only permissions: 0600)")
+    if getattr(args, "open", False) and not open_replay_page(output):
+        print("sessions ui: no default browser could be opened; use the HTML file path above", file=sys.stderr)
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     raw = list(argv) if argv is not None else None
     # Product verbs are rewritten before argparse so the rest of the CLI only
@@ -1046,6 +1157,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "doctor":
             return run_doctor(args)
         if args.command == "sessions":
+            if args.session_command == "ui":
+                return _run_sessions_ui(args)
             from session_view import run_sessions
 
             return run_sessions(args)
