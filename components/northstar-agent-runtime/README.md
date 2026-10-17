@@ -324,6 +324,11 @@ python3 -m cli run --sidecar-socket /var/run/northstar-codex/sidecar.sock \
   --probe-sidecar            # one health-check prompt, then exit
 ```
 
+Sidecar responses are screened at the client boundary too: direct SDK callers
+receive a blocked marker or sanitized text before remote output can become an
+instruction channel. The main loop applies its own result-boundary checks as a
+second defense.
+
 ## Creating a governed project (`new`)
 
 ```sh
