@@ -611,7 +611,7 @@ def scan_workspace(
         try:
             from mcp_config import _load_json
 
-        document = _load_json(path)
+            document = _load_json(path)
             table = document.get("mcpServers", document.get("servers")) if isinstance(document, dict) else None
             if isinstance(table, dict):
                 servers += len(table)
