@@ -150,17 +150,20 @@ simple variable assignments in one file; they do not resolve imports or aliases,
 understand scopes and sanitizers, prove root containment or symlink protections,
 or trace cross-function and multi-line calls.
 
-Python files also receive a request-to-HTTP URL-flow check for common Flask,
-Django, and Starlette request fields flowing through simple assignments into
-`requests`, `httpx`, `urllib.request.urlopen`, and named session/client calls.
-It does not resolve import aliases, model Python scopes, or understand
-multi-line calls or destination-validation helpers; treat it as a review signal.
+Python also receives `PY011_UNTRUSTED_SSRF`, an AST-based flow check from common
+request, CLI, environment, and interactive-input sources to outbound HTTP URL
+arguments. It recognizes common import aliases, multiline calls, named HTTP
+clients, assignments, and bounded direct calls to same-file top-level helpers.
+It does not resolve method dispatch or cross-file calls, or prove that a custom
+destination allowlist is correct; treat it as a review signal.
 
-Python files also receive a request-to-filesystem path check for simple flows
-into `open`, `Path` read/write methods, file response helpers, and common file
-deletion or copy APIs. It follows same-file assignments and does not parse
-Python, understand aliases or scopes, or prove trusted-root and symlink checks.
-Treat it as a review signal; it does not automatically fix findings.
+Python also receives `PY012_PATH_TRAVERSAL`, an AST-based flow check from common
+untrusted-input sources to `open`, `Path` read/write methods, file responses,
+and common file deletion or copy APIs. It recognizes common import aliases,
+multiline calls, assignments, and bounded direct calls to same-file top-level
+helpers. It does not resolve method dispatch or cross-file calls, or prove
+trusted-root and symlink checks. Treat it as a review signal; it does not
+automatically fix findings.
 
 Python also receives `PY013_COMMAND_INJECTION`, an AST-based flow check from
 request fields, `input()`, CLI arguments, and environment values to shell-backed

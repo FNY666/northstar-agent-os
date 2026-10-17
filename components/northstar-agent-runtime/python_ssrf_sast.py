@@ -1,14 +1,22 @@
-"""Small offline Python request-to-HTTP SSRF heuristic.
+"""Bounded AST taint analysis for Python server-side request forgery flows.
 
-This bounded, line-oriented pass follows simple assignments from common web
-request fields to common HTTP client URL arguments. It does not parse Python,
-resolve imports or aliases, model scopes, or prove that a destination allowlist
-is correct.
+The scanner follows common request, CLI, environment, and interactive-input
+sources into outbound HTTP client URL arguments. It recognizes common import
+aliases and multiline calls, and follows bounded direct calls to same-file
+top-level helpers. It does not resolve method dispatch or cross-file flows, and
+cannot prove that a destination allowlist is correct.
 """
 from __future__ import annotations
 
-import re
+import ast
 from typing import Any
+
+from python_command_sast import (
+    _Analyzer,
+    _Finding,
+    _MAX_AST_NODES,
+    _MAX_SOURCE_BYTES,
+)
 
 
 RULE_ID = "PY011_UNTRUSTED_SSRF"
@@ -18,137 +26,117 @@ REMEDIATION = (
     "Resolve outbound requests through a strict destination allowlist and reject private, "
     "loopback, and link-local addresses after DNS resolution."
 )
-_MAX_SOURCE_BYTES = 1024 * 1024
+_HTTP_METHODS = {
+    "get", "post", "put", "delete", "head", "options", "patch", "request",
+}
+_HTTP_MODULES = ("requests.", "httpx.", "urllib3.")
+_HTTP_CLIENT_NAMES = {
+    "session", "client", "http_client", "httpx_client", "aiohttp_session",
+}
+_HTTP_CLIENT_CONSTRUCTORS = {
+    "requests.Session",
+    "requests.sessions.Session",
+    "httpx.Client",
+    "httpx.AsyncClient",
+    "aiohttp.ClientSession",
+    "urllib3.PoolManager",
+}
+_URL_OPENERS = {
+    "urlopen",
+    "urllib.urlopen",
+    "urllib.request.urlopen",
+}
 
-_REQUEST_SOURCE = re.compile(
-    r"\b(?:request|flask\s*\.\s*request)\s*\.\s*"
-    r"(?:args|form|values|cookies|headers|files|GET|POST|query_params|path_params|json|data|url|path|path_info)\b"
-)
-_HTTP_SINK = re.compile(
-    r"\b(?:(?:requests|httpx)\s*\.\s*(?P<module_method>"
-    r"get|post|put|delete|head|options|patch|request)"
-    r"|(?:session|client|http_client|httpx_client|aiohttp_session)\s*\.\s*(?P<object_method>"
-    r"get|post|put|delete|head|options|patch|request)"
-    r"|urllib\s*\.\s*request\s*\.\s*urlopen|urlopen)\s*\("
-)
-_ASSIGNMENT = re.compile(
-    r"^\s*(?P<name>[A-Za-z_]\w*)\s*(?::\s*[^=]+)?=(?!=)\s*(?P<value>.*?)\s*$"
-)
 
+class _SsrfAnalyzer(_Analyzer):
+    def _is_http_sink(self, call: ast.Call) -> tuple[str, str] | None:
+        name = self._canonical_name(call.func)
+        if name in _URL_OPENERS:
+            return name, "urlopen"
+        method = (
+            call.func.attr if isinstance(call.func, ast.Attribute)
+            else name.rsplit(".", 1)[-1] if name else ""
+        )
+        if method not in _HTTP_METHODS:
+            return None
+        if name and name.startswith(_HTTP_MODULES):
+            return name, method
 
-def _references_variable(expression: str, variable: str) -> bool:
-    return re.search(rf"(?<![\w.]){re.escape(variable)}(?!\w)", expression) is not None
+        if isinstance(call.func, ast.Attribute):
+            receiver = call.func.value
+            if isinstance(receiver, ast.Name) and receiver.id in _HTTP_CLIENT_NAMES:
+                return name or f"{receiver.id}.{method}", method
+            if isinstance(receiver, ast.Call):
+                constructor = self._canonical_name(receiver.func)
+                if constructor in _HTTP_CLIENT_CONSTRUCTORS:
+                    return f"{constructor}.{method}", method
+        return None
 
+    @staticmethod
+    def _url_argument(call: ast.Call, method: str) -> ast.AST | None:
+        keyword = next((item.value for item in call.keywords if item.arg == "url"), None)
+        if keyword is not None:
+            return keyword
+        index = 1 if method == "request" else 0
+        return call.args[index] if len(call.args) > index else None
 
-def _call_arguments(line: str, start: int) -> list[tuple[str, int]]:
-    """Split a same-line call's arguments while respecting nested syntax and strings."""
-    arguments: list[tuple[str, int]] = []
-    segment_start = start
-    stack: list[str] = []
-    pairs = {"(": ")", "[": "]", "{": "}"}
-    quote: str | None = None
-    triple = False
-    escaped = False
-    index = start
-    while index < len(line):
-        char = line[index]
-        if quote is not None:
-            if escaped:
-                escaped = False
-            elif char == "\\":
-                escaped = True
-            elif triple and line.startswith(quote * 3, index):
-                quote = None
-                triple = False
-                index += 2
-            elif not triple and char == quote:
-                quote = None
-        elif char in "'\"":
-            quote = char
-            triple = line.startswith(char * 3, index)
-            if triple:
-                index += 2
-        elif char == "#":
-            break
-        elif char in pairs:
-            stack.append(pairs[char])
-        elif char in ")]}":
-            if not stack:
-                if char == ")":
-                    raw = line[segment_start:index]
-                    leading = len(raw) - len(raw.lstrip())
-                    arguments.append((raw.strip(), segment_start + leading))
-                break
-            if char == stack[-1]:
-                stack.pop()
-        elif char == "," and not stack:
-            raw = line[segment_start:index]
-            leading = len(raw) - len(raw.lstrip())
-            arguments.append((raw.strip(), segment_start + leading))
-            segment_start = index + 1
-        index += 1
-    else:
-        tail = line[segment_start:].strip()
-        if tail:
-            raw = line[segment_start:]
-            leading = len(raw) - len(raw.lstrip())
-            arguments.append((tail, segment_start + leading))
-    if not arguments and line[start:].strip():
-        arguments.append((line[start:].strip(), start))
-    return arguments
+    def _taint(self, node: ast.AST | None, env: dict):
+        if isinstance(node, ast.Call) and self._is_http_sink(node) is not None:
+            # An HTTP response is not an alias of the URL used to fetch it.
+            return None
+        return super()._taint(node, env)
+
+    def _call_sink(self, call: ast.Call, env: dict) -> None:
+        sink = self._is_http_sink(call)
+        if sink is None:
+            return
+        name, method = sink
+        url = self._url_argument(call, method)
+        origin = self._taint(url, env)
+        if origin is not None:
+            self.findings.append(_Finding(
+                line=getattr(call, "lineno", 1),
+                column=getattr(call, "col_offset", 0) + 1,
+                source_line=origin.source_line,
+                sink=name,
+            ))
 
 
 def scan_source(source: Any) -> list[dict[str, Any]]:
-    """Return heuristic request-to-outbound-HTTP findings for Python source."""
+    """Return untrusted-source-to-outbound-HTTP flow findings."""
     if not isinstance(source, str):
         raise TypeError("source must be a string")
     if len(source.encode("utf-8")) > _MAX_SOURCE_BYTES:
         raise ValueError("source exceeds the 1 MiB scan limit")
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError, TypeError, RecursionError):
+        return []
+    if sum(1 for _ in ast.walk(tree)) > _MAX_AST_NODES:
+        return []
+    try:
+        analyzer = _SsrfAnalyzer(tree)
+    except RecursionError:
+        return []
 
-    findings: list[dict[str, Any]] = []
-    tainted_variables: set[str] = set()
-    for line_number, line in enumerate(source.splitlines(), start=1):
-        assignment = _ASSIGNMENT.match(line)
-        assignment_sink = _HTTP_SINK.search(assignment.group("value")) if assignment else None
-        if assignment and assignment_sink is None:
-            name, value = assignment.group("name", "value")
-            if (
-                _REQUEST_SOURCE.search(value) or any(
-                    _references_variable(value, variable)
-                    for variable in tainted_variables
-                )
-            ):
-                tainted_variables.add(name)
-            else:
-                tainted_variables.discard(name)
-
-        for sink in _HTTP_SINK.finditer(line):
-            method = sink.group("module_method") or sink.group("object_method")
-            arguments = _call_arguments(line, sink.end())
-            url_argument_index = 1 if method == "request" else 0
-            if len(arguments) <= url_argument_index:
-                continue
-            expression, expression_start = arguments[url_argument_index]
-            source_match = _REQUEST_SOURCE.search(expression)
-            tainted_variable = next((
-                variable for variable in sorted(tainted_variables)
-                if _references_variable(expression, variable)
-            ), None)
-            if source_match is None and tainted_variable is None:
-                continue
-            offset = source_match.start() if source_match is not None else expression.find(tainted_variable or "")
-            findings.append({
-                "rule": RULE_ID,
-                "severity": SEVERITY,
-                "message": MESSAGE,
-                "remediation": REMEDIATION,
-                "line": line_number,
-                "column": max(1, expression_start + offset + 1),
-            })
-        if assignment and assignment_sink is not None:
-            # The assigned value is an HTTP response, not an alias of its URL.
-            tainted_variables.discard(assignment.group("name"))
-    return findings
+    unique = {
+        (item.line, item.column, item.source_line, item.sink): item
+        for item in analyzer.findings
+    }
+    return [
+        {
+            "rule": RULE_ID,
+            "severity": SEVERITY,
+            "message": (
+                f"untrusted value from line {item.source_line} reaches outbound HTTP "
+                f"request via {item.sink}"
+            ),
+            "remediation": REMEDIATION,
+            "line": item.line,
+            "column": item.column,
+        }
+        for item in sorted(unique.values(), key=lambda finding: (finding.line, finding.column, finding.sink))
+    ]
 
 
 __all__ = ["MESSAGE", "REMEDIATION", "RULE_ID", "SEVERITY", "scan_source"]
