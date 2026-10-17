@@ -14,6 +14,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest import mock
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -36,6 +37,7 @@ from audit_rekor import (
     verify_anchor_in_log,
     verify_anchor_offline,
 )
+import audit_rekor
 from ed25519 import public_key as ed_public_key
 from ed25519 import sign as ed_sign
 from ed25519 import verify as ed_verify
@@ -45,6 +47,44 @@ _PUBKEY = ed_public_key(_SEED)
 _FAKE_UUID = "f" * 80
 _FAKE_INDEX = 424242
 _FAKE_TIME = 1791023198
+
+
+class ResponseBoundaryTests(unittest.TestCase):
+    def test_rekor_response_is_byte_bounded(self):
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self, _size):
+                return b"x" * (audit_rekor.MAX_REKOR_RESPONSE_BYTES + 1)
+
+        with mock.patch("audit_rekor.urllib.request.urlopen", return_value=Response()):
+            with self.assertRaisesRegex(RekorError, "1 MiB byte cap"):
+                audit_rekor._post_json("https://rekor.example", {}, timeout=1)
+
+    def test_rekor_response_rejects_duplicate_keys_and_nonstandard_constants(self):
+        class Response:
+            def __init__(self, body):
+                self.body = body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self, _size):
+                return self.body
+
+        for body in (b'{"a":1,"a":2}', b'{"a":NaN}'):
+            with self.subTest(body=body), mock.patch(
+                "audit_rekor.urllib.request.urlopen", return_value=Response(body)
+            ):
+                with self.assertRaisesRegex(RekorError, "bad response"):
+                    audit_rekor._post_json("https://rekor.example", {}, timeout=1)
 
 
 def _sample_feed(path: Path, n: int = 3) -> None:
