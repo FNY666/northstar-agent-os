@@ -46,6 +46,17 @@ EGRESS_STATUSES: frozenset[str] = frozenset(
 )
 
 
+def _safe_remote_text(value: Any) -> str:
+    """Keep sidecar diagnostics from becoming a direct model input channel."""
+    from defensive_agent import sanitize_for_model
+
+    safe, assessment = sanitize_for_model(str(value))
+    if assessment.decision.value == "block":
+        rule_ids = ",".join(item.rule_id for item in assessment.findings[:8]) or "unknown"
+        return f"[blocked by defensive agent; rules={rule_ids}]"
+    return safe
+
+
 class EgressClientError(ValueError):
     """A client-side configuration error. Fails before any socket opens."""
 
@@ -178,8 +189,12 @@ class EgressClient:
             body=body_bytes,
             truncated=bool(payload.get("truncated", False)),
             deny_code=str(payload.get("deny_code", "") or ""),
-            reason=str(payload.get("reason", "") or payload.get("error", "") or ""),
-            errors=tuple(payload.get("errors", ()) or ()),
+            reason=(
+                _safe_remote_text(payload.get("reason", "") or payload.get("error", ""))
+                if payload.get("reason", "") or payload.get("error", "")
+                else ""
+            ),
+            errors=tuple(_safe_remote_text(item) for item in (payload.get("errors", ()) or ())),
             receipt=payload.get("receipt") if isinstance(payload.get("receipt"), dict) else None,
             latency_ms=latency_ms,
         )
