@@ -163,9 +163,12 @@ jobs:
         # The public entry points must work from the installed layout: version,
         # environment self-check, dry-run (no request), the offline demo, and the
         # public governance bench (denial / injection / budget — offline, no key).
+        # GitHub runners may lack Landlock ABI 10; exercise doctor without MCP
+        # networking here. Default-deny MCP refusal on unsupported hosts remains
+        # enforced by the runtime tests and the dedicated network benchmark.
         run: |
           python -m cli --version
-          python -m cli doctor --workspace . | grep -q "ready to run"
+          python -m cli doctor --workspace . --mcp-network allowed | grep -q "ready to run"
           python -m cli run --workspace . --prompt smoke --scripted-text ok --dry-run | grep -q "no request was sent"
           python -m cli bench --json | python -c 'import json,sys; r=json.load(sys.stdin); assert r["ok"] and r["failed"]==0, r'
           sh ../../examples/demo/run_offline.sh >/dev/null
