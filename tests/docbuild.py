@@ -180,7 +180,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "dating_agents", "ddos_protection", "dead_letter", "dead_letter_queue",
         "debate", "debate_protocol", "debugger", "deception",
         "deception_detector", "deceptive_alignment", "decision_model", "decision_table",
-        "deepfake_detection", "defense_agents", "delay_queue", "delegation_credentials",
+        "deepfake_detection", "defense_agents", "defensive_agent", "delay_queue", "delegation_credentials",
         "deny_monotonicity", "dependency_resolver", "deployment_registry", "developer_portal",
         "device_manager", "differential_privacy", "disaster_agents", "disaster_recovery",
         "distributed_consensus", "distributed_lock", "dkg_interface", "dns_manager",

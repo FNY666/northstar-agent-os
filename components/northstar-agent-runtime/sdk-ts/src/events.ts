@@ -164,6 +164,7 @@ export const KNOWN_EVENT_TYPES = ["result", "system", "assistant", "user", "stre
  */
 export const EXIT_CODES = {
   success: 0,
+  success_unverified: 0,
   error_during_execution: 1,
   error_max_turns: 2,
   error_max_tool_calls: 3,
