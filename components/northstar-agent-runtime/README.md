@@ -520,7 +520,10 @@ python3 -m cli run --workspace . --prompt "summarise the files" \
   "answered_fields"}`, and a short `[governance] …` note is appended to the tool
   result so the refusal is inside the transcript rather than beside it.
 - Output is bounded client-side (per-line and per-call caps); image/resource
-  content blocks are replaced with a placeholder rather than rendered.
+  content blocks are replaced with a placeholder rather than rendered. The
+  low-level `McpStdioClient.call_tool()` path also runs the defensive-agent
+  output screen, so callers that bypass the main loop still get hostile
+  instruction/credential payloads blocked or sanitized before they see them.
 - `run --dry-run` lists the configured servers **and the stance**
   (`protocol=auto, elicit=off→input_required is declined, roots=off,
   sensitive_input=off, rounds=3`) without spawning them, and appends what an import
