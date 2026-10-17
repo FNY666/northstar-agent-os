@@ -180,7 +180,8 @@ jobs:
           cd /tmp
           northstar-agent-runtime --version
           northstar --version
-          northstar-agent-runtime doctor --workspace /tmp | grep -q "ready to run"
+          # No MCP server is launched here; CI kernels may lack Landlock ABI 10.
+          northstar-agent-runtime doctor --workspace /tmp --mcp-network allowed | grep -q "ready to run"
           python -c "import cli, loop, tools, tools.verify_invariants, governance_bench, memory, product_path; print('northstar-agent-runtime core imports OK')"
       - name: Installed full benchmark smoke
         # The optional bench includes durable/host/contract tracks. Resolve their
