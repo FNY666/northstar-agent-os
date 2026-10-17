@@ -501,6 +501,7 @@ def shell_execution_evidence(run_report: Any) -> list[dict[str, Any]]:
         timeout_text = exit_match.group(2) if exit_match else None
         record: dict[str, Any] = {
             "call_id": call.call_id,
+            "command_digest": getattr(call, "input_digest", ""),
             "turn_index": call.turn_index,
             "agent": call.agent,
             "execution_scope": "top_level",

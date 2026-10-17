@@ -22,6 +22,7 @@ tool, which is registered only when a socket path is supplied.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import time
@@ -430,6 +431,10 @@ class ToolCallReport:
     input_rewritten: bool = False
     turn_index: int = 0
     agent: str = "main"
+    # Shell command identity is retained as a digest so an independent verifier
+    # can bind an execution receipt to a configured command without persisting
+    # command text (which may contain paths, arguments, or secrets).
+    input_digest: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -444,6 +449,7 @@ class ToolCallReport:
             "input_rewritten": self.input_rewritten,
             "turn_index": self.turn_index,
             "agent": self.agent,
+            "input_digest": self.input_digest,
         }
 
 
@@ -2378,6 +2384,18 @@ class AgentRuntime:
             input_rewritten=rewritten,
             turn_index=turn_index,
             agent=self.config.agent,
+            input_digest=(
+                hashlib.sha256(
+                    json.dumps(
+                        {key: payload[key] for key in ("command", "argv") if key in payload},
+                        ensure_ascii=True,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                ).hexdigest()
+                if spec.name == "Shell" and ("command" in payload or "argv" in payload)
+                else ""
+            ),
         )
         return block, report
 

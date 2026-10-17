@@ -103,6 +103,11 @@ Two things to keep in mind: the conditions are **not** shown to the model (a mod
 that knows the check optimises the check), and `contains` is convenience — the
 structural kinds are what a sign-off should rest on. For "the tests actually pass",
 pair it with a `Stop` command hook that runs the suite and vetoes finishing.
+The coding receipt also records a SHA-256 `command_digest` for each Shell call,
+computed from the JSON encoding of its `command` or `argv` input. This lets CI
+bind a successful exit receipt to a reviewed command while keeping command text
+out of the receipt. It does not itself define a required-command policy; that
+still needs to be declared by the project or CI verifier.
 
 ## 8. Review Agent Skills, then pin what you reviewed
 
