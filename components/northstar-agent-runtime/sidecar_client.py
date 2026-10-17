@@ -46,11 +46,49 @@ MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 #: One escaped BMP char is 6 bytes and one astral char is 12; 12 per char covers
 #: the worst case for a prompt the validator accepts, with framing headroom.
 MAX_REQUEST_BYTES = 12 * SIDECAR_MAX_PROMPT_CHARS + 65_536
+MAX_JSON_DEPTH = 128
 #: Sourced from the contract bridge so there is exactly one definition of the
 #: boundary shared by the runtime, ``northstar-run-contract``, and the sidecar.
 REQUEST_FIELDS: frozenset[str] = WIRE_FIELDS
 CONNECT_ATTEMPTS = 3
 CONNECT_RETRY_DELAY = 0.1
+
+
+def _strict_json_loads(raw: str) -> Any:
+    """Parse sidecar output without duplicate keys or non-standard constants."""
+    depth = 0
+    in_string = False
+    escaped = False
+    for character in raw:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            continue
+        if character == '"':
+            in_string = True
+        elif character in "[{":
+            depth += 1
+            if depth > MAX_JSON_DEPTH:
+                raise ValueError(f"JSON depth limit exceeded ({MAX_JSON_DEPTH} containers)")
+        elif character in "]}":
+            depth -= 1
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON key {key!r}")
+            result[key] = value
+        return result
+
+    def reject_constant(value: str):
+        raise ValueError(f"non-standard JSON constant {value}")
+
+    return json.loads(raw, object_pairs_hook=unique_object, parse_constant=reject_constant)
 
 
 def _safe_diagnostic(value: Any) -> str:
@@ -284,8 +322,8 @@ class SidecarClient:
             return self._failure(rid, "protocol_error", str(error), started)
         latency_ms = int((time.monotonic() - started) * 1000)
         try:
-            payload = json.loads(line)
-        except (TypeError, json.JSONDecodeError) as error:
+            payload = _strict_json_loads(line)
+        except (TypeError, ValueError) as error:
             return self._failure(rid, "protocol_error", f"sidecar returned a non-JSON response: {error}", started)
         except RecursionError:
             return self._failure(rid, "protocol_error", "sidecar response exceeds the parser depth limit", started)

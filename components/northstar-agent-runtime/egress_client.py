@@ -41,9 +41,47 @@ SOCKET_NAME = "egress.sock"
 MIN_TIMEOUT_MS = 1_000
 MAX_TIMEOUT_MS = 120_000
 MAX_RESPONSE_BYTES = 5_000_000
+MAX_JSON_DEPTH = 128
 EGRESS_STATUSES: frozenset[str] = frozenset(
     {"ok", "denied", "rejected", "error", "transport_unavailable", "protocol_error"}
 )
+
+
+def _strict_json_loads(raw: str) -> Any:
+    """Parse sidecar output without ambiguous keys or non-standard numbers."""
+    depth = 0
+    in_string = False
+    escaped = False
+    for character in raw:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            continue
+        if character == '"':
+            in_string = True
+        elif character in "[{":
+            depth += 1
+            if depth > MAX_JSON_DEPTH:
+                raise ValueError(f"JSON depth limit exceeded ({MAX_JSON_DEPTH} containers)")
+        elif character in "]}":
+            depth -= 1
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON key {key!r}")
+            result[key] = value
+        return result
+
+    def reject_constant(value: str):
+        raise ValueError(f"non-standard JSON constant {value}")
+
+    return json.loads(raw, object_pairs_hook=unique_object, parse_constant=reject_constant)
 
 
 def _safe_remote_text(value: Any) -> str:
@@ -169,8 +207,8 @@ class EgressClient:
             return self._failure(rid, "transport_unavailable", f"egress transport failed: {error}", started)
         latency_ms = int((time.monotonic() - started) * 1000)
         try:
-            payload = json.loads(line)
-        except (TypeError, json.JSONDecodeError) as error:
+            payload = _strict_json_loads(line)
+        except (TypeError, ValueError) as error:
             return self._failure(rid, "protocol_error", f"sidecar returned non-JSON: {error}", started)
         except RecursionError:
             return self._failure(rid, "protocol_error", "sidecar response exceeds the parser depth limit", started)
