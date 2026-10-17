@@ -738,6 +738,90 @@ class GenerationFlagTests(unittest.TestCase):
         self.assertIn("echo:still fine", out)
 
 
+class ToolListPaginationTests(unittest.TestCase):
+    def client(self) -> McpStdioClient:
+        return McpStdioClient("demo", ["true"], env={})
+
+    def test_list_all_tools_follows_opaque_cursors_and_preserves_page_order(self):
+        client = self.client()
+        calls = []
+        pages = iter((
+            {"tools": [{"name": "first"}], "nextCursor": "opaque/page-2"},
+            {"tools": [{"name": "second"}]},
+        ))
+
+        def request(method, params):
+            calls.append((method, params))
+            return next(pages)
+
+        client._request = request  # type: ignore[method-assign]
+        self.assertEqual(
+            client._list_all_tools(),
+            [{"name": "first"}, {"name": "second"}],
+        )
+        self.assertEqual(calls, [
+            ("tools/list", {}),
+            ("tools/list", {"cursor": "opaque/page-2"}),
+        ])
+
+    def test_list_all_tools_accepts_a_final_page_at_the_page_limit(self):
+        from unittest.mock import patch
+
+        client = self.client()
+        pages = iter((
+            {"tools": [], "nextCursor": "page-2"},
+            {"tools": [{"name": "last"}]},
+        ))
+        client._request = lambda *_args, **_kwargs: next(pages)  # type: ignore[method-assign]
+        with patch.object(mcp_client, "MAX_TOOL_LIST_PAGES", 2):
+            self.assertEqual(client._list_all_tools(), [{"name": "last"}])
+
+    def test_list_all_tools_rejects_repeated_or_malformed_cursors(self):
+        cases = (
+            (
+                ({"tools": [], "nextCursor": "same"}, {"tools": [], "nextCursor": "same"}),
+                "repeated a pagination cursor",
+            ),
+            (({"tools": [], "nextCursor": 7},), "nextCursor must be a string"),
+        )
+        for pages, message in cases:
+            with self.subTest(message=message):
+                client = self.client()
+                responses = iter(pages)
+                client._request = lambda *_args, **_kwargs: next(responses)  # type: ignore[method-assign]
+                with self.assertRaisesRegex(McpError, message):
+                    client._list_all_tools()
+
+    def test_list_all_tools_bounds_empty_page_chains(self):
+        from unittest.mock import patch
+
+        client = self.client()
+        calls = []
+
+        def request(_method, _params):
+            calls.append(None)
+            return {"tools": [], "nextCursor": f"cursor-{len(calls)}"}
+
+        client._request = request  # type: ignore[method-assign]
+        with patch.object(mcp_client, "MAX_TOOL_LIST_PAGES", 2):
+            with self.assertRaisesRegex(McpError, "exceeded the 2 page limit"):
+                client._list_all_tools()
+        self.assertEqual(len(calls), 2)
+
+    def test_list_all_tools_preserves_the_aggregate_tool_count_cap(self):
+        from unittest.mock import patch
+
+        client = self.client()
+        pages = iter((
+            {"tools": [{"name": "first"}], "nextCursor": "page-2"},
+            {"tools": [{"name": "second"}]},
+        ))
+        client._request = lambda *_args, **_kwargs: next(pages)  # type: ignore[method-assign]
+        with patch.object(mcp_client, "MAX_TOOLS_PER_SERVER", 1):
+            with self.assertRaisesRegex(McpError, "more than 1 tools"):
+                client._list_all_tools()
+
+
 class ToolPinningTests(unittest.TestCase):
     """Tool-definition pinning: drift quarantines the server."""
 
