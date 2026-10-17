@@ -241,7 +241,7 @@ def build_parser() -> argparse.ArgumentParser:
     security_actions = security.add_subparsers(dest="security_action", required=True)
     scan = security_actions.add_parser(
         "scan",
-        help="read-only heuristic scan for secrets, Python/JavaScript/Go SAST, dependencies, and selected config risks",
+        help="read-only scan for secrets, Python/JavaScript/Go SAST, dependencies, and selected config risks",
     )
     scan.add_argument("--workspace", default=".", help="local workspace to inspect (no files are changed)")
     scan.add_argument("--max-files", type=int, default=4000, help="maximum text files to inspect (hard cap 10000)")

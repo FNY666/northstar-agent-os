@@ -408,6 +408,10 @@ def _remediation(tool: str, rule: str) -> str:
             "Map user-facing identifiers to server-owned paths or resolve paths under a trusted root; "
             "enforce containment after symlink resolution and use race-safe file opens."
         ),
+        "PY013_COMMAND_INJECTION": (
+            "Avoid shell execution; pass a fixed executable and argument list with shell=False, "
+            "and validate each argument against an allowlist."
+        ),
     }.get(rule, "Review the flagged code path and apply the least-privilege safe API for this operation.")
 
 
@@ -451,6 +455,7 @@ def _scan_root(
     from javascript_sast import scan_source as scan_javascript_source
     from python_ssrf_sast import scan_source as scan_python_ssrf_source
     from python_path_sast import scan_source as scan_python_path_source
+    from python_command_sast import scan_source as scan_python_command_source
     from go_sast import scan_source as scan_go_source
 
     root = root.resolve()
@@ -559,6 +564,17 @@ def _scan_root(
                     "remediation": item["remediation"],
                 })
             for item in scan_python_path_source(text):
+                add_finding({
+                    "path": relative,
+                    "line": item["line"],
+                    "column": item["column"],
+                    "tool": "python-sast-scanner",
+                    "rule": item["rule"],
+                    "severity": item["severity"],
+                    "message": item["message"],
+                    "remediation": item["remediation"],
+                })
+            for item in scan_python_command_source(text):
                 add_finding({
                     "path": relative,
                     "line": item["line"],
@@ -813,6 +829,89 @@ spec:
             "missing_rules": missing,
             "hardened_fixture_findings": sorted({item["rule"] for item in hardened_findings}),
             "scope": "two fixed temporary manifests; automatically removed",
+        }
+
+
+def _probe_python_command_scanner() -> dict[str, Any]:
+    """Check Python source-to-shell flow on fixed vulnerable and hardened samples."""
+    from _version import __version__
+    from python_command_sast import RULE_ID
+    from sarif_export import build_sarif
+
+    vulnerable = """import subprocess as sp
+from flask import request
+def handle():
+    command = "convert " + request.args.get("name", "")
+    sp.run(
+        command,
+        shell=True,
+    )
+"""
+    hardened = """import subprocess
+from flask import request
+def handle():
+    subprocess.run(["convert", request.args.get("name", "")], shell=False)
+"""
+
+    with tempfile.TemporaryDirectory(prefix="northstar-python-command-sast-") as temporary:
+        root = Path(temporary)
+        (root / "vulnerable.py").write_text(vulnerable, encoding="utf-8")
+        (root / "hardened.py").write_text(hardened, encoding="utf-8")
+        summary = _scan_root(
+            root,
+            max_files=10,
+            max_file_bytes=256 * 1024,
+            fail_on="none",
+            max_findings=100,
+        )
+        vulnerable_findings = [
+            item for item in summary["findings"]
+            if item["path"] == "vulnerable.py"
+            and item["tool"] == "python-sast-scanner"
+            and item["rule"] == RULE_ID
+        ]
+        hardened_findings = [
+            item for item in summary["findings"]
+            if item["path"] == "hardened.py"
+            and item["tool"] == "python-sast-scanner"
+            and item["rule"] == RULE_ID
+        ]
+        sarif = build_sarif(summary, tool_version=__version__)
+        sarif_run = sarif["runs"][0]
+        full_rule_id = f"python-sast-scanner:{RULE_ID}"
+        rule_descriptors = sarif_run["tool"]["driver"].get("rules", [])
+        result = next((
+            item for item in sarif_run["results"]
+            if item.get("ruleId") == full_rule_id
+            and item["locations"][0]["physicalLocation"]["artifactLocation"]["uri"] == "vulnerable.py"
+        ), None)
+        rule_index = result.get("ruleIndex", -1) if result is not None else -1
+        index_matches = (
+            0 <= rule_index < len(rule_descriptors)
+            and rule_descriptors[rule_index].get("id") == full_rule_id
+        )
+        sarif_passed = bool(
+            sarif.get("version") == "2.1.0"
+            and result is not None
+            and index_matches
+            and result["locations"][0]["physicalLocation"]["region"]["startLine"] == 6
+            and result["properties"].get("remediation")
+        )
+        passed = len(vulnerable_findings) == 1 and not hardened_findings and sarif_passed
+        return {
+            "check": "python-command-injection-sast-rule",
+            "passed": passed,
+            "expected_rule": RULE_ID,
+            "vulnerable_finding_count": len(vulnerable_findings),
+            "vulnerable_sink_line": vulnerable_findings[0]["line"] if vulnerable_findings else None,
+            "hardened_fixture_findings": len(hardened_findings),
+            "sarif_export": {
+                "passed": sarif_passed,
+                "version": sarif.get("version"),
+                "rule_index_matches": index_matches,
+                "finding_found": result is not None,
+            },
+            "scope": "fixed temporary Python source examples; analyzed without execution and automatically removed",
         }
 
 
@@ -1374,6 +1473,7 @@ def _probe_runtime() -> dict[str, Any]:
         absent = all(not path.exists() for path in canaries)
         defense_checks = [
             _probe_kubernetes_scanner(),
+            _probe_python_command_scanner(),
             _probe_javascript_scanner(),
             _probe_go_scanner(),
         ]
@@ -1591,7 +1691,7 @@ def security_tool_specs() -> tuple[Any, Any]:
             name="SecurityScan",
             description=(
                 "Read-only offline heuristic scan of the current run workspace for likely secrets, Python, JavaScript/TypeScript, and Go SAST issues, "
-                "dependency pinning/source risks, and selected deployment misconfigurations. No path or URL is accepted; "
+                "including Python request-to-URL/path and AST-based input-to-shell flows, dependency pinning/source risks, and selected deployment misconfigurations. No path or URL is accepted; "
                 "findings omit secret values and include remediation guidance. The first call returns a run-local baseline_id; "
                 "pass it as compare_to on a later call to retest after changes. Writes still require separate tool approval; "
                 "no CVE database is queried."

@@ -162,6 +162,14 @@ deletion or copy APIs. It follows same-file assignments and does not parse
 Python, understand aliases or scopes, or prove trusted-root and symlink checks.
 Treat it as a review signal; it does not automatically fix findings.
 
+Python also receives `PY013_COMMAND_INJECTION`, an AST-based flow check from
+request fields, `input()`, CLI arguments, and environment values to shell-backed
+`os` and `subprocess` APIs. It handles multiline calls, common import aliases,
+assignments, f-strings, and basic control-flow joins. It does not follow values
+across function boundaries, recognize project-specific validators, or treat
+shell quoting as proof that a command is allowlisted. The scanner reports only
+shell-enabled process calls and remains a review signal.
+
 Go files also receive `GO001_UNTRUSTED_SSRF` and `GO002_PATH_TRAVERSAL` checks
 for standard `net/http`, chi/mux, and common Gin request values flowing through
 simple assignments to `net/http` client calls, `os` / `ioutil` file APIs,
@@ -188,7 +196,7 @@ claim a complete scan.
 
 The runtime probe drives fixed tool calls through fresh runtimes backed by a
 temporary workspace. It also scans fixed vulnerable and hardened Kubernetes,
-JavaScript/TypeScript, and Go fixtures to ensure the local defense rules trigger
+Python, JavaScript/TypeScript, and Go fixtures to ensure the local defense rules trigger
 on the vulnerable samples and stay quiet on the hardened examples. The source
 samples are analyzed as text and never executed. The probe also checks that
 SARIF output preserves rule identifiers, workspace-relative locations, and
