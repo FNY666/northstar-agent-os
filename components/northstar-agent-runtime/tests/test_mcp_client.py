@@ -782,6 +782,43 @@ class ToolPinningTests(unittest.TestCase):
         finally:
             client.close()
 
+    def test_unknown_result_type_without_extension_is_rejected_and_audited(self):
+        client = self.connect()
+        records: list[dict] = []
+        request_methods: list[str] = []
+        client.audit = records.append
+        try:
+            def unknown_response(method, *_args, **_kwargs):
+                request_methods.append(method)
+                return {
+                    "resultType": "future_extension_result",
+                    "taskId": "server-task-secret",
+                    "status": "working",
+                }
+
+            client._request = unknown_response  # type: ignore[method-assign]
+            self.assertNotIn("extensions", client._capabilities())
+            result = client.call_tool("echo", {})
+            self.assertTrue(result.is_error)
+            self.assertIn("unsupported result type", result.text())
+            self.assertIn("completion is unknown", result.text())
+            self.assertNotIn("future_extension_result", result.text())
+            self.assertNotIn("server-task-secret", result.text())
+            self.assertTrue(client.quarantined)
+            self.assertEqual(request_methods, ["tools/call"])
+            self.assertEqual(len(records), 1)
+            self.assertEqual(records[0]["type"], "mcp.tool_drift")
+            self.assertEqual(records[0]["at"], "output_validation")
+            self.assertNotIn("future_extension_result", json.dumps(records))
+            self.assertNotIn("server-task-secret", json.dumps(records))
+
+            denied = client.call_tool("echo", {})
+            self.assertTrue(denied.is_error)
+            self.assertIn("quarantined", denied.text())
+            self.assertEqual(request_methods, ["tools/call"])
+        finally:
+            client.close()
+
     def test_refresh_with_no_drift_returns_empty(self):
         client = self.connect()
         try:
