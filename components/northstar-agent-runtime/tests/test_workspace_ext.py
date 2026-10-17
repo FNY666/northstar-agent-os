@@ -128,6 +128,45 @@ class SkillTests(unittest.TestCase):
         self.assertNotIn("example-org", listing)
         self.assertNotIn("Bash(git:*)", listing)
 
+    def test_claude_invocation_metadata_limits_model_discovery(self):
+        from tools.skill_scripts import discover_skill_scripts
+
+        self.write_skill(
+            "manual-only",
+            "---\n"
+            "name: manual-only\n"
+            "description: A skill that requires deliberate user invocation.\n"
+            "disable-model-invocation: true\n"
+            "---\nBody.\n",
+        )
+        self.write_skill(
+            "model-only",
+            "---\n"
+            "name: model-only\n"
+            "description: A model-discoverable skill with no host command.\n"
+            "user-invocable: false\n"
+            "---\nBody.\n",
+        )
+        for name in ("manual-only", "model-only"):
+            scripts = self.skills_dir / name / "scripts"
+            scripts.mkdir()
+            (scripts / "helper.sh").write_text("echo helper\n", encoding="utf-8")
+
+        found = discover_skills(self.ws)
+        by_name = {skill.name: skill for skill in found}
+        self.assertFalse(by_name["manual-only"].model_invocable)
+        self.assertTrue(by_name["manual-only"].user_invocable)
+        self.assertTrue(by_name["model-only"].model_invocable)
+        self.assertFalse(by_name["model-only"].user_invocable)
+
+        listing = skill_listing(found, self.ws)
+        self.assertNotIn("manual-only", listing)
+        self.assertIn("model-only", listing)
+        model_skills = skills.model_visible_skills(found)
+        self.assertEqual({skill.name for skill in model_skills}, {"model-only"})
+        scripts = discover_skill_scripts(self.ws, model_skills)
+        self.assertEqual([script.skill for script in scripts], ["model-only"])
+
     def test_agent_skills_optional_metadata_types_are_validated(self):
         invalid_fields = (
             ("license: [Apache-2.0]", "license must be a string"),
@@ -135,6 +174,8 @@ class SkillTests(unittest.TestCase):
             ("compatibility: " + "x" * 501, "compatibility must be a non-empty string"),
             ("metadata:\n  version: 1.0", "metadata must be a mapping"),
             ("allowed-tools: [Read]", "allowed-tools must be a string"),
+            ("disable-model-invocation: maybe", "disable-model-invocation must be a boolean"),
+            ("user-invocable: 1", "user-invocable must be a boolean"),
         )
         for index, (field, message) in enumerate(invalid_fields):
             with self.subTest(field=field[:32]):
