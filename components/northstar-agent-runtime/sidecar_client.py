@@ -420,6 +420,8 @@ class SidecarClient:
                     break
                 newline = chunk.find(b"\n")
                 if newline >= 0:
+                    if total + newline + 1 > self.max_response_bytes:
+                        raise SidecarProtocolError("sidecar response exceeded the byte cap")
                     chunks.append(chunk[: newline + 1])
                     total += newline + 1
                     break

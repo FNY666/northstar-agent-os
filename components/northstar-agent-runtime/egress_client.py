@@ -224,6 +224,8 @@ class EgressClient:
                     break
                 newline = chunk.find(b"\n")
                 if newline >= 0:
+                    if total + newline + 1 > self.max_response_bytes:
+                        raise OSError("sidecar response exceeded the byte cap")
                     chunks.append(chunk[:newline])
                     return b"".join(chunks).decode("utf-8", "replace")
                 chunks.append(chunk)
