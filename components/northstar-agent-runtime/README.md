@@ -131,7 +131,7 @@ python3 -m cli security probe --format json
 ```
 
 The scan runs offline and makes no file changes. It checks likely secrets,
-Python and JavaScript/TypeScript SAST patterns, dependency source and pinning,
+Python, JavaScript/TypeScript, and Go SAST patterns, dependency source and pinning,
 and selected Docker, Compose, Kubernetes, GitHub Actions, and Terraform risks.
 Kubernetes rules cover privileged containers, privilege escalation, root UIDs,
 host namespace sharing, hostPath volumes, all Linux capabilities, and floating
@@ -142,8 +142,9 @@ secure.
 JavaScript and TypeScript files also receive line-pattern checks for dynamic
 code execution, shell commands, interpolated SQL, HTML injection, direct
 request-derived URL flows to outbound HTTP calls, and request-derived paths
-(`JS009_PATH_TRAVERSAL`) flowing to common Node.js `fs` and Express file response APIs, disabled TLS
-verification, weak security tokens, and JWT `none` algorithms. These checks
+(`JS009_PATH_TRAVERSAL`) flowing to common Node.js `fs` and Express file
+response APIs, disabled TLS verification, weak security tokens, and JWT `none`
+algorithms. These checks
 are heuristic and do not replace parser-backed analysis. The flow checks follow
 simple variable assignments in one file; they do not resolve imports or aliases,
 understand scopes and sanitizers, prove root containment or symlink protections,
@@ -160,6 +161,13 @@ into `open`, `Path` read/write methods, file response helpers, and common file
 deletion or copy APIs. It follows same-file assignments and does not parse
 Python, understand aliases or scopes, or prove trusted-root and symlink checks.
 Treat it as a review signal; it does not automatically fix findings.
+
+Go files also receive `GO001_UNTRUSTED_SSRF` and `GO002_PATH_TRAVERSAL` checks
+for standard `net/http`, chi/mux, and common Gin request values flowing through
+simple assignments to `net/http` client calls, `os` / `ioutil` file APIs,
+`http.ServeFile`, and `http.Dir`. The
+scanner does not parse Go, resolve imports or aliases, model scopes, understand
+sanitizers, or follow multi-line calls; treat findings as review signals.
 
 `--format sarif` emits a SARIF 2.1.0 document to stdout for import into code
 scanning platforms. The export contains rule identifiers, workspace-relative
@@ -179,8 +187,8 @@ file limit or skips candidate files exits with status 2 because the gate cannot
 claim a complete scan.
 
 The runtime probe drives fixed tool calls through fresh runtimes backed by a
-temporary workspace. It also scans fixed vulnerable and hardened Kubernetes
-and JavaScript/TypeScript fixtures to ensure the local defense rules trigger
+temporary workspace. It also scans fixed vulnerable and hardened Kubernetes,
+JavaScript/TypeScript, and Go fixtures to ensure the local defense rules trigger
 on the vulnerable samples and stay quiet on the hardened examples. The source
 samples are analyzed as text and never executed. The probe also checks that
 SARIF output preserves rule identifiers, workspace-relative locations, and

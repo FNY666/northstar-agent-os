@@ -1,8 +1,8 @@
 """Local security scans and bounded runtime red-team probes.
 
 The workspace scan is read-only, offline, and heuristic. It includes secret,
-Python and JavaScript/TypeScript SAST, dependency-source/pinning, and selected
-deployment-config rules.
+Python, JavaScript/TypeScript, and Go SAST, dependency-source/pinning, and
+selected deployment-config rules.
 It does not query vulnerability databases. The runtime probe feeds a
 compromised-model-shaped tool-call sequence into fresh Northstar runtimes
 backed by a temporary workspace. It checks default authorization, path
@@ -451,6 +451,7 @@ def _scan_root(
     from javascript_sast import scan_source as scan_javascript_source
     from python_ssrf_sast import scan_source as scan_python_ssrf_source
     from python_path_sast import scan_source as scan_python_path_source
+    from go_sast import scan_source as scan_go_source
 
     root = root.resolve()
     if not root.is_dir():
@@ -580,6 +581,18 @@ def _scan_root(
                     "message": item["message"],
                     "remediation": item["remediation"],
                 })
+        elif safe_path.suffix.lower() == ".go":
+            for item in scan_go_source(text):
+                add_finding({
+                    "path": relative,
+                    "line": item["line"],
+                    "column": item["column"],
+                    "tool": "go-sast-scanner",
+                    "rule": item["rule"],
+                    "severity": item["severity"],
+                    "message": item["message"],
+                    "remediation": item["remediation"],
+                })
         for item in _dependency_config_findings(relative, text):
             add_finding(item)
 
@@ -608,7 +621,7 @@ def _scan_root(
 
 
 def scan_workspace(args: Any) -> int:
-    """Run local secret, Python, and JavaScript/TypeScript SAST heuristics."""
+    """Run local secret and Python, JavaScript/TypeScript, and Go SAST heuristics."""
     if args.max_files < 1 or args.max_files > MAX_SCAN_FILES:
         print(f"configuration error: --max-files must be between 1 and {MAX_SCAN_FILES}", file=sys.stderr)
         return 64
@@ -926,6 +939,112 @@ const fileContents = await fs.promises.readFile(safeFile, "utf8");
                     path_sarif_result["locations"][0]["physicalLocation"]["region"]["startLine"]
                     if path_sarif_result is not None else None
                 ),
+            },
+            "scope": "fixed temporary source examples; analyzed without execution and automatically removed",
+        }
+
+
+def _probe_go_scanner() -> dict[str, Any]:
+    """Check Go request-to-network and request-to-file rules on fixed source examples."""
+    from _version import __version__
+    from go_sast import PATH_RULE_ID, SSRF_RULE_ID
+    from sarif_export import build_sarif
+
+    vulnerable = """package handler
+import "net/http"
+import "os"
+import "path/filepath"
+func handler(w http.ResponseWriter, r *http.Request) {
+    remote := r.URL.Query().Get("target")
+    target := "https://" + remote
+    response, err := http.Get(target)
+    _ = response
+    _ = err
+    file := r.URL.Path
+    joined := filepath.Join("/srv/data", file)
+    contents, err := os.ReadFile(joined)
+    _ = contents
+    _ = err
+    http.ServeFile(w, r, file)
+}
+"""
+    hardened = """package handler
+import "net/http"
+import "os"
+func handler(w http.ResponseWriter, r *http.Request) {
+    target := trustedOrigins[originID]
+    response, err := http.Get(target)
+    file := approvedFiles[fileID]
+    contents, err := os.ReadFile(file)
+    _ = response
+    _ = contents
+    _ = err
+}
+"""
+    expected_rules = {SSRF_RULE_ID, PATH_RULE_ID}
+
+    with tempfile.TemporaryDirectory(prefix="northstar-go-sast-rules-") as temporary:
+        root = Path(temporary)
+        (root / "vulnerable.go").write_text(vulnerable, encoding="utf-8")
+        (root / "hardened.go").write_text(hardened, encoding="utf-8")
+        summary = _scan_root(
+            root,
+            max_files=10,
+            max_file_bytes=256 * 1024,
+            fail_on="none",
+            max_findings=100,
+        )
+        vulnerable_rules = {
+            item["rule"] for item in summary["findings"]
+            if item["path"] == "vulnerable.go" and item["tool"] == "go-sast-scanner"
+        }
+        hardened_findings = [
+            item for item in summary["findings"]
+            if item["path"] == "hardened.go" and item["tool"] == "go-sast-scanner"
+        ]
+        missing = sorted(expected_rules - vulnerable_rules)
+        sarif = build_sarif(summary, tool_version=__version__)
+        sarif_run = sarif["runs"][0]
+        rule_descriptors = sarif_run["tool"]["driver"].get("rules", [])
+        rule_ids = {item["id"] for item in rule_descriptors}
+
+        def sarif_rule_check(rule_id: str, expected_line: int) -> tuple[bool, bool]:
+            full_rule_id = f"go-sast-scanner:{rule_id}"
+            result = next((
+                item for item in sarif_run["results"]
+                if item.get("ruleId") == full_rule_id
+                and item["locations"][0]["physicalLocation"]["artifactLocation"]["uri"] == "vulnerable.go"
+            ), None)
+            index = result.get("ruleIndex", -1) if result is not None else -1
+            index_matches = (
+                0 <= index < len(rule_descriptors)
+                and rule_descriptors[index].get("id") == full_rule_id
+            )
+            passed = bool(
+                full_rule_id in rule_ids
+                and result is not None
+                and index_matches
+                and result["locations"][0]["physicalLocation"]["region"]["startLine"] == expected_line
+                and result["properties"].get("remediation")
+            )
+            return passed, result is not None
+
+        ssrf_sarif_passed, ssrf_result_found = sarif_rule_check(SSRF_RULE_ID, 8)
+        path_sarif_passed, path_result_found = sarif_rule_check(PATH_RULE_ID, 13)
+        sarif_passed = sarif.get("version") == "2.1.0" and ssrf_sarif_passed and path_sarif_passed
+        passed = not missing and not hardened_findings and sarif_passed
+        return {
+            "check": "go-ssrf-path-sast-rules",
+            "passed": passed,
+            "expected_rules": sorted(expected_rules),
+            "detected_rules": sorted(expected_rules & vulnerable_rules),
+            "missing_rules": missing,
+            "hardened_fixture_findings": sorted({item["rule"] for item in hardened_findings}),
+            "sarif_export": {
+                "passed": sarif_passed,
+                "version": sarif.get("version"),
+                "ssrf_result_found": ssrf_result_found,
+                "path_traversal_result_found": path_result_found,
             },
             "scope": "fixed temporary source examples; analyzed without execution and automatically removed",
         }
@@ -1253,7 +1372,11 @@ def _probe_runtime() -> dict[str, Any]:
             shell_governance_canary,
         )
         absent = all(not path.exists() for path in canaries)
-        defense_checks = [_probe_kubernetes_scanner(), _probe_javascript_scanner()]
+        defense_checks = [
+            _probe_kubernetes_scanner(),
+            _probe_javascript_scanner(),
+            _probe_go_scanner(),
+        ]
         success = (
             all(item["blocked"] for item in all_results)
             and absent
@@ -1467,7 +1590,7 @@ def security_tool_specs() -> tuple[Any, Any]:
         ToolSpec(
             name="SecurityScan",
             description=(
-                "Read-only offline heuristic scan of the current run workspace for likely secrets, Python and JavaScript/TypeScript SAST issues, "
+                "Read-only offline heuristic scan of the current run workspace for likely secrets, Python, JavaScript/TypeScript, and Go SAST issues, "
                 "dependency pinning/source risks, and selected deployment misconfigurations. No path or URL is accepted; "
                 "findings omit secret values and include remediation guidance. The first call returns a run-local baseline_id; "
                 "pass it as compare_to on a later call to retest after changes. Writes still require separate tool approval; "

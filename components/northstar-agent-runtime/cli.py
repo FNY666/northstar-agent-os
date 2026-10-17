@@ -230,7 +230,7 @@ def build_parser() -> argparse.ArgumentParser:
         "security",
         help="read-only local security scan and bounded runtime red-team probes",
         description=(
-            "Local-only security utilities. `scan` uses bounded heuristic rules for secrets, Python and JavaScript/TypeScript SAST, "
+            "Local-only security utilities. `scan` uses bounded heuristic rules for secrets, Python, JavaScript/TypeScript, and Go SAST, "
             "dependency pinning/source risks, and selected Docker, Compose, Kubernetes, CI, and Terraform config over the selected "
             "workspace. `probe` attempts controlled tool calls against a fresh Northstar runtime "
             "in a temporary workspace and checks selected scanner rules against temporary fixtures. "
@@ -241,7 +241,7 @@ def build_parser() -> argparse.ArgumentParser:
     security_actions = security.add_subparsers(dest="security_action", required=True)
     scan = security_actions.add_parser(
         "scan",
-        help="read-only heuristic scan for secrets, Python/JavaScript SAST, dependencies, and selected config risks",
+        help="read-only heuristic scan for secrets, Python/JavaScript/Go SAST, dependencies, and selected config risks",
     )
     scan.add_argument("--workspace", default=".", help="local workspace to inspect (no files are changed)")
     scan.add_argument("--max-files", type=int, default=4000, help="maximum text files to inspect (hard cap 10000)")
