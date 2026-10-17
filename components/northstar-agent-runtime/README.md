@@ -186,6 +186,13 @@ The flow rule excludes `yaml.safe_load()` and explicit `SafeLoader` /
 rule does not follow values across function boundaries or verify that
 serialized data is authenticated before loading.
 
+Python also receives `PY016_SERVER_SIDE_TEMPLATE_INJECTION` for untrusted values
+reaching Flask `render_template_string`, Jinja `Template` / `from_string`, Django
+`Template`, or Mako `Template` compilation. User values passed as context to a
+static `render_template()` file do not trigger this flow rule. It does not resolve
+custom wrappers or cross-function flows; autoescaping and sandboxing do not make
+untrusted template source safe.
+
 Go files also receive `GO001_UNTRUSTED_SSRF` and `GO002_PATH_TRAVERSAL` checks
 for standard `net/http`, chi/mux, and common Gin request values flowing through
 simple assignments to `net/http` client calls, `os` / `ioutil` file APIs,

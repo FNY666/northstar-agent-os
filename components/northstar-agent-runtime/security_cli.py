@@ -420,6 +420,11 @@ def _remediation(tool: str, rule: str) -> str:
             "Prefer data-only formats; never deserialize untrusted pickle-like bytes. "
             "Use yaml.safe_load() for untrusted YAML and authenticate serialized data before loading it."
         ),
+        "PY016_SERVER_SIDE_TEMPLATE_INJECTION": (
+            "Keep template source in trusted files and pass untrusted values as render context. "
+            "If users author templates, isolate rendering and enforce strict resource limits; "
+            "autoescaping and sandboxing are defense in depth, not source validation."
+        ),
     }.get(rule, "Review the flagged code path and apply the least-privilege safe API for this operation.")
 
 
@@ -466,6 +471,7 @@ def _scan_root(
     from python_command_sast import scan_source as scan_python_command_source
     from python_sql_sast import scan_source as scan_python_sql_source
     from python_deserialization_sast import scan_source as scan_python_deserialization_source
+    from python_template_sast import scan_source as scan_python_template_source
     from go_sast import scan_source as scan_go_source
 
     root = root.resolve()
@@ -607,6 +613,17 @@ def _scan_root(
                     "remediation": item["remediation"],
                 })
             for item in scan_python_deserialization_source(text):
+                add_finding({
+                    "path": relative,
+                    "line": item["line"],
+                    "column": item["column"],
+                    "tool": "python-sast-scanner",
+                    "rule": item["rule"],
+                    "severity": item["severity"],
+                    "message": item["message"],
+                    "remediation": item["remediation"],
+                })
+            for item in scan_python_template_source(text):
                 add_finding({
                     "path": relative,
                     "line": item["line"],
@@ -1100,6 +1117,90 @@ def load_payload():
             "vulnerable_finding_count": len(vulnerable_findings),
             "vulnerable_sink_line": vulnerable_findings[0]["line"] if vulnerable_findings else None,
             "safe_loader_fixture_findings": len(hardened_findings),
+            "sarif_export": {
+                "passed": sarif_passed,
+                "version": sarif.get("version"),
+                "rule_index_matches": index_matches,
+                "finding_found": result is not None,
+            },
+            "scope": "fixed temporary Python source examples; analyzed without execution and automatically removed",
+        }
+
+
+def _probe_python_template_scanner() -> dict[str, Any]:
+    """Check Python dynamic-template flow and static-template rendering."""
+    from _version import __version__
+    from python_template_sast import RULE_ID
+    from sarif_export import build_sarif
+
+    vulnerable = """from flask import request, render_template_string
+from jinja2 import Environment
+def preview():
+    template = request.args.get("template", "")
+    return render_template_string(template)
+def custom_preview():
+    source = request.args.get("source", "")
+    env = Environment()
+    return env.from_string(source).render()
+"""
+    hardened = """from flask import request, render_template
+def profile():
+    name = request.args.get("name", "")
+    return render_template("profile.html", name=name)
+"""
+
+    with tempfile.TemporaryDirectory(prefix="northstar-python-template-sast-") as temporary:
+        root = Path(temporary)
+        (root / "vulnerable.py").write_text(vulnerable, encoding="utf-8")
+        (root / "hardened.py").write_text(hardened, encoding="utf-8")
+        summary = _scan_root(
+            root,
+            max_files=10,
+            max_file_bytes=256 * 1024,
+            fail_on="none",
+            max_findings=100,
+        )
+        vulnerable_findings = [
+            item for item in summary["findings"]
+            if item["path"] == "vulnerable.py"
+            and item["tool"] == "python-sast-scanner"
+            and item["rule"] == RULE_ID
+        ]
+        hardened_findings = [
+            item for item in summary["findings"]
+            if item["path"] == "hardened.py"
+            and item["tool"] == "python-sast-scanner"
+            and item["rule"] == RULE_ID
+        ]
+        sarif = build_sarif(summary, tool_version=__version__)
+        sarif_run = sarif["runs"][0]
+        full_rule_id = f"python-sast-scanner:{RULE_ID}"
+        rule_descriptors = sarif_run["tool"]["driver"].get("rules", [])
+        result = next((
+            item for item in sarif_run["results"]
+            if item.get("ruleId") == full_rule_id
+            and item["locations"][0]["physicalLocation"]["artifactLocation"]["uri"] == "vulnerable.py"
+        ), None)
+        rule_index = result.get("ruleIndex", -1) if result is not None else -1
+        index_matches = (
+            0 <= rule_index < len(rule_descriptors)
+            and rule_descriptors[rule_index].get("id") == full_rule_id
+        )
+        sarif_passed = bool(
+            sarif.get("version") == "2.1.0"
+            and result is not None
+            and index_matches
+            and result["locations"][0]["physicalLocation"]["region"]["startLine"] == 5
+            and result["properties"].get("remediation")
+        )
+        passed = len(vulnerable_findings) == 2 and not hardened_findings and sarif_passed
+        return {
+            "check": "python-server-side-template-injection-sast-rule",
+            "passed": passed,
+            "expected_rule": RULE_ID,
+            "vulnerable_finding_count": len(vulnerable_findings),
+            "first_vulnerable_sink_line": vulnerable_findings[0]["line"] if vulnerable_findings else None,
+            "static_template_context_findings": len(hardened_findings),
             "sarif_export": {
                 "passed": sarif_passed,
                 "version": sarif.get("version"),
@@ -1671,6 +1772,7 @@ def _probe_runtime() -> dict[str, Any]:
             _probe_python_command_scanner(),
             _probe_python_sql_scanner(),
             _probe_python_deserialization_scanner(),
+            _probe_python_template_scanner(),
             _probe_javascript_scanner(),
             _probe_go_scanner(),
         ]
@@ -1888,7 +1990,7 @@ def security_tool_specs() -> tuple[Any, Any]:
             name="SecurityScan",
             description=(
                 "Read-only offline heuristic scan of the current run workspace for likely secrets, Python, JavaScript/TypeScript, and Go SAST issues, "
-                "including Python request-to-URL/path, input-to-shell, SQL query, and unsafe deserialization flows, dependency pinning/source risks, and selected deployment misconfigurations. No path or URL is accepted; "
+                "including Python request-to-URL/path, input-to-shell, SQL query, unsafe deserialization, and dynamic template compilation flows, dependency pinning/source risks, and selected deployment misconfigurations. No path or URL is accepted; "
                 "findings omit secret values and include remediation guidance. The first call returns a run-local baseline_id; "
                 "pass it as compare_to on a later call to retest after changes. Writes still require separate tool approval; "
                 "no CVE database is queried."
