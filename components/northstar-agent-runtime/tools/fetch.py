@@ -115,13 +115,19 @@ def fetch_tool_spec() -> Any:
                 },
             )
         if result.status == "denied":
+            reason = getattr(result, "reason", "") or getattr(result, "error", "")
+            errors = getattr(result, "errors", ()) or ()
+            detail = reason or (errors[0] if errors else "policy refusal")
             return ToolResult.error(
-                f"egress denied ({result.deny_code}): {result.error or 'policy refusal'}",
+                f"egress denied ({result.deny_code}): {detail}",
                 deny_code=result.deny_code,
                 receipt=result.receipt,
             )
+        reason = getattr(result, "reason", "") or getattr(result, "error", "")
+        errors = getattr(result, "errors", ()) or ()
+        detail = reason or (errors[0] if errors else "sidecar failure")
         return ToolResult.error(
-            f"egress {result.status}: {result.error or 'sidecar failure'}",
+            f"egress {result.status}: {detail}",
             status=result.status,
             receipt=result.receipt,
         )
