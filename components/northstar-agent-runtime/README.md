@@ -153,6 +153,12 @@ Django, and Starlette request fields flowing through simple assignments into
 It does not resolve import aliases, model Python scopes, or understand
 multi-line calls or destination-validation helpers; treat it as a review signal.
 
+Python files also receive a request-to-filesystem path check for simple flows
+into `open`, `Path` read/write methods, file response helpers, and common file
+deletion or copy APIs. It follows same-file assignments and does not parse
+Python, understand aliases or scopes, or prove trusted-root and symlink checks.
+Treat it as a review signal; it does not automatically fix findings.
+
 `--format sarif` emits a SARIF 2.1.0 document to stdout for import into code
 scanning platforms. The export contains rule identifiers, workspace-relative
 locations, severity, and remediation guidance; it does not include source

@@ -404,6 +404,10 @@ def _remediation(tool: str, rule: str) -> str:
             "Resolve outbound requests through a strict destination allowlist and reject private, "
             "loopback, and link-local addresses after DNS resolution."
         ),
+        "PY012_PATH_TRAVERSAL": (
+            "Map user-facing identifiers to server-owned paths or resolve paths under a trusted root; "
+            "enforce containment after symlink resolution and use race-safe file opens."
+        ),
     }.get(rule, "Review the flagged code path and apply the least-privilege safe API for this operation.")
 
 
@@ -446,6 +450,7 @@ def _scan_root(
     from secret_scanner import SecretScanner
     from javascript_sast import scan_source as scan_javascript_source
     from python_ssrf_sast import scan_source as scan_python_ssrf_source
+    from python_path_sast import scan_source as scan_python_path_source
 
     root = root.resolve()
     if not root.is_dir():
@@ -542,6 +547,17 @@ def _scan_root(
                     "remediation": _remediation("sast-scanner", item.rule_id),
                 })
             for item in scan_python_ssrf_source(text):
+                add_finding({
+                    "path": relative,
+                    "line": item["line"],
+                    "column": item["column"],
+                    "tool": "python-sast-scanner",
+                    "rule": item["rule"],
+                    "severity": item["severity"],
+                    "message": item["message"],
+                    "remediation": item["remediation"],
+                })
+            for item in scan_python_path_source(text):
                 add_finding({
                     "path": relative,
                     "line": item["line"],

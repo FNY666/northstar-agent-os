@@ -22,7 +22,7 @@ _MAX_SOURCE_BYTES = 1024 * 1024
 
 _REQUEST_SOURCE = re.compile(
     r"\b(?:request|flask\s*\.\s*request)\s*\.\s*"
-    r"(?:args|form|values|cookies|headers|GET|POST|query_params|path_params|json|data|url)\b"
+    r"(?:args|form|values|cookies|headers|files|GET|POST|query_params|path_params|json|data|url|path|path_info)\b"
 )
 _HTTP_SINK = re.compile(
     r"\b(?:(?:requests|httpx)\s*\.\s*(?P<module_method>"

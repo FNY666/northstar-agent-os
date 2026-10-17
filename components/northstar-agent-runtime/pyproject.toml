@@ -1112,6 +1112,7 @@ py-modules = [
     "pubsub_broker",
     "pulsar_broker",
     "punct_norm",
+    "python_path_sast",
     "python_ssrf_sast",
     "push_service",
     "quantum_timeline",
