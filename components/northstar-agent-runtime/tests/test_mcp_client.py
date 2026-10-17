@@ -766,7 +766,7 @@ class ToolPinningTests(unittest.TestCase):
             self.assertNotIn("extensions", client._capabilities())
             result = client.call_tool("echo", {})
             self.assertTrue(result.is_error)
-            self.assertIn("task support is not negotiated", result.text())
+            self.assertIn("without negotiated task support", result.text())
             self.assertNotIn("server-task-secret", result.text())
             self.assertTrue(client.quarantined)
             self.assertEqual(request_methods, ["tools/call"])
