@@ -1072,7 +1072,7 @@ def _probe_agent_surface_scanner() -> dict[str, Any]:
 
 
 def _probe_github_actions_scanner() -> dict[str, Any]:
-    """Check privileged pull-request and direct script-injection detection."""
+    """Check untrusted pull-request and workflow_run artifact flows."""
     checkout_sha = "0123456789abcdef0123456789abcdef01234567"
     unsafe = "\n".join([
         "name: unsafe", "on:", "  pull_request_target:", "jobs:", "  build:",
@@ -1090,9 +1090,22 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         "name: metadata-only", "on:", "  pull_request_target:", "jobs:", "  label:",
         "    steps:", "      - uses: actions/github-script@0123456789abcdef0123456789abcdef01234567",
     ])
+    workflow_run_unsafe = "\n".join([
+        "name: downstream", "on:", "  workflow_run:", "    workflows: [Build]", "    types: [completed]",
+        "jobs:", "  privileged:", "    steps:",
+        "      - uses: actions/download-artifact@0123456789abcdef0123456789abcdef01234567",
+        "        with:", "          name: build-output", "      - run: ./artifact/run.sh",
+    ])
+    workflow_run_data_only = "\n".join([
+        "name: inspect-output", "on:", "  workflow_run:", "    workflows: [Build]", "    types: [completed]",
+        "jobs:", "  inspect:", "    steps:",
+        "      - uses: actions/download-artifact@0123456789abcdef0123456789abcdef01234567",
+        "        with:", "          name: build-output", "      - uses: actions/upload-artifact@0123456789abcdef0123456789abcdef01234567",
+    ])
     expected = {
         "CFG008_PULL_REQUEST_TARGET_UNTRUSTED_CHECKOUT",
         "CFG009_ACTIONS_UNTRUSTED_RUN_EXPRESSION",
+        "CFG010_WORKFLOW_RUN_ARTIFACT_EXECUTION",
     }
     with tempfile.TemporaryDirectory(prefix="northstar-actions-sast-") as temporary:
         workflows = Path(temporary) / ".github" / "workflows"
@@ -1100,6 +1113,8 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         (workflows / "unsafe.yml").write_text(unsafe, encoding="utf-8")
         (workflows / "safe.yml").write_text(safe, encoding="utf-8")
         (workflows / "metadata.yml").write_text(metadata_only, encoding="utf-8")
+        (workflows / "workflow-run-unsafe.yml").write_text(workflow_run_unsafe, encoding="utf-8")
+        (workflows / "workflow-run-data-only.yml").write_text(workflow_run_data_only, encoding="utf-8")
         summary = _scan_root(
             Path(temporary),
             max_files=20,
@@ -1111,11 +1126,17 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         item for item in summary["findings"]
         if item["rule"] in expected
     ]
-    hostile = [item for item in relevant if item["path"].endswith("unsafe.yml")]
-    clean = [item for item in relevant if not item["path"].endswith("unsafe.yml")]
+    hostile = [
+        item for item in relevant
+        if item["path"].endswith("unsafe.yml")
+    ]
+    clean = [
+        item for item in relevant
+        if not item["path"].endswith("unsafe.yml")
+    ]
     detected = {item["rule"] for item in hostile}
     return {
-        "check": "github-actions-untrusted-pr-flow-rules",
+        "check": "github-actions-untrusted-input-flow-rules",
         "passed": expected.issubset(detected) and not clean,
         "expected_rules": sorted(expected),
         "detected_rules": sorted(detected),

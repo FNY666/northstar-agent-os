@@ -56,6 +56,20 @@ def _run_blocks(lines: list[str]) -> list[tuple[int, int, str]]:
     return blocks
 
 
+def _job_bounds(lines: list[str], index: int) -> tuple[int, int]:
+    """Approximate the YAML job block containing a workflow line."""
+    job_header = re.compile(r"^\s{2}[A-Za-z0-9_-]+\s*:")
+    start = next((
+        row for row in range(index - 1, -1, -1)
+        if _indent(lines[row]) == 2 and job_header.match(lines[row])
+    ), 0)
+    end = next((
+        row for row in range(index + 1, len(lines))
+        if _indent(lines[row]) == 2 and job_header.match(lines[row])
+    ), len(lines))
+    return start, end
+
+
 def scan_workflow(relative: str, source: str) -> list[dict[str, Any]]:
     lines = source.splitlines()
     clean_lines = [_without_comment(line) for line in lines]
@@ -76,6 +90,10 @@ def scan_workflow(relative: str, source: str) -> list[dict[str, Any]]:
     pull_request_target = bool(
         re.search(r"(?m)^\s*on\s*:\s*[^\n]*\bpull_request_target\b", "\n".join(clean_lines))
         or re.search(r"(?m)^\s{2,}['\"]?pull_request_target['\"]?\s*:", "\n".join(clean_lines))
+    )
+    workflow_run = bool(
+        re.search(r"(?m)^\s*on\s*:\s*[^\n]*\bworkflow_run\b", "\n".join(clean_lines))
+        or re.search(r"(?m)^\s{2,}['\"]?workflow_run['\"]?\s*:", "\n".join(clean_lines))
     )
     if pull_request_target:
         checkout_lines = [
@@ -100,16 +118,7 @@ def scan_workflow(relative: str, source: str) -> list[dict[str, Any]]:
                 step_end += 1
             if ref_line is None:
                 continue
-            job_start = next((
-                index for index in range(checkout - 1, -1, -1)
-                if _indent(clean_lines[index]) == 2
-                and re.match(r"^\s{2}[A-Za-z0-9_-]+\s*:", clean_lines[index])
-            ), 0)
-            job_end = next((
-                index for index in range(checkout + 1, len(clean_lines))
-                if _indent(clean_lines[index]) == 2
-                and re.match(r"^\s{2}[A-Za-z0-9_-]+\s*:", clean_lines[index])
-            ), len(clean_lines))
+            job_start, job_end = _job_bounds(clean_lines, checkout)
             # Running any checked-out project script in the workflow makes this
             # checkout security-relevant; a checkout by itself only inspects data.
             has_run = any(
@@ -126,6 +135,25 @@ def scan_workflow(relative: str, source: str) -> list[dict[str, Any]]:
                 "privileged pull_request_target workflow checks out pull-request code and later runs workflow commands",
                 "Do not build or run pull-request code in pull_request_target. Use an unprivileged pull_request workflow, or keep privileged automation limited to metadata operations.",
             )
+
+    if workflow_run:
+        artifact_downloads = [
+            index for index, line in enumerate(clean_lines)
+            if re.search(r"(?i)\buses\s*:\s*actions/download-artifact(?:@|\s)", line)
+        ]
+        for download in artifact_downloads:
+            job_start, job_end = _job_bounds(clean_lines, download)
+            if any(
+                job_start + start - 1 > download
+                for start, _, _ in _run_blocks(clean_lines[job_start:job_end])
+            ):
+                add(
+                    download + 1,
+                    "CFG010_WORKFLOW_RUN_ARTIFACT_EXECUTION",
+                    "privileged workflow_run job downloads an upstream artifact and later runs commands in the same job",
+                    "Treat workflow_run artifacts as untrusted data. Validate and inspect contents; do not execute scripts or binaries from the downloaded artifact in a privileged job.",
+                )
+                break
 
     for start_line, _, body in _run_blocks(clean_lines):
         match = _UNTRUSTED_CONTEXT.search(body)
