@@ -212,6 +212,14 @@ class RoundTripTests(unittest.TestCase):
         self.assertEqual(result.status, "protocol_error")
         self.assertIn("non-JSON", result.error)
 
+    def test_ambiguous_json_is_a_protocol_error(self):
+        for raw in ('{"status":"ok","status":"timeout","text":"x"}',
+                    '{"status":"ok","text":NaN}'):
+            with self.subTest(raw=raw):
+                client, _ = client_with(raw)
+                result = client.execute("go")
+                self.assertEqual(result.status, "protocol_error")
+
     def test_response_fields_are_validated(self):
         cases = {
             "not a mapping": ([{"status": "ok"}], "sidecar response is not a JSON object"),

@@ -27,6 +27,16 @@ class EgressResponseBoundaryTests(unittest.TestCase):
         self.assertEqual(result.status, "protocol_error")
         self.assertIn("unknown status", result.errors[0])
 
+    def test_ambiguous_json_is_a_protocol_error(self):
+        for raw in ('{"request_id":"r","request_id":"other","status":"ok"}',
+                    '{"request_id":"r","status":NaN}'):
+            with self.subTest(raw=raw):
+                result = self._client(raw).request(
+                    agent_id="a", run_id="run", host="example.com", port=443,
+                    method="GET", path="/", request_id="r",
+                )
+                self.assertEqual(result.status, "protocol_error")
+
     def test_remote_diagnostics_are_screened(self):
         secret = "api_key=sk-1234567890abcdef"
         client = self._client(json.dumps({
