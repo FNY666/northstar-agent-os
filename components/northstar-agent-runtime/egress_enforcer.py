@@ -629,11 +629,11 @@ class EgressBudgetLedger:
             return True
 
 
-# These IPv6 formats can carry an internal IPv4 destination through a
-# globally classified transition address. Keep the guard stable across the
-# Python versions Northstar supports; in particular, is_global considers the
-# NAT64 well-known prefix globally reachable.
-_NON_GLOBAL_IPV6_TRANSITION_NETWORKS = tuple(
+# These IPv6 ranges can conceal or route to internal destinations while
+# Python classifies the address as global. Keep the guard stable across the
+# Python versions Northstar supports; the NAT64 well-known prefix is global
+# under is_global on every supported version.
+_NON_GLOBAL_IPV6_SPECIAL_NETWORKS = tuple(
     ipaddress.ip_network(prefix)
     for prefix in (
         "64:ff9b::/96",       # RFC 6052 well-known NAT64
@@ -645,7 +645,7 @@ _NON_GLOBAL_IPV6_TRANSITION_NETWORKS = tuple(
 
 
 def _ip_permitted(ip_text: str, rule: DestinationRule) -> bool:
-    """SSRF guard: require a globally reachable non-transition address by default."""
+    """SSRF guard: exclude known IPv6 translation and scoped ranges by default."""
     try:
         ip = ipaddress.ip_address(ip_text)
     except ValueError:
@@ -653,7 +653,7 @@ def _ip_permitted(ip_text: str, rule: DestinationRule) -> bool:
     if rule.allow_private_ips:
         return True
     if isinstance(ip, ipaddress.IPv6Address) and any(
-        ip in network for network in _NON_GLOBAL_IPV6_TRANSITION_NETWORKS
+        ip in network for network in _NON_GLOBAL_IPV6_SPECIAL_NETWORKS
     ):
         return False
     # Positive classification blocks ordinary private ranges and the shared
