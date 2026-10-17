@@ -193,6 +193,15 @@ static `render_template()` file do not trigger this flow rule. It does not resol
 custom wrappers or cross-function flows; autoescaping and sandboxing do not make
 untrusted template source safe.
 
+Python also receives `PY017_XSS_OUTPUT_FLOW` for untrusted values reaching
+Flask and Django HTML responses, Starlette / FastAPI `HTMLResponse`, or APIs that
+mark content safe with MarkupSafe `Markup` or Django `mark_safe`; it also checks
+tainted values returned directly from Flask `@route` handlers. It recognizes
+`html.escape`, MarkupSafe `escape`, and Django `escape`; static autoescaping
+templates do not trigger this rule. The analysis does not follow custom wrappers,
+template filters, or cross-function flows, and it does not model HTML subcontexts
+such as JavaScript or CSS.
+
 Go files also receive `GO001_UNTRUSTED_SSRF` and `GO002_PATH_TRAVERSAL` checks
 for standard `net/http`, chi/mux, and common Gin request values flowing through
 simple assignments to `net/http` client calls, `os` / `ioutil` file APIs,

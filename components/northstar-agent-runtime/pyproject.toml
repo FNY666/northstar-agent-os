@@ -1119,6 +1119,7 @@ py-modules = [
     "python_sql_sast",
     "python_ssrf_sast",
     "python_template_sast",
+    "python_xss_sast",
     "push_service",
     "quantum_timeline",
     "query_planner",
