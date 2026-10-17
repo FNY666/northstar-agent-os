@@ -400,11 +400,22 @@ class ChainResult:
 
 def _iter_records(lines: Iterable[str]) -> Iterator[tuple[int, dict[str, Any]]]:
     """Yield (physical_line_number, parsed_json) for non-blank lines."""
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON key {key!r}")
+            result[key] = value
+        return result
+
+    def reject_constant(value: str):
+        raise ValueError(f"non-standard JSON constant {value}")
+
     for number, raw in enumerate(lines, start=1):
         line = raw.strip()
         if not line:
             continue
-        yield number, json.loads(line)
+        yield number, json.loads(line, object_pairs_hook=unique_object, parse_constant=reject_constant)
 
 
 def verify_lines(
@@ -615,7 +626,7 @@ def verify_lines(
                             else:
                                 strict_seen_nonces[nonce] = number
                     strict_prev_epoch, strict_prev_ts = epoch, ts
-    except json.JSONDecodeError as error:
+    except (ValueError, RecursionError) as error:
         return ChainResult(ok=False, broken_at=None, reason=f"line is not valid JSON: {error}")
 
     if not record_count:
@@ -820,7 +831,7 @@ def check_anchor(path: str | Path, manifest: dict[str, Any]) -> tuple[bool, str]
             chain_hash = record.get("chain_hash")
             if isinstance(chain_hash, str):
                 head = chain_hash
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+    except (UnicodeDecodeError, ValueError, RecursionError) as error:
         return False, f"feed is not readable: {error}"
     if head != manifest.get("head_chain_hash"):
         return False, "head chain_hash differs from the anchor (rewritten history)"
@@ -903,8 +914,8 @@ def _verify_prefix(
             valid_bytes = offset
             continue
         try:
-            record = json.loads(line.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            record = next(_iter_records((line.decode("utf-8"),)))[1]
+        except (UnicodeDecodeError, ValueError, RecursionError) as exc:
             return last_chain, valid_bytes, records, f"line is not valid JSON ({exc}); truncating to last valid record"
         if not isinstance(record, dict):
             return last_chain, valid_bytes, records, "line is not a JSON object; truncating to last valid record"
@@ -1056,8 +1067,8 @@ class DurableAuditWriter:
                 if not line:
                     continue
                 try:
-                    record = json.loads(line.decode("utf-8"))
-                except (UnicodeDecodeError, json.JSONDecodeError):
+                    record = next(_iter_records((line.decode("utf-8"),)))[1]
+                except (UnicodeDecodeError, ValueError, RecursionError):
                     break
                 chain_hash = record.get("chain_hash") if isinstance(record, dict) else None
                 if isinstance(chain_hash, str) and _HEX64_RE.match(chain_hash):
