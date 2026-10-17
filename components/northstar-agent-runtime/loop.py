@@ -1019,13 +1019,12 @@ class AgentRuntime:
         """
         from defensive_agent import assess as assess_defensive, sanitize_for_model
 
-        # Keep a mutable copy so malformed imported records can be removed
-        # without mutating the durable transcript or the caller's sequence.
-        payload = list(copy.deepcopy(tuple(messages)))
+        # Filter record shapes before copying. A hostile non-message object
+        # must not reach ``deepcopy`` and execute a caller-defined copy hook.
+        raw_messages = tuple(messages)
+        malformed_count = sum(not isinstance(message, dict) for message in raw_messages)
+        payload = [copy.deepcopy(message) for message in raw_messages if isinstance(message, dict)]
         findings: list[Any] = []
-        malformed_count = sum(not isinstance(message, dict) for message in payload)
-        if malformed_count:
-            payload = [message for message in payload if isinstance(message, dict)]
         changed = bool(malformed_count)
 
         def screen_text(value: Any) -> Any:
