@@ -12,6 +12,7 @@ import importlib.util
 import json
 import os
 import platform
+import re
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,17 @@ if SPEC is None or SPEC.loader is None:
     raise RuntimeError(f"cannot load {RUNNER_PATH}")
 RUNNER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(RUNNER)
+
+
+def _require_node24(version: str) -> None:
+    """Reject unsupported TypeScript control environments before running fixtures."""
+    match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?", version.strip())
+    if match is None:
+        raise ValueError("Node toolchain probe returned an invalid version")
+    if int(match.group(1)) < 24:
+        raise ValueError(
+            f"TypeScript fixture controls require Node.js >=24; found {version.strip()}"
+        )
 
 
 def check_task(task_id: str) -> dict[str, Any]:
@@ -148,6 +160,7 @@ def run_controls(
         if probe["exit_code"] != 0:
             raise ValueError("Node toolchain probe failed or timed out")
         node_version = probe["output"].strip()
+        _require_node24(node_version)
     rows: list[dict[str, Any]] = []
     report: dict[str, Any] = {
         "schema": "northstar.code-task-controls.v1",

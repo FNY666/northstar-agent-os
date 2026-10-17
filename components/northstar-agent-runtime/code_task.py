@@ -262,7 +262,7 @@ class CodePhaseMachine:
         error_class: str = "",
     ) -> None:
         """Close one effect receipt; a crash before this call leaves it unknown."""
-        if status not in {"completed", "failed", "unknown"}:
+        if status not in {"completed", "denied", "failed", "unknown"}:
             raise CodeTaskError(f"invalid effect completion status: {status}")
         with self._lock:
             effect = next(
@@ -426,6 +426,7 @@ def _current_patch(worktree: Path) -> bytes:
         worktree,
         "diff",
         "--binary",
+        "--no-color",
         "--no-ext-diff",
         "--full-index",
         "HEAD",
@@ -729,7 +730,7 @@ def reconcile_code_evidence(evidence_dir: str | Path) -> dict[str, Any]:
         if not effect_id or effect_id in seen_effect_ids:
             integrity_errors.append(f"effect {index + 1} has a missing or duplicate id")
         seen_effect_ids.add(effect_id)
-        if status not in {"in_flight", "completed", "failed", "unknown"}:
+        if status not in {"in_flight", "completed", "denied", "failed", "unknown"}:
             integrity_errors.append(f"effect {effect_id or index + 1} has an invalid status")
         if raw_effect.get("sequence") != index + 1:
             integrity_errors.append(f"effect {effect_id or index + 1} has an invalid sequence")

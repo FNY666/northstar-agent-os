@@ -128,6 +128,10 @@ class ToolAccessError(RuntimeError):
     """Raised by the sandbox; converted into an errored tool_result, never a crash."""
 
 
+class ToolWriteDenied(ToolAccessError):
+    """A write target was refused during path preflight, before mutation began."""
+
+
 class ToolInputError(ValueError):
     """Raised for a malformed tool payload; reported to the model as an error."""
 
@@ -192,9 +196,14 @@ class ToolContext:
     services: Mapping[str, Any] = field(default_factory=dict)
 
     def resolve(self, raw: Any, *, for_write: bool = False, must_exist: bool = False) -> Path:
-        if self.sandbox is None:
-            raise ToolAccessError("this tool context has no workspace sandbox")
-        return self.sandbox.resolve(raw, for_write=for_write, must_exist=must_exist)
+        try:
+            if self.sandbox is None:
+                raise ToolAccessError("this tool context has no workspace sandbox")
+            return self.sandbox.resolve(raw, for_write=for_write, must_exist=must_exist)
+        except ToolAccessError as error:
+            if for_write:
+                raise ToolWriteDenied(str(error)) from error
+            raise
 
     def relative(self, path: Path) -> str:
         """Workspace-relative display path; never leaks a resolved absolute path into output."""
@@ -1901,6 +1910,7 @@ __all__ = [
     "MAX_READ_BYTES",
     "MAX_TOOL_RESULT_CHARS",
     "ToolAccessError",
+    "ToolWriteDenied",
     "ToolContext",
     "ToolInputError",
     "ToolKind",
@@ -1923,4 +1933,3 @@ __all__ = [
 
 # Submodules used by doctor / CLI / tests (explicit re-exports keep import paths stable).
 # os_sandbox and shell are part of the public tools surface for the product path.
-

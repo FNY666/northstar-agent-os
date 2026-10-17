@@ -101,6 +101,7 @@ from sidecar_client import SIDECAR_MAX_TIMEOUT_MS, SIDECAR_MIN_TIMEOUT_MS, Sidec
 from tools import (
     MAX_TOOL_RESULT_CHARS,
     ToolContext,
+    ToolWriteDenied,
     ToolLimits,
     ToolRegistry,
     ToolResult,
@@ -3668,6 +3669,14 @@ class AgentRuntime:
             effect_id = phases.begin_execution(tool=spec.name, call_id=call_id)
         try:
             result = spec.handler(payload, context)
+        except ToolWriteDenied as error:
+            if effect_id is not None:
+                phases.complete_execution(
+                    effect_id,
+                    status="denied",
+                    error_class=type(error).__name__,
+                )
+            raise
         except BaseException as error:
             if effect_id is not None:
                 phases.complete_execution(

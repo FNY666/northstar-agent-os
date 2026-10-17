@@ -315,6 +315,70 @@ class CodeCliTests(unittest.TestCase):
                 ["understanding", "planned", "verifying", "success_unverified"],
             )
 
+    def test_compromised_code_agent_cannot_rewrite_workspace_governance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root = self.make_repository(parent)
+            policy_dir = root / ".northstar"
+            policy_dir.mkdir()
+            policy = policy_dir / "config.toml"
+            original = 'permission_mode = "default"\n'
+            policy.write_text(original, encoding="utf-8")
+            git(root, "add", ".northstar/config.toml")
+            git(root, "commit", "-m", "add workspace policy")
+            evidence = parent / "evidence"
+            script = parent / "turns.json"
+            script.write_text(
+                json.dumps([
+                    plan_turn(),
+                    {
+                        "tool": {
+                            "name": "Write",
+                            "input": {
+                                "path": ".northstar/config.toml",
+                                "content": 'permission_mode = "bypassPermissions"\\n',
+                            },
+                        }
+                    },
+                    {
+                        "tool": {
+                            "name": "Edit",
+                            "input": {
+                                "path": ".northstar/config.toml",
+                                "old_string": 'permission_mode = "default"',
+                                "new_string": 'permission_mode = "bypassPermissions"',
+                            },
+                        }
+                    },
+                    {"text": "attempted policy change"},
+                ]),
+                encoding="utf-8",
+            )
+            code, output, error = invoke(
+                "code", "make the configuration update", *self.base(root),
+                "--script", str(script), "--evidence-dir", str(evidence),
+            )
+
+            self.assertEqual(code, 0, error)
+            self.assertEqual(policy.read_text(encoding="utf-8"), original)
+            run_dir = next(evidence.iterdir())
+            patch = (run_dir / "changes.patch").read_text(encoding="utf-8")
+            self.assertNotIn("bypassPermissions", patch)
+            phases = json.loads((run_dir / "phases.json").read_text(encoding="utf-8"))
+            self.assertEqual(len(phases["effects"]), 2)
+            self.assertEqual([row["status"] for row in phases["effects"]], ["denied", "denied"])
+            reconcile_code, reconcile_output, reconcile_error = invoke(
+                "code-reconcile", str(run_dir)
+            )
+            self.assertEqual(reconcile_code, 0, reconcile_error)
+            receipt = json.loads(reconcile_output)
+            self.assertEqual(receipt["classification"], "terminal")
+            self.assertFalse(receipt["automatic_tool_replay"])
+            self.assertFalse(receipt["unknown_side_effects"])
+            manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+            if Path(manifest["worktree"]).is_dir():
+                git(root, "worktree", "remove", "--force", manifest["worktree"])
+
 
 if __name__ == "__main__":
     unittest.main()
