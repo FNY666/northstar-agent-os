@@ -62,10 +62,10 @@ class T5DocStatusTests(unittest.TestCase):
             with self.subTest(doc=name):
                 self.assertTrue(path.is_file(), f"{name} doc missing: {path}")
 
-    def test_transport_doc_declares_itself_a_specification(self):
+    def test_transport_doc_declares_profile_a_helper_and_real_host_boundary(self):
         text = _norm(DOCS["transport"].read_text(encoding="utf-8"))
-        for marker in ("Status: specification only", "No transport code ships",
-                       "a spec is not", "has ever run against a real host"):
+        for marker in ("Status: Profile A helper implemented",
+                       "managed transport not shipped", "has run against a real host"):
             with self.subTest(marker=marker):
                 self.assertIn(marker, text)
 
@@ -312,17 +312,16 @@ class T5LivingScoreSyncTests(unittest.TestCase):
     def test_living_docs_carry_the_current_score(self):
         for relative in self.LIVING_DOCS:
             with self.subTest(doc=relative):
-                self.assertIn("94/100", (ROOT / relative).read_text(encoding="utf-8"))
+                self.assertIn("97/100", (ROOT / relative).read_text(encoding="utf-8"))
 
     def test_ops_percentage_phrasing_is_consistent(self):
         concept = (ROOT / "docs/concepts/northstar-remote-worker.md").read_text(encoding="utf-8")
         assessment = (ROOT / "docs/dx-remote-worker-assessment.zh-CN.md").read_text(encoding="utf-8")
-        self.assertIn("ops 4/6 = 67%", concept)
-        self.assertIn("ops **67**", assessment)
-        self.assertIn("ops 67%", (ROOT / "components/northstar-agent-interop/README.md").read_text(encoding="utf-8"))
+        self.assertIn("ops 5/6 = 83%", concept)
+        self.assertIn("ops **83**", assessment)
+        self.assertIn("ops 83%", (ROOT / "components/northstar-agent-interop/README.md").read_text(encoding="utf-8"))
 
-    def test_remaining_gaps_are_the_two_implementation_items(self):
+    def test_remaining_gap_is_the_real_host_canary(self):
         concept = (ROOT / "docs/concepts/northstar-remote-worker.md").read_text(encoding="utf-8")
-        for marker in ("network transport", "real (non-fake) end-to-end canary"):
-            with self.subTest(marker=marker):
-                self.assertIn(marker, concept)
+        self.assertNotIn("network transport *code*", concept)
+        self.assertIn("real (non-fake) end-to-end canary", concept)

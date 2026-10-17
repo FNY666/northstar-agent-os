@@ -70,6 +70,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "process_adapter",
         "process_backend",
         "remote_worker",
+        "remote_transport",
     ),
     "northstar-codex-sidecar": ("sidecar", "transport", "service", "sidecar_socket"),
     "northstar-egress-sidecar": ("egress_sidecar", "egress_socket", "transport"),
