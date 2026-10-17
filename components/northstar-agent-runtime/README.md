@@ -178,6 +178,14 @@ sink heuristic can still mark `cursor.execute()` sites for review. The flow rule
 does not follow values across function boundaries or prove that a custom query
 builder safely quotes identifiers.
 
+Python also receives `PY015_UNSAFE_DESERIALIZATION_FLOW` for untrusted values
+reaching `pickle`, `dill`, `cloudpickle`, `joblib`, or unsafe PyYAML loaders.
+The flow rule excludes `yaml.safe_load()` and explicit `SafeLoader` /
+`CSafeLoader` calls. The existing `PY003` sink heuristic can still mark any
+`yaml.load()` call site, including one that specifies a safe loader. The flow
+rule does not follow values across function boundaries or verify that
+serialized data is authenticated before loading.
+
 Go files also receive `GO001_UNTRUSTED_SSRF` and `GO002_PATH_TRAVERSAL` checks
 for standard `net/http`, chi/mux, and common Gin request values flowing through
 simple assignments to `net/http` client calls, `os` / `ioutil` file APIs,
