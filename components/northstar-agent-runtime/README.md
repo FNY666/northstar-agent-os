@@ -140,7 +140,10 @@ dependency source and pinning; and selected Docker, Compose, Kubernetes,
 GitHub Actions, and Terraform risks. These agent-surface checks reuse the local
 skill audit and MCP admission rules. They are static triage, do not execute
 skills or server commands, and omit matched instruction, endpoint, environment,
-and secret values from findings. Shell checks are heuristics for dynamic `eval`,
+and secret values from findings. Actions workflow checks flag pull-request-head
+checkout plus later `run` under `pull_request_target`, and direct untrusted event
+text in `run` blocks. They do not fully parse YAML or prove whether a command
+executes checked-out code. Shell checks are heuristics for dynamic `eval`,
 expanded `sh -c` commands, and direct remote-script pipelines; they join explicit
 backslash continuations but do not parse Shell syntax or follow variables. The human summary and JSON receipt report how
 many recognized instruction files and MCP servers were scanned.

@@ -498,6 +498,7 @@ def _scan_root(
     from python_xss_sast import scan_source as scan_python_xss_source
     from python_redirect_sast import scan_source as scan_python_redirect_source
     from go_sast import scan_source as scan_go_source
+    from github_actions_sast import scan_workflow as scan_github_actions_workflow
     from shell_sast import scan_source as scan_shell_source
 
     root = root.resolve()
@@ -582,6 +583,9 @@ def _scan_root(
                 add_finding(item)
         for item in scan_agent_config(relative, text):
             add_finding(item)
+        if relative.startswith(".github/workflows/"):
+            for item in scan_github_actions_workflow(relative, text):
+                add_finding(item)
         if is_mcp_config_path(relative):
             mcp_findings, server_count = scan_mcp_config_text(relative, text)
             mcp_servers_scanned += server_count
@@ -1064,6 +1068,59 @@ def _probe_agent_surface_scanner() -> dict[str, Any]:
         "clean_mcp_findings": len(clean_mcp),
         "sensitive_values_omitted": no_sensitive_echo,
         "scope": "in-memory hostile and clean fixtures only; no skills or MCP servers are executed",
+    }
+
+
+def _probe_github_actions_scanner() -> dict[str, Any]:
+    """Check privileged pull-request and direct script-injection detection."""
+    checkout_sha = "0123456789abcdef0123456789abcdef01234567"
+    unsafe = "\n".join([
+        "name: unsafe", "on:", "  pull_request_target:", "jobs:", "  build:",
+        "    steps:", f"      - uses: actions/checkout@{checkout_sha}", "        with:",
+        "          ref: ${{ github.event.pull_request.head.sha }}", "      - run: make test",
+        "      - name: print title", "        run: echo \"${{ github.event.pull_request.title }}\"",
+    ])
+    safe = "\n".join([
+        "name: safe", "on:", "  pull_request:", "jobs:", "  build:", "    steps:",
+        f"      - uses: actions/checkout@{checkout_sha}", "      - name: print title as data",
+        "        env:", "          PR_TITLE: ${{ github.event.pull_request.title }}",
+        "        run: echo \"$PR_TITLE\"",
+    ])
+    metadata_only = "\n".join([
+        "name: metadata-only", "on:", "  pull_request_target:", "jobs:", "  label:",
+        "    steps:", "      - uses: actions/github-script@0123456789abcdef0123456789abcdef01234567",
+    ])
+    expected = {
+        "CFG008_PULL_REQUEST_TARGET_UNTRUSTED_CHECKOUT",
+        "CFG009_ACTIONS_UNTRUSTED_RUN_EXPRESSION",
+    }
+    with tempfile.TemporaryDirectory(prefix="northstar-actions-sast-") as temporary:
+        workflows = Path(temporary) / ".github" / "workflows"
+        workflows.mkdir(parents=True)
+        (workflows / "unsafe.yml").write_text(unsafe, encoding="utf-8")
+        (workflows / "safe.yml").write_text(safe, encoding="utf-8")
+        (workflows / "metadata.yml").write_text(metadata_only, encoding="utf-8")
+        summary = _scan_root(
+            Path(temporary),
+            max_files=20,
+            max_file_bytes=256 * 1024,
+            fail_on="none",
+            max_findings=100,
+        )
+    relevant = [
+        item for item in summary["findings"]
+        if item["rule"] in expected
+    ]
+    hostile = [item for item in relevant if item["path"].endswith("unsafe.yml")]
+    clean = [item for item in relevant if not item["path"].endswith("unsafe.yml")]
+    detected = {item["rule"] for item in hostile}
+    return {
+        "check": "github-actions-untrusted-pr-flow-rules",
+        "passed": expected.issubset(detected) and not clean,
+        "expected_rules": sorted(expected),
+        "detected_rules": sorted(detected),
+        "clean_fixture_findings": len(clean),
+        "scope": "temporary workflow YAML fixtures scanned as text; never executed and automatically removed",
     }
 
 
@@ -2158,6 +2215,7 @@ def _probe_runtime() -> dict[str, Any]:
         absent = all(not path.exists() for path in canaries)
         defense_checks = [
             _probe_agent_surface_scanner(),
+            _probe_github_actions_scanner(),
             _probe_kubernetes_scanner(),
             _probe_python_command_scanner(),
             _probe_shell_scanner(),

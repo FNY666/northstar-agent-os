@@ -26,6 +26,12 @@ Northstar 已有源码 SAST、依赖/部署配置检查、MCP 准入扫描、ski
 - 这些规则自然进入既有 `--security-gate` 的基线/新增发现比较，因此仍然由运行宿主判定，agent 无法用自述覆盖门禁。发现只表示需审查，不授予修复或外部操作权限。
 - `SecurityProbe` 增加固定的恶意与干净内存样例，覆盖指令注入、环境秘密暴露、Codex/Claude/Cursor 高风险权限配置、MCP 描述注入、未固定包、敏感字段不回显；样例不执行，也不接触用户文件。
 
+## GitHub Actions 的两类不可信输入流
+
+GitHub 官方文档明确说明，`pull_request_target` 使用基仓库的高信任权限；若再 checkout 并运行 fork PR 的代码，攻击者可借 PR 中的 Makefile、构建脚本或依赖在该权限下执行。另一类常见边界是将 `github.event.pull_request.title`、`body` 等不可信上下文直接插入 `run:` 脚本源。对应参考：[Securely using `pull_request_target`](https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target) 与 [Script injections](https://docs.github.com/en/actions/concepts/security/script-injections)。
+
+Northstar 新增 `CFG008_PULL_REQUEST_TARGET_UNTRUSTED_CHECKOUT`，在 `pull_request_target` 中发现 PR head/ref checkout 且同一 job 后续存在 `run` 步骤时提示；新增 `CFG009_ACTIONS_UNTRUSTED_RUN_EXPRESSION`，检测不可信事件字段直接插入 `run` 块。运行时探针只扫描固定的临时 YAML 文本，不启动 workflow、action 或脚本。当前分析是有限文本启发式：不完整解析 YAML 表达式、复合 action、跨 job 数据流、远程 action 内部实现，也不能证明某 `run` 是否实际执行 checkout 代码；结果应作为人工审查线索。
+
 静态扫描无法可靠判断自然语言的真实意图、跨文件/远程技能依赖或运行时工具行为，也不能把“未匹配规则”解释为安全。MCP 服务器 package blocklist 是本地知识而非实时漏洞数据库。后续优先级仍是加强编程任务的独立验证和攻防工具的可复现覆盖；不先扩张到图像/音频/视频能力。
 
 ## 后续持续检索队列
