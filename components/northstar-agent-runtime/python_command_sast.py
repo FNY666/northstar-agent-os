@@ -4,7 +4,8 @@ The analyzer tracks simple values from common request, CLI, environment, and
 interactive input sources to shell-backed process APIs. It handles multiline
 calls, assignments, f-strings, imports, basic control-flow joins, and bounded
 calls to direct same-file functions and explicitly named methods in top-level
-classes. It remains a heuristic: it does not
+classes, including direct `self` / `cls` field flow into called helpers. It
+remains a heuristic: it does not
 resolve inherited or dynamic method dispatch, cross-file or dynamic-alias flows,
 custom sanitizers, or whether non-shell subprocess arguments are dangerous.
 """
@@ -25,6 +26,7 @@ REMEDIATION = (
 _MAX_SOURCE_BYTES = 1024 * 1024
 _MAX_AST_NODES = 50_000
 _MAX_HELPER_DEPTH = 6
+_FIELD_ENV_PREFIX = "$northstar_field$"
 _SUBPROCESS_SINKS = {
     "subprocess.run", "subprocess.call", "subprocess.Popen",
     "subprocess.check_call", "subprocess.check_output",
@@ -139,6 +141,9 @@ class _Analyzer:
             return _Taint(source_line)
         if isinstance(node, ast.Name):
             return env.get(node.id)
+        field_key = self._field_key(node)
+        if field_key is not None:
+            return env.get(field_key)
         if isinstance(node, ast.Call):
             name = self._canonical_name(node.func)
             if name in _SUBPROCESS_SINKS | _DIRECT_SHELL_SINKS:
@@ -151,6 +156,16 @@ class _Analyzer:
         origins = [self._taint(child, env) for child in ast.iter_child_nodes(node)]
         tainted = [origin for origin in origins if origin is not None]
         return min(tainted, key=lambda origin: origin.source_line) if tainted else None
+
+    def _field_key(self, node: ast.AST) -> str | None:
+        if (
+            self._current_class is None
+            or not isinstance(node, ast.Attribute)
+            or not isinstance(node.value, ast.Name)
+            or node.value.id not in {"self", "cls"}
+        ):
+            return None
+        return f"{_FIELD_ENV_PREFIX}{self._current_class}:{node.value.id}:{node.attr}"
 
     def _function_name(self, call: ast.Call) -> str | None:
         if isinstance(call.func, ast.Name):
@@ -226,6 +241,13 @@ class _Analyzer:
                 if taint is not None:
                     environment[parameter.arg] = taint
 
+        field_prefix = self._shared_field_prefix(call, function)
+        if field_prefix is not None:
+            environment.update({
+                key: taint for key, taint in caller_env.items()
+                if key.startswith(field_prefix)
+            })
+
         # A starred tuple can fill any remaining positional slot. Preserve the
         # flow conservatively rather than assuming the first slot is the only
         # destination when the number of expanded values is unknown.
@@ -257,6 +279,38 @@ class _Analyzer:
                     if previous is None or origin.source_line < previous.source_line:
                         environment[parameter.arg] = origin
         return environment
+
+    def _shared_field_prefix(
+        self,
+        call: ast.Call,
+        function: ast.FunctionDef | ast.AsyncFunctionDef,
+    ) -> str | None:
+        name = self._function_name(call)
+        class_name = self._function_classes.get(name or "")
+        if class_name is None or class_name != self._current_class:
+            return None
+        if self._is_staticmethod(function):
+            return None
+
+        field_owner: str | None = None
+        if self._is_classmethod(function):
+            field_owner = "cls"
+        elif isinstance(call.func, ast.Attribute) and isinstance(call.func.value, ast.Name):
+            receiver = call.func.value.id
+            if receiver == "self":
+                field_owner = "self"
+            elif (
+                receiver in self._local_classes
+                and call.args
+                and isinstance(call.args[0], ast.Name)
+                and call.args[0].id == "self"
+            ):
+                # A direct unbound call passes the current instance explicitly.
+                field_owner = "self"
+        if field_owner is None:
+            return None
+
+        return f"{_FIELD_ENV_PREFIX}{class_name}:{field_owner}:"
 
     def _local_call_result(
         self, call: ast.Call, caller_env: dict[str, _Taint]
@@ -309,9 +363,18 @@ class _Analyzer:
             return [name for child in target.elts for name in _Analyzer._target_names(child)]
         return []
 
+    def _tracked_target_keys(self, target: ast.AST) -> list[str]:
+        if isinstance(target, (ast.Tuple, ast.List)):
+            return [key for child in target.elts for key in self._tracked_target_keys(child)]
+        names = self._target_names(target)
+        field_key = self._field_key(target)
+        if field_key is not None:
+            names.append(field_key)
+        return names
+
     def _assign(self, target: ast.AST, value: ast.AST | None, env: dict[str, _Taint]) -> None:
         taint = self._taint(value, env)
-        for name in self._target_names(target):
+        for name in self._tracked_target_keys(target):
             if taint is None:
                 env.pop(name, None)
             else:
@@ -407,15 +470,20 @@ class _Analyzer:
                     self._assign(target, statement.value, env)
             elif isinstance(statement, ast.AnnAssign):
                 self._expression(statement.value, env)
-                self._assign(statement.target, statement.value, env)
+                if statement.value is not None:
+                    self._assign(statement.target, statement.value, env)
             elif isinstance(statement, ast.AugAssign):
                 self._expression(statement.value, env)
                 origin = self._taint(statement.target, env) or self._taint(statement.value, env)
-                for name in self._target_names(statement.target):
+                for name in self._tracked_target_keys(statement.target):
                     if origin is None:
                         env.pop(name, None)
                     else:
                         env[name] = origin
+            elif isinstance(statement, ast.Delete):
+                for target in statement.targets:
+                    for name in self._tracked_target_keys(target):
+                        env.pop(name, None)
             elif isinstance(statement, ast.Expr):
                 self._expression(statement.value, env)
             elif isinstance(statement, (ast.Return, ast.Raise, ast.Assert)):
