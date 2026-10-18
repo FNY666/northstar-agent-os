@@ -15,6 +15,9 @@ _UNTRUSTED_CONTEXT = re.compile(
     r"\$\{\{\s*github\.(?:event\.)?"
     r"(?:pull_request|issue|comment|discussion|review)\."
     r"(?:title|body|head_ref|ref|label|message|name|email)\s*\}\}"
+    r"|\$\{\{\s*github\.event\.pull_request\.head\.(?:ref|label)\s*\}\}"
+    r"|\$\{\{\s*github\.event\.workflow_run\."
+    r"(?:head_branch|head_commit\.message)\s*\}\}"
     r"|\$\{\{\s*github\.(?:head_ref|ref|event\.ref|event\.head_commit\.message)\s*\}\}",
     re.IGNORECASE,
 )

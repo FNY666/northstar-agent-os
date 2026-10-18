@@ -1096,6 +1096,10 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         "          repository: ${{ github.event.pull_request.head.repo.full_name }}",
         "          ref: ${{ github.event.pull_request.head.ref }}", "      - run: make test",
     ])
+    pr_head_ref_injection = "\n".join([
+        "name: unsafe-pr-head-ref", "on:", "  pull_request:", "jobs:", "  print:", "    steps:",
+        "      - run: echo '${{ github.event.pull_request.head.ref }}'",
+    ])
     workflow_run_unsafe = "\n".join([
         "name: downstream", "on:", "  workflow_run:", "    workflows: [Build]", "    types: [completed]",
         "jobs:", "  privileged:", "    steps:",
@@ -1107,6 +1111,17 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         "jobs:", "  inspect:", "    steps:",
         "      - uses: actions/download-artifact@0123456789abcdef0123456789abcdef01234567",
         "        with:", "          name: build-output", "      - uses: actions/upload-artifact@0123456789abcdef0123456789abcdef01234567",
+    ])
+    workflow_run_injection_unsafe = "\n".join([
+        "name: unsafe-workflow-run-branch", "on:", "  workflow_run:", "    workflows: [Build]",
+        "    types: [completed]", "jobs:", "  comment:", "    steps:",
+        "      - run: echo '${{ github.event.workflow_run.head_branch }}'",
+    ])
+    workflow_run_injection_safe = "\n".join([
+        "name: safe-workflow-run-branch", "on:", "  workflow_run:", "    workflows: [Build]",
+        "    types: [completed]", "jobs:", "  comment:", "    steps:",
+        "      - name: print branch as data", "        env:",
+        "          BRANCH: ${{ github.event.workflow_run.head_branch }}", "        run: echo \"$BRANCH\"",
     ])
     shell_fetch_unsafe = "\n".join([
         "name: privileged-shell-fetch", "on:", "  issue_comment:", "    types: [created]", "jobs:", "  test:",
@@ -1127,8 +1142,11 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         (workflows / "safe.yml").write_text(safe, encoding="utf-8")
         (workflows / "metadata.yml").write_text(metadata_only, encoding="utf-8")
         (workflows / "fork-repository-unsafe.yml").write_text(fork_repository, encoding="utf-8")
+        (workflows / "pr-head-ref-unsafe.yml").write_text(pr_head_ref_injection, encoding="utf-8")
         (workflows / "workflow-run-unsafe.yml").write_text(workflow_run_unsafe, encoding="utf-8")
         (workflows / "workflow-run-data-only.yml").write_text(workflow_run_data_only, encoding="utf-8")
+        (workflows / "workflow-run-injection-unsafe.yml").write_text(workflow_run_injection_unsafe, encoding="utf-8")
+        (workflows / "workflow-run-injection-safe.yml").write_text(workflow_run_injection_safe, encoding="utf-8")
         (workflows / "shell-fetch-unsafe.yml").write_text(shell_fetch_unsafe, encoding="utf-8")
         summary = _scan_root(
             Path(temporary),
@@ -1150,11 +1168,33 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         if not item["path"].endswith(("unsafe.yml", "fork-repository-unsafe.yml"))
     ]
     detected = {item["rule"] for item in hostile}
+    required_fixture_rules = {
+        "unsafe.yml": {
+            "CFG008_PULL_REQUEST_TARGET_UNTRUSTED_CHECKOUT",
+            "CFG009_ACTIONS_UNTRUSTED_RUN_EXPRESSION",
+        },
+        "fork-repository-unsafe.yml": {"CFG008_PULL_REQUEST_TARGET_UNTRUSTED_CHECKOUT"},
+        "pr-head-ref-unsafe.yml": {"CFG009_ACTIONS_UNTRUSTED_RUN_EXPRESSION"},
+        "workflow-run-unsafe.yml": {"CFG010_WORKFLOW_RUN_ARTIFACT_EXECUTION"},
+        "workflow-run-injection-unsafe.yml": {"CFG009_ACTIONS_UNTRUSTED_RUN_EXPRESSION"},
+        "shell-fetch-unsafe.yml": {"CFG011_PRIVILEGED_PR_CODE_FETCH"},
+    }
+    per_fixture = {
+        filename: {
+            item["rule"] for item in hostile if item["path"].endswith(filename)
+        }
+        for filename in required_fixture_rules
+    }
+    fixture_coverage = all(
+        rules.issubset(per_fixture[filename])
+        for filename, rules in required_fixture_rules.items()
+    )
     return {
         "check": "github-actions-untrusted-input-flow-rules",
-        "passed": expected.issubset(detected) and not clean,
+        "passed": expected.issubset(detected) and fixture_coverage and not clean,
         "expected_rules": sorted(expected),
         "detected_rules": sorted(detected),
+        "fixture_coverage": fixture_coverage,
         "clean_fixture_findings": len(clean),
         "scope": "temporary workflow YAML fixtures scanned as text; never executed and automatically removed",
     }
