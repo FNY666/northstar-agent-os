@@ -513,6 +513,13 @@ python3 -m cli run --workspace . --prompt "summarise the files" \
   operator names it with `--allow-tool` (or a policy file denies it, which
   stays terminal). MCP is a tool *transport*; permission decisions remain in
   the three-layer gate and every call still fires the hooks.
+- Remote descriptions are untrusted model input. The client screens them for
+  instruction-coercion signals at admission, pins the full tool definition,
+  and withholds flagged prose from the model while recording the finding.
+  Coercive JSON Schema annotation text is removed; if a functional schema
+  string matches the same signals, the tool is omitted from the model's tool
+  list rather than having its contract rewritten. The heuristic only covers
+  known patterns; it is not a proof that unflagged content is safe.
 - **A server that wants something from a human goes through the approval gate,
   not around it.** The 2026-07-28 revision forbids servers from initiating
   JSON-RPC requests, so `elicitation/create`, `sampling/createMessage` and

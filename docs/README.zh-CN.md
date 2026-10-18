@@ -20,6 +20,7 @@ Northstar 面向希望**把活交给 AI 同事**、并要求其在明确边界�
 产品脊梁与路线图：[next-gen-agent-os.zh-CN.md](next-gen-agent-os.zh-CN.md)。  
 对标全球顶级 agent：[benchmark-top-agents-2026-09.zh-CN.md](benchmark-top-agents-2026-09.zh-CN.md)（2026-09 本地实测版）、[benchmark-top-agents-2026-10.zh-CN.md](benchmark-top-agents-2026-10.zh-CN.md)（2026-10 公开资料横向调研版）。
 开发者入门与代码学习路径：[按工程师的方式学习 Northstar 代码](guides/codebase-learning-northstar.zh-CN.md)。
+Agent runtime 生态与安全调研：[Agent Runtime 生态与安全做法（2026-10）](research/agent-runtime-ecosystem-2026-10.zh-CN.md)。
 
 ## 当前发布了什么
 

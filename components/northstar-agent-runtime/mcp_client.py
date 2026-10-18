@@ -192,6 +192,47 @@ def coercion_severity(hits: list[tuple[str, str]]) -> int:
     return sum(weights.get(name, 0) for name, _text in hits)
 
 
+def _model_safe_input_schema(schema: Mapping[str, Any]) -> tuple[dict[str, Any], bool, bool]:
+    """Redact poisoned schema annotations or flag a tool as unsafe to expose.
+
+    Descriptive JSON Schema metadata is removed when it contains coercive
+    instructions. A hit in a functional string value (for example an enum,
+    default, or pattern) cannot be removed without changing the tool contract,
+    so the caller must keep the tool out of the model's available tool list.
+    """
+    metadata_keys = {"description", "title", "$comment", "examples"}
+    redacted = False
+    blocked = False
+
+    def has_coercion(value: Any) -> bool:
+        if isinstance(value, str):
+            return bool(scan_description_coercion(value))
+        if isinstance(value, Mapping):
+            return any(has_coercion(item) for item in value.values())
+        if isinstance(value, list):
+            return any(has_coercion(item) for item in value)
+        return False
+
+    def visit(value: Any, *, metadata: bool = False) -> Any:
+        nonlocal redacted, blocked
+        if isinstance(value, Mapping):
+            result: dict[str, Any] = {}
+            for raw_key, item in value.items():
+                key = str(raw_key)
+                if key.casefold() in metadata_keys and has_coercion(item):
+                    redacted = True
+                    continue
+                result[key] = visit(item, metadata=key.casefold() in metadata_keys)
+            return result
+        if isinstance(value, list):
+            return [visit(item, metadata=metadata) for item in value]
+        if isinstance(value, str) and scan_description_coercion(value) and not metadata:
+            blocked = True
+        return value
+
+    return visit(schema), blocked, redacted
+
+
 @dataclass
 class ToolDrift:
     """One tool definition that drifted from the admission baseline."""
@@ -1135,11 +1176,47 @@ def mcp_tool_specs(client: McpStdioClient) -> tuple[ToolSpec, ...]:
     for name in client.tool_names():
         remote = client.tool(name)
         tool_name = f"{MCP_NAME_RE}{client.name}__{name}"
+        safe_schema, schema_blocked, schema_redacted = _model_safe_input_schema(
+            remote.input_schema or {"type": "object", "properties": {}}
+        )
+        if schema_blocked:
+            if callable(client.audit):
+                client.audit({
+                    "type": "mcp.coercion_screen",
+                    "server": client.name,
+                    "tool": name,
+                    "surface": "input_schema_functional_string",
+                    "severity": 3,
+                    "action": "withheld_from_model",
+                })
+            continue
+        if schema_redacted and callable(client.audit):
+            client.audit({
+                "type": "mcp.coercion_screen",
+                "server": client.name,
+                "tool": name,
+                "surface": "input_schema_metadata",
+                "severity": 3,
+                "action": "metadata_redacted",
+            })
+        description = remote.description
+        if scan_description_coercion(description):
+            # Admission-time findings were already emitted to the audit sink.
+            # Do not also feed instruction-like server text to the model: a
+            # poisoned description can steer calls to other tools before the
+            # permission gate sees any proposal. The schema and actual tool
+            # remain intact; only the untrusted natural-language field is
+            # withheld from model context.
+            description = (
+                f"MCP tool {name!r} from server {client.name!r}. "
+                "Its server-provided description was withheld because it "
+                "contains instruction-like text."
+            )
         specs.append(
             ToolSpec(
                 name=tool_name,
-                description=f"MCP tool via server '{client.name}': {remote.description}",
-                input_schema=remote.input_schema or {"type": "object", "properties": {}},
+                description=f"MCP tool via server '{client.name}': {description}",
+                input_schema=safe_schema,
                 kind="other",  # mutating by default: denied until --allow-tool names it
                 is_mutating=True,
                 needs_workspace=False,
