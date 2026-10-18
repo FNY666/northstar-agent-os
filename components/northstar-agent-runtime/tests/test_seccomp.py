@@ -77,10 +77,10 @@ class FilterAssemblyTests(unittest.TestCase):
         prog = build_default_filter()
         self.assertTrue(len(prog) > 0)
         self.assertEqual(len(prog) % 8, 0)
-        # 21 fixed instructions plus one comparison for each denied syscall on each arch.
+        # 23 fixed instructions plus one comparison for each denied syscall on each arch.
         n = len(denied_syscalls("x86_64"))
         m = len(denied_syscalls("aarch64"))
-        self.assertEqual(len(prog) // 8, 21 + n + m)
+        self.assertEqual(len(prog) // 8, 23 + n + m)
 
     def test_denylist_tables_are_nonempty_and_sane(self):
         for arch in ("x86_64", "aarch64"):
