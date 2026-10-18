@@ -1080,11 +1080,22 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         "          ref: ${{ github.event.pull_request.head.sha }}", "      - run: make test",
         "      - name: print title", "        run: echo \"${{ github.event.pull_request.title }}\"",
     ])
+    local_action_after_checkout_unsafe = "\n".join([
+        "name: unsafe-local-action", "on:", "  pull_request_target:", "jobs:", "  build:", "    steps:",
+        f"      - uses: actions/checkout@{checkout_sha}", "        with:",
+        "          ref: ${{ github.event.pull_request.head.sha }}",
+        "      - name: run action from checked out PR", "        uses: ./.github/actions/test",
+    ])
     safe = "\n".join([
         "name: safe", "on:", "  pull_request:", "jobs:", "  build:", "    steps:",
         f"      - uses: actions/checkout@{checkout_sha}", "      - name: print title as data",
         "        env:", "          PR_TITLE: ${{ github.event.pull_request.title }}",
         "        run: echo \"$PR_TITLE\"",
+    ])
+    local_action_trusted_checkout_safe = "\n".join([
+        "name: safe-local-action", "on:", "  pull_request_target:", "jobs:", "  metadata:", "    steps:",
+        f"      - uses: actions/checkout@{checkout_sha}",
+        "      - name: run action from trusted checkout", "        uses: ./.github/actions/metadata",
     ])
     env_reparse_unsafe = "\n".join([
         "name: unsafe-env-reparse", "on:", "  pull_request:", "jobs:", "  build:", "    steps:",
@@ -1177,11 +1188,24 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         "      - uses: actions/download-artifact@0123456789abcdef0123456789abcdef01234567",
         "        with:", "          name: build-output", "      - run: ./artifact/run.sh",
     ])
+    workflow_run_local_action_unsafe = "\n".join([
+        "name: downstream-local-action", "on:", "  workflow_run:", "    workflows: [Build]", "    types: [completed]",
+        "jobs:", "  privileged:", "    steps:",
+        "      - uses: actions/download-artifact@0123456789abcdef0123456789abcdef01234567",
+        "      - name: run downloaded action", "        uses: ./build-output/action",
+    ])
     workflow_run_checkout_unsafe = "\n".join([
         "name: checkout-upstream-run", "on:", "  workflow_run:", "    workflows: [Build]", "    types: [completed]",
         "jobs:", "  privileged:", "    steps:",
         "      - uses: actions/checkout@0123456789abcdef0123456789abcdef01234567", "        with:",
         "          ref: ${{ github.event.workflow_run.head_sha }}", "      - run: make test",
+    ])
+    workflow_run_checkout_local_action_unsafe = "\n".join([
+        "name: checkout-upstream-local-action", "on:", "  workflow_run:", "    workflows: [Build]", "    types: [completed]",
+        "jobs:", "  privileged:", "    steps:",
+        f"      - uses: actions/checkout@{checkout_sha}", "        with:",
+        "          ref: ${{ github.event.workflow_run.head_sha }}",
+        "      - name: run action from upstream checkout", "        uses: ./.github/actions/test",
     ])
     workflow_run_data_only = "\n".join([
         "name: inspect-output", "on:", "  workflow_run:", "    workflows: [Build]", "    types: [completed]",
@@ -1226,6 +1250,8 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         "    steps:", "      - run: gh pr checkout 123", "      - run: make test",
         "  second-path:", "    steps:", "      - run: |", "          git fetch origin refs/pull/123/head",
         "          git checkout FETCH_HEAD", "          npm test",
+        "  local-action-path:", "    steps:", "      - run: gh pr checkout 456",
+        "      - uses: ./.github/actions/test",
     ])
     expected = {
         "CFG008_PULL_REQUEST_TARGET_UNTRUSTED_CHECKOUT",
@@ -1241,7 +1267,9 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         workflows = Path(temporary) / ".github" / "workflows"
         workflows.mkdir(parents=True)
         (workflows / "unsafe.yml").write_text(unsafe, encoding="utf-8")
+        (workflows / "local-action-after-checkout-unsafe.yml").write_text(local_action_after_checkout_unsafe, encoding="utf-8")
         (workflows / "safe.yml").write_text(safe, encoding="utf-8")
+        (workflows / "local-action-trusted-checkout-safe.yml").write_text(local_action_trusted_checkout_safe, encoding="utf-8")
         (workflows / "env-reparse-unsafe.yml").write_text(env_reparse_unsafe, encoding="utf-8")
         (workflows / "env-static-shell-safe.yml").write_text(env_static_shell_safe, encoding="utf-8")
         (workflows / "env-alias-unsafe.yml").write_text(env_alias_unsafe, encoding="utf-8")
@@ -1257,7 +1285,9 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         (workflows / "pr-head-ref-unsafe.yml").write_text(pr_head_ref_injection, encoding="utf-8")
         (workflows / "quoted-hash-unsafe.yml").write_text(quoted_hash_injection, encoding="utf-8")
         (workflows / "workflow-run-unsafe.yml").write_text(workflow_run_unsafe, encoding="utf-8")
+        (workflows / "workflow-run-local-action-unsafe.yml").write_text(workflow_run_local_action_unsafe, encoding="utf-8")
         (workflows / "workflow-run-checkout-unsafe.yml").write_text(workflow_run_checkout_unsafe, encoding="utf-8")
+        (workflows / "workflow-run-checkout-local-action-unsafe.yml").write_text(workflow_run_checkout_local_action_unsafe, encoding="utf-8")
         (workflows / "privileged-write-global-unsafe.yml").write_text(privileged_write_global_unsafe, encoding="utf-8")
         (workflows / "privileged-write-job-unsafe.yml").write_text(privileged_write_job_unsafe, encoding="utf-8")
         (workflows / "privileged-readonly-safe.yml").write_text(privileged_readonly_safe, encoding="utf-8")
@@ -1268,7 +1298,7 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         (workflows / "shell-fetch-unsafe.yml").write_text(shell_fetch_unsafe, encoding="utf-8")
         summary = _scan_root(
             Path(temporary),
-            max_files=20,
+            max_files=50,
             max_file_bytes=256 * 1024,
             fail_on="none",
             max_findings=100,
@@ -1295,6 +1325,7 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
             "CFG008_PULL_REQUEST_TARGET_UNTRUSTED_CHECKOUT",
             "CFG009_ACTIONS_UNTRUSTED_RUN_EXPRESSION",
         },
+        "local-action-after-checkout-unsafe.yml": {"CFG008_PULL_REQUEST_TARGET_UNTRUSTED_CHECKOUT"},
         "env-reparse-unsafe.yml": {"CFG014_ACTIONS_UNTRUSTED_ENV_TO_CODE_EXECUTION"},
         "env-alias-unsafe.yml": {"CFG014_ACTIONS_UNTRUSTED_ENV_TO_CODE_EXECUTION"},
         "env-cross-step-unsafe.yml": {
@@ -1315,7 +1346,9 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         "pr-head-ref-unsafe.yml": {"CFG009_ACTIONS_UNTRUSTED_RUN_EXPRESSION"},
         "quoted-hash-unsafe.yml": {"CFG009_ACTIONS_UNTRUSTED_RUN_EXPRESSION"},
         "workflow-run-unsafe.yml": {"CFG010_WORKFLOW_RUN_ARTIFACT_EXECUTION"},
+        "workflow-run-local-action-unsafe.yml": {"CFG010_WORKFLOW_RUN_ARTIFACT_EXECUTION"},
         "workflow-run-checkout-unsafe.yml": {"CFG012_WORKFLOW_RUN_REVISION_EXECUTION"},
+        "workflow-run-checkout-local-action-unsafe.yml": {"CFG012_WORKFLOW_RUN_REVISION_EXECUTION"},
         "privileged-write-global-unsafe.yml": {"CFG013_PRIVILEGED_TRIGGER_WRITE_PERMISSION"},
         "privileged-write-job-unsafe.yml": {"CFG013_PRIVILEGED_TRIGGER_WRITE_PERMISSION"},
         "workflow-run-injection-unsafe.yml": {"CFG009_ACTIONS_UNTRUSTED_RUN_EXPRESSION"},

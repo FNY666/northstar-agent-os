@@ -4,6 +4,8 @@ This is a bounded structural text scanner, not a general YAML parser or
 workflow evaluator. It indexes common block-style jobs and steps without
 evaluating expressions, then reports untrusted inputs reaching ``run`` blocks,
 privileged PR checkout/fetch flows, and ``workflow_run`` artifact handling.
+It also treats later local actions as executable workflow content after an
+untrusted checkout or artifact download.
 """
 from __future__ import annotations
 
@@ -342,6 +344,20 @@ def _untrusted_env_names(
     return names
 
 
+def _uses_local_action(step: _WorkflowStep) -> bool:
+    return any(
+        field.value.startswith("./")
+        for field in step.values("uses")
+    )
+
+
+def _later_executes_job_content(job: _WorkflowJob, step: _WorkflowStep) -> bool:
+    return any(
+        later.start > step.start and (later.runs or _uses_local_action(later))
+        for later in job.steps
+    )
+
+
 def _multiline_file_flow(
     body: str, tainted_names: set[str], target: str
 ) -> tuple[set[str], set[int]]:
@@ -611,7 +627,7 @@ def scan_workflow(relative: str, source: str) -> list[dict[str, Any]]:
                 ]
                 if not untrusted_fields and not unsafe_opt_in:
                     continue
-                if any(later.start > step.start and later.runs for later in job.steps):
+                if _later_executes_job_content(job, step):
                     evidence = (untrusted_fields or unsafe_opt_in)[0]
                     risky_checkout = evidence.line
                     break
@@ -621,8 +637,8 @@ def scan_workflow(relative: str, source: str) -> list[dict[str, Any]]:
             add(
                 risky_checkout + 1,
                 "CFG008_PULL_REQUEST_TARGET_UNTRUSTED_CHECKOUT",
-                "privileged pull_request_target workflow selects or explicitly enables pull-request code checkout and later runs workflow commands",
-                "Do not build or run pull-request code in pull_request_target. Use an unprivileged pull_request workflow, or keep privileged automation limited to metadata operations.",
+                "privileged pull_request_target workflow selects or explicitly enables pull-request code checkout and later runs commands or a local action",
+                "Do not execute pull-request code in pull_request_target, including through uses: ./... local actions. Use an unprivileged pull_request workflow, or keep privileged automation limited to metadata operations.",
             )
 
     if workflow_run:
@@ -640,7 +656,7 @@ def scan_workflow(relative: str, source: str) -> list[dict[str, Any]]:
                     if field.key.casefold() in {"ref", "repository"}
                     and _WORKFLOW_RUN_REVISION.search(field.value)
                 ]
-                if revision_fields and any(later.start > step.start and later.runs for later in job.steps):
+                if revision_fields and _later_executes_job_content(job, step):
                     risky_checkout = revision_fields[0].line + 1
                     break
             if risky_checkout is not None:
@@ -649,7 +665,7 @@ def scan_workflow(relative: str, source: str) -> list[dict[str, Any]]:
             add(
                 risky_checkout,
                 "CFG012_WORKFLOW_RUN_REVISION_EXECUTION",
-                "workflow_run checks out an upstream workflow revision and later runs commands in the same job",
+                "workflow_run checks out an upstream workflow revision and later runs commands or a local action in the same job",
                 "Verify the upstream run's source event and repository before checkout; keep downstream privileged jobs from executing untrusted pull-request code.",
                 severity="medium",
             )
@@ -657,13 +673,13 @@ def scan_workflow(relative: str, source: str) -> list[dict[str, Any]]:
             risky_download = next((
                 step for step in job.steps
                 if any(re.match(r"(?i)actions/download-artifact(?:@|$)", field.value) for field in step.values("uses"))
-                and any(later.start > step.start and later.runs for later in job.steps)
+                and _later_executes_job_content(job, step)
             ), None)
             if risky_download is not None:
                 add(
                     next(field.line + 1 for field in risky_download.values("uses")),
                     "CFG010_WORKFLOW_RUN_ARTIFACT_EXECUTION",
-                    "privileged workflow_run job downloads an upstream artifact and later runs commands in the same job",
+                    "privileged workflow_run job downloads an upstream artifact and later runs commands or a local action in the same job",
                     "Treat workflow_run artifacts as untrusted data. Validate and inspect contents; do not execute scripts or binaries from the downloaded artifact in a privileged job.",
                 )
                 break
@@ -693,7 +709,7 @@ def scan_workflow(relative: str, source: str) -> list[dict[str, Any]]:
                                 break
                     if fetch_offset is None:
                         continue
-                    later_run = any(later.start > step.start and later.runs for later in job.steps)
+                    later_run = _later_executes_job_content(job, step)
                     runs_retrieved_code = any(
                         re.search(r"(?i)(?:\b(?:make|npm|npx|pnpm|yarn|pytest|cargo|go\s+test|bash|sh|python3?|node)\b|\./\S+)", command)
                         for command in commands[fetch_offset + 1:]
@@ -709,8 +725,8 @@ def scan_workflow(relative: str, source: str) -> list[dict[str, Any]]:
             add(
                 risky_fetch,
                 "CFG011_PRIVILEGED_PR_CODE_FETCH",
-                "privileged workflow fetches pull-request code through a shell command and later runs workflow commands",
-                "Do not fetch, build, or run untrusted pull-request code in pull_request_target, workflow_run, or issue_comment. Use an unprivileged pull_request workflow or keep privileged automation limited to metadata operations.",
+                "privileged workflow fetches pull-request code through a shell command and later runs commands or a local action",
+                "Do not fetch or execute untrusted pull-request code in pull_request_target, workflow_run, or issue_comment, including through uses: ./... local actions. Use an unprivileged pull_request workflow or keep privileged automation limited to metadata operations.",
             )
 
     job_output_taint = _job_output_taint(workflow)
