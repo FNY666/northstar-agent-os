@@ -264,6 +264,23 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     add_audit_arguments(audit)
+    evidence = sub.add_parser(
+        "evidence",
+        help="inspect, pack, seal, or verify run evidence (lazy optional dispatch)",
+        description=(
+            "Offline operations over a runtime evidence bundle. The run-evidence "
+            "component is imported only when this command runs; an install without "
+            "it gets an explicit installation message."
+        ),
+    )
+    evidence.add_argument(
+        "evidence_action",
+        nargs="?",
+        choices=("inspect", "pack", "verify", "seal"),
+        help="inspect/pack a runtime bundle, or use the evidence component's seal/verify commands",
+    )
+    evidence.add_argument("evidence_args", nargs=argparse.REMAINDER)
+    evidence.add_argument("--json", action="store_true", help="accepted by inspect (its output is always JSON)")
     mcp = sub.add_parser(
         "mcp",
         help="inspect the MCP servers this workspace declares (read-only; a run needs --mcp-config to start them)",
@@ -572,6 +589,17 @@ def _add_output_arguments(parser: argparse.ArgumentParser) -> None:
         output.add_argument("--trace", action="store_true", help="print the span tree afterwards")
         output.add_argument("--session-dir", default="", help="append an auditable JSONL transcript here")
         output.add_argument(
+            "--run-evidence-dir",
+            default="",
+            metavar="PATH",
+            help="write the generic run's digest-first evidence bundle here (opt-in)",
+        )
+        output.add_argument(
+            "--require-evidence",
+            action="store_true",
+            help="fail the run with error_evidence_incomplete (exit 8) if required evidence cannot be captured",
+        )
+        output.add_argument(
             "--session-lease-seconds",
             type=int,
             default=900,
@@ -755,6 +783,10 @@ def _print_dry_run(
     print(f"sidecar={'on' if config.sidecar_socket else 'off'} "
           f"session_dir={args.session_dir or 'off'} "
           f"halt_on_denial={config.halt_on_denial}")
+    print(
+        f"run_evidence={config.evidence_dir or 'off'} "
+        f"required={getattr(config, 'evidence_required', False)}"
+    )
     target_scope = config.egress_target_scope
     target_scope_note = (
         "sidecar policy only" if target_scope is None else
@@ -1053,6 +1085,28 @@ def main(argv: Sequence[str] | None = None) -> int:
             from audit_cli import run_audit
 
             return run_audit(args)
+        if args.command == "evidence":
+            try:
+                import importlib
+                import sys as _sys
+
+                component = Path(__file__).resolve().parents[1] / "northstar-run-evidence"
+                if component.is_dir() and str(component) not in _sys.path:
+                    _sys.path.append(str(component))
+                module = importlib.import_module("evidence_cli")
+            except ImportError:
+                print(
+                    "configuration error: northstar-run-evidence is not installed; "
+                    "install that component to inspect or verify evidence bundles",
+                    file=sys.stderr,
+                )
+                return USAGE_ERROR
+            argv = list(args.evidence_args)
+            if args.evidence_action:
+                argv.insert(0, args.evidence_action)
+            elif "--json" in argv:
+                argv.remove("--json")
+            return module.main(argv)
         if args.command == "mcp":
             handler = getattr(args, "handler", None)
             if handler is None:
@@ -1685,6 +1739,11 @@ def _run(args: argparse.Namespace) -> int:
     config_kwargs["shell_landlock"] = getattr(args, "landlock", "auto") or "auto"
     config_kwargs["shell_aggregate_resource_scope"] = getattr(args, "shell_aggregate_resource_scope", "off") or "off"
     config_kwargs["parallel_tools"] = int(getattr(args, "parallel_tools", 1) or 1)
+    if getattr(args, "run_evidence_dir", ""):
+        config_kwargs["evidence_dir"] = args.run_evidence_dir
+        config_kwargs["evidence_required"] = bool(getattr(args, "require_evidence", False))
+    elif getattr(args, "require_evidence", False):
+        raise RunConfigurationError("--require-evidence needs --run-evidence-dir")
 
     validate_session_flags(args, ceilings)
     session = resolve_session(args, ceilings)

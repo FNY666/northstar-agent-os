@@ -192,6 +192,43 @@ Check a decoded JSON tree and return ``(estimated_bytes, expanded_nodes)``.
 
 Count JSON value occurrences and nesting before decoding the input.
 
+### `runtime_evidence`
+
+Source: `components/northstar-agent-runtime/runtime_evidence.py`
+
+Optional, digest-first evidence capture for one governed runtime run.
+
+#### `RuntimeEvidenceError`
+
+The bundle could not be created or updated safely.
+
+#### `EvidenceCaptureReport`
+
+Machine-readable result of evidence capture for one run.
+
+- `as_dict()`
+#### `RuntimeEvidenceSink`
+
+Best-effort-by-default sink for runtime events and subject digests.
+
+- `available` (property)
+- `last_error` (property)
+- `start_run(*, provider: str, model: str, permission_mode: str, policy_revision: str | None, tools: Sequence[str], workspace: str, max_turns: int, max_tool_calls: int | None, max_budget_usd: float | None)`
+  - Record run identity and governance configuration without prompt text.
+- `append_event(*, source: str, kind: str, sequence: str, subject: Mapping[str, Any], ref_ids: Sequence[str]=())`
+  - Append a compact event under a stable source-qualified id.
+- `append_subject(*, kind: str, source_id: str, subject: Mapping[str, Any] | bytes, ref_ids: Sequence[str]=())`
+  - Append a caller-built message-specific subject with a stable id.
+- `result_refs()`
+  - Stable prior source ids the terminal record can reference.
+- `seal(*, completion: Mapping[str, Any])`
+  - Write a digest manifest and close the capture session.
+- `verify()`
+  - Re-open the ledger and report its current structural integrity.
+- `inspect()`
+  - Read-only bundle summary; corruption is reported, never hidden.
+- `record_remote_grant(*, capability_count: int, expires_at: int, delegation_depth: int, target_agent: str, grant_digest: str, receipt_digest: str | None=None)`
+  - Bind a verified remote handoff without retaining its token or prompt.
 ### `providers.http_response_limits`
 
 Source: `components/northstar-agent-runtime/providers/http_response_limits.py`

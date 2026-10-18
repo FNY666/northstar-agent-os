@@ -76,6 +76,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
     "northstar-egress-sidecar": ("egress_sidecar", "egress_socket", "transport"),
     "northstar-agent-runtime": (
         "code_task", "verification", "memory_integrity", "ssrf_detect", "tool_input_schema",
+        "runtime_evidence",
         "providers.http_response_limits", "tools.code", "tools.resource_limits", "tools.systemd_scope",
         "a2a_budget_combo", "a2a_gates", "a2abreak_probes", "ab_testing",
         "abac_engine", "abe_interface", "abstract_interp", "abuse_limits",

@@ -83,6 +83,9 @@ class RunOptions:
     require_verification: bool = False  # report success_unverified when no host-owned check exists
     code_tools: bool = False  # add the structured repository tool profile
     code_phase_machine: Any = None  # internal host-owned phase gate for run_code
+    postconditions: Sequence[Any] = ()  # validated host-owned workspace checks evaluated after the run
+    evidence_dir: str | None = None  # write a digest-first evidence bundle for this run
+    evidence_required: bool = False  # evidence capture failure changes the terminal subtype
 
 
 @dataclass
@@ -100,6 +103,7 @@ class RunReport:
     errors: list[str]
     permission_denials: list[dict[str, Any]]
     events: list[dict[str, Any]] = field(default_factory=list)
+    evidence: dict[str, Any] | None = None
 
     @property
     def is_error(self) -> bool:
@@ -193,7 +197,10 @@ def _build(options: RunOptions, resume: str | None = None) -> tuple[Any, Any, li
         "stream": options.stream,
         "verification_commands": tuple(options.verification_commands),
         "require_verification": options.require_verification,
+        "postconditions": tuple(options.postconditions),
         "code_phase_machine": options.code_phase_machine,
+        "evidence_dir": options.evidence_dir,
+        "evidence_required": options.evidence_required,
     }
     if options.system_prompt is not None:
         config_kwargs["system_prompt"] = options.system_prompt
@@ -311,6 +318,22 @@ def run(options: RunOptions, resume: str | None = None) -> RunReport:
         if event_dict.get("type") == "result":
             result = event_dict
     report = runtime.last_report
+    if report is not None and report.result is not None and isinstance(result, dict):
+        result = {
+            **result,
+            "subtype": report.result.subtype,
+            "is_error": report.result.is_error,
+            "errors": list(report.result.errors),
+            "evidence": (
+                report.evidence.as_dict()
+                if report.evidence is not None
+                else None
+            ),
+        }
+        if events:
+            final_event = event_to_dict(report.result)
+            final_event["evidence"] = result["evidence"]
+            events[-1] = final_event
     return RunReport(
         subtype=str(result.get("subtype", "")) if result else "",
         session_id=str(result.get("session_id", "")) if result else "",
@@ -323,6 +346,11 @@ def run(options: RunOptions, resume: str | None = None) -> RunReport:
         errors=list(result.get("errors", [])) if result else [],
         permission_denials=list(result.get("permission_denials", [])) if result else [],
         events=events,
+        evidence=(
+            report.evidence.as_dict()
+            if report is not None and report.evidence is not None
+            else None
+        ),
     )
 
 

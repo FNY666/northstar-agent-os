@@ -138,6 +138,7 @@ test("a real --json run's payload keys are exactly the keys this SDK reads", { s
     [
       "duration_ms",
       "errors",
+      "evidence",
       "is_error",
       "num_turns",
       "permission_denials",

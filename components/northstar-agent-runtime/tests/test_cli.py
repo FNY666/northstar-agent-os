@@ -443,6 +443,7 @@ class CeilingTests(unittest.TestCase):
                 # or an exit code nothing ever returns - fails here rather than in a
                 # pipeline that reads 1 as "the run failed" and 7 as "try again".
                 "error_session_busy": 7,
+                "error_evidence_incomplete": 8,
             },
         )
 
