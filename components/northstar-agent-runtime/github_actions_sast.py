@@ -127,6 +127,7 @@ class _WorkflowJob:
     start: int
     end: int
     steps: tuple[_WorkflowStep, ...]
+    env_sources: tuple[_YamlField, ...]
 
 
 @dataclass(frozen=True)
@@ -141,6 +142,7 @@ class _Workflow:
     triggers: frozenset[str]
     jobs: tuple[_WorkflowJob, ...]
     write_permissions: tuple[_PermissionGrant, ...]
+    env_sources: tuple[_YamlField, ...]
 
 
 def _key_value(line: str) -> tuple[str, str] | None:
@@ -174,6 +176,26 @@ def _explicit_write_permissions(
     return grants
 
 
+def _environment_fields(
+    lines: list[str], start: int, end: int, header_indent: int
+) -> list[_YamlField]:
+    sources: list[_YamlField] = []
+    for index in range(start, end):
+        if _indent(lines[index]) != header_indent:
+            continue
+        pair = _key_value(lines[index])
+        if not pair or pair[0] != "env":
+            continue
+        cursor = index + 1
+        while cursor < end and (not lines[cursor].strip() or _indent(lines[cursor]) > header_indent):
+            if _indent(lines[cursor]) == header_indent + 2:
+                assignment = _key_value(lines[cursor].lstrip())
+                if assignment:
+                    sources.append(_YamlField(assignment[0], assignment[1], cursor, _indent(lines[cursor])))
+            cursor += 1
+    return sources
+
+
 def _workflow_index(lines: list[str]) -> _Workflow:
     """Index common GitHub Actions YAML structure while retaining source lines.
 
@@ -203,7 +225,7 @@ def _workflow_index(lines: list[str]) -> _Workflow:
 
     jobs_key = next((i for i, line in enumerate(clean) if _indent(line) == 0 and _key_value(line) == ("jobs", "")), None)
     if jobs_key is None:
-        return _Workflow(frozenset(triggers), (), ())
+        return _Workflow(frozenset(triggers), (), (), tuple(_environment_fields(clean, 0, len(clean), 0)))
     jobs_end = next((
         i for i in range(jobs_key + 1, len(clean))
         if clean[i].strip() and _indent(clean[i]) == 0
@@ -254,8 +276,18 @@ def _workflow_index(lines: list[str]) -> _Workflow:
                     for line_no, base_indent, body in _run_blocks(clean[step_start:step_end])
                 )
                 steps.append(_WorkflowStep(step_start, step_end, tuple(fields), step_runs))
-        jobs.append(_WorkflowJob(name, start, end, tuple(steps)))
-    return _Workflow(frozenset(triggers), tuple(jobs), tuple(permissions))
+        job_env = tuple(_environment_fields(clean, start + 1, end, 4))
+        jobs.append(_WorkflowJob(name, start, end, tuple(steps), job_env))
+    workflow_env = tuple(_environment_fields(clean, 0, len(clean), 0))
+    return _Workflow(frozenset(triggers), tuple(jobs), tuple(permissions), workflow_env)
+
+
+def _untrusted_fields(fields: tuple[_YamlField, ...] | list[_YamlField]) -> set[str]:
+    return {
+        field.key for field in fields
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", field.key)
+        and _UNTRUSTED_CONTEXT.search(field.value)
+    }
 
 
 def _untrusted_env_names(step: _WorkflowStep) -> set[str]:
@@ -271,19 +303,49 @@ def _untrusted_env_names(step: _WorkflowStep) -> set[str]:
     return names
 
 
+def _env_exports(body: str, tainted_names: set[str]) -> set[str]:
+    if not tainted_names:
+        return set()
+    refs = re.compile(r"(?:\$([A-Za-z_][A-Za-z0-9_]*)|\$\{([A-Za-z_][A-Za-z0-9_]*)\})")
+    exported: set[str] = set()
+    for line in body.splitlines():
+        if not re.search(r"\$GITHUB_ENV\b", line, re.IGNORECASE):
+            continue
+        if not re.search(r"(?:>>|tee\s+-a)\s*\"?\$GITHUB_ENV\b", line, re.IGNORECASE):
+            continue
+        variable = re.search(r"\b([A-Za-z_][A-Za-z0-9_]*)=", line)
+        if not variable:
+            continue
+        if any((match.group(1) or match.group(2)) in tainted_names for match in refs.finditer(line)):
+            exported.add(variable.group(1))
+    return exported
+
+
+def _local_aliases(body: str, tainted_names: set[str]) -> set[str]:
+    aliases = set(tainted_names)
+    refs = re.compile(r"(?:\$([A-Za-z_][A-Za-z0-9_]*)|\$\{([A-Za-z_][A-Za-z0-9_]*)\})")
+    for line in body.splitlines():
+        assignment = re.match(r"\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)", line)
+        if assignment and any((match.group(1) or match.group(2)) in aliases for match in refs.finditer(assignment.group(2))):
+            aliases.add(assignment.group(1))
+    return aliases
+
+
 def _dynamic_execution_line(body: str, tainted_names: set[str]) -> int | None:
-    references = re.compile(
-        r"(?<![A-Za-z0-9_])(?:"
-        + "|".join(
-            rf"\${name}\b|\$\{{{name}\}}|\$env:{name}\b|%{name}%"
-            for name in sorted(tainted_names)
-        )
-        + r")",
-        re.IGNORECASE,
-    )
+    aliases = set(tainted_names)
+    shell_refs = re.compile(r"(?:\$([A-Za-z_][A-Za-z0-9_]*)|\$\{([A-Za-z_][A-Za-z0-9_]*)\})")
     for line_number, line in enumerate(body.splitlines(), start=1):
+        references = re.compile(
+            r"(?<![A-Za-z0-9_])(?:"
+            + "|".join(
+                rf"\${name}\b|\$\{{{name}\}}|\$env:{name}\b|%{name}%"
+                for name in sorted(aliases)
+            )
+            + r")",
+            re.IGNORECASE,
+        ) if aliases else None
         for sink in _DYNAMIC_CODE_SINK.finditer(line):
-            reference = references.search(line[sink.end():])
+            reference = references.search(line[sink.end():]) if references else None
             if not reference:
                 continue
             reference_start = sink.end() + reference.start()
@@ -297,6 +359,9 @@ def _dynamic_execution_line(body: str, tainted_names: set[str]) -> int | None:
                     return line_number
                 if re.search(r"\b(?:eval|source)\b", prefix, re.IGNORECASE):
                     return line_number
+        assignment = re.match(r"\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)", line)
+        if assignment and any((match.group(1) or match.group(2)) in aliases for match in shell_refs.finditer(assignment.group(2))):
+            aliases.add(assignment.group(1))
     return None
 
 
@@ -475,8 +540,9 @@ def scan_workflow(relative: str, source: str) -> list[dict[str, Any]]:
             )
 
     for job in workflow.jobs:
+        persistent_taint = _untrusted_fields(workflow.env_sources) | _untrusted_fields(job.env_sources)
         for step in job.steps:
-            tainted_env = _untrusted_env_names(step)
+            tainted_env = persistent_taint | _untrusted_env_names(step)
             for relative_line, _, body in step.runs:
                 if _UNTRUSTED_CONTEXT.search(body):
                     # Report the run block, not attacker-controlled text.
@@ -486,6 +552,7 @@ def scan_workflow(relative: str, source: str) -> list[dict[str, Any]]:
                         "untrusted GitHub event text is interpolated directly into a shell run block",
                         "Pass event data through an environment variable and validate it as data; never interpolate attacker-controlled context directly into run script source.",
                     )
+                aliases = _local_aliases(body, tainted_env)
                 if tainted_env and _dynamic_execution_line(body, tainted_env) is not None:
                     add(
                         step.start + relative_line,
@@ -493,4 +560,5 @@ def scan_workflow(relative: str, source: str) -> list[dict[str, Any]]:
                         "untrusted event data passed through an environment variable is reparsed by a dynamic code-execution command",
                         "Keep untrusted values as data. Remove eval or shell -c reparsing; use fixed commands and validated arguments, and avoid sourcing paths derived from event input.",
                     )
+                persistent_taint.update(_env_exports(body, aliases))
     return findings

@@ -1098,6 +1098,34 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         "          PR_TITLE: ${{ github.event.pull_request.title }}",
         "        run: bash -c 'printf \"%s\" \"$PR_TITLE\"'",
     ])
+    env_alias_unsafe = "\n".join([
+        "name: unsafe-env-alias", "on:", "  pull_request:", "jobs:", "  build:", "    steps:",
+        "      - name: alias title", "        env:",
+        "          PR_TITLE: ${{ github.event.pull_request.title }}", "        run: |",
+        "          SAFE_TITLE=$PR_TITLE", "          eval \"$SAFE_TITLE\"",
+    ])
+    env_cross_step_unsafe = "\n".join([
+        "name: unsafe-env-cross-step", "on:", "  pull_request:", "jobs:", "  build:", "    steps:",
+        "      - name: persist title", "        env:",
+        "          PR_TITLE: ${{ github.event.pull_request.title }}", "        run: echo \"MESSAGE=$PR_TITLE\" >> \"$GITHUB_ENV\"",
+        "      - name: execute title", "        run: bash -c \"$MESSAGE\"",
+    ])
+    env_scope_unsafe = "\n".join([
+        "name: unsafe-env-scope", "on:", "  pull_request:", "env:",
+        "  PR_TITLE: ${{ github.event.pull_request.title }}", "jobs:", "  build:",
+        "    steps:", "      - run: bash -c \"$PR_TITLE\"",
+    ])
+    env_job_scope_unsafe = "\n".join([
+        "name: unsafe-job-env-scope", "on:", "  pull_request:", "jobs:", "  build:", "    env:",
+        "      PR_TITLE: ${{ github.event.pull_request.title }}", "    steps:",
+        "      - run: bash -c \"$PR_TITLE\"",
+    ])
+    env_cross_step_safe = "\n".join([
+        "name: safe-env-cross-step", "on:", "  pull_request:", "jobs:", "  build:", "    steps:",
+        "      - name: persist title", "        env:",
+        "          PR_TITLE: ${{ github.event.pull_request.title }}", "        run: echo \"MESSAGE=$PR_TITLE\" >> \"$GITHUB_ENV\"",
+        "      - name: print title as data", "        run: printf '%s' \"$MESSAGE\"",
+    ])
     metadata_only = "\n".join([
         "name: metadata-only", "on:", "  pull_request_target:", "jobs:", "  label:",
         "    steps:", "      - uses: actions/github-script@0123456789abcdef0123456789abcdef01234567",
@@ -1188,6 +1216,11 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         (workflows / "safe.yml").write_text(safe, encoding="utf-8")
         (workflows / "env-reparse-unsafe.yml").write_text(env_reparse_unsafe, encoding="utf-8")
         (workflows / "env-static-shell-safe.yml").write_text(env_static_shell_safe, encoding="utf-8")
+        (workflows / "env-alias-unsafe.yml").write_text(env_alias_unsafe, encoding="utf-8")
+        (workflows / "env-cross-step-unsafe.yml").write_text(env_cross_step_unsafe, encoding="utf-8")
+        (workflows / "env-scope-unsafe.yml").write_text(env_scope_unsafe, encoding="utf-8")
+        (workflows / "env-job-scope-unsafe.yml").write_text(env_job_scope_unsafe, encoding="utf-8")
+        (workflows / "env-cross-step-safe.yml").write_text(env_cross_step_safe, encoding="utf-8")
         (workflows / "metadata.yml").write_text(metadata_only, encoding="utf-8")
         (workflows / "fork-repository-unsafe.yml").write_text(fork_repository, encoding="utf-8")
         (workflows / "pr-head-ref-unsafe.yml").write_text(pr_head_ref_injection, encoding="utf-8")
@@ -1232,6 +1265,10 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
             "CFG009_ACTIONS_UNTRUSTED_RUN_EXPRESSION",
         },
         "env-reparse-unsafe.yml": {"CFG014_ACTIONS_UNTRUSTED_ENV_TO_CODE_EXECUTION"},
+        "env-alias-unsafe.yml": {"CFG014_ACTIONS_UNTRUSTED_ENV_TO_CODE_EXECUTION"},
+        "env-cross-step-unsafe.yml": {"CFG014_ACTIONS_UNTRUSTED_ENV_TO_CODE_EXECUTION"},
+        "env-scope-unsafe.yml": {"CFG014_ACTIONS_UNTRUSTED_ENV_TO_CODE_EXECUTION"},
+        "env-job-scope-unsafe.yml": {"CFG014_ACTIONS_UNTRUSTED_ENV_TO_CODE_EXECUTION"},
         "fork-repository-unsafe.yml": {"CFG008_PULL_REQUEST_TARGET_UNTRUSTED_CHECKOUT"},
         "pr-head-ref-unsafe.yml": {"CFG009_ACTIONS_UNTRUSTED_RUN_EXPRESSION"},
         "quoted-hash-unsafe.yml": {"CFG009_ACTIONS_UNTRUSTED_RUN_EXPRESSION"},
