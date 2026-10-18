@@ -36,6 +36,14 @@ _WORKFLOW_RUN_REVISION = re.compile(
     r"head_repository\.full_name|pull_requests\[[^\]]+\]\.head\.(?:sha|ref))",
     re.IGNORECASE,
 )
+_DYNAMIC_CODE_SINK = re.compile(
+    r"(?P<eval>\beval\b)"
+    r"|(?P<shell>\b(?:bash|sh|zsh|dash)\s+(?:-[A-Za-z]*c\b|--command\b))"
+    r"|(?P<code>\b(?:python\d*|node)\s+(?:-c\b|-e\b))"
+    r"|(?P<source>\bsource\b|(?:^|[;&|]\s*)\.\s+)"
+    r"|(?P<iex>\bInvoke-Expression\b)",
+    re.IGNORECASE,
+)
 
 
 def _indent(line: str) -> int:
@@ -250,6 +258,67 @@ def _workflow_index(lines: list[str]) -> _Workflow:
     return _Workflow(frozenset(triggers), tuple(jobs), tuple(permissions))
 
 
+def _untrusted_env_names(step: _WorkflowStep) -> set[str]:
+    names: set[str] = set()
+    for env_field in step.values("env"):
+        for field in step.fields:
+            if field.line <= env_field.line:
+                continue
+            if field.indent <= env_field.indent:
+                break
+            if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", field.key) and _UNTRUSTED_CONTEXT.search(field.value):
+                names.add(field.key)
+    return names
+
+
+def _dynamic_execution_line(body: str, tainted_names: set[str]) -> int | None:
+    references = re.compile(
+        r"(?<![A-Za-z0-9_])(?:"
+        + "|".join(
+            rf"\${name}\b|\$\{{{name}\}}|\$env:{name}\b|%{name}%"
+            for name in sorted(tainted_names)
+        )
+        + r")",
+        re.IGNORECASE,
+    )
+    for line_number, line in enumerate(body.splitlines(), start=1):
+        for sink in _DYNAMIC_CODE_SINK.finditer(line):
+            reference = references.search(line[sink.end():])
+            if not reference:
+                continue
+            reference_start = sink.end() + reference.start()
+            quote = _shell_quote_at(line, reference_start)
+            if sink.lastgroup == "eval" or quote != "'":
+                return line_number
+            if sink.lastgroup == "shell":
+                prefix = line[sink.end():reference_start]
+                suffix = line[reference_start + len(reference.group(0)):]
+                if not prefix.strip(" \t'\"") and not suffix.strip(" \t'\";#"):
+                    return line_number
+                if re.search(r"\b(?:eval|source)\b", prefix, re.IGNORECASE):
+                    return line_number
+    return None
+
+
+def _shell_quote_at(line: str, position: int) -> str | None:
+    quote: str | None = None
+    escaped = False
+    for char in line[:position]:
+        if quote == "'":
+            if char == "'":
+                quote = None
+        elif quote == '"':
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                quote = None
+        elif char in {"'", '"'}:
+            quote = char
+    return quote
+
+
 def scan_workflow(relative: str, source: str) -> list[dict[str, Any]]:
     lines = source.splitlines()
     workflow = _workflow_index(lines)
@@ -407,6 +476,7 @@ def scan_workflow(relative: str, source: str) -> list[dict[str, Any]]:
 
     for job in workflow.jobs:
         for step in job.steps:
+            tainted_env = _untrusted_env_names(step)
             for relative_line, _, body in step.runs:
                 if _UNTRUSTED_CONTEXT.search(body):
                     # Report the run block, not attacker-controlled text.
@@ -415,5 +485,12 @@ def scan_workflow(relative: str, source: str) -> list[dict[str, Any]]:
                         "CFG009_ACTIONS_UNTRUSTED_RUN_EXPRESSION",
                         "untrusted GitHub event text is interpolated directly into a shell run block",
                         "Pass event data through an environment variable and validate it as data; never interpolate attacker-controlled context directly into run script source.",
+                    )
+                if tainted_env and _dynamic_execution_line(body, tainted_env) is not None:
+                    add(
+                        step.start + relative_line,
+                        "CFG014_ACTIONS_UNTRUSTED_ENV_TO_CODE_EXECUTION",
+                        "untrusted event data passed through an environment variable is reparsed by a dynamic code-execution command",
+                        "Keep untrusted values as data. Remove eval or shell -c reparsing; use fixed commands and validated arguments, and avoid sourcing paths derived from event input.",
                     )
     return findings

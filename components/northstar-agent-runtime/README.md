@@ -150,6 +150,9 @@ but flow-style YAML and artifact transfer across jobs are outside its model.
 They do not prove whether a command executes
 checked-out/downloaded code. `workflow_run` checkouts of upstream SHA/PR-head
 revisions followed by commands receive a separate medium-severity review finding.
+Untrusted values in step-level environment variables are also checked for
+same-step reparsing by `eval`, shell `-c`, Python/Node code flags, or source-like
+commands; a fixed quoted `bash -c` script that prints the variable remains clean.
 Explicit write token scopes in privileged-trigger workflows also receive a
 medium-severity least-privilege finding at workflow or job scope; repository
 default token settings are not inferred.
