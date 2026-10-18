@@ -1263,15 +1263,16 @@ class PermissionEngine:
             )
         # Authority ceiling (gated ascent): within an open scope that has a
         # ceiling, tools outside the ceiling need explicit host approval --
-        # even if they'd normally be auto-allowed. Contraction is free;
-        # expansion needs evidence.
-        if (
+        # even if they'd normally be auto-allowed. Record the need here, but
+        # defer the approval until the ordinary safety layers have run. An
+        # early return here used to bypass disallowed_tools, argument and
+        # pre-trade policies, composition rules, dataflow, and approval tiers.
+        ceiling_ascent = bool(
             self.scope_manager is not None
             and context is not None
             and context.scope_id
             and not self.scope_manager.within_ceiling(context.scope_id, tool_name)
-        ):
-            return self._ceiling_ascent_decision(tool_name, payload, context)
+        )
         # Offensive tooling is deny-by-default (Spain AEPD, Sept 2026).
         # The host can explicitly allowlist via offensive_allowlist.
         if is_offensive_tool(tool_name):
@@ -1320,23 +1321,59 @@ class PermissionEngine:
             composition_deny = self._check_composition(tool_name)
             if composition_deny is not None:
                 return composition_deny
-            category = self._tool_categories_canonical.get(canonical_tool_name(tool_name))
-            if category:
-                self._category_history.append(category)
-        if dataflow is None or not decision.allowed:
+        if not decision.allowed:
+            if (
+                ceiling_ascent
+                and decision.source == "mode"
+                and decision.rule == f"mode:{self.config.mode}:no_callback"
+            ):
+                assert context is not None  # noqa: S101 - ceiling ascent requires a scope context
+                return self._ceiling_ascent_decision(tool_name, payload, context)
+            if (
+                ceiling_ascent
+                and decision.source == "host_callback"
+                and decision.rule == "host_callback:deny"
+            ):
+                return replace(decision, rule="ceiling:ascent_denied", deny_code="")
             return decision
-        # The call will execute: its result carries the source label, so the
-        # trajectory learns it now. (A denied call produces no data and
-        # attaches nothing.)
-        dataflow.observe(tool_name, payload)
         if (
-            sink_verdict is not None
+            dataflow is not None
+            and sink_verdict is not None
             and sink_verdict.escalate
             and self.config.mode != "bypassPermissions"
         ):
-            return self._apply_dataflow_escalation(
+            decision = self._apply_dataflow_escalation(
                 tool_name, payload, context, sink_verdict
             )
+            if not decision.allowed:
+                return decision
+
+        if ceiling_ascent:
+            # A successful ordinary host/multisig approval already pins this
+            # exact call and satisfies the ceiling. Auto-allow paths (read,
+            # allowlist, bypass, or decision model) still need a separate
+            # ceiling approval. Never ask twice after an approval decision.
+            if decision.source in {"host_callback", "multisig"}:
+                decision = replace(
+                    decision,
+                    rule="ceiling:ascent_approved",
+                    reason=decision.reason or f"{tool_name} approved for ceiling ascent by host",
+                )
+            else:
+                if context is None:
+                    context = PermissionRequestContext(mode=self.config.mode)
+                decision = self._ceiling_ascent_decision(tool_name, payload, context)
+            if not decision.allowed:
+                return decision
+
+        # Only an action that survived every gate changes composition history
+        # or contributes provenance to the dataflow tracker.
+        if self._composition_rules:
+            category = self._tool_categories_canonical.get(canonical_tool_name(tool_name))
+            if category:
+                self._category_history.append(category)
+        if dataflow is not None:
+            dataflow.observe(tool_name, payload)
         return decision
 
     def _ceiling_ascent_decision(
@@ -1364,8 +1401,23 @@ class PermissionEngine:
                 rule="ceiling:needs_approval",
                 tool=tool_name,
             )
+        request = context
+        if not request.arguments_digest:
+            try:
+                request = replace(request, arguments_digest=digest_arguments(payload))
+            except ValueError:
+                return PermissionDecision(
+                    False,
+                    source="pretrade",
+                    reason=(
+                        f"{tool_name} denied: call arguments are not JSON-serialisable, "
+                        "so no approval can be bound to them"
+                    ),
+                    rule=PT_FACT_MISSING,
+                    tool=tool_name,
+                )
         try:
-            verdict = callback(tool_name, dict(payload), context)
+            verdict = callback(tool_name, dict(payload), request)
         except Exception as error:  # noqa: BLE001 - a broken approver must not grant access
             return PermissionDecision(
                 False,
@@ -1375,7 +1427,30 @@ class PermissionEngine:
                 tool=tool_name,
             )
         approved, note = _approval_verdict(verdict)
+        if approved and isinstance(verdict, dict) and "approval_receipt" in verdict:
+            verified_approver = self._verify_approval_receipt(verdict["approval_receipt"])
+            if verified_approver is None and self.config.approver_keys:
+                return PermissionDecision(
+                    False,
+                    source="host_callback",
+                    reason="signed approval receipt failed verification; failing closed",
+                    rule="host_callback:bad_signature",
+                    tool=tool_name,
+                )
+            if verified_approver:
+                note = note or f"approved by verified approver {verified_approver}"
         if approved:
+            if self._multisig_gate is not None:
+                multi = self._multisig_decision(tool_name, request)
+                return replace(
+                    multi,
+                    rule=(
+                        "ceiling:ascent_approved"
+                        if multi.allowed
+                        else "ceiling:ascent_denied"
+                    ),
+                    deny_code="",
+                )
             return PermissionDecision(
                 True,
                 source="host_callback",
@@ -1444,7 +1519,19 @@ class PermissionEngine:
             reason_hint=f"{tool_name} carries labelled data to a restricted sink",
         )
         if not request.arguments_digest:
-            request = replace(request, arguments_digest=digest_arguments(payload))
+            try:
+                request = replace(request, arguments_digest=digest_arguments(payload))
+            except ValueError:
+                return PermissionDecision(
+                    False,
+                    source="pretrade",
+                    reason=(
+                        f"{tool_name} denied: call arguments are not JSON-serialisable, "
+                        "so no approval can be bound to them"
+                    ),
+                    rule=PT_FACT_MISSING,
+                    tool=tool_name,
+                )
         try:
             verdict = self.config.can_use_tool(tool_name, dict(payload), request)
         except Exception as error:  # noqa: BLE001 - a broken approver must not grant access
@@ -1456,7 +1543,21 @@ class PermissionEngine:
                 tool=tool_name,
             )
         approved, note = _approval_verdict(verdict)
+        if approved and isinstance(verdict, dict) and "approval_receipt" in verdict:
+            verified_approver = self._verify_approval_receipt(verdict["approval_receipt"])
+            if verified_approver is None and self.config.approver_keys:
+                return PermissionDecision(
+                    False,
+                    source="host_callback",
+                    reason="signed approval receipt failed verification; failing closed",
+                    rule="host_callback:bad_signature",
+                    tool=tool_name,
+                )
+            if verified_approver:
+                note = note or f"approved by verified approver {verified_approver}"
         if approved:
+            if self._multisig_gate is not None:
+                return self._multisig_decision(tool_name, request)
             return PermissionDecision(
                 True,
                 source="host_callback",

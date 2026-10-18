@@ -83,7 +83,7 @@ Northstar equivalent: `PermissionEngine.evaluate()` in
 - disallowed/allowed tool lists (canonical name matching)
 - argument-level policies (`ArgumentPolicy`)
 - composition rules (forbidden sequences over per-session history)
-- per-scope authority ceiling (gated ascent via host callback, never persists)
+- per-scope authority ceiling (gated ascent via host callback, never persists); ascent adds an approval requirement and cannot override deny lists, argument/pre-trade policies, composition, or dataflow checks
 - offensive-tooling deny-by-default
 - Rule-of-Two escalation (3 legs → host-tier)
 - approval receipts with `call_id` / arguments-digest binding
