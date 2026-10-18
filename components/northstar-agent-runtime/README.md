@@ -161,6 +161,11 @@ newline injection. These are bounded shell heuristics; a fixed quoted
 Explicit write token scopes in privileged-trigger workflows also receive a
 medium-severity least-privilege finding at workflow or job scope; repository
 default token settings are not inferred.
+When a privileged job checks out an untrusted pull-request revision and later
+executes repository content, the scanner separately reports checkout token
+persistence (defaulting to enabled unless `persist-credentials: false` is
+explicit). The `workflow_run` case is medium severity because the upstream
+revision may come from a trusted push.
 Privileged `pull_request_target`, `workflow_run`,
 and `issue_comment` workflows are also checked for `gh pr checkout` and
 PR-ref `git fetch` followed by later commands or local actions. This command-flow check is

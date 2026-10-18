@@ -684,6 +684,62 @@ def scan_workflow(relative: str, source: str) -> list[dict[str, Any]]:
                 )
                 break
 
+    # actions/checkout persists its token in local Git configuration by
+    # default. If that checkout selects an untrusted PR/upstream revision and
+    # the same privileged job later executes repository content, the token is
+    # available to that content. Report the credential exposure separately
+    # from the execution finding so the remediation is actionable.
+    risky_persisted_token: int | None = None
+    persisted_token_severity = "high"
+    for job in workflow.jobs:
+        for step in job.steps:
+            uses = next((
+                field for field in step.values("uses")
+                if re.match(r"(?i)actions/checkout(?:@|$)", field.value)
+            ), None)
+            if uses is None:
+                continue
+            if not _later_executes_job_content(job, step):
+                continue
+            credential_setting = next(iter(step.values("persist-credentials")), None)
+            # Omitted and unresolved values retain an effective credential
+            # persistence risk. Only an explicit YAML false disables it.
+            if credential_setting is not None and credential_setting.value.casefold() == "false":
+                continue
+            for field in step.fields:
+                key = field.key.casefold()
+                if key not in {"ref", "repository"}:
+                    continue
+                if "pull_request_target" in workflow.triggers and (
+                    _UNTRUSTED_REF.search(field.value) or _UNTRUSTED_REPOSITORY.search(field.value)
+                ):
+                    risky_persisted_token = uses.line
+                    persisted_token_severity = "high"
+                    break
+                if "workflow_run" in workflow.triggers and _WORKFLOW_RUN_REVISION.search(field.value):
+                    risky_persisted_token = uses.line
+                    persisted_token_severity = "medium"
+                    break
+            if risky_persisted_token is None and "pull_request_target" in workflow.triggers:
+                if any(
+                    field.value.casefold() == "true"
+                    for field in step.values("allow-unsafe-pr-checkout")
+                ):
+                    risky_persisted_token = uses.line
+                    persisted_token_severity = "high"
+            if risky_persisted_token is not None:
+                break
+        if risky_persisted_token is not None:
+            break
+    if risky_persisted_token is not None:
+        add(
+            risky_persisted_token + 1,
+            "CFG016_ACTIONS_PERSISTED_TOKEN_WITH_UNTRUSTED_CHECKOUT",
+            "privileged workflow persists the checkout token while later executing content from an untrusted revision",
+            "Set persist-credentials: false on the checkout and avoid executing untrusted pull-request content in a privileged workflow; grant only the minimum token permissions needed.",
+            severity=persisted_token_severity,
+        )
+
     if pull_request_target or workflow_run or issue_comment:
         risky_fetch: int | None = None
         for job in workflow.jobs:
