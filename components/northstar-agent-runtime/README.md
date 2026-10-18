@@ -481,6 +481,15 @@ python3 -m cli run --workspace . --prompt "summarise the files" \
 - Each server is a child process speaking JSON-RPC 2.0 over stdio, under a
   per-request deadline (`--mcp-timeout-ms`, default 15 s); a server that stops
   answering is TERM→KILLed as a process group.
+- `--mcp-filesystem workspace` opts into a fail-closed Landlock filesystem
+  boundary: system/runtime paths are read/execute, /etc and /proc are read-only,
+  the runtime's small device-node set stays available, the current workspace is
+  read/write, and other filesystem paths are denied. It requires Linux with
+  Landlock ABI 1+ and never falls back to the unconfined profile. The default
+  `unconfined` mode preserves compatibility. Workspace scope applies to the
+  whole server process, not individual MCP tools, so every admitted server tool
+  can read workspace files such as local secrets; keep such files outside the
+  workspace. The boundary also does not make the process a container or VM.
 - **Two protocol generations, one probe.** `--mcp-protocol auto` (the default)
   opens with `server/discover` — the request the 2026-07-28 revision made
   mandatory — and only falls back to the older `initialize` handshake when that
@@ -544,7 +553,10 @@ python3 -m cli run --workspace . --prompt "summarise the files" \
 - Verdicts are audited as field **names**, never values: `client.elicitation_log`
   and the `audit=` callback (embedders) record
   `{"kind": "mcp-elicitation", "server", "tool", "method", "action", "reason",
-  "answered_fields"}`, and a short `[governance] …` note is appended to the tool
+  "answered_fields"}`; a successful server connection also emits
+  `mcp.server_isolation` with its selected network/filesystem scopes and Landlock
+  ABI when denied networking or workspace filesystem scope applies. A short
+  `[governance] …` note is appended to the tool
   result so the refusal is inside the transcript rather than beside it.
 - Output is bounded client-side (per-line and per-call caps); image/resource
   content blocks are replaced with a placeholder rather than rendered. The
@@ -553,7 +565,8 @@ python3 -m cli run --workspace . --prompt "summarise the files" \
   instruction/credential payloads blocked or sanitized before they see them.
 - `run --dry-run` lists the configured servers **and the stance**
   (`protocol=auto, elicit=off→input_required is declined, roots=off,
-  sensitive_input=off, rounds=3`) without spawning them, and appends what an import
+  sensitive_input=off, rounds=3, network=denied, filesystem=unconfined`)
+  without spawning them, and appends what an import
   contributed (`config 1 server(s) from .mcp.json: demo`). MCP servers cannot be declared
   in `.northstar/config.toml` — that file's tables cap what a run may do, and a server list
   is not a ceiling — so a server is either a per-run flag or a workspace file the operator

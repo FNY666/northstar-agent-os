@@ -536,3 +536,12 @@ An initial broad error-conversion attempt changed five established test expectat
 [17]: https://slsa.dev/spec/v1.2/build-provenance "SLSA Build Provenance v1.2"
 [18]: https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-agent-spans.md "OpenTelemetry GenAI agent span conventions"
 [19]: https://www.w3.org/TR/baggage/ "W3C Baggage Recommendation"
+
+
+### Local MCP filesystem capability boundary (2026-10-18)
+
+The October 15 arXiv preprint [“My Credentials, Please: Detecting Filesystem Capability Laundering in MCP Servers at Scale”](https://arxiv.org/abs/2610.22301) studies local stdio servers whose process permissions exceed the filesystem scope implied by a tool's declared contract. Its reported scan and dynamic evaluations are the authors' results, not independently reproduced here. The [Linux Landlock documentation](https://docs.kernel.org/userspace-api/landlock.html) describes path rules as an unprivileged, inherited boundary and also documents limits around special files and already-open descriptors.
+
+Northstar's main branch makes the same ambient-filesystem grant in network_deny_profile(): it removes IP egress while granting workspace rights over /, and McpStdioClient uses that profile by default. Existing environment scrubbing and tool permission checks do not narrow the server process's filesystem authority.
+
+The narrow response is an opt-in --mcp-filesystem workspace profile. It limits the MCP process to system/runtime read/execute paths, preserves the existing read-only /etc and /proc and minimal device-node allowances, and grants read/write to the current workspace. It independently preserves the selected network mode and refuses startup when Landlock cannot enforce the requested boundary. The default remains compatible. This is process-wide workspace scope, not per-tool least privilege: admitted server tools can still read every file inside the workspace, and Landlock's special-file limitations still apply.

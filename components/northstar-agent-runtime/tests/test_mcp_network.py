@@ -45,6 +45,19 @@ class ModeValidationTests(unittest.TestCase):
         client = McpStdioClient("t", ["echo"])
         self.assertEqual(client.network, "denied")
 
+    def test_filesystem_scope_defaults_to_unconfined(self):
+        self.assertEqual(McpStdioClient("t", ["echo"]).filesystem, "unconfined")
+
+    def test_bad_filesystem_scope_is_rejected(self):
+        with self.assertRaises(ValueError):
+            McpStdioClient("t", ["echo"], filesystem="host")
+
+    def test_filesystem_scope_is_normalized(self):
+        self.assertEqual(
+            McpStdioClient("t", ["echo"], filesystem="WORKSPACE").filesystem,
+            "workspace",
+        )
+
 
 class SpawnArgvTests(unittest.TestCase):
     def test_landlock_bootstrap_uses_runtime_interpreter_not_path(self):
@@ -79,6 +92,60 @@ class SpawnArgvTests(unittest.TestCase):
         self.assertEqual(spec["scoped"], ["ABSTRACT_UNIX_SOCKET"])
         self.assertEqual(spec["mode"], "on", "fail-closed, not graceful")
 
+    def test_workspace_scope_wraps_with_fail_closed_filesystem_profile(self):
+        workspace = _workspace()
+        client = McpStdioClient(
+            "t", ["echo", "hi"], timeout_ms=5000, workspace_root=workspace,
+            network="allowed", filesystem="workspace", seccomp="off",
+        )
+        with mock.patch.object(mcp_client, "landlock_abi_version", return_value=1):
+            argv = client._apply_network_policy(["echo", "hi"])
+        import base64, json
+        spec = json.loads(base64.b64decode(argv[3]).decode())
+        self.assertEqual(argv[0], sys.executable)
+        self.assertEqual(argv[-2:], ["echo", "hi"])
+        self.assertEqual(spec["mode"], "on")
+        self.assertFalse(spec["handle_network"], "filesystem confinement must preserve explicit network access")
+        self.assertTrue(any(
+            rule["path"] == workspace and "WRITE_FILE" in rule["rights"]
+            for rule in spec["rules"]
+        ))
+        self.assertFalse(any(rule["path"] == "/" for rule in spec["rules"]))
+
+    def test_workspace_scope_preserves_network_denial_when_selected(self):
+        workspace = _workspace()
+        client = McpStdioClient(
+            "t", ["echo", "hi"], workspace_root=workspace,
+            network="denied", filesystem="workspace", seccomp="off",
+        )
+        with mock.patch.object(mcp_client, "landlock_abi_version", return_value=10):
+            argv = client._apply_network_policy(["echo", "hi"])
+        import base64, json
+        spec = json.loads(base64.b64decode(argv[3]).decode())
+        self.assertTrue(spec["handle_network"])
+        self.assertFalse(spec["network"])
+        self.assertTrue(spec["deny_unix_sockets"])
+        self.assertEqual(spec["scoped"], ["ABSTRACT_UNIX_SOCKET"])
+
+    def test_workspace_scope_refuses_when_landlock_is_unavailable(self):
+        client = McpStdioClient(
+            "t", ["echo"], workspace_root=_workspace(),
+            network="allowed", filesystem="workspace",
+        )
+        with mock.patch.object(mcp_client, "landlock_abi_version", return_value=0):
+            with self.assertRaises(McpError) as caught:
+                client._apply_network_policy(["echo"])
+        self.assertIn("Landlock ABI 1+", str(caught.exception))
+
+    def test_workspace_scope_requires_an_existing_workspace(self):
+        client = McpStdioClient(
+            "t", ["echo"], network="allowed", filesystem="workspace",
+        )
+        with mock.patch.object(mcp_client, "landlock_abi_version", return_value=1):
+            with self.assertRaises(McpError) as caught:
+                client._apply_network_policy(["echo"])
+        self.assertIn("absolute workspace directory", str(caught.exception))
+
     def test_denied_refuses_without_full_tcp_udp_landlock(self):
         client = McpStdioClient("t", ["echo"], timeout_ms=5000, workspace_root=_workspace(), network="denied")
         for abi in (0, 4, 9):
@@ -86,6 +153,74 @@ class SpawnArgvTests(unittest.TestCase):
                 with self.assertRaises(McpError) as caught:
                     client.connect()
             self.assertIn("Landlock ABI 10+", str(caught.exception))
+
+
+class LiveFilesystemTests(unittest.TestCase):
+    """Real kernel test that MCP workspace scope denies paths outside the workspace."""
+
+    def test_workspace_scope_denies_outside_reads_and_writes(self):
+        if not LINUX or landlock_abi_version() < 1:
+            self.skipTest("needs Linux with Landlock ABI 1+")
+        import json
+        import textwrap
+
+        with tempfile.TemporaryDirectory(prefix="northstar-mcp-fs-") as temp_root:
+            root = Path(temp_root)
+            workspace = root / "workspace"
+            outside = root / "outside"
+            workspace.mkdir()
+            outside.mkdir()
+            secret = outside / "secret.txt"
+            secret.write_text("must stay outside", encoding="utf-8")
+            out_file = outside / "write.txt"
+            probe = [
+                sys.executable,
+                "-c",
+                textwrap.dedent(
+                    """
+                    import json
+                    import pathlib
+                    import sys
+
+                    workspace, secret, outside_write = map(pathlib.Path, sys.argv[1:])
+                    try:
+                        secret.read_text(encoding="utf-8")
+                        read_outside = True
+                    except OSError:
+                        read_outside = False
+                    try:
+                        outside_write.write_text("blocked", encoding="utf-8")
+                        write_outside = True
+                    except OSError:
+                        write_outside = False
+                    (workspace / "inside.txt").write_text("allowed", encoding="utf-8")
+                    print(json.dumps({
+                        "read_outside": read_outside,
+                        "write_outside": write_outside,
+                        "write_workspace": (workspace / "inside.txt").read_text(encoding="utf-8") == "allowed",
+                    }))
+                    """
+                ),
+                str(workspace),
+                str(secret),
+                str(out_file),
+            ]
+            client = McpStdioClient(
+                "fs-probe", probe, workspace_root=str(workspace),
+                network="allowed", filesystem="workspace", seccomp="off",
+            )
+            completed = subprocess.run(
+                client._apply_network_policy(probe),
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            result = json.loads(completed.stdout.strip())
+            self.assertFalse(result["read_outside"])
+            self.assertFalse(result["write_outside"])
+            self.assertTrue(result["write_workspace"])
+            self.assertFalse(out_file.exists())
 
 
 class LiveDenialTests(unittest.TestCase):

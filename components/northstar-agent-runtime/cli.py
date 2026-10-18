@@ -521,6 +521,7 @@ def _add_mcp_arguments(parser: argparse.ArgumentParser) -> None:
         mcp.add_argument("--mcp-max-rounds", type=int, default=3, help="how many times one tool call may be re-asked for input before the client gives up")
         mcp.add_argument("--mcp-seccomp", choices=("auto", "on", "off"), default="auto", help="seccomp-BPF denylist for MCP server processes on Linux (same escape-primitive denylist as the Shell process backend): auto applies it where loadable, on refuses to start where it is not, off runs the server command as-is")
         mcp.add_argument("--mcp-network", choices=("denied", "allowed"), default="denied", help="network for MCP server processes: denied (default) confines the server with Landlock TCP denial like the Shell process backend and refuses to start where that cannot be enforced; allowed runs the server with full host network (explicit opt-in for servers that need it)")
+        mcp.add_argument("--mcp-filesystem", choices=("unconfined", "workspace"), default="unconfined", help="filesystem for MCP server processes: unconfined preserves compatibility; workspace applies a fail-closed Landlock boundary granting system/runtime paths read/execute, /etc and /proc read-only, minimal device access, and the current workspace read/write")
 
 def _add_execution_arguments(parser: argparse.ArgumentParser) -> None:
         execution = parser.add_argument_group("execution delegation")
@@ -1334,6 +1335,8 @@ def _mcp_stance_note(args: argparse.Namespace) -> str:
             f"roots={'on' if getattr(args, 'mcp_allow_roots', False) else 'off'}",
             f"sensitive_input={'on' if getattr(args, 'mcp_allow_sensitive_input', False) else 'off'}",
             f"rounds={getattr(args, 'mcp_max_rounds', 3)}",
+            f"network={getattr(args, 'mcp_network', 'denied')}",
+            f"filesystem={getattr(args, 'mcp_filesystem', 'unconfined')}",
         ]
     )
 
@@ -1390,6 +1393,7 @@ def _connect_mcp_clients(
             "max_input_rounds": getattr(args, "mcp_max_rounds", 3),
             "seccomp": getattr(args, "mcp_seccomp", "auto"),
             "network": getattr(args, "mcp_network", "denied"),
+            "filesystem": getattr(args, "mcp_filesystem", "unconfined"),
             "workspace_root": Path(args.workspace).resolve(),
         }
     clients: list[Any] = []
