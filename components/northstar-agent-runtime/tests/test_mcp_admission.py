@@ -410,6 +410,14 @@ class TighteningTests(unittest.TestCase):
 
 
 class SeamTests(unittest.TestCase):
+    def test_oversized_policy_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            policy_dir = Path(directory) / ".northstar"
+            policy_dir.mkdir()
+            (policy_dir / "mcp-admission.json").write_text("{" + "x" * (1 << 20) + "}")
+            policy = load_policy(directory)
+            self.assertTrue(any("unreadable" in note for note in policy.notes))
+
     def test_blocked_servers_are_refused(self):
         policy = AdmissionPolicy(levels={"evil": "blocked", "ok": "allow"})
         admitted, refused = apply_admission_policy([("evil", object()), ("ok", object()), ("new", object())], policy)
