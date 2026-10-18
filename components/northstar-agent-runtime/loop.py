@@ -2666,6 +2666,15 @@ class AgentRuntime:
             # refuses is_delegation specs), so the outcome is authorized or refused.
             assert not isinstance(outcome, _Delegate), "a delegation call reached a parallel batch"
             if isinstance(outcome, _Authorized):
+                self._record_authorized_tool_evidence(
+                    state,
+                    call,
+                    turn_index,
+                    outcome.spec,
+                    outcome.payload,
+                    outcome.decision,
+                    outcome.governed_inputs_digest,
+                )
                 prepared.append((call, outcome.spec, outcome.payload, outcome.decision, outcome.rewritten, outcome.governed_inputs_digest))
                 early.append(None)
                 state.tool_calls += 1
@@ -3718,6 +3727,77 @@ class AgentRuntime:
         )
         return block, report
 
+    def _record_authorized_tool_evidence(
+        self,
+        state: _RunState,
+        call: ToolUseBlock,
+        turn_index: int,
+        spec: Any,
+        payload: dict[str, Any],
+        decision: Any,
+        authorized_inputs_digest: str,
+    ) -> None:
+        """Record permission and governance authorization for every dispatch path."""
+        sink = state.evidence_sink
+        if sink is None:
+            return
+        sequence = f"{self.config.agent}-{turn_index}-{call.id}"
+        egress_subject: dict[str, Any] | None = None
+        if spec.name == "Fetch":
+            from egress_scope import canonical_egress_host
+
+            egress_subject = {
+                "agent": self.config.agent,
+                "turn_index": turn_index,
+                "call_id": call.id,
+                "host": canonical_egress_host(payload.get("host")),
+                "port": payload.get("port", 443),
+                "method": str(payload.get("method") or "GET").upper(),
+                "path_length": len(str(payload.get("path") or "")),
+                "permission_source": decision.source,
+                "target_scope": (
+                    list(self.config.egress_target_scope)
+                    if self.config.egress_target_scope is not None
+                    else None
+                ),
+            }
+        sink.append_event(
+            source="permission",
+            kind="runtime.permission.allowed",
+            sequence=sequence,
+            subject={
+                "agent": self.config.agent,
+                "turn_index": turn_index,
+                "call_id": call.id,
+                "tool": spec.name,
+                "tool_kind": spec.kind,
+                "source": decision.source,
+                "rule": getattr(decision, "rule", "") or "",
+                "permission_mode": str(getattr(self.permissions.mode, "value", self.permissions.mode)),
+                "arguments_digest": digest_arguments(payload),
+            },
+        )
+        if egress_subject is not None:
+            sink.append_event(
+                source="egress",
+                kind="runtime.egress.allowed",
+                sequence=sequence,
+                subject=egress_subject,
+            )
+        sink.append_event(
+            source="governance",
+            kind="runtime.governance.authorized",
+            sequence=sequence,
+            subject={
+                "agent": self.config.agent,
+                "turn_index": turn_index,
+                "call_id": call.id,
+                "tool": spec.name,
+                "permission_source": decision.source,
+                "authorized_inputs_digest": authorized_inputs_digest,
+            },
+        )
+
     def _dispatch(
         self,
         call: ToolUseBlock,
@@ -3748,49 +3828,9 @@ class AgentRuntime:
             return outcome.block, outcome.report, outcome.fatal
 
         spec, payload, decision, rewritten = outcome.spec, outcome.payload, outcome.decision, outcome.rewritten
-        if state.evidence_sink is not None:
-            egress_subject: dict[str, Any] | None = None
-            if spec.name == "Fetch":
-                from egress_scope import canonical_egress_host
-
-                egress_subject = {
-                    "agent": self.config.agent,
-                    "turn_index": turn_index,
-                    "call_id": call.id,
-                    "host": canonical_egress_host(payload.get("host")),
-                    "port": payload.get("port", 443),
-                    "method": str(payload.get("method") or "GET").upper(),
-                    "path_length": len(str(payload.get("path") or "")),
-                    "permission_source": decision.source,
-                    "target_scope": (
-                        list(self.config.egress_target_scope)
-                        if self.config.egress_target_scope is not None
-                        else None
-                    ),
-                }
-            state.evidence_sink.append_event(
-                source="permission",
-                kind="runtime.permission.allowed",
-                sequence=f"{self.config.agent}-{turn_index}-{call.id}",
-                subject={
-                    "agent": self.config.agent,
-                    "turn_index": turn_index,
-                    "call_id": call.id,
-                    "tool": spec.name,
-                    "tool_kind": spec.kind,
-                    "source": decision.source,
-                    "rule": getattr(decision, "rule", "") or "",
-                    "permission_mode": str(getattr(self.permissions.mode, "value", self.permissions.mode)),
-                    "arguments_digest": digest_arguments(payload),
-                },
-            )
-            if egress_subject is not None:
-                state.evidence_sink.append_event(
-                    source="egress",
-                    kind="runtime.egress.allowed",
-                    sequence=f"{self.config.agent}-{turn_index}-{call.id}",
-                    subject=egress_subject,
-                )
+        self._record_authorized_tool_evidence(
+            state, call, turn_index, spec, payload, decision, outcome.governed_inputs_digest
+        )
         context = ToolContext(
             session_id=state.session_id,
             agent=self.config.agent,
