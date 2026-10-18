@@ -128,6 +128,7 @@ class _WorkflowJob:
     end: int
     steps: tuple[_WorkflowStep, ...]
     env_sources: tuple[_YamlField, ...]
+    output_fields: tuple[_YamlField, ...]
 
 
 @dataclass(frozen=True)
@@ -194,6 +195,26 @@ def _environment_fields(
                     sources.append(_YamlField(assignment[0], assignment[1], cursor, _indent(lines[cursor])))
             cursor += 1
     return sources
+
+
+def _mapping_fields(
+    lines: list[str], start: int, end: int, header_indent: int, mapping: str
+) -> list[_YamlField]:
+    fields: list[_YamlField] = []
+    for index in range(start, end):
+        if _indent(lines[index]) != header_indent:
+            continue
+        pair = _key_value(lines[index])
+        if not pair or pair[0] != mapping:
+            continue
+        cursor = index + 1
+        while cursor < end and (not lines[cursor].strip() or _indent(lines[cursor]) > header_indent):
+            if _indent(lines[cursor]) == header_indent + 2:
+                item = _key_value(lines[cursor].lstrip())
+                if item:
+                    fields.append(_YamlField(item[0], item[1], cursor, _indent(lines[cursor])))
+            cursor += 1
+    return fields
 
 
 def _workflow_index(lines: list[str]) -> _Workflow:
@@ -277,7 +298,8 @@ def _workflow_index(lines: list[str]) -> _Workflow:
                 )
                 steps.append(_WorkflowStep(step_start, step_end, tuple(fields), step_runs))
         job_env = tuple(_environment_fields(clean, start + 1, end, 4))
-        jobs.append(_WorkflowJob(name, start, end, tuple(steps), job_env))
+        job_outputs = tuple(_mapping_fields(clean, start + 1, end, 4, "outputs"))
+        jobs.append(_WorkflowJob(name, start, end, tuple(steps), job_env, job_outputs))
     workflow_env = tuple(_environment_fields(clean, 0, len(clean), 0))
     return _Workflow(frozenset(triggers), tuple(jobs), tuple(permissions), workflow_env)
 
@@ -290,7 +312,16 @@ def _untrusted_fields(fields: tuple[_YamlField, ...] | list[_YamlField]) -> set[
     }
 
 
-def _untrusted_env_names(step: _WorkflowStep) -> set[str]:
+def _output_references(fields: tuple[_YamlField, ...] | list[_YamlField]) -> set[str]:
+    return {
+        field.key for field in fields
+        if re.search(r"\$\{\{\s*needs\.[A-Za-z0-9_-]+\.outputs\.[A-Za-z_][A-Za-z0-9_-]*\s*\}\}", field.value)
+    }
+
+
+def _untrusted_env_names(
+    step: _WorkflowStep, job_outputs: dict[str, set[str]] | None = None
+) -> set[str]:
     names: set[str] = set()
     for env_field in step.values("env"):
         for field in step.fields:
@@ -300,6 +331,14 @@ def _untrusted_env_names(step: _WorkflowStep) -> set[str]:
                 break
             if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", field.key) and _UNTRUSTED_CONTEXT.search(field.value):
                 names.add(field.key)
+            if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", field.key) and job_outputs:
+                if _output_references((field,)):
+                    referenced = re.findall(
+                        r"\$\{\{\s*needs\.([A-Za-z0-9_-]+)\.outputs\.([A-Za-z_][A-Za-z0-9_-]*)\s*\}\}",
+                        field.value,
+                    )
+                    if any(output in job_outputs.get(job, set()) for job, output in referenced):
+                        names.add(field.key)
     return names
 
 
@@ -319,6 +358,70 @@ def _env_exports(body: str, tainted_names: set[str]) -> set[str]:
         if any((match.group(1) or match.group(2)) in tainted_names for match in refs.finditer(line)):
             exported.add(variable.group(1))
     return exported
+
+
+def _output_exports(body: str, tainted_names: set[str]) -> set[str]:
+    refs = re.compile(r"(?:\$([A-Za-z_][A-Za-z0-9_]*)|\$\{([A-Za-z_][A-Za-z0-9_]*)\})")
+    exported: set[str] = set()
+    for line in body.splitlines():
+        if not re.search(r"\$GITHUB_OUTPUT\b", line, re.IGNORECASE):
+            continue
+        if not re.search(r"(?:>>|tee\s+-a)\s*\"?\$GITHUB_OUTPUT\b", line, re.IGNORECASE):
+            continue
+        variable = re.search(r"\b([A-Za-z_][A-Za-z0-9_]*)=", line)
+        if not variable:
+            continue
+        context_is_untrusted = bool(_UNTRUSTED_CONTEXT.search(line))
+        env_is_untrusted = any(
+            (match.group(1) or match.group(2)) in tainted_names
+            for match in refs.finditer(line)
+        )
+        if context_is_untrusted or env_is_untrusted:
+            exported.add(variable.group(1))
+    return exported
+
+
+def _job_output_taint(workflow: _Workflow) -> dict[str, set[str]]:
+    """Propagate simple step outputs through declared job outputs to needs.* env."""
+    tainted_outputs: dict[str, set[str]] = {job.name: set() for job in workflow.jobs}
+    for _ in range(max(1, len(workflow.jobs))):
+        changed = False
+        for job in workflow.jobs:
+            persistent = (
+                _untrusted_fields(workflow.env_sources)
+                | _untrusted_fields(job.env_sources)
+            )
+            for field in job.env_sources:
+                refs = re.findall(
+                    r"\$\{\{\s*needs\.([A-Za-z0-9_-]+)\.outputs\.([A-Za-z_][A-Za-z0-9_-]*)\s*\}\}",
+                    field.value,
+                )
+                if any(output in tainted_outputs.get(source, set()) for source, output in refs):
+                    persistent.add(field.key)
+
+            step_outputs: dict[str, set[str]] = {}
+            for step in job.steps:
+                step_env = persistent | _untrusted_env_names(step, tainted_outputs)
+                exported: set[str] = set()
+                for _, _, body in step.runs:
+                    aliases = _local_aliases(body, step_env)
+                    exported.update(_output_exports(body, aliases))
+                    persistent.update(_env_exports(body, aliases))
+                step_id = next((field.value for field in step.values("id")), None)
+                if step_id and exported:
+                    step_outputs[step_id] = exported
+            for output_field in job.output_fields:
+                source = re.search(
+                    r"\$\{\{\s*steps\.([A-Za-z0-9_-]+)\.outputs\.([A-Za-z_][A-Za-z0-9_-]*)\s*\}\}",
+                    output_field.value,
+                )
+                if source and source.group(2) in step_outputs.get(source.group(1), set()):
+                    if output_field.key not in tainted_outputs[job.name]:
+                        tainted_outputs[job.name].add(output_field.key)
+                        changed = True
+        if not changed:
+            break
+    return tainted_outputs
 
 
 def _local_aliases(body: str, tainted_names: set[str]) -> set[str]:
@@ -539,10 +642,21 @@ def scan_workflow(relative: str, source: str) -> list[dict[str, Any]]:
                 "Do not fetch, build, or run untrusted pull-request code in pull_request_target, workflow_run, or issue_comment. Use an unprivileged pull_request workflow or keep privileged automation limited to metadata operations.",
             )
 
+    job_output_taint = _job_output_taint(workflow)
     for job in workflow.jobs:
-        persistent_taint = _untrusted_fields(workflow.env_sources) | _untrusted_fields(job.env_sources)
+        persistent_taint = (
+            _untrusted_fields(workflow.env_sources)
+            | _untrusted_fields(job.env_sources)
+        )
+        for field in job.env_sources:
+            refs = re.findall(
+                r"\$\{\{\s*needs\.([A-Za-z0-9_-]+)\.outputs\.([A-Za-z_][A-Za-z0-9_-]*)\s*\}\}",
+                field.value,
+            )
+            if any(output in job_output_taint.get(source, set()) for source, output in refs):
+                persistent_taint.add(field.key)
         for step in job.steps:
-            tainted_env = persistent_taint | _untrusted_env_names(step)
+            tainted_env = persistent_taint | _untrusted_env_names(step, job_output_taint)
             for relative_line, _, body in step.runs:
                 if _UNTRUSTED_CONTEXT.search(body):
                     # Report the run block, not attacker-controlled text.

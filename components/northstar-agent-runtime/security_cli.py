@@ -1126,6 +1126,24 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         "          PR_TITLE: ${{ github.event.pull_request.title }}", "        run: echo \"MESSAGE=$PR_TITLE\" >> \"$GITHUB_ENV\"",
         "      - name: print title as data", "        run: printf '%s' \"$MESSAGE\"",
     ])
+    env_cross_job_output_unsafe = "\n".join([
+        "name: unsafe-cross-job-output", "on:", "  pull_request:", "jobs:", "  capture:",
+        "    outputs:", "      script: ${{ steps.capture_title.outputs.script }}", "    steps:",
+        "      - id: capture_title", "        env:",
+        "          PR_TITLE: ${{ github.event.pull_request.title }}",
+        "        run: echo \"script=$PR_TITLE\" >> \"$GITHUB_OUTPUT\"",
+        "  execute:", "    needs: capture", "    steps:", "      - name: execute output", "        env:",
+        "          SCRIPT: ${{ needs.capture.outputs.script }}", "        run: bash -c \"$SCRIPT\"",
+    ])
+    env_cross_job_output_safe = "\n".join([
+        "name: safe-cross-job-output", "on:", "  pull_request:", "jobs:", "  capture:",
+        "    outputs:", "      title: ${{ steps.capture_title.outputs.title }}", "    steps:",
+        "      - id: capture_title", "        env:",
+        "          PR_TITLE: ${{ github.event.pull_request.title }}",
+        "        run: echo \"title=$PR_TITLE\" >> \"$GITHUB_OUTPUT\"",
+        "  report:", "    needs: capture", "    steps:", "      - name: print output as data", "        env:",
+        "          TITLE: ${{ needs.capture.outputs.title }}", "        run: printf '%s' \"$TITLE\"",
+    ])
     metadata_only = "\n".join([
         "name: metadata-only", "on:", "  pull_request_target:", "jobs:", "  label:",
         "    steps:", "      - uses: actions/github-script@0123456789abcdef0123456789abcdef01234567",
@@ -1221,6 +1239,8 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         (workflows / "env-scope-unsafe.yml").write_text(env_scope_unsafe, encoding="utf-8")
         (workflows / "env-job-scope-unsafe.yml").write_text(env_job_scope_unsafe, encoding="utf-8")
         (workflows / "env-cross-step-safe.yml").write_text(env_cross_step_safe, encoding="utf-8")
+        (workflows / "env-cross-job-output-unsafe.yml").write_text(env_cross_job_output_unsafe, encoding="utf-8")
+        (workflows / "env-cross-job-output-safe.yml").write_text(env_cross_job_output_safe, encoding="utf-8")
         (workflows / "metadata.yml").write_text(metadata_only, encoding="utf-8")
         (workflows / "fork-repository-unsafe.yml").write_text(fork_repository, encoding="utf-8")
         (workflows / "pr-head-ref-unsafe.yml").write_text(pr_head_ref_injection, encoding="utf-8")
@@ -1269,6 +1289,7 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         "env-cross-step-unsafe.yml": {"CFG014_ACTIONS_UNTRUSTED_ENV_TO_CODE_EXECUTION"},
         "env-scope-unsafe.yml": {"CFG014_ACTIONS_UNTRUSTED_ENV_TO_CODE_EXECUTION"},
         "env-job-scope-unsafe.yml": {"CFG014_ACTIONS_UNTRUSTED_ENV_TO_CODE_EXECUTION"},
+        "env-cross-job-output-unsafe.yml": {"CFG014_ACTIONS_UNTRUSTED_ENV_TO_CODE_EXECUTION"},
         "fork-repository-unsafe.yml": {"CFG008_PULL_REQUEST_TARGET_UNTRUSTED_CHECKOUT"},
         "pr-head-ref-unsafe.yml": {"CFG009_ACTIONS_UNTRUSTED_RUN_EXPRESSION"},
         "quoted-hash-unsafe.yml": {"CFG009_ACTIONS_UNTRUSTED_RUN_EXPRESSION"},
