@@ -77,10 +77,10 @@ class FilterAssemblyTests(unittest.TestCase):
         prog = build_default_filter()
         self.assertTrue(len(prog) > 0)
         self.assertEqual(len(prog) % 8, 0)
-        # 17 fixed instructions plus one comparison for each denied syscall on each arch.
+        # 21 fixed instructions plus one comparison for each denied syscall on each arch.
         n = len(denied_syscalls("x86_64"))
         m = len(denied_syscalls("aarch64"))
-        self.assertEqual(len(prog) // 8, 17 + n + m)
+        self.assertEqual(len(prog) // 8, 21 + n + m)
 
     def test_denylist_tables_are_nonempty_and_sane(self):
         for arch in ("x86_64", "aarch64"):
@@ -93,7 +93,7 @@ class FilterAssemblyTests(unittest.TestCase):
         self.assertIn("bpf", denied_syscalls("aarch64"))
         self.assertIn("setpgid", denied_syscalls("x86_64"))
         self.assertIn("setsid", denied_syscalls("aarch64"))
-        for name in ("unshare", "setns", "open_tree", "move_mount", "mount_setattr"):
+        for name in ("setns", "open_tree", "move_mount", "mount_setattr"):
             self.assertIn(name, denied_syscalls("x86_64"))
             self.assertIn(name, denied_syscalls("aarch64"))
 
@@ -117,6 +117,15 @@ class FilterSemanticsTests(unittest.TestCase):
         for name, nr in table.items():
             with self.subTest(name=name):
                 self.assertEqual(interpret(self.prog, _AARCH64, nr), _ERRNO_EPERM)
+
+    def test_unshare_allows_non_namespace_flags_and_denies_escape_flags(self):
+        for arch, unshare_nr in ((_X86_64, 272), (_AARCH64, 97)):
+            self.assertEqual(interpret(self.prog, arch, unshare_nr, 0x400), _ALLOW)
+            for flag in (0x10000000, 0x00020000, 0x00100000):
+                with self.subTest(arch=arch, flag=flag):
+                    self.assertEqual(
+                        interpret(self.prog, arch, unshare_nr, flag), _ERRNO_EPERM
+                    )
 
     def test_clone_allows_ordinary_flags_and_denies_namespace_flags(self):
         for arch, clone_nr in ((_X86_64, 56), (_AARCH64, 220)):
