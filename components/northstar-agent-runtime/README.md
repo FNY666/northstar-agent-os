@@ -143,22 +143,27 @@ skills or server commands, and omit matched instruction, endpoint, environment,
 and secret values from findings. Actions workflow checks flag pull-request-head
 checkout plus later `run` under `pull_request_target`, and direct untrusted event
 text in `run` blocks, plus `workflow_run` artifact downloads followed by commands
-in the same job. They also catch fork repository selection and the explicit
+or local actions in the same job. They also catch fork repository selection and the explicit
 `allow-unsafe-pr-checkout` opt-in under `pull_request_target`. They do not fully
 parse YAML; a zero-dependency block-style index keeps jobs and steps separate,
 but flow-style YAML and artifact transfer across jobs are outside its model.
-They do not prove whether a command executes
+They do not prove whether a command or local action executes
 checked-out/downloaded code. `workflow_run` checkouts of upstream SHA/PR-head
-revisions followed by commands receive a separate medium-severity review finding.
-Untrusted values in step-level environment variables are also checked for
-same-step reparsing by `eval`, shell `-c`, Python/Node code flags, or source-like
-commands; a fixed quoted `bash -c` script that prints the variable remains clean.
+revisions followed by commands or local actions receive a separate
+medium-severity review finding. Untrusted values in workflow-, job-, or
+step-level environment variables are checked for reparsing by `eval`, shell
+`-c`, Python/Node code flags, or source-like commands. Simple aliases,
+`$GITHUB_ENV` writes, and `$GITHUB_OUTPUT` → job outputs → `needs.*.outputs.*`
+are followed within the same workflow. Single-line or fixed-delimiter writes of
+untrusted values to GitHub environment/output files also receive a finding for
+newline injection. These are bounded shell heuristics; a fixed quoted
+`bash -c` script that prints a variable remains clean.
 Explicit write token scopes in privileged-trigger workflows also receive a
 medium-severity least-privilege finding at workflow or job scope; repository
 default token settings are not inferred.
 Privileged `pull_request_target`, `workflow_run`,
 and `issue_comment` workflows are also checked for `gh pr checkout` and
-PR-ref `git fetch` followed by later commands. This command-flow check is
+PR-ref `git fetch` followed by later commands or local actions. This command-flow check is
 pattern based and does not resolve variables, aliases, or helper scripts. Shell checks are heuristics for dynamic `eval`,
 expanded `sh -c` commands, and direct remote-script pipelines; they join explicit
 backslash continuations but do not parse Shell syntax or follow variables. The human summary and JSON receipt report how
