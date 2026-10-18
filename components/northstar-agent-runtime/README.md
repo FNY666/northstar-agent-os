@@ -488,8 +488,9 @@ python3 -m cli run --workspace . --prompt "summarise the files" \
   Landlock ABI 1+ and never falls back to the unconfined profile. The default
   `unconfined` mode preserves compatibility. Workspace scope applies to the
   whole server process, not individual MCP tools, so every admitted server tool
-  can read workspace files such as local secrets; keep such files outside the
-  workspace. The boundary also does not make the process a container or VM.
+  can read and change workspace files, including local secrets and state. Keep
+  anything requiring tighter protection outside this tree. The boundary also
+  does not make the process a container or VM.
 - **Two protocol generations, one probe.** `--mcp-protocol auto` (the default)
   opens with `server/discover` — the request the 2026-07-28 revision made
   mandatory — and only falls back to the older `initialize` handshake when that
