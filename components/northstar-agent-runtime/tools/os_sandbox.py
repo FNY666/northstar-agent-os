@@ -13,7 +13,7 @@ Two backends, one contract:
   absolute paths. Doctor and the Shell tool both say so out loud.
 
 The runtime never invents a third, quieter mode. ``auto`` picks bwrap when the
-binary exists and can start a throwaway probe; otherwise process. An operator
+binary is at least 0.12.0 and can start a throwaway probe; otherwise process. An operator
 who asks for bwrap on a host without it gets a configuration error, not a
 silent downgrade — a run advertised as sandboxed that quietly is not would be
 the exact lie this project refuses to tell.
@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import selectors
 import shutil
 import signal
@@ -80,6 +81,9 @@ MAX_CPU_SECONDS = MAX_TIMEOUT_MS // 1000
 MAX_TASKS = 128
 
 BACKENDS = ("auto", "bwrap", "process")
+
+# Bubblewrap releases before 0.12.0 are affected by CVE-2026-87766.
+_MIN_BWRAP_VERSION = (0, 12, 0)
 
 
 class SandboxError(RuntimeError):
@@ -213,6 +217,39 @@ class SandboxResult:
 _CAP_CACHE: SandboxCapabilities | None = None
 
 
+def _probe_bwrap_version(path: str) -> tuple[tuple[int, int, int] | None, str | None]:
+    """Require a parseable, security-supported bubblewrap version."""
+    try:
+        completed = subprocess.run(
+            [path, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return None, f"bwrap at {path} version could not be checked: {error}"
+    if completed.returncode != 0:
+        output = (completed.stderr or completed.stdout or "").strip().splitlines()
+        reason = output[-1] if output else f"exit {completed.returncode}"
+        return None, f"bwrap at {path} version check failed: {reason[:200]}"
+    output = "\n".join(part for part in (completed.stdout, completed.stderr) if part)
+    match = re.search(r"\b(?:bubblewrap|bwrap)\s+(\d+)\.(\d+)\.(\d+)\b", output)
+    if match is None:
+        return None, (
+            f"bwrap at {path} returned an unrecognized version; "
+            "require bubblewrap >=0.12.0"
+        )
+    version = tuple(int(part) for part in match.groups())
+    version_text = ".".join(str(part) for part in version)
+    if version < _MIN_BWRAP_VERSION:
+        return version, (
+            f"bwrap at {path} version {version_text} is below required 0.12.0 "
+            "(CVE-2026-87766)"
+        )
+    return version, None
+
+
 def _probe_bwrap_feature(
     path: str,
     *,
@@ -264,10 +301,15 @@ def probe_capabilities(*, force: bool = False, bwrap_bin: str | None = None) -> 
     usable = False
     detail = "bwrap not found on PATH"
     if path:
-        try:
-            # A real, empty sandbox is the only honest probe: --version alone does
-            # not prove user namespaces or seccomp work on this kernel.
-            completed = subprocess.run(
+        version, version_error = _probe_bwrap_version(path)
+        if version_error is not None:
+            detail = version_error
+        else:
+            assert version is not None
+            try:
+                # A real, empty sandbox is the only honest probe: a supported version
+                # still does not prove user namespaces or seccomp work on this kernel.
+                completed = subprocess.run(
                 [
                     path,
                     "--die-with-parent",
@@ -291,14 +333,14 @@ def probe_capabilities(*, force: bool = False, bwrap_bin: str | None = None) -> 
                 timeout=5,
                 check=False,
             )
-            if completed.returncode == 0:
-                usable = True
-                detail = f"bwrap usable at {path}"
-            else:
-                err = (completed.stderr or completed.stdout or "").strip().splitlines()
-                detail = f"bwrap at {path} failed probe: {(err[-1] if err else 'exit ' + str(completed.returncode))[:200]}"
-        except (OSError, subprocess.TimeoutExpired) as error:
-            detail = f"bwrap at {path} could not be probed: {error}"
+                if completed.returncode == 0:
+                    usable = True
+                    detail = f"bwrap {'.'.join(map(str, version))} usable at {path}"
+                else:
+                    err = (completed.stderr or completed.stdout or "").strip().splitlines()
+                    detail = f"bwrap at {path} failed probe: {(err[-1] if err else 'exit ' + str(completed.returncode))[:200]}"
+            except (OSError, subprocess.TimeoutExpired) as error:
+                detail = f"bwrap at {path} could not be probed: {error}"
     cap_drop = False
     seccomp_usable = False
     seccomp_detail = "bwrap unavailable; not probed"
