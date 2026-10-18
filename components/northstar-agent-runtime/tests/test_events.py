@@ -51,6 +51,7 @@ class EventTypeTests(unittest.TestCase):
                 "error_permission_denied",
                 "error_postconditions_failed",
                 "error_session_busy",
+                "error_evidence_incomplete",
             ),
         )
         # Pinned against the exit-code table as well: a subtype with no code is a result

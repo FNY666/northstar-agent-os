@@ -1185,6 +1185,7 @@ py-modules = [
     "run_assert_eval_probes",
     "run_setup",
     "runbook_automation",
+    "runtime_evidence",
     "runtime_defense_01",
     "runtime_defense_02",
     "runtime_defense_03",

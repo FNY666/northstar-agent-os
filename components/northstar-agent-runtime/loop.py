@@ -278,6 +278,14 @@ class RuntimeConfig:
     #: seccomp so the workload cannot contact a user/session manager to loosen
     #: the unit. Missing enforcement is a refusal, never an rlimits fallback.
     shell_aggregate_resource_scope: str = "off"
+    #: Optional per-run evidence bundle directory. When set, the runtime records
+    #: digest-first governance metadata into a hash-chained ledger. The evidence
+    #: component is loaded lazily, so a bare runtime remains dependency-free.
+    evidence_dir: str | None = None
+    #: When true, an evidence capture failure changes the terminal result to
+    #: ``error_evidence_incomplete``. When false, capture failures are reported
+    #: in the result while the run's business outcome is preserved.
+    evidence_required: bool = False
 
     def __post_init__(self) -> None:
         def fail(message: str) -> None:
@@ -327,6 +335,13 @@ class RuntimeConfig:
             fail("stream must be a boolean")
         if not isinstance(self.require_verification, bool):
             fail("require_verification must be a boolean")
+        if self.evidence_dir is not None:
+            if not isinstance(self.evidence_dir, str) or not self.evidence_dir.strip():
+                fail("evidence_dir must be a non-empty path string or None")
+        if not isinstance(self.evidence_required, bool):
+            fail("evidence_required must be a boolean")
+        if self.evidence_required and self.evidence_dir is None:
+            fail("evidence_required needs evidence_dir")
         if self.code_phase_machine is not None and any(
             not callable(getattr(self.code_phase_machine, name, None))
             for name in (
@@ -447,6 +462,8 @@ class RuntimeConfig:
             "lock_session": self.lock_session,
             "sidecar": bool(self.sidecar_socket),
             "egress_target_scope": list(self.egress_target_scope) if self.egress_target_scope is not None else None,
+            "evidence_dir": self.evidence_dir,
+            "evidence_required": self.evidence_required,
         }
 
 
@@ -618,6 +635,8 @@ class RunReport:
     errors: tuple[str, ...] = ()
     session_id: str = ""
     spans: tuple[str, ...] = ()
+    #: Digests, paths, and capture errors for this run's optional evidence bundle.
+    evidence: Any = None
 
     @property
     def ok(self) -> bool:
@@ -676,6 +695,7 @@ class RunReport:
             "cost_usd": result.total_cost_usd if result else 0.0,
             "unverified_cost_usd": result.unverified_cost_usd if result else 0.0,
             "pricing_estimated": result.pricing_estimated if result else False,
+            "evidence": self.evidence.as_dict() if self.evidence is not None else None,
         }
 
     _trace: str = ""
@@ -718,6 +738,9 @@ class _RunState:
     budget_reservation_failed: bool = False
     #: Whether this run already spent its single free compaction on an oversized request.
     overflow_compacted: bool = False
+    #: Optional runtime evidence sink and its final capture report.
+    evidence_sink: Any = None
+    evidence_report: Any = None
 
 
 @dataclass(frozen=True)
@@ -928,6 +951,8 @@ class AgentRuntime:
         #: read a full report without re-deriving it from events.
         self._pending_state: _RunState | None = None
         self._last_report: RunReport | None = None
+        self._evidence_sink: Any = None
+        self._evidence_report: Any = None
         self.retry = getattr(config, "retry", None)
         if self.retry is not None:
             from provider_retry import RetryPolicy
@@ -1487,6 +1512,30 @@ class AgentRuntime:
     def run(self, prompt: str, *, resume: Sequence[Any] | None = None) -> Iterator[Message]:
         """Stream events for one run. Terminates in exactly one ResultMessage."""
         state = _RunState(session_id=self.session_id)
+        # Evidence is per-run state. Child runtimes receive a separate sink only
+        # when the host asks for one; the parent never writes through a child.
+        self._evidence_sink = None
+        self._evidence_report = None
+        if self.config.evidence_dir is not None:
+            from runtime_evidence import RuntimeEvidenceSink
+
+            self._evidence_sink = RuntimeEvidenceSink(
+                self.config.evidence_dir,
+                run_id=self.config.run_id or f"session-{self.session_id}",
+                session_id=self.session_id,
+            )
+            state.evidence_sink = self._evidence_sink
+            self._evidence_sink.start_run(
+                provider=self.provider_name,
+                model=self.config.model,
+                permission_mode=self.permissions.mode,
+                policy_revision=self.config.policy_revision,
+                tools=self.tools.names(),
+                workspace=str(self.sandbox.root_real),
+                max_turns=self.config.max_turns,
+                max_tool_calls=self.config.max_tool_calls,
+                max_budget_usd=self.config.max_budget_usd,
+            )
         if resume:
             state.transcript.extend(resume)
             if self.dataflow is not None:
@@ -2260,12 +2309,63 @@ class AgentRuntime:
                 ),
                 data=verification_summary,
             )
+            if state.evidence_sink is not None:
+                state.evidence_sink.append_event(
+                    source="verifier",
+                    kind="runtime.verification.completed",
+                    sequence=str(turn_index),
+                    subject={
+                        "declared": verification_summary["declared"],
+                        "ran": verification_summary["ran"],
+                        "passed": verification_summary["passed"],
+                        "failed": verification_summary["failed"],
+                        "skipped": verification_summary["skipped"],
+                        "ok": verification_summary["ok"],
+                        "network": verification_summary["network"],
+                        "results": [
+                            {
+                                "command_index": receipt.index,
+                                "ok": receipt.ok,
+                                "exit_code": receipt.exit_code,
+                                "timed_out": receipt.timed_out,
+                                "duration_ms": receipt.duration_ms,
+                                "output_sha256": receipt.output_sha256,
+                                "truncated": receipt.truncated,
+                            }
+                            for receipt in receipts
+                        ],
+                    },
+                )
             self.sessions.record_system(verification_record, agent=config.agent)
             yield verification_record
             if not verification_summary["ok"]:
                 subtype = "error_postconditions_failed"
         if self.postconditions:
             summary = summarise_postconditions(self.postconditions.evaluate())
+            if state.evidence_sink is not None:
+                state.evidence_sink.append_event(
+                    source="verifier",
+                    kind="runtime.postconditions.completed",
+                    sequence=str(turn_index),
+                    subject={
+                        "checked": summary["checked"],
+                        "passed": summary["passed"],
+                        "failed": summary["failed"],
+                        "ok": summary["ok"],
+                        "structural_passed": summary["structural_passed"],
+                        "results": [
+                            {
+                                "kind": item.get("kind"),
+                                "path": item.get("path"),
+                                "ok": item.get("ok"),
+                                "structural": item.get("structural"),
+                                "digest_before": item.get("digest_before"),
+                                "digest_after": item.get("digest_after"),
+                            }
+                            for item in summary.get("results", [])
+                        ],
+                    },
+                )
             record = SystemMessage(
                 subtype="postconditions",
                 content=(
@@ -2402,6 +2502,21 @@ class AgentRuntime:
         )
         payload["boundary"] = boundary
         self.sessions.append("checkpoint", payload)
+        if state.evidence_sink is not None:
+            state.evidence_sink.append_event(
+                source="checkpoint",
+                kind="runtime.checkpoint",
+                sequence=str(self.sessions.written),
+                subject={
+                    "boundary": boundary,
+                    "record_index": self.sessions.written,
+                    "turns": state.turns,
+                    "tool_calls": state.tool_calls,
+                    "transcript_len": int(payload.get("transcript_len", 0) or 0),
+                    "transcript_digest": str(payload.get("transcript_digest", ""))[:80],
+                    "denials": len(state.denials),
+                },
+            )
         # A boundary is the moment to renew: whoever is reading this file from another
         # process should see the freshest possible promise about the holder.
         self._heartbeat()
@@ -3097,6 +3212,21 @@ class AgentRuntime:
                 ).as_dict(),
             },
         )
+        if state.evidence_sink is not None:
+            state.evidence_sink.append_event(
+                source="permission",
+                kind="runtime.permission.denied",
+                sequence=f"{self.config.agent}-{turn_index}-{call.id}",
+                subject={
+                    "agent": self.config.agent,
+                    "turn_index": turn_index,
+                    "call_id": call.id,
+                    "tool": call.name,
+                    "source": "unknown_tool",
+                    "rule": "",
+                    "permission_mode": str(getattr(self.permissions.mode, "value", self.permissions.mode)),
+                },
+            )
         return _Refused(block, report, None)
 
     def _refuse_by_hook(
@@ -3126,6 +3256,20 @@ class AgentRuntime:
             agent=self.config.agent,
         )
         fatal = "error_permission_denied" if self.config.halt_on_denial else None
+        if state.evidence_sink is not None:
+            state.evidence_sink.append_event(
+                source="permission",
+                kind="runtime.permission.denied",
+                sequence=f"{self.config.agent}-{turn_index}-{call.id}",
+                subject={
+                    "agent": self.config.agent,
+                    "turn_index": turn_index,
+                    "call_id": call.id,
+                    "tool": spec.name,
+                    "source": f"hook:{pre.denied_by}",
+                    "permission_mode": str(getattr(self.permissions.mode, "value", self.permissions.mode)),
+                },
+            )
         return _Refused(block, report, fatal)
 
     def _safe_hook_text(self, value: Any, *, event: str, turn_index: int) -> str:
@@ -3218,6 +3362,22 @@ class AgentRuntime:
                 data={"denied": True, "source": decision.source},
             ),
         )
+        if state.evidence_sink is not None:
+            state.evidence_sink.append_event(
+                source="permission",
+                kind="runtime.permission.denied",
+                sequence=f"{self.config.agent}-{turn_index}-{call.id}",
+                subject={
+                    "agent": self.config.agent,
+                    "turn_index": turn_index,
+                    "call_id": call.id,
+                    "tool": spec.name,
+                    "source": decision.source,
+                    "rule": getattr(decision, "rule", "") or "",
+                    "permission_mode": str(getattr(self.permissions.mode, "value", self.permissions.mode)),
+                    "arguments_digest": digest_arguments(payload),
+                },
+            )
         block = ToolResultBlock(
             tool_use_id=call.id,
             # Structured denial (not a bare string): the model gets the
@@ -3485,7 +3645,7 @@ class AgentRuntime:
                     },
                 ),
             )
-        else:
+        if not result.is_error:
             self._fire(
                 state,
                 "PostToolUse",
@@ -3506,6 +3666,33 @@ class AgentRuntime:
                         "provenance": provenance_data,
                     },
                 ),
+            )
+        if state.evidence_sink is not None:
+            state.evidence_sink.append_event(
+                source="tool",
+                kind="runtime.tool.completed",
+                sequence=f"{self.config.agent}-{turn_index}-{call.id}",
+                subject={
+                    "agent": self.config.agent,
+                    "turn_index": turn_index,
+                    "call_id": call.id,
+                    "tool": spec.name,
+                    "tool_kind": spec.kind,
+                    "mutating": bool(spec.is_mutating),
+                    "is_error": bool(result.is_error),
+                    "permission_source": getattr(decision, "source", "") or "",
+                    "input_rewritten": rewritten,
+                    "parallel": parallel,
+                    "duration_ms": min(duration_ms, 86_400_000),
+                    "result_chars": min(original_chars, 10_000_000),
+                    "truncated": result_truncated,
+                    "result_source": result.provenance.source,
+                    "result_trust": result.provenance.trust,
+                    "execution_status": execution_status,
+                    "execution_gate": execution_gate,
+                    "governance_input_digest": attrs["tool.governance_input_digest"],
+                    "defensive_decision": defensive.decision.value,
+                },
             )
         report = ToolCallReport(
             name=spec.name,
@@ -3561,6 +3748,49 @@ class AgentRuntime:
             return outcome.block, outcome.report, outcome.fatal
 
         spec, payload, decision, rewritten = outcome.spec, outcome.payload, outcome.decision, outcome.rewritten
+        if state.evidence_sink is not None:
+            egress_subject: dict[str, Any] | None = None
+            if spec.name == "Fetch":
+                from egress_scope import canonical_egress_host
+
+                egress_subject = {
+                    "agent": self.config.agent,
+                    "turn_index": turn_index,
+                    "call_id": call.id,
+                    "host": canonical_egress_host(payload.get("host")),
+                    "port": payload.get("port", 443),
+                    "method": str(payload.get("method") or "GET").upper(),
+                    "path_length": len(str(payload.get("path") or "")),
+                    "permission_source": decision.source,
+                    "target_scope": (
+                        list(self.config.egress_target_scope)
+                        if self.config.egress_target_scope is not None
+                        else None
+                    ),
+                }
+            state.evidence_sink.append_event(
+                source="permission",
+                kind="runtime.permission.allowed",
+                sequence=f"{self.config.agent}-{turn_index}-{call.id}",
+                subject={
+                    "agent": self.config.agent,
+                    "turn_index": turn_index,
+                    "call_id": call.id,
+                    "tool": spec.name,
+                    "tool_kind": spec.kind,
+                    "source": decision.source,
+                    "rule": getattr(decision, "rule", "") or "",
+                    "permission_mode": str(getattr(self.permissions.mode, "value", self.permissions.mode)),
+                    "arguments_digest": digest_arguments(payload),
+                },
+            )
+            if egress_subject is not None:
+                state.evidence_sink.append_event(
+                    source="egress",
+                    kind="runtime.egress.allowed",
+                    sequence=f"{self.config.agent}-{turn_index}-{call.id}",
+                    subject=egress_subject,
+                )
         context = ToolContext(
             session_id=state.session_id,
             agent=self.config.agent,
@@ -3572,6 +3802,23 @@ class AgentRuntime:
             services=self._services(),
         )
         started = time.monotonic()
+        if state.evidence_sink is not None:
+            # Bind the decision to the governed runner's canonical (tool,args)
+            # pin. This lets an offline reviewer correlate permission -> action
+            # without copying the arguments themselves.
+            state.evidence_sink.append_event(
+                source="governance",
+                kind="runtime.governance.authorized",
+                sequence=f"{self.config.agent}-{turn_index}-{call.id}",
+                subject={
+                    "agent": self.config.agent,
+                    "turn_index": turn_index,
+                    "call_id": call.id,
+                    "tool": spec.name,
+                    "permission_source": decision.source,
+                    "authorized_inputs_digest": outcome.governed_inputs_digest,
+                },
+            )
         # A: the authorized call runs through the governed-action runner, so
         # the SAFR 4-gate trail (declare -> authorize -> assess -> audit) is
         # booked and sealed for every production tool call.  The production
@@ -3928,6 +4175,24 @@ class AgentRuntime:
                 )
             task_prompt = filtered_prompt
 
+        if state.evidence_sink is not None:
+            state.evidence_sink.append_event(
+                source="interop",
+                kind="runtime.interop.delegation_admitted",
+                sequence=f"{self.config.agent}-{turn_index}-{call.id}",
+                subject={
+                    "parent_agent": self.config.agent,
+                    "call_id": call.id,
+                    "target_agent": definition.name,
+                    "prompt_chars": len(task_prompt),
+                    "tool_count": len(gate.allowed),
+                    "depth": self.config.depth + 1,
+                    "permission_mode": str(
+                        getattr(self.permissions.mode, "value", self.permissions.mode)
+                    ),
+                },
+            )
+
         child_provider = self.provider
         if definition.provider:
             child_provider = self.providers.get(definition.provider)
@@ -4200,6 +4465,24 @@ class AgentRuntime:
             },
         )
         block = result.as_block(call.id, max_chars=self.limits.max_result_chars)
+        if state.evidence_sink is not None:
+            state.evidence_sink.append_event(
+                source="interop",
+                kind="runtime.subagent.completed",
+                sequence=f"{self.config.agent}-{turn_index}-{call.id}",
+                subject={
+                    "parent_agent": self.config.agent,
+                    "child_agent": definition.name,
+                    "call_id": call.id,
+                    "subtype": subagent_report.subtype,
+                    "turns": subagent_report.turns,
+                    "tool_calls": subagent_report.tool_calls,
+                    "denials": len(subagent_report.denials),
+                    "cost_micro_usd": int(round(subagent_report.cost_usd * 1_000_000)),
+                    "accepted": accepted,
+                    "verdict_acceptance": verdict.acceptance if verdict is not None else "",
+                },
+            )
         report_row = ToolCallReport(
             name=spec.name,
             call_id=call.id,
@@ -4307,6 +4590,10 @@ class AgentRuntime:
         return result
 
     def _close_run(self, state: _RunState, run_span: Any) -> None:
+        # Apply the evidence policy before the terminal record is persisted: a
+        # required-capture failure must make the event stream, RunReport, and
+        # session transcript agree on the final subtype.
+        self._seal_evidence(state)
         if not state.session_end_fired:
             state.session_end_fired = True
             if state.refused_session:
@@ -4359,6 +4646,114 @@ class AgentRuntime:
         # tail that the next writer then appends to.
         self._release_session()
 
+    def _seal_evidence(self, state: _RunState) -> None:
+        """Seal opt-in evidence and apply the required-capture policy."""
+        sink = state.evidence_sink or self._evidence_sink
+        if sink is None:
+            return
+        existing = state.result
+        subtype = existing.subtype if existing is not None else "error_during_execution"
+        verification = next(
+            (
+                event
+                for event in reversed(state.events)
+                if isinstance(event, SystemMessage) and event.subtype == "verification"
+            ),
+            None,
+        )
+        postconditions = next(
+            (
+                event
+                for event in reversed(state.events)
+                if isinstance(event, SystemMessage) and event.subtype == "postconditions"
+            ),
+            None,
+        )
+        verifier_verdict = "unknown"
+        test_exit_code = None
+        if verification is not None:
+            data = dict(verification.data or {})
+            verifier_verdict = "passed" if data.get("ok") else "failed"
+            results = data.get("results")
+            if isinstance(results, list) and results and isinstance(results[0], dict):
+                exit_code = results[0].get("exit_code")
+                if isinstance(exit_code, int) and not isinstance(exit_code, bool):
+                    test_exit_code = max(0, min(255, exit_code))
+        elif postconditions is not None:
+            verifier_verdict = "passed" if (postconditions.data or {}).get("ok") else "failed"
+        completion = {
+            "status": "finished" if subtype in {"success", "success_unverified"} else "failed",
+            "subtype": subtype,
+            "turns": state.turns,
+            "tool_calls": state.tool_calls,
+            "denials": len(state.denials),
+            "verifier_verdict": verifier_verdict,
+            "test_exit_code": test_exit_code,
+        }
+        completion_entry = sink.append_event(
+            source="result",
+            kind="runtime.completed",
+            sequence="terminal",
+            subject={
+                **completion,
+                "error_count": len(state.errors),
+                "subagent_count": len(state.subagents),
+            },
+            ref_ids=tuple(
+                item
+                for item in (
+                    "runtime-started",
+                    *(
+                        f"{report.agent}-{report.turn_index}-{report.call_id}"
+                        for report in state.tool_reports
+                    ),
+                )
+                if item
+            ),
+        )
+        report = sink.seal(
+            completion={
+                **completion,
+                "evidence_entry_digest": (
+                    completion_entry.entry_digest if completion_entry is not None else None
+                ),
+            }
+        )
+        if completion_entry is None and report.ok:
+            report = replace(
+                report,
+                ok=False,
+                errors=("terminal evidence entry could not be appended",),
+            )
+        state.evidence_report = report
+        self._evidence_report = report
+        if report.ok:
+            return
+        message = (
+            "evidence capture is incomplete: " + "; ".join(report.errors)
+            if report.errors
+            else "evidence capture is incomplete"
+        )
+        if self.config.evidence_required and existing is not None:
+            state.errors.append(message)
+            replacement = replace(
+                existing,
+                subtype="error_evidence_incomplete",
+                errors=tuple(state.errors),
+            )
+            state.result = replacement
+            if state.events and state.events[-1] is existing:
+                state.events[-1] = replacement
+        else:
+            span = self.tracer.start_span("evidence.capture.failed", attributes={"evidence.ok": False})
+            span.record_error("evidence capture is incomplete")
+            span.end()
+        # ``run_collect`` and the SDK read ``last_report`` after the generator
+        # closes, while streaming callers already consumed the original result
+        # event. Keep both views truthful when the required-capture policy replaces
+        # the terminal subtype.
+        self._last_report = self._report(state.events, state=state)
+
     def _report(self, events: Sequence[Message], *, state: _RunState) -> RunReport:
         result = state.result
         if result is None and events:
@@ -4377,6 +4772,7 @@ class AgentRuntime:
             errors=tuple(state.errors),
             session_id=state.session_id,
             spans=tuple(self.tracer.names()),
+            evidence=state.evidence_report,
             _trace=self.tracer.tree(),
         )
 

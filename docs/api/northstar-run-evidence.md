@@ -207,11 +207,15 @@ Re-open the store (fail-closed on tamper) and verify the seal binds.
 
 Source: `components/northstar-run-evidence/evidence_cli.py`
 
-Operator CLI for the run-evidence component: seal and verify audit feeds.
+Operator CLI for the run-evidence component: inspect, pack, seal, and verify.
 
 #### `cmd_seal(args: argparse.Namespace)`
 
 #### `cmd_verify(args: argparse.Namespace)`
+
+#### `cmd_inspect(args: argparse.Namespace)`
+
+#### `cmd_pack(args: argparse.Namespace)`
 
 #### `build_parser()`
 

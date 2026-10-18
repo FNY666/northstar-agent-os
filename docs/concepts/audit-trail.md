@@ -149,6 +149,29 @@ is the record's original timestamp.
 
 ## Honest ceiling
 
+## 5. Unified run evidence bundles
+
+`northstar-run-evidence` supplies the cross-surface layer when a host needs one
+offline artifact. An opt-in governed run (`--run-evidence-dir PATH`) writes a
+canonical hash-chained ledger with typed digest references to permission
+decisions, tool outcomes, checkpoints, verification and postconditions, egress
+decisions, delegation, and the terminal result.
+
+The capture policy is digest-first. Runtime entries never copy prompt text, raw
+tool arguments, tool output bodies, authorization tokens, credentials, or
+handoff secrets. `northstar evidence inspect BUNDLE --json` revalidates the
+chain and checks that the manifest still describes its ledger; `northstar
+evidence pack BUNDLE --output NEW_BUNDLE` copies only the declared regular
+bundle artifacts to a new directory and refuses to overwrite.
+
+A bundle is not authenticated merely because its hash chain verifies: a party
+who can rewrite the whole ledger can recompute it. A trusted signer's sealed
+run receipt anchors the head. Runtime bundles without one have integrity but
+unknown authenticity. Capture failure is explicit: observe-only runs preserve
+their business result and report the incomplete bundle, while
+`--require-evidence` returns `error_evidence_incomplete` (exit 8). Existing
+tool effects are never replayed or silently undone.
+
 Transcripts and stores are a **local audit trail, not a compliance store**:
 the runtime does not automatically delete records or enforce an organization-wide
 retention schedule. `sessions retention --older-than-days N` gives host jobs a

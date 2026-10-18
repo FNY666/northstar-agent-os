@@ -15,7 +15,34 @@ This component contains:
 - `sealed_receipt`: a separate domain-separated `SealedRunReceipt` v1 binding explicit terminal completion claims, capture-policy identity, required/observed evidence sources, and per-source ledger tails to one validated chain snapshot;
 - `verify_run_receipt()` with layered integrity, completeness, authenticity, and run verdicts. Verifying without the corresponding ledger deliberately leaves integrity and the overall run verdict unknown;
 - `audit_adapter`: seals the runtime's canonical audit NDJSON feed (`audit.ndjson/1`) into an evidence store — one entry per audit record, strict RFC 3339 timestamps, idempotent re-seals — without the runtime depending on this component;
-- `evidence_cli`: operator commands `seal` / `verify` over a store file and an HMAC key file (local test-grade sealing; not non-repudiation).
+- `evidence_cli`: operator commands `inspect` / `pack` for runtime bundles, plus `seal` / `verify` over a store file and an HMAC key file (local test-grade sealing; not non-repudiation).
+
+## Unified runtime bundles
+
+An opt-in governed run can write one bundle with `--run-evidence-dir PATH`.
+The runtime stores a canonical `ledger.jsonl`, a digest `manifest.json`, and a
+small `audit.ndjson` projection. Entries cover run start, permission allow/deny,
+tool completion, checkpoints, verification, postconditions, egress decisions,
+subagent completion, and the terminal result.
+
+The bundle is digest-first: prompts, raw tool arguments, tool output bodies,
+credentials, and handoff tokens are not copied. `--require-evidence` upgrades a
+capture failure to `error_evidence_incomplete` (exit 8); without it, the
+business result is preserved and the evidence report says capture failed.
+
+```sh
+northstar run --run-evidence-dir ./evidence/run-1 --require-evidence \
+  --prompt 'summarise README' --provider scripted --scripted-text ok
+northstar evidence inspect ./evidence/run-1 --json
+northstar evidence pack ./evidence/run-1 --output ./handoff/run-1
+```
+
+`inspect` verifies the ledger chain and checks that the manifest's entry count
+and head digest still describe that ledger. It never rewrites the bundle.
+`pack` copies only `ledger.jsonl`, `manifest.json`, and the optional
+`audit.ndjson` to a new directory; it refuses to overwrite an existing bundle.
+These unsigned runtime bundles prove structural integrity only. Use the sealed
+run receipt path when authenticity is required.
 
 ## Sealed run receipt
 
