@@ -56,7 +56,7 @@ from tools.seccomp import prctl_loader_argv, validate_mode
 from tools.sandbox import (
     landlock_abi_version,
     landlock_loader_argv,
-    mcp_workspace_profile,
+    _mcp_workspace_profile,
     network_deny_profile,
 )
 from mcp_elicitation import (
@@ -526,7 +526,7 @@ class McpStdioClient:
         """Build the fail-closed Landlock profile selected for this server."""
         if self.filesystem == "workspace":
             try:
-                return mcp_workspace_profile(self.workspace_root, network=self.network)
+                return _mcp_workspace_profile(self.workspace_root, network=self.network)
             except ValueError as error:
                 raise McpError(f"mcp server {self.name!r}: {error}") from error
         spec = network_deny_profile()

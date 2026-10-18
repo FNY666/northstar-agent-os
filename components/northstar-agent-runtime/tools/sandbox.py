@@ -359,7 +359,7 @@ def default_profile(workspace: str) -> dict:
     return spec
 
 
-def mcp_workspace_profile(workspace: str, *, network: str = "denied") -> dict:
+def _mcp_workspace_profile(workspace: str, *, network: str = "denied") -> dict:
     """Landlock profile for a local MCP server restricted to one workspace.
 
     Runtime and system hierarchies are readable/executable, the selected workspace
