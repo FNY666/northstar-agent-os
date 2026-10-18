@@ -76,6 +76,8 @@ _SECCOMP_RET_ERRNO_ENOSYS = _SECCOMP_RET_ERRNO | _ENOSYS
 _CLONE_NEWUSER = 0x10000000
 _CLONE_NEWNS = 0x00020000
 _CLONE_NAMESPACE_FLAGS = _CLONE_NEWUSER | _CLONE_NEWNS
+_UNSHARE_EMPTY_MNTNS = 0x00100000
+_UNSHARE_NAMESPACE_FLAGS = _CLONE_NAMESPACE_FLAGS | _UNSHARE_EMPTY_MNTNS
 _CLONE3_SYSCALL = 435
 
 #: Denylisted syscalls per architecture. Numbers verified against kernel
@@ -85,7 +87,6 @@ _DENY_X86_64: dict[str, int] = {
     "mount": 165,
     "umount2": 166,
     "pivot_root": 155,
-    "unshare": 272,
     "setns": 308,
     "open_tree": 428,
     "move_mount": 429,
@@ -131,7 +132,6 @@ _DENY_AARCH64: dict[str, int] = {
     "mount": 40,
     "umount2": 39,
     "pivot_root": 41,
-    "unshare": 97,
     "setns": 268,
     "open_tree": 428,
     "move_mount": 429,
@@ -275,6 +275,11 @@ def build_default_filter() -> bytes:
         following = f"x86_next_{i}"
         b.branch(_BPF_JMP_JEQ_K, nr, "deny", following)
         b.label(following)
+    b.branch(_BPF_JMP_JEQ_K, 272, "x86_unshare_flags", "x86_clone")
+    b.label("x86_unshare_flags")
+    b.stmt(_BPF_LD_W_ABS, _ARGS0_OFFSET)
+    b.branch(_BPF_JMP_JSET_K, _UNSHARE_NAMESPACE_FLAGS, "deny", "x86_clone")
+    b.label("x86_clone")
     b.branch(_BPF_JMP_JEQ_K, 56, "x86_clone_flags", "allow")
     b.label("x86_clone_flags")
     b.stmt(_BPF_LD_W_ABS, _ARGS0_OFFSET)
@@ -288,6 +293,11 @@ def build_default_filter() -> bytes:
         following = f"arm_next_{i}"
         b.branch(_BPF_JMP_JEQ_K, nr, "deny", following)
         b.label(following)
+    b.branch(_BPF_JMP_JEQ_K, 97, "arm_unshare_flags", "arm_clone")
+    b.label("arm_unshare_flags")
+    b.stmt(_BPF_LD_W_ABS, _ARGS0_OFFSET)
+    b.branch(_BPF_JMP_JSET_K, _UNSHARE_NAMESPACE_FLAGS, "deny", "arm_clone")
+    b.label("arm_clone")
     b.branch(_BPF_JMP_JEQ_K, 220, "arm_clone_flags", "allow")
     b.label("arm_clone_flags")
     b.stmt(_BPF_LD_W_ABS, _ARGS0_OFFSET)
