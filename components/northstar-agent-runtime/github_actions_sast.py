@@ -31,6 +31,11 @@ _UNTRUSTED_REPOSITORY = re.compile(
     r"github\.event\.pull_request\.head\.repo\.full_name",
     re.IGNORECASE,
 )
+_WORKFLOW_RUN_REVISION = re.compile(
+    r"github\.event\.workflow_run\.(?:head_sha|head_branch|"
+    r"head_repository\.full_name|pull_requests\[[^\]]+\]\.head\.(?:sha|ref))",
+    re.IGNORECASE,
+)
 
 
 def _indent(line: str) -> int:
@@ -179,7 +184,7 @@ def _workflow_index(lines: list[str]) -> _Workflow:
                     if key.casefold() == "run" and value in {"", "|", ">", "|-", ">-", "|+", ">+"}:
                         in_run_block_indent = indent
                 step_runs = tuple(
-                    (line_no - step_start + 1, base_indent, body)
+                    (line_no, base_indent, body)
                     for line_no, base_indent, body in _run_blocks(clean[step_start:step_end])
                 )
                 steps.append(_WorkflowStep(step_start, step_end, tuple(fields), step_runs))
@@ -192,14 +197,20 @@ def scan_workflow(relative: str, source: str) -> list[dict[str, Any]]:
     workflow = _workflow_index(lines)
     findings: list[dict[str, Any]] = []
 
-    def add(line: int, rule: str, message: str, remediation: str) -> None:
+    def add(
+        line: int,
+        rule: str,
+        message: str,
+        remediation: str,
+        severity: str = "high",
+    ) -> None:
         findings.append({
             "path": relative,
             "line": line,
             "column": 1,
             "tool": "github-actions-sast-scanner",
             "rule": rule,
-            "severity": "high",
+            "severity": severity,
             "message": message,
             "remediation": remediation,
         })
@@ -240,6 +251,33 @@ def scan_workflow(relative: str, source: str) -> list[dict[str, Any]]:
             )
 
     if workflow_run:
+        risky_checkout: int | None = None
+        for job in workflow.jobs:
+            for step in job.steps:
+                uses = next((
+                    field for field in step.values("uses")
+                    if re.match(r"(?i)actions/checkout(?:@|$)", field.value)
+                ), None)
+                if uses is None:
+                    continue
+                revision_fields = [
+                    field for field in step.fields
+                    if field.key.casefold() in {"ref", "repository"}
+                    and _WORKFLOW_RUN_REVISION.search(field.value)
+                ]
+                if revision_fields and any(later.start > step.start and later.runs for later in job.steps):
+                    risky_checkout = revision_fields[0].line + 1
+                    break
+            if risky_checkout is not None:
+                break
+        if risky_checkout is not None:
+            add(
+                risky_checkout,
+                "CFG012_WORKFLOW_RUN_REVISION_EXECUTION",
+                "workflow_run checks out an upstream workflow revision and later runs commands in the same job",
+                "Verify the upstream run's source event and repository before checkout; keep downstream privileged jobs from executing untrusted pull-request code.",
+                severity="medium",
+            )
         for job in workflow.jobs:
             risky_download = next((
                 step for step in job.steps

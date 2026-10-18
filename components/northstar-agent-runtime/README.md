@@ -148,7 +148,9 @@ in the same job. They also catch fork repository selection and the explicit
 parse YAML; a zero-dependency block-style index keeps jobs and steps separate,
 but flow-style YAML and artifact transfer across jobs are outside its model.
 They do not prove whether a command executes
-checked-out/downloaded code. Privileged `pull_request_target`, `workflow_run`,
+checked-out/downloaded code. `workflow_run` checkouts of upstream SHA/PR-head
+revisions followed by commands receive a separate medium-severity review finding.
+Privileged `pull_request_target`, `workflow_run`,
 and `issue_comment` workflows are also checked for `gh pr checkout` and
 PR-ref `git fetch` followed by later commands. This command-flow check is
 pattern based and does not resolve variables, aliases, or helper scripts. Shell checks are heuristics for dynamic `eval`,

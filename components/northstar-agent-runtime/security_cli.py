@@ -1106,6 +1106,12 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         "      - uses: actions/download-artifact@0123456789abcdef0123456789abcdef01234567",
         "        with:", "          name: build-output", "      - run: ./artifact/run.sh",
     ])
+    workflow_run_checkout_unsafe = "\n".join([
+        "name: checkout-upstream-run", "on:", "  workflow_run:", "    workflows: [Build]", "    types: [completed]",
+        "jobs:", "  privileged:", "    steps:",
+        "      - uses: actions/checkout@0123456789abcdef0123456789abcdef01234567", "        with:",
+        "          ref: ${{ github.event.workflow_run.head_sha }}", "      - run: make test",
+    ])
     workflow_run_data_only = "\n".join([
         "name: inspect-output", "on:", "  workflow_run:", "    workflows: [Build]", "    types: [completed]",
         "jobs:", "  inspect:", "    steps:",
@@ -1140,6 +1146,7 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         "CFG009_ACTIONS_UNTRUSTED_RUN_EXPRESSION",
         "CFG010_WORKFLOW_RUN_ARTIFACT_EXECUTION",
         "CFG011_PRIVILEGED_PR_CODE_FETCH",
+        "CFG012_WORKFLOW_RUN_REVISION_EXECUTION",
     }
     with tempfile.TemporaryDirectory(prefix="northstar-actions-sast-") as temporary:
         workflows = Path(temporary) / ".github" / "workflows"
@@ -1150,6 +1157,7 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         (workflows / "fork-repository-unsafe.yml").write_text(fork_repository, encoding="utf-8")
         (workflows / "pr-head-ref-unsafe.yml").write_text(pr_head_ref_injection, encoding="utf-8")
         (workflows / "workflow-run-unsafe.yml").write_text(workflow_run_unsafe, encoding="utf-8")
+        (workflows / "workflow-run-checkout-unsafe.yml").write_text(workflow_run_checkout_unsafe, encoding="utf-8")
         (workflows / "workflow-run-data-only.yml").write_text(workflow_run_data_only, encoding="utf-8")
         (workflows / "workflow-run-separated-safe.yml").write_text(workflow_run_separated_jobs, encoding="utf-8")
         (workflows / "workflow-run-injection-unsafe.yml").write_text(workflow_run_injection_unsafe, encoding="utf-8")
@@ -1162,6 +1170,10 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
             fail_on="none",
             max_findings=100,
         )
+        line_counts = {
+            workflow.name: len(workflow.read_text(encoding="utf-8").splitlines())
+            for workflow in workflows.iterdir()
+        }
     relevant = [
         item for item in summary["findings"]
         if item["rule"] in expected
@@ -1183,6 +1195,7 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         "fork-repository-unsafe.yml": {"CFG008_PULL_REQUEST_TARGET_UNTRUSTED_CHECKOUT"},
         "pr-head-ref-unsafe.yml": {"CFG009_ACTIONS_UNTRUSTED_RUN_EXPRESSION"},
         "workflow-run-unsafe.yml": {"CFG010_WORKFLOW_RUN_ARTIFACT_EXECUTION"},
+        "workflow-run-checkout-unsafe.yml": {"CFG012_WORKFLOW_RUN_REVISION_EXECUTION"},
         "workflow-run-injection-unsafe.yml": {"CFG009_ACTIONS_UNTRUSTED_RUN_EXPRESSION"},
         "shell-fetch-unsafe.yml": {"CFG011_PRIVILEGED_PR_CODE_FETCH"},
     }
@@ -1196,12 +1209,17 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         rules.issubset(per_fixture[filename])
         for filename, rules in required_fixture_rules.items()
     )
+    valid_line_numbers = all(
+        1 <= item.get("line", 0) <= line_counts.get(Path(item["path"]).name, 0)
+        for item in relevant
+    )
     return {
         "check": "github-actions-untrusted-input-flow-rules",
-        "passed": expected.issubset(detected) and fixture_coverage and not clean,
+        "passed": expected.issubset(detected) and fixture_coverage and valid_line_numbers and not clean,
         "expected_rules": sorted(expected),
         "detected_rules": sorted(detected),
         "fixture_coverage": fixture_coverage,
+        "valid_line_numbers": valid_line_numbers,
         "clean_fixture_findings": len(clean),
         "scope": "temporary workflow YAML fixtures scanned as text; never executed and automatically removed",
     }
