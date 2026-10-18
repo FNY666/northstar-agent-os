@@ -341,6 +341,29 @@ class LockTests(unittest.TestCase):
         self.assertTrue(result.is_error)
         self.assertIn("changed after run setup", result.content)
 
+    def test_shell_refuses_changed_skill_script_inside_nested_shell_command(self):
+        from skills import discover_skills
+        from tools import ToolContext, ToolSandbox
+        from tools.skill_scripts import discover_skill_scripts
+        from tools.shell import shell_handler
+
+        script = self.folder / "scripts" / "helper.py"
+        script.parent.mkdir()
+        script.write_text("print('reviewed')\\n", encoding="utf-8")
+        skills = discover_skills(self.root)
+        scripts = discover_skill_scripts(self.root, skills)
+        self.assertEqual(len(scripts), 1)
+        pins = {item.relative: item.digest for item in scripts}
+        ctx = ToolContext(sandbox=ToolSandbox(self.root), services={"skill_digests": pins})
+
+        script.write_text("print('replaced')\\n", encoding="utf-8")
+        result = shell_handler(
+            {"command": f"bash -c 'python {scripts[0].relative}'"},
+            ctx,
+        )
+        self.assertTrue(result.is_error)
+        self.assertIn("changed after run setup", result.content)
+
     def test_lock_symlink_is_refused_without_touching_external_target(self):
         import tempfile
         outside = Path(tempfile.mkdtemp(prefix="nsar-lock-outside-")) / "target.json"
