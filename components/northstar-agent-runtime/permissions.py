@@ -2743,7 +2743,10 @@ def _approval_verdict(verdict: Any) -> tuple[bool, str]:
             return False, ""
         return False, f"unrecognised approval verdict {verdict!r}"
     if isinstance(verdict, dict):
-        allowed = bool(verdict.get("allowed", verdict.get("allow", False)))
+        field = "allowed" if "allowed" in verdict else "allow"
+        allowed = verdict.get(field, False)
+        if not isinstance(allowed, bool):
+            return False, f"approval mapping field {field!r} must be a boolean"
         reason = str(verdict.get("reason", "") or "")
         return allowed, reason
     allowed = getattr(verdict, "allowed", None)
