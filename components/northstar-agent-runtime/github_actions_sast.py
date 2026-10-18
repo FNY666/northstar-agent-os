@@ -98,9 +98,17 @@ class _WorkflowJob:
 
 
 @dataclass(frozen=True)
+class _PermissionGrant:
+    permission: str
+    scope: str
+    line: int
+
+
+@dataclass(frozen=True)
 class _Workflow:
     triggers: frozenset[str]
     jobs: tuple[_WorkflowJob, ...]
+    write_permissions: tuple[_PermissionGrant, ...]
 
 
 def _key_value(line: str) -> tuple[str, str] | None:
@@ -108,6 +116,30 @@ def _key_value(line: str) -> tuple[str, str] | None:
     if not match:
         return None
     return match.group(1).strip().strip("'\""), match.group(2).strip().strip("'\"")
+
+
+def _explicit_write_permissions(
+    lines: list[str], start: int, end: int, header_indent: int, scope: str
+) -> list[_PermissionGrant]:
+    grants: list[_PermissionGrant] = []
+    for index in range(start, end):
+        if _indent(lines[index]) != header_indent:
+            continue
+        pair = _key_value(lines[index])
+        if not pair or pair[0] != "permissions":
+            continue
+        if re.search(r"(?i)\b[A-Za-z][A-Za-z0-9-]*\s*:\s*write\b", pair[1]):
+            grants.append(_PermissionGrant("write", scope, index))
+        if pair[1].casefold() in {"write-all", "read-all", "none"}:
+            continue
+        cursor = index + 1
+        while cursor < end and (not lines[cursor].strip() or _indent(lines[cursor]) > header_indent):
+            if _indent(lines[cursor]) == header_indent + 2:
+                permission = _key_value(lines[cursor].lstrip())
+                if permission and permission[1].casefold() == "write":
+                    grants.append(_PermissionGrant(permission[0], scope, cursor))
+            cursor += 1
+    return grants
 
 
 def _workflow_index(lines: list[str]) -> _Workflow:
@@ -139,11 +171,12 @@ def _workflow_index(lines: list[str]) -> _Workflow:
 
     jobs_key = next((i for i, line in enumerate(clean) if _indent(line) == 0 and _key_value(line) == ("jobs", "")), None)
     if jobs_key is None:
-        return _Workflow(frozenset(triggers), ())
+        return _Workflow(frozenset(triggers), (), ())
     jobs_end = next((
         i for i in range(jobs_key + 1, len(clean))
         if clean[i].strip() and _indent(clean[i]) == 0
     ), len(clean))
+    permissions = _explicit_write_permissions(clean, 0, jobs_key, 0, "workflow")
     job_headers = [
         i for i in range(jobs_key + 1, jobs_end)
         if _indent(clean[i]) == 2 and re.match(r"^\s{2}[A-Za-z0-9_-]+\s*:", clean[i])
@@ -153,6 +186,7 @@ def _workflow_index(lines: list[str]) -> _Workflow:
         end = job_headers[job_number + 1] if job_number + 1 < len(job_headers) else jobs_end
         header = _key_value(clean[start].strip())
         name = header[0] if header else "unknown"
+        permissions.extend(_explicit_write_permissions(clean, start + 1, end, 4, f"job:{name}"))
         steps_key = next((
             i for i in range(start + 1, end)
             if _indent(clean[i]) == 4 and _key_value(clean[i]) == ("steps", "")
@@ -189,7 +223,7 @@ def _workflow_index(lines: list[str]) -> _Workflow:
                 )
                 steps.append(_WorkflowStep(step_start, step_end, tuple(fields), step_runs))
         jobs.append(_WorkflowJob(name, start, end, tuple(steps)))
-    return _Workflow(frozenset(triggers), tuple(jobs))
+    return _Workflow(frozenset(triggers), tuple(jobs), tuple(permissions))
 
 
 def scan_workflow(relative: str, source: str) -> list[dict[str, Any]]:
@@ -218,6 +252,15 @@ def scan_workflow(relative: str, source: str) -> list[dict[str, Any]]:
     pull_request_target = "pull_request_target" in workflow.triggers
     workflow_run = "workflow_run" in workflow.triggers
     issue_comment = "issue_comment" in workflow.triggers
+    if (pull_request_target or workflow_run or issue_comment) and workflow.write_permissions:
+        for grant in workflow.write_permissions:
+            add(
+                grant.line + 1,
+                "CFG013_PRIVILEGED_TRIGGER_WRITE_PERMISSION",
+                f"{grant.scope} explicitly grants a GITHUB_TOKEN write permission in a privileged-event workflow",
+                "Keep the token read-only by default and grant only the exact write scope required to a narrowly scoped job; separate untrusted-code handling from jobs that can write to the repository.",
+                severity="medium",
+            )
     if pull_request_target:
         risky_checkout: int | None = None
         for job in workflow.jobs:

@@ -150,6 +150,9 @@ but flow-style YAML and artifact transfer across jobs are outside its model.
 They do not prove whether a command executes
 checked-out/downloaded code. `workflow_run` checkouts of upstream SHA/PR-head
 revisions followed by commands receive a separate medium-severity review finding.
+Explicit write token scopes in privileged-trigger workflows also receive a
+medium-severity least-privilege finding at workflow or job scope; repository
+default token settings are not inferred.
 Privileged `pull_request_target`, `workflow_run`,
 and `issue_comment` workflows are also checked for `gh pr checkout` and
 PR-ref `git fetch` followed by later commands. This command-flow check is

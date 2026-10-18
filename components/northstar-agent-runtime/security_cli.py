@@ -1118,6 +1118,21 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         "      - uses: actions/download-artifact@0123456789abcdef0123456789abcdef01234567",
         "        with:", "          name: build-output", "      - uses: actions/upload-artifact@0123456789abcdef0123456789abcdef01234567",
     ])
+    privileged_write_global_unsafe = "\n".join([
+        "name: privileged-write", "on:", "  pull_request_target:", "permissions:",
+        "  contents: read", "  pull-requests: write", "jobs:", "  label:",
+        "    steps:", "      - run: echo label",
+    ])
+    privileged_write_job_unsafe = "\n".join([
+        "name: privileged-job-write", "on:", "  workflow_run:", "    workflows: [Build]", "    types: [completed]",
+        "jobs:", "  publish:", "    permissions:", "      contents: write", "    steps:",
+        "      - run: echo publish",
+    ])
+    privileged_readonly_safe = "\n".join([
+        "name: privileged-readonly", "on:", "  pull_request_target:", "permissions:",
+        "  contents: read", "  pull-requests: read", "jobs:", "  inspect:",
+        "    steps:", "      - run: echo inspect",
+    ])
     workflow_run_separated_jobs = "\n".join([
         "name: separate-jobs", "on:", "  workflow_run:", "    workflows: [Build]", "    types: [completed]",
         "jobs:", "  fetch:", "    steps:",
@@ -1147,6 +1162,7 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         "CFG010_WORKFLOW_RUN_ARTIFACT_EXECUTION",
         "CFG011_PRIVILEGED_PR_CODE_FETCH",
         "CFG012_WORKFLOW_RUN_REVISION_EXECUTION",
+        "CFG013_PRIVILEGED_TRIGGER_WRITE_PERMISSION",
     }
     with tempfile.TemporaryDirectory(prefix="northstar-actions-sast-") as temporary:
         workflows = Path(temporary) / ".github" / "workflows"
@@ -1158,6 +1174,9 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         (workflows / "pr-head-ref-unsafe.yml").write_text(pr_head_ref_injection, encoding="utf-8")
         (workflows / "workflow-run-unsafe.yml").write_text(workflow_run_unsafe, encoding="utf-8")
         (workflows / "workflow-run-checkout-unsafe.yml").write_text(workflow_run_checkout_unsafe, encoding="utf-8")
+        (workflows / "privileged-write-global-unsafe.yml").write_text(privileged_write_global_unsafe, encoding="utf-8")
+        (workflows / "privileged-write-job-unsafe.yml").write_text(privileged_write_job_unsafe, encoding="utf-8")
+        (workflows / "privileged-readonly-safe.yml").write_text(privileged_readonly_safe, encoding="utf-8")
         (workflows / "workflow-run-data-only.yml").write_text(workflow_run_data_only, encoding="utf-8")
         (workflows / "workflow-run-separated-safe.yml").write_text(workflow_run_separated_jobs, encoding="utf-8")
         (workflows / "workflow-run-injection-unsafe.yml").write_text(workflow_run_injection_unsafe, encoding="utf-8")
@@ -1196,6 +1215,8 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         "pr-head-ref-unsafe.yml": {"CFG009_ACTIONS_UNTRUSTED_RUN_EXPRESSION"},
         "workflow-run-unsafe.yml": {"CFG010_WORKFLOW_RUN_ARTIFACT_EXECUTION"},
         "workflow-run-checkout-unsafe.yml": {"CFG012_WORKFLOW_RUN_REVISION_EXECUTION"},
+        "privileged-write-global-unsafe.yml": {"CFG013_PRIVILEGED_TRIGGER_WRITE_PERMISSION"},
+        "privileged-write-job-unsafe.yml": {"CFG013_PRIVILEGED_TRIGGER_WRITE_PERMISSION"},
         "workflow-run-injection-unsafe.yml": {"CFG009_ACTIONS_UNTRUSTED_RUN_EXPRESSION"},
         "shell-fetch-unsafe.yml": {"CFG011_PRIVILEGED_PR_CODE_FETCH"},
     }
