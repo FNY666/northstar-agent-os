@@ -310,29 +310,29 @@ def probe_capabilities(*, force: bool = False, bwrap_bin: str | None = None) -> 
                 # A real, empty sandbox is the only honest probe: a supported version
                 # still does not prove user namespaces or seccomp work on this kernel.
                 completed = subprocess.run(
-                [
-                    path,
-                    "--die-with-parent",
-                    "--unshare-pid",
-                    "--unshare-net",
-                    "--ro-bind",
-                    "/",
-                    "/",
-                    "--tmpfs",
-                    "/tmp",
-                    "--dev",
-                    "/dev",
-                    "--proc",
-                    "/proc",
-                    "--chdir",
-                    "/",
-                    "true",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=5,
-                check=False,
-            )
+                    [
+                        path,
+                        "--die-with-parent",
+                        "--unshare-pid",
+                        "--unshare-net",
+                        "--ro-bind",
+                        "/",
+                        "/",
+                        "--tmpfs",
+                        "/tmp",
+                        "--dev",
+                        "/dev",
+                        "--proc",
+                        "/proc",
+                        "--chdir",
+                        "/",
+                        "true",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    check=False,
+                )
                 if completed.returncode == 0:
                     usable = True
                     detail = f"bwrap {'.'.join(map(str, version))} usable at {path}"
