@@ -13,7 +13,7 @@ Policy shape: a default-deny allowlist is unworkable for a general Shell tool
 aimed at privilege-escalation and sandbox-escape primitives that no legitimate
 workspace command needs: kernel module loading, kexec, BPF program loading,
 perf, userfaultfd, keyrings, ptrace, cross-process memory access, and
-filesystem super-operations (mount/pivot_root/...), namespace entry/creation, and modern fd-based mount operations. Since Shell networking is
+filesystem super-operations (mount/pivot_root/...). Since Shell networking is
 not offered, socket creation, socketpair, and ``io_uring_setup`` are also
 denied; this gives the process backend a kernel-level network creation barrier
 when seccomp is active, even without Landlock. The namespaces already blunt
@@ -240,14 +240,24 @@ class _FilterBuilder:
 
 
 def build_default_filter() -> bytes:
-    """Assemble a cross-architecture syscall and namespace-escape denylist.
+    """Assemble the denylist BPF program.
 
-    unshare and setns are denied. clone remains available for normal process
-    and thread creation, but is denied when it requests a new user or mount
-    namespace. clone3 is answered with ENOSYS so libc can fall back to the
-    covered clone syscall; its flags live in a struct seccomp cannot safely
-    inspect. Old and fd-based mount syscalls are denied on both verified
-    architectures.
+    Layout::
+
+        ld [arch]
+        jeq X86_64 -> x86_chain
+        jeq AARCH64 -> arm_chain else DENY
+      x86_chain:
+        ld [nr]
+        jge X32_SYSCALL_BIT -> DENY
+        jeq n1 -> DENY ... jeq nN -> DENY
+        ja ALLOW
+      arm_chain:
+        ld [nr]
+        jeq m1 -> DENY ... jeq mM -> DENY
+        ja ALLOW
+      ALLOW: ret SECCOMP_RET_ALLOW
+      DENY:  ret SECCOMP_RET_ERRNO|EPERM
     """
     b = _FilterBuilder()
     b.stmt(_BPF_LD_W_ABS, _ARCH_OFFSET)
