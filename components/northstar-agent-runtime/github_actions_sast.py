@@ -43,8 +43,32 @@ def _indent(line: str) -> int:
 
 
 def _without_comment(line: str) -> str:
-    # Keep the original expression syntax but remove ordinary YAML comments.
-    return re.split(r"\s+#", line, maxsplit=1)[0]
+    """Remove a YAML comment marker outside simple quoted text."""
+    quote: str | None = None
+    escaped = False
+    index = 0
+    while index < len(line):
+        char = line[index]
+        if quote == '"':
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                quote = None
+        elif quote == "'":
+            if char == "'" and index + 1 < len(line) and line[index + 1] == "'":
+                index += 1
+            elif char == "'":
+                quote = None
+        elif char in {'"', "'"} and (
+            index == 0 or line[index - 1].isspace() or line[index - 1] in ":[([{"
+        ):
+            quote = char
+        elif char == "#" and (index == 0 or line[index - 1].isspace()):
+            return line[:index]
+        index += 1
+    return line
 
 
 def _run_blocks(lines: list[str]) -> list[tuple[int, int, str]]:

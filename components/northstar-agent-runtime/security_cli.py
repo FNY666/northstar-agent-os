@@ -1100,6 +1100,10 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         "name: unsafe-pr-head-ref", "on:", "  pull_request:", "jobs:", "  print:", "    steps:",
         "      - run: echo '${{ github.event.pull_request.head.ref }}'",
     ])
+    quoted_hash_injection = "\n".join([
+        "name: unsafe-hash-context", "on:", "  pull_request:", "jobs:", "  print:", "    steps:",
+        "      - run: printf '%s' \"marker # ${{ github.event.pull_request.body }}\"",
+    ])
     workflow_run_unsafe = "\n".join([
         "name: downstream", "on:", "  workflow_run:", "    workflows: [Build]", "    types: [completed]",
         "jobs:", "  privileged:", "    steps:",
@@ -1172,6 +1176,7 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         (workflows / "metadata.yml").write_text(metadata_only, encoding="utf-8")
         (workflows / "fork-repository-unsafe.yml").write_text(fork_repository, encoding="utf-8")
         (workflows / "pr-head-ref-unsafe.yml").write_text(pr_head_ref_injection, encoding="utf-8")
+        (workflows / "quoted-hash-unsafe.yml").write_text(quoted_hash_injection, encoding="utf-8")
         (workflows / "workflow-run-unsafe.yml").write_text(workflow_run_unsafe, encoding="utf-8")
         (workflows / "workflow-run-checkout-unsafe.yml").write_text(workflow_run_checkout_unsafe, encoding="utf-8")
         (workflows / "privileged-write-global-unsafe.yml").write_text(privileged_write_global_unsafe, encoding="utf-8")
@@ -1213,6 +1218,7 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         },
         "fork-repository-unsafe.yml": {"CFG008_PULL_REQUEST_TARGET_UNTRUSTED_CHECKOUT"},
         "pr-head-ref-unsafe.yml": {"CFG009_ACTIONS_UNTRUSTED_RUN_EXPRESSION"},
+        "quoted-hash-unsafe.yml": {"CFG009_ACTIONS_UNTRUSTED_RUN_EXPRESSION"},
         "workflow-run-unsafe.yml": {"CFG010_WORKFLOW_RUN_ARTIFACT_EXECUTION"},
         "workflow-run-checkout-unsafe.yml": {"CFG012_WORKFLOW_RUN_REVISION_EXECUTION"},
         "privileged-write-global-unsafe.yml": {"CFG013_PRIVILEGED_TRIGGER_WRITE_PERMISSION"},
