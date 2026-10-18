@@ -1276,7 +1276,7 @@ class PermissionEngine:
         # The host can explicitly allowlist via offensive_allowlist.
         if is_offensive_tool(tool_name):
             allowed_names = {canonical_tool_name(n) for n in self.config.offensive_allowlist}
-            if tool_name not in allowed_names:
+            if canonical_tool_name(tool_name) not in allowed_names:
                 return PermissionDecision(
                     False,
                     source="offensive",
