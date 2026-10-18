@@ -312,11 +312,16 @@ def _untrusted_fields(fields: tuple[_YamlField, ...] | list[_YamlField]) -> set[
     }
 
 
+def _needs_output_refs(value: str) -> set[tuple[str, str]]:
+    """Read needs outputs even when wrapped by format/fromJSON expressions."""
+    return set(re.findall(
+        r"\bneeds\.([A-Za-z0-9_-]+)\.outputs\.([A-Za-z_][A-Za-z0-9_-]*)\b",
+        value,
+    ))
+
+
 def _output_references(fields: tuple[_YamlField, ...] | list[_YamlField]) -> set[str]:
-    return {
-        field.key for field in fields
-        if re.search(r"\$\{\{\s*needs\.[A-Za-z0-9_-]+\.outputs\.[A-Za-z_][A-Za-z0-9_-]*\s*\}\}", field.value)
-    }
+    return {field.key for field in fields if _needs_output_refs(field.value)}
 
 
 def _untrusted_env_names(
@@ -332,14 +337,42 @@ def _untrusted_env_names(
             if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", field.key) and _UNTRUSTED_CONTEXT.search(field.value):
                 names.add(field.key)
             if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", field.key) and job_outputs:
-                if _output_references((field,)):
-                    referenced = re.findall(
-                        r"\$\{\{\s*needs\.([A-Za-z0-9_-]+)\.outputs\.([A-Za-z_][A-Za-z0-9_-]*)\s*\}\}",
-                        field.value,
-                    )
-                    if any(output in job_outputs.get(job, set()) for job, output in referenced):
-                        names.add(field.key)
+                if any(output in job_outputs.get(job, set()) for job, output in _needs_output_refs(field.value)):
+                    names.add(field.key)
     return names
+
+
+def _multiline_file_flow(
+    body: str, tainted_names: set[str], target: str
+) -> tuple[set[str], set[int]]:
+    lines = body.splitlines()
+    refs = re.compile(r"(?:\$([A-Za-z_][A-Za-z0-9_]*)|\$\{([A-Za-z_][A-Za-z0-9_]*)\})")
+    exports: set[str] = set()
+    unsafe_lines: set[int] = set()
+    opener = re.compile(r"^\s*echo\s+['\"]?([A-Za-z_][A-Za-z0-9_]*)<<([A-Za-z0-9_.-]+)['\"]?\s*$")
+    for index, line in enumerate(lines):
+        match = opener.match(line)
+        if not match:
+            continue
+        name, delimiter = match.groups()
+        terminator = re.compile(rf"^\s*echo\s+['\"]?{re.escape(delimiter)}['\"]?\s*$")
+        close = next((i for i in range(index + 1, len(lines)) if terminator.match(lines[i])), None)
+        if close is None or not any(
+            re.search(rf"\$GITHUB_{target}\b", tail, re.IGNORECASE)
+            and re.search(r"(?:>>|tee\s+-a)", tail)
+            for tail in lines[close + 1:close + 5]
+        ):
+            continue
+        payload = lines[index + 1:close]
+        tainted = any(_UNTRUSTED_CONTEXT.search(item) for item in payload) or any(
+            (ref.group(1) or ref.group(2)) in tainted_names
+            for item in payload for ref in refs.finditer(item)
+        )
+        if tainted:
+            exports.add(name)
+            # Fixed delimiters can be injected as a line in attacker-controlled data.
+            unsafe_lines.add(index + 1)
+    return exports, unsafe_lines
 
 
 def _env_exports(body: str, tainted_names: set[str]) -> set[str]:
@@ -357,6 +390,8 @@ def _env_exports(body: str, tainted_names: set[str]) -> set[str]:
             continue
         if any((match.group(1) or match.group(2)) in tainted_names for match in refs.finditer(line)):
             exported.add(variable.group(1))
+    multiline_exports, _ = _multiline_file_flow(body, tainted_names, "ENV")
+    exported.update(multiline_exports)
     return exported
 
 
@@ -378,7 +413,47 @@ def _output_exports(body: str, tainted_names: set[str]) -> set[str]:
         )
         if context_is_untrusted or env_is_untrusted:
             exported.add(variable.group(1))
+    multiline_exports, _ = _multiline_file_flow(body, tainted_names, "OUTPUT")
+    exported.update(multiline_exports)
     return exported
+
+
+def _unsafe_env_file_lines(body: str, tainted_names: set[str]) -> set[int]:
+    """Find one-line shell writes that let untrusted newlines add file commands."""
+    variable_refs = re.compile(
+        r"(?<![A-Za-z0-9_])(?:"
+        + "|".join(
+            rf"\${name}\b|\$\{{{name}\}}"
+            for name in sorted(tainted_names)
+        )
+        + r")",
+        re.IGNORECASE,
+    ) if tainted_names else None
+    findings: set[int] = set()
+    for target in ("ENV", "OUTPUT"):
+        _, multiline_unsafe = _multiline_file_flow(body, tainted_names, target)
+        findings.update(multiline_unsafe)
+    for line_number, line in enumerate(body.splitlines(), start=1):
+        if not re.search(r"\$GITHUB_(?:ENV|OUTPUT)\b", line, re.IGNORECASE):
+            continue
+        if not re.search(r"(?:>>|tee\s+-a)\s*\"?\$GITHUB_(?:ENV|OUTPUT)\b", line, re.IGNORECASE):
+            continue
+        if not re.search(r"\b(?:echo|printf)\b", line, re.IGNORECASE):
+            continue
+        if not re.search(r"\b[A-Za-z_][A-Za-z0-9_]*=", line):
+            continue
+        if _UNTRUSTED_CONTEXT.search(line):
+            findings.add(line_number)
+            continue
+        # Base64 followed by newline removal produces a single safe file value.
+        if re.search(r"\bbase64\b.*\btr\s+-d\s+['\"]?\\?n", line):
+            continue
+        if variable_refs:
+            for reference in variable_refs.finditer(line):
+                if _shell_quote_at(line, reference.start()) != "'":
+                    findings.add(line_number)
+                    break
+    return findings
 
 
 def _job_output_taint(workflow: _Workflow) -> dict[str, set[str]]:
@@ -392,11 +467,7 @@ def _job_output_taint(workflow: _Workflow) -> dict[str, set[str]]:
                 | _untrusted_fields(job.env_sources)
             )
             for field in job.env_sources:
-                refs = re.findall(
-                    r"\$\{\{\s*needs\.([A-Za-z0-9_-]+)\.outputs\.([A-Za-z_][A-Za-z0-9_-]*)\s*\}\}",
-                    field.value,
-                )
-                if any(output in tainted_outputs.get(source, set()) for source, output in refs):
+                if any(output in tainted_outputs.get(source, set()) for source, output in _needs_output_refs(field.value)):
                     persistent.add(field.key)
 
             step_outputs: dict[str, set[str]] = {}
@@ -649,11 +720,7 @@ def scan_workflow(relative: str, source: str) -> list[dict[str, Any]]:
             | _untrusted_fields(job.env_sources)
         )
         for field in job.env_sources:
-            refs = re.findall(
-                r"\$\{\{\s*needs\.([A-Za-z0-9_-]+)\.outputs\.([A-Za-z_][A-Za-z0-9_-]*)\s*\}\}",
-                field.value,
-            )
-            if any(output in job_output_taint.get(source, set()) for source, output in refs):
+            if any(output in job_output_taint.get(source, set()) for source, output in _needs_output_refs(field.value)):
                 persistent_taint.add(field.key)
         for step in job.steps:
             tainted_env = persistent_taint | _untrusted_env_names(step, job_output_taint)
@@ -667,6 +734,13 @@ def scan_workflow(relative: str, source: str) -> list[dict[str, Any]]:
                         "Pass event data through an environment variable and validate it as data; never interpolate attacker-controlled context directly into run script source.",
                     )
                 aliases = _local_aliases(body, tainted_env)
+                for relative_sink_line in _unsafe_env_file_lines(body, aliases):
+                    add(
+                        step.start + relative_line + relative_sink_line - 1,
+                        "CFG015_ACTIONS_UNTRUSTED_ENV_FILE_INJECTION",
+                        "untrusted multiline data is written as a single-line GitHub environment or output file entry",
+                        "Reject or encode CR/LF before writing untrusted values to GITHUB_ENV or GITHUB_OUTPUT; use GitHub's documented delimiter format for multiline data with a delimiter that cannot occur in the value.",
+                    )
                 if tainted_env and _dynamic_execution_line(body, tainted_env) is not None:
                     add(
                         step.start + relative_line,

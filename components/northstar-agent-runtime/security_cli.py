@@ -1110,6 +1110,14 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         "          PR_TITLE: ${{ github.event.pull_request.title }}", "        run: echo \"MESSAGE=$PR_TITLE\" >> \"$GITHUB_ENV\"",
         "      - name: execute title", "        run: bash -c \"$MESSAGE\"",
     ])
+    env_fixed_delimiter_unsafe = "\n".join([
+        "name: unsafe-fixed-output-delimiter", "on:", "  pull_request:", "jobs:", "  build:", "    steps:",
+        "      - name: persist title", "        env:",
+        "          PR_TITLE: ${{ github.event.pull_request.title }}", "        run: |", "          {",
+        "            echo 'SCRIPT<<STOP'", "            printf '%s\\n' \"$PR_TITLE\"",
+        "            echo 'STOP'", "          } >> \"$GITHUB_ENV\"",
+        "      - name: execute title", "        run: bash -c \"$SCRIPT\"",
+    ])
     env_scope_unsafe = "\n".join([
         "name: unsafe-env-scope", "on:", "  pull_request:", "env:",
         "  PR_TITLE: ${{ github.event.pull_request.title }}", "jobs:", "  build:",
@@ -1123,7 +1131,8 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
     env_cross_step_safe = "\n".join([
         "name: safe-env-cross-step", "on:", "  pull_request:", "jobs:", "  build:", "    steps:",
         "      - name: persist title", "        env:",
-        "          PR_TITLE: ${{ github.event.pull_request.title }}", "        run: echo \"MESSAGE=$PR_TITLE\" >> \"$GITHUB_ENV\"",
+        "          PR_TITLE: ${{ github.event.pull_request.title }}",
+        "        run: printf 'MESSAGE=%s\\n' \"$(printf '%s' \"$PR_TITLE\" | base64 | tr -d '\\n')\" >> \"$GITHUB_ENV\"",
         "      - name: print title as data", "        run: printf '%s' \"$MESSAGE\"",
     ])
     env_cross_job_output_unsafe = "\n".join([
@@ -1133,16 +1142,16 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         "          PR_TITLE: ${{ github.event.pull_request.title }}",
         "        run: echo \"script=$PR_TITLE\" >> \"$GITHUB_OUTPUT\"",
         "  execute:", "    needs: capture", "    steps:", "      - name: execute output", "        env:",
-        "          SCRIPT: ${{ needs.capture.outputs.script }}", "        run: bash -c \"$SCRIPT\"",
+        "          SCRIPT: ${{ fromJSON(needs.capture.outputs.script) }}", "        run: bash -c \"$SCRIPT\"",
     ])
     env_cross_job_output_safe = "\n".join([
         "name: safe-cross-job-output", "on:", "  pull_request:", "jobs:", "  capture:",
-        "    outputs:", "      title: ${{ steps.capture_title.outputs.title }}", "    steps:",
+        "    outputs:", "      title_b64: ${{ steps.capture_title.outputs.title_b64 }}", "    steps:",
         "      - id: capture_title", "        env:",
         "          PR_TITLE: ${{ github.event.pull_request.title }}",
-        "        run: echo \"title=$PR_TITLE\" >> \"$GITHUB_OUTPUT\"",
+        "        run: printf 'title_b64=%s\\n' \"$(printf '%s' \"$PR_TITLE\" | base64 | tr -d '\\n')\" >> \"$GITHUB_OUTPUT\"",
         "  report:", "    needs: capture", "    steps:", "      - name: print output as data", "        env:",
-        "          TITLE: ${{ needs.capture.outputs.title }}", "        run: printf '%s' \"$TITLE\"",
+        "          TITLE: ${{ needs.capture.outputs.title_b64 }}", "        run: printf '%s' \"$TITLE\"",
     ])
     metadata_only = "\n".join([
         "name: metadata-only", "on:", "  pull_request_target:", "jobs:", "  label:",
@@ -1226,6 +1235,7 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         "CFG012_WORKFLOW_RUN_REVISION_EXECUTION",
         "CFG013_PRIVILEGED_TRIGGER_WRITE_PERMISSION",
         "CFG014_ACTIONS_UNTRUSTED_ENV_TO_CODE_EXECUTION",
+        "CFG015_ACTIONS_UNTRUSTED_ENV_FILE_INJECTION",
     }
     with tempfile.TemporaryDirectory(prefix="northstar-actions-sast-") as temporary:
         workflows = Path(temporary) / ".github" / "workflows"
@@ -1236,6 +1246,7 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         (workflows / "env-static-shell-safe.yml").write_text(env_static_shell_safe, encoding="utf-8")
         (workflows / "env-alias-unsafe.yml").write_text(env_alias_unsafe, encoding="utf-8")
         (workflows / "env-cross-step-unsafe.yml").write_text(env_cross_step_unsafe, encoding="utf-8")
+        (workflows / "env-fixed-delimiter-unsafe.yml").write_text(env_fixed_delimiter_unsafe, encoding="utf-8")
         (workflows / "env-scope-unsafe.yml").write_text(env_scope_unsafe, encoding="utf-8")
         (workflows / "env-job-scope-unsafe.yml").write_text(env_job_scope_unsafe, encoding="utf-8")
         (workflows / "env-cross-step-safe.yml").write_text(env_cross_step_safe, encoding="utf-8")
@@ -1286,10 +1297,20 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         },
         "env-reparse-unsafe.yml": {"CFG014_ACTIONS_UNTRUSTED_ENV_TO_CODE_EXECUTION"},
         "env-alias-unsafe.yml": {"CFG014_ACTIONS_UNTRUSTED_ENV_TO_CODE_EXECUTION"},
-        "env-cross-step-unsafe.yml": {"CFG014_ACTIONS_UNTRUSTED_ENV_TO_CODE_EXECUTION"},
+        "env-cross-step-unsafe.yml": {
+            "CFG014_ACTIONS_UNTRUSTED_ENV_TO_CODE_EXECUTION",
+            "CFG015_ACTIONS_UNTRUSTED_ENV_FILE_INJECTION",
+        },
+        "env-fixed-delimiter-unsafe.yml": {
+            "CFG014_ACTIONS_UNTRUSTED_ENV_TO_CODE_EXECUTION",
+            "CFG015_ACTIONS_UNTRUSTED_ENV_FILE_INJECTION",
+        },
         "env-scope-unsafe.yml": {"CFG014_ACTIONS_UNTRUSTED_ENV_TO_CODE_EXECUTION"},
         "env-job-scope-unsafe.yml": {"CFG014_ACTIONS_UNTRUSTED_ENV_TO_CODE_EXECUTION"},
-        "env-cross-job-output-unsafe.yml": {"CFG014_ACTIONS_UNTRUSTED_ENV_TO_CODE_EXECUTION"},
+        "env-cross-job-output-unsafe.yml": {
+            "CFG014_ACTIONS_UNTRUSTED_ENV_TO_CODE_EXECUTION",
+            "CFG015_ACTIONS_UNTRUSTED_ENV_FILE_INJECTION",
+        },
         "fork-repository-unsafe.yml": {"CFG008_PULL_REQUEST_TARGET_UNTRUSTED_CHECKOUT"},
         "pr-head-ref-unsafe.yml": {"CFG009_ACTIONS_UNTRUSTED_RUN_EXPRESSION"},
         "quoted-hash-unsafe.yml": {"CFG009_ACTIONS_UNTRUSTED_RUN_EXPRESSION"},
