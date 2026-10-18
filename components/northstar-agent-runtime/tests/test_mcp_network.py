@@ -183,20 +183,36 @@ class LiveFilesystemTests(unittest.TestCase):
                     import sys
 
                     workspace, secret, outside_write = map(pathlib.Path, sys.argv[1:])
+                    read_link = workspace / "outside-read-link"
+                    write_link = workspace / "outside-write-link"
+                    read_link.symlink_to(secret)
+                    write_link.symlink_to(outside_write)
                     try:
                         secret.read_text(encoding="utf-8")
                         read_outside = True
                     except OSError:
                         read_outside = False
                     try:
+                        read_link.read_text(encoding="utf-8")
+                        read_symlink_outside = True
+                    except OSError:
+                        read_symlink_outside = False
+                    try:
                         outside_write.write_text("blocked", encoding="utf-8")
                         write_outside = True
                     except OSError:
                         write_outside = False
+                    try:
+                        write_link.write_text("blocked", encoding="utf-8")
+                        write_symlink_outside = True
+                    except OSError:
+                        write_symlink_outside = False
                     (workspace / "inside.txt").write_text("allowed", encoding="utf-8")
                     print(json.dumps({
                         "read_outside": read_outside,
+                        "read_symlink_outside": read_symlink_outside,
                         "write_outside": write_outside,
+                        "write_symlink_outside": write_symlink_outside,
                         "write_workspace": (workspace / "inside.txt").read_text(encoding="utf-8") == "allowed",
                     }))
                     """
@@ -218,7 +234,9 @@ class LiveFilesystemTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, completed.stderr)
             result = json.loads(completed.stdout.strip())
             self.assertFalse(result["read_outside"])
+            self.assertFalse(result["read_symlink_outside"])
             self.assertFalse(result["write_outside"])
+            self.assertFalse(result["write_symlink_outside"])
             self.assertTrue(result["write_workspace"])
             self.assertFalse(out_file.exists())
 
