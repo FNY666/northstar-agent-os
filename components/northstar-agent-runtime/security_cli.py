@@ -1112,6 +1112,12 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         "      - uses: actions/download-artifact@0123456789abcdef0123456789abcdef01234567",
         "        with:", "          name: build-output", "      - uses: actions/upload-artifact@0123456789abcdef0123456789abcdef01234567",
     ])
+    workflow_run_separated_jobs = "\n".join([
+        "name: separate-jobs", "on:", "  workflow_run:", "    workflows: [Build]", "    types: [completed]",
+        "jobs:", "  fetch:", "    steps:",
+        "      - uses: actions/download-artifact@0123456789abcdef0123456789abcdef01234567",
+        "  report:", "    needs: fetch", "    steps:", "      - run: echo 'review data only'",
+    ])
     workflow_run_injection_unsafe = "\n".join([
         "name: unsafe-workflow-run-branch", "on:", "  workflow_run:", "    workflows: [Build]",
         "    types: [completed]", "jobs:", "  comment:", "    steps:",
@@ -1145,6 +1151,7 @@ def _probe_github_actions_scanner() -> dict[str, Any]:
         (workflows / "pr-head-ref-unsafe.yml").write_text(pr_head_ref_injection, encoding="utf-8")
         (workflows / "workflow-run-unsafe.yml").write_text(workflow_run_unsafe, encoding="utf-8")
         (workflows / "workflow-run-data-only.yml").write_text(workflow_run_data_only, encoding="utf-8")
+        (workflows / "workflow-run-separated-safe.yml").write_text(workflow_run_separated_jobs, encoding="utf-8")
         (workflows / "workflow-run-injection-unsafe.yml").write_text(workflow_run_injection_unsafe, encoding="utf-8")
         (workflows / "workflow-run-injection-safe.yml").write_text(workflow_run_injection_safe, encoding="utf-8")
         (workflows / "shell-fetch-unsafe.yml").write_text(shell_fetch_unsafe, encoding="utf-8")

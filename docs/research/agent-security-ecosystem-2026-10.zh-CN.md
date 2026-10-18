@@ -32,7 +32,7 @@ GitHub 官方文档明确说明，`pull_request_target` 使用基仓库的高信
 
 Northstar 新增 `CFG008_PULL_REQUEST_TARGET_UNTRUSTED_CHECKOUT`，在 `pull_request_target` 中发现 PR head/ref 或 fork repository checkout，或显式启用 `allow-unsafe-pr-checkout`，且同一 job 后续存在 `run` 步骤时提示；新增 `CFG009_ACTIONS_UNTRUSTED_RUN_EXPRESSION`，检测不可信事件字段直接插入 `run` 块，覆盖 PR head ref 以及 `workflow_run` 的分支名和提交信息。GitHub 也提醒，`workflow_run` 下游工作流下载的上游工件必须视为不可信数据，且通过 `git fetch`、`gh pr checkout` 等方式取回 PR 代码也可能形成同类危险。`CFG010_WORKFLOW_RUN_ARTIFACT_EXECUTION` 会在这类工作流的同一 job 下载工件、随后运行命令时提示；`CFG011_PRIVILEGED_PR_CODE_FETCH` 检查 `pull_request_target`、`workflow_run` 与 `issue_comment` 中的常见 Shell 拉取模式及后续命令。运行时探针为每条规则核对固定恶意样例，并检查 workflow_run 分支名经环境变量传递的安全对照；只扫描临时 YAML 文本，不启动 workflow、action 或脚本。
 
-这些检查是有限文本启发式：不完整解析 YAML、复合 action、跨 job 数据流、工件路径/来源关联、Shell 变量或远程 action 内部实现。CFG010 的下载后命令顺序是风险线索，不能证明命令实际执行了刚下载的工件；CFG011 也只覆盖显式 `gh pr checkout` 或包含 PR ref 的 `git fetch`/checkout 模式。结果应作为人工审查线索。
+扫描器现在先建立常见 block-style YAML 的 Workflow/Job/Step 行号索引，再在 job 内判定步骤顺序，避免不同 job 的步骤互相拼成一条风险链；探针将“一个 job 下载、另一个 job 只打印摘要”作为负例。这仍不是完整 YAML 解析器。它不解析 flow-style jobs/steps、复合 action、跨 job 数据流、工件路径/来源关联、Shell 变量或远程 action 内部实现。CFG010 的下载后命令顺序是风险线索，不能证明命令实际执行了刚下载的工件；CFG011 也只覆盖显式 `gh pr checkout` 或包含 PR ref 的 `git fetch`/checkout 模式。结果应作为人工审查线索。
 
 静态扫描无法可靠判断自然语言的真实意图、跨文件/远程技能依赖或运行时工具行为，也不能把“未匹配规则”解释为安全。MCP 服务器 package blocklist 是本地知识而非实时漏洞数据库。后续优先级仍是加强编程任务的独立验证和攻防工具的可复现覆盖；不先扩张到图像/音频/视频能力。
 

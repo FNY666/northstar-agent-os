@@ -1,13 +1,14 @@
 """Heuristic GitHub Actions checks for untrusted pull-request flows.
 
-This is a bounded text scanner, not a YAML parser or workflow evaluator. It
-intentionally reports direct expression interpolation in ``run`` blocks,
-privileged PR checkout/fetch followed by workflow commands, and
-workflow_run artifact handling.
+This is a bounded structural text scanner, not a general YAML parser or
+workflow evaluator. It indexes common block-style jobs and steps without
+evaluating expressions, then reports untrusted inputs reaching ``run`` blocks,
+privileged PR checkout/fetch flows, and ``workflow_run`` artifact handling.
 """
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from typing import Any
 
 
@@ -64,23 +65,131 @@ def _run_blocks(lines: list[str]) -> list[tuple[int, int, str]]:
     return blocks
 
 
-def _job_bounds(lines: list[str], index: int) -> tuple[int, int]:
-    """Approximate the YAML job block containing a workflow line."""
-    job_header = re.compile(r"^\s{2}[A-Za-z0-9_-]+\s*:")
-    start = next((
-        row for row in range(index - 1, -1, -1)
-        if _indent(lines[row]) == 2 and job_header.match(lines[row])
-    ), 0)
-    end = next((
-        row for row in range(index + 1, len(lines))
-        if _indent(lines[row]) == 2 and job_header.match(lines[row])
-    ), len(lines))
-    return start, end
+@dataclass(frozen=True)
+class _YamlField:
+    key: str
+    value: str
+    line: int  # zero-based source index
+    indent: int
+
+
+@dataclass(frozen=True)
+class _WorkflowStep:
+    start: int
+    end: int
+    fields: tuple[_YamlField, ...]
+    runs: tuple[tuple[int, int, str], ...]
+
+    def values(self, key: str) -> tuple[_YamlField, ...]:
+        return tuple(field for field in self.fields if field.key.casefold() == key.casefold())
+
+
+@dataclass(frozen=True)
+class _WorkflowJob:
+    name: str
+    start: int
+    end: int
+    steps: tuple[_WorkflowStep, ...]
+
+
+@dataclass(frozen=True)
+class _Workflow:
+    triggers: frozenset[str]
+    jobs: tuple[_WorkflowJob, ...]
+
+
+def _key_value(line: str) -> tuple[str, str] | None:
+    match = re.match(r"^\s*([^:#][^:]*?)\s*:\s*(.*)$", line)
+    if not match:
+        return None
+    return match.group(1).strip().strip("'\""), match.group(2).strip().strip("'\"")
+
+
+def _workflow_index(lines: list[str]) -> _Workflow:
+    """Index common GitHub Actions YAML structure while retaining source lines.
+
+    This deliberately handles block style workflow/job/step structure only; it
+    is not a general YAML implementation and never evaluates expressions.
+    """
+    clean = [_without_comment(line) for line in lines]
+    triggers: set[str] = set()
+    event_names = {"pull_request_target", "workflow_run", "issue_comment"}
+    for index, line in enumerate(clean):
+        if _indent(line) != 0:
+            continue
+        pair = _key_value(line)
+        if not pair or pair[0] != "on":
+            continue
+        inline = pair[1]
+        triggers.update(event for event in event_names if re.search(rf"\b{event}\b", inline))
+        if inline:
+            continue
+        cursor = index + 1
+        while cursor < len(clean) and (not clean[cursor].strip() or _indent(clean[cursor]) > 0):
+            if _indent(clean[cursor]) == 2:
+                event_pair = _key_value(clean[cursor].lstrip())
+                if event_pair and event_pair[0].strip("'\"") in event_names:
+                    triggers.add(event_pair[0].strip("'\""))
+            cursor += 1
+
+    jobs_key = next((i for i, line in enumerate(clean) if _indent(line) == 0 and _key_value(line) == ("jobs", "")), None)
+    if jobs_key is None:
+        return _Workflow(frozenset(triggers), ())
+    jobs_end = next((
+        i for i in range(jobs_key + 1, len(clean))
+        if clean[i].strip() and _indent(clean[i]) == 0
+    ), len(clean))
+    job_headers = [
+        i for i in range(jobs_key + 1, jobs_end)
+        if _indent(clean[i]) == 2 and re.match(r"^\s{2}[A-Za-z0-9_-]+\s*:", clean[i])
+    ]
+    jobs: list[_WorkflowJob] = []
+    for job_number, start in enumerate(job_headers):
+        end = job_headers[job_number + 1] if job_number + 1 < len(job_headers) else jobs_end
+        header = _key_value(clean[start].strip())
+        name = header[0] if header else "unknown"
+        steps_key = next((
+            i for i in range(start + 1, end)
+            if _indent(clean[i]) == 4 and _key_value(clean[i]) == ("steps", "")
+        ), None)
+        steps: list[_WorkflowStep] = []
+        if steps_key is not None:
+            step_headers = [
+                i for i in range(steps_key + 1, end)
+                if _indent(clean[i]) == 6 and re.match(r"^\s{6}-\s*", clean[i])
+            ]
+            for step_number, step_start in enumerate(step_headers):
+                step_end = step_headers[step_number + 1] if step_number + 1 < len(step_headers) else end
+                fields: list[_YamlField] = []
+                in_run_block_indent: int | None = None
+                for row in range(step_start, step_end):
+                    current = clean[row]
+                    if in_run_block_indent is not None:
+                        if current.strip() and _indent(current) <= in_run_block_indent:
+                            in_run_block_indent = None
+                        else:
+                            continue
+                    content = re.sub(r"^\s*-\s*", "", current, count=1) if row == step_start else current.strip()
+                    pair = _key_value(content)
+                    if not pair:
+                        continue
+                    key, value = pair
+                    indent = _indent(current)
+                    fields.append(_YamlField(key, value, row, indent))
+                    if key.casefold() == "run" and value in {"", "|", ">", "|-", ">-", "|+", ">+"}:
+                        in_run_block_indent = indent
+                step_runs = tuple(
+                    (line_no - step_start + 1, base_indent, body)
+                    for line_no, base_indent, body in _run_blocks(clean[step_start:step_end])
+                )
+                steps.append(_WorkflowStep(step_start, step_end, tuple(fields), step_runs))
+        jobs.append(_WorkflowJob(name, start, end, tuple(steps)))
+    return _Workflow(frozenset(triggers), tuple(jobs))
 
 
 def scan_workflow(relative: str, source: str) -> list[dict[str, Any]]:
     lines = source.splitlines()
-    clean_lines = [_without_comment(line) for line in lines]
+    workflow = _workflow_index(lines)
     findings: list[dict[str, Any]] = []
 
     def add(line: int, rule: str, message: str, remediation: str) -> None:
@@ -95,58 +204,32 @@ def scan_workflow(relative: str, source: str) -> list[dict[str, Any]]:
             "remediation": remediation,
         })
 
-    pull_request_target = bool(
-        re.search(r"(?m)^\s*on\s*:\s*[^\n]*\bpull_request_target\b", "\n".join(clean_lines))
-        or re.search(r"(?m)^\s{2,}['\"]?pull_request_target['\"]?\s*:", "\n".join(clean_lines))
-    )
-    workflow_run = bool(
-        re.search(r"(?m)^\s*on\s*:\s*[^\n]*\bworkflow_run\b", "\n".join(clean_lines))
-        or re.search(r"(?m)^\s{2,}['\"]?workflow_run['\"]?\s*:", "\n".join(clean_lines))
-    )
-    issue_comment = bool(
-        re.search(r"(?m)^\s*on\s*:\s*[^\n]*\bissue_comment\b", "\n".join(clean_lines))
-        or re.search(r"(?m)^\s{2,}['\"]?issue_comment['\"]?\s*:", "\n".join(clean_lines))
-    )
+    pull_request_target = "pull_request_target" in workflow.triggers
+    workflow_run = "workflow_run" in workflow.triggers
+    issue_comment = "issue_comment" in workflow.triggers
     if pull_request_target:
-        checkout_lines = [
-            index for index, line in enumerate(clean_lines)
-            if re.search(r"(?i)\buses\s*:\s*actions/checkout(?:@|\s)", line)
-        ]
         risky_checkout: int | None = None
-        for checkout in checkout_lines:
-            checkout_indent = _indent(clean_lines[checkout])
-            step_end = checkout + 1
-            untrusted_checkout_line: int | None = None
-            while step_end < len(clean_lines):
-                candidate = clean_lines[step_end]
-                same_indent_next_step = (
-                    _indent(candidate) == checkout_indent
-                    and re.match(r"^\s*-\s+", candidate) is not None
-                )
-                if candidate.strip() and (_indent(candidate) < checkout_indent or same_indent_next_step):
+        for job in workflow.jobs:
+            for step in job.steps:
+                uses = next((field for field in step.values("uses") if re.match(r"(?i)actions/checkout(?:@|$)", field.value)), None)
+                if uses is None:
+                    continue
+                untrusted_fields = [
+                    field for field in step.fields
+                    if field.key.casefold() in {"ref", "repository"}
+                    and (_UNTRUSTED_REF.search(field.value) or _UNTRUSTED_REPOSITORY.search(field.value))
+                ]
+                unsafe_opt_in = [
+                    field for field in step.values("allow-unsafe-pr-checkout")
+                    if field.value.casefold() == "true"
+                ]
+                if not untrusted_fields and not unsafe_opt_in:
+                    continue
+                if any(later.start > step.start and later.runs for later in job.steps):
+                    evidence = (untrusted_fields or unsafe_opt_in)[0]
+                    risky_checkout = evidence.line
                     break
-                if (
-                    re.match(r"^\s{0,}(?:ref|repository)\s*:", candidate)
-                    and (
-                        _UNTRUSTED_REF.search(candidate)
-                        or _UNTRUSTED_REPOSITORY.search(candidate)
-                    )
-                ) or re.match(
-                    r"(?i)^\s*allow-unsafe-pr-checkout\s*:\s*true\b", candidate
-                ):
-                    untrusted_checkout_line = step_end
-                step_end += 1
-            if untrusted_checkout_line is None:
-                continue
-            job_start, job_end = _job_bounds(clean_lines, checkout)
-            # Running any checked-out project script in the workflow makes this
-            # checkout security-relevant; a checkout by itself only inspects data.
-            has_run = any(
-                job_start + start - 1 > checkout
-                for start, _, _ in _run_blocks(clean_lines[job_start:job_end])
-            )
-            if has_run:
-                risky_checkout = untrusted_checkout_line
+            if risky_checkout is not None:
                 break
         if risky_checkout is not None:
             add(
@@ -157,18 +240,15 @@ def scan_workflow(relative: str, source: str) -> list[dict[str, Any]]:
             )
 
     if workflow_run:
-        artifact_downloads = [
-            index for index, line in enumerate(clean_lines)
-            if re.search(r"(?i)\buses\s*:\s*actions/download-artifact(?:@|\s)", line)
-        ]
-        for download in artifact_downloads:
-            job_start, job_end = _job_bounds(clean_lines, download)
-            if any(
-                job_start + start - 1 > download
-                for start, _, _ in _run_blocks(clean_lines[job_start:job_end])
-            ):
+        for job in workflow.jobs:
+            risky_download = next((
+                step for step in job.steps
+                if any(re.match(r"(?i)actions/download-artifact(?:@|$)", field.value) for field in step.values("uses"))
+                and any(later.start > step.start and later.runs for later in job.steps)
+            ), None)
+            if risky_download is not None:
                 add(
-                    download + 1,
+                    next(field.line + 1 for field in risky_download.values("uses")),
                     "CFG010_WORKFLOW_RUN_ARTIFACT_EXECUTION",
                     "privileged workflow_run job downloads an upstream artifact and later runs commands in the same job",
                     "Treat workflow_run artifacts as untrusted data. Validate and inspect contents; do not execute scripts or binaries from the downloaded artifact in a privileged job.",
@@ -176,42 +256,41 @@ def scan_workflow(relative: str, source: str) -> list[dict[str, Any]]:
                 break
 
     if pull_request_target or workflow_run or issue_comment:
-        run_blocks = _run_blocks(clean_lines)
         risky_fetch: int | None = None
-        for start_line, _, body in run_blocks:
-            commands = body.splitlines()
-            fetch_line: int | None = None
-            for offset, command in enumerate(commands):
-                if re.search(r"(?i)(?:\bgh\s+pr\s+checkout\b)", command):
-                    fetch_line = start_line + offset
-                    break
-                if re.search(r"(?i)\bgit\s+fetch\b", command):
-                    has_pr_ref = bool(re.search(
-                        r"(?i)(?:github\.event\.(?:pull_request|workflow_run)|refs/pull/|pull_request\.head)",
-                        "\n".join(commands[offset:]),
-                    ))
-                    has_checkout = any(
-                        re.search(r"(?i)\bgit\s+(?:checkout|switch)\b", later)
-                        for later in commands[offset + 1:]
+        for job in workflow.jobs:
+            for step in job.steps:
+                for relative_line, _, body in step.runs:
+                    commands = body.splitlines()
+                    fetch_offset: int | None = None
+                    for offset, command in enumerate(commands):
+                        if re.search(r"(?i)\bgh\s+pr\s+checkout\b", command):
+                            fetch_offset = offset
+                            break
+                        if re.search(r"(?i)\bgit\s+fetch\b", command):
+                            has_pr_ref = bool(re.search(
+                                r"(?i)(?:github\.event\.(?:pull_request|workflow_run)|refs/pull/|pull_request\.head)",
+                                "\n".join(commands[offset:]),
+                            ))
+                            has_checkout = any(
+                                re.search(r"(?i)\bgit\s+(?:checkout|switch)\b", later)
+                                for later in commands[offset + 1:]
+                            )
+                            if has_pr_ref and has_checkout:
+                                fetch_offset = offset
+                                break
+                    if fetch_offset is None:
+                        continue
+                    later_run = any(later.start > step.start and later.runs for later in job.steps)
+                    runs_retrieved_code = any(
+                        re.search(r"(?i)(?:\b(?:make|npm|npx|pnpm|yarn|pytest|cargo|go\s+test|bash|sh|python3?|node)\b|\./\S+)", command)
+                        for command in commands[fetch_offset + 1:]
                     )
-                    if has_pr_ref and has_checkout:
-                        fetch_line = start_line + offset
+                    if later_run or runs_retrieved_code:
+                        risky_fetch = step.start + relative_line + fetch_offset
                         break
-            if fetch_line is None:
-                continue
-            run_index = start_line - 1
-            job_start, job_end = _job_bounds(clean_lines, run_index)
-            later_run = any(
-                later_start - 1 > run_index
-                and later_start - 1 < job_end
-                for later_start, _, _ in run_blocks
-            )
-            runs_retrieved_code = any(
-                re.search(r"(?i)(?:\b(?:make|npm|npx|pnpm|yarn|pytest|cargo|go\s+test|bash|sh|python3?|node)\b|\./\S+)", command)
-                for command in commands[fetch_line - start_line + 1:]
-            )
-            if later_run or runs_retrieved_code:
-                risky_fetch = fetch_line
+                if risky_fetch is not None:
+                    break
+            if risky_fetch is not None:
                 break
         if risky_fetch is not None:
             add(
@@ -221,15 +300,15 @@ def scan_workflow(relative: str, source: str) -> list[dict[str, Any]]:
                 "Do not fetch, build, or run untrusted pull-request code in pull_request_target, workflow_run, or issue_comment. Use an unprivileged pull_request workflow or keep privileged automation limited to metadata operations.",
             )
 
-    for start_line, _, body in _run_blocks(clean_lines):
-        match = _UNTRUSTED_CONTEXT.search(body)
-        if match:
-            # Point to the run block, not the untrusted value itself; findings
-            # never include source fragments or attacker-controlled text.
-            add(
-                start_line,
-                "CFG009_ACTIONS_UNTRUSTED_RUN_EXPRESSION",
-                "untrusted GitHub event text is interpolated directly into a shell run block",
-                "Pass event data through an environment variable and validate it as data; never interpolate attacker-controlled context directly into run script source.",
-            )
+    for job in workflow.jobs:
+        for step in job.steps:
+            for relative_line, _, body in step.runs:
+                if _UNTRUSTED_CONTEXT.search(body):
+                    # Report the run block, not attacker-controlled text.
+                    add(
+                        step.start + relative_line,
+                        "CFG009_ACTIONS_UNTRUSTED_RUN_EXPRESSION",
+                        "untrusted GitHub event text is interpolated directly into a shell run block",
+                        "Pass event data through an environment variable and validate it as data; never interpolate attacker-controlled context directly into run script source.",
+                    )
     return findings

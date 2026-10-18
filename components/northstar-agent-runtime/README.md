@@ -145,7 +145,9 @@ checkout plus later `run` under `pull_request_target`, and direct untrusted even
 text in `run` blocks, plus `workflow_run` artifact downloads followed by commands
 in the same job. They also catch fork repository selection and the explicit
 `allow-unsafe-pr-checkout` opt-in under `pull_request_target`. They do not fully
-parse YAML, track artifacts across jobs, or prove whether a command executes
+parse YAML; a zero-dependency block-style index keeps jobs and steps separate,
+but flow-style YAML and artifact transfer across jobs are outside its model.
+They do not prove whether a command executes
 checked-out/downloaded code. Privileged `pull_request_target`, `workflow_run`,
 and `issue_comment` workflows are also checked for `gh pr checkout` and
 PR-ref `git fetch` followed by later commands. This command-flow check is
