@@ -349,14 +349,14 @@ class LockTests(unittest.TestCase):
 
         script = self.folder / "scripts" / "helper.py"
         script.parent.mkdir()
-        script.write_text("print('reviewed')\\n", encoding="utf-8")
+        script.write_text("print('reviewed')\n", encoding="utf-8")
         skills = discover_skills(self.root)
         scripts = discover_skill_scripts(self.root, skills)
         self.assertEqual(len(scripts), 1)
         pins = {item.relative: item.digest for item in scripts}
         ctx = ToolContext(sandbox=ToolSandbox(self.root), services={"skill_digests": pins})
 
-        script.write_text("print('replaced')\\n", encoding="utf-8")
+        script.write_text("print('replaced')\n", encoding="utf-8")
         result = shell_handler(
             {"command": f"bash -c 'python {scripts[0].relative}'"},
             ctx,
