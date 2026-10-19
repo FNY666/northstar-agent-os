@@ -882,6 +882,15 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(findings[0].name, "seccomp")
         self.assertEqual(findings[0].level, "warn")
 
+    def test_doctor_warns_about_server_supplied_oauth_discovery_with_mcp_network_allowed(self):
+        code, out, _ = run_cli("doctor", "--mcp-network", "allowed")
+        self.assertEqual(code, 0)  # explicit network opt-in remains a warning
+        warning = next(line for line in out.splitlines() if line.startswith("[warn] mcp-network"))
+        self.assertIn("loopback/private destinations", warning)
+        self.assertIn("stdio-to-HTTP OAuth bridges", warning)
+        self.assertIn("server-supplied discovery URLs", warning)
+        self.assertIn("SSRF risk", warning)
+
     def test_doctor_reports_mcp_seccomp_status(self):
         tmp = Path(tempfile.mkdtemp(prefix="nsar-doctor-"))
         code, out, _ = run_cli("doctor", "--workspace", str(tmp), "--mcp-network", "allowed")
