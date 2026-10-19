@@ -66,6 +66,7 @@ from mcp_negotiate import (
     LEGACY_VERSIONS,
     MAX_INPUT_ROUNDS,
     MODERN_VERSION,
+    RESULT_COMPLETE,
     RESULT_INPUT_REQUIRED,
     client_capabilities,
     decide_era,
@@ -1182,6 +1183,34 @@ class McpStdioClient:
                 )
             if not isinstance(result, dict):
                 return ToolResult.error(f"mcp {self.name}/{tool_name}: tools/call returned a non-object result")
+            # The client only supports core result types and does not negotiate
+            # result extensions. Do not let result_type() normalize an unknown
+            # discriminator to "complete" and report unfinished work as success.
+            response_type = result.get("resultType")
+            if "resultType" in result and response_type not in (
+                RESULT_COMPLETE,
+                RESULT_INPUT_REQUIRED,
+            ):
+                is_task_result = response_type == "task"
+                if is_task_result:
+                    reason = "asynchronous result without negotiated task support"
+                    message = (
+                        "server returned an asynchronous task result "
+                        "without negotiated task support"
+                    )
+                else:
+                    reason = "unsupported result type without negotiated extension support"
+                    message = (
+                        "server returned an unsupported result type "
+                        "without negotiated extension support"
+                    )
+                self._quarantine(
+                    f"tool {tool_name!r} returned {reason}",
+                    at="output_validation",
+                )
+                return ToolResult.error(
+                    f"mcp {self.name}/{tool_name}: {message}; completion is unknown"
+                )
             if result_type(result) != RESULT_INPUT_REQUIRED:
                 break
             rounds += 1
