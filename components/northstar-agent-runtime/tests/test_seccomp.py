@@ -35,11 +35,12 @@ _X86_64 = 0xC000003E
 _AARCH64 = 0xC00000B7
 _ALLOW = 0x7FFF0000
 _ERRNO_EPERM = 0x00050001
+_ERRNO_ENOSYS = 0x00050026
 
 
-def interpret(prog: bytes, arch: int, nr: int) -> int:
-    """Minimal classic-BPF interpreter over seccomp_data{nr@0, arch@4}."""
-    mem = {0: nr, 4: arch}
+def interpret(prog: bytes, arch: int, nr: int, args0: int = 0) -> int:
+    """Minimal interpreter over seccomp_data{nr@0, arch@4, args[0]@16}."""
+    mem = {0: nr, 4: arch, 16: args0 & 0xFFFFFFFF}
     acc = 0
     pc = 0
     insns = len(prog) // 8
@@ -56,6 +57,8 @@ def interpret(prog: bytes, arch: int, nr: int) -> int:
                 pc += (jt + 1) if acc == k else (jf + 1)
             elif code == 0x35:  # JGE|K
                 pc += (jt + 1) if acc >= k else (jf + 1)
+            elif code == 0x45:  # JSET|K
+                pc += (jt + 1) if acc & k else (jf + 1)
             elif code == 0x05:  # JA
                 pc += k + 1
             else:
@@ -74,10 +77,10 @@ class FilterAssemblyTests(unittest.TestCase):
         prog = build_default_filter()
         self.assertTrue(len(prog) > 0)
         self.assertEqual(len(prog) % 8, 0)
-        # 10 fixed (3 arch-dispatch + x86 ld/guard/ja + arm ld/ja + ALLOW/DENY) + N + M jeq.
+        # 23 fixed instructions plus one comparison for each denied syscall on each arch.
         n = len(denied_syscalls("x86_64"))
         m = len(denied_syscalls("aarch64"))
-        self.assertEqual(len(prog) // 8, 10 + n + m)
+        self.assertEqual(len(prog) // 8, 23 + n + m)
 
     def test_denylist_tables_are_nonempty_and_sane(self):
         for arch in ("x86_64", "aarch64"):
@@ -90,6 +93,9 @@ class FilterAssemblyTests(unittest.TestCase):
         self.assertIn("bpf", denied_syscalls("aarch64"))
         self.assertIn("setpgid", denied_syscalls("x86_64"))
         self.assertIn("setsid", denied_syscalls("aarch64"))
+        for name in ("setns", "open_tree", "move_mount", "mount_setattr"):
+            self.assertIn(name, denied_syscalls("x86_64"))
+            self.assertIn(name, denied_syscalls("aarch64"))
 
     def test_unknown_arch_raises(self):
         with self.assertRaises(SeccompError):
@@ -111,6 +117,29 @@ class FilterSemanticsTests(unittest.TestCase):
         for name, nr in table.items():
             with self.subTest(name=name):
                 self.assertEqual(interpret(self.prog, _AARCH64, nr), _ERRNO_EPERM)
+
+    def test_unshare_allows_non_namespace_flags_and_denies_escape_flags(self):
+        for arch, unshare_nr in ((_X86_64, 272), (_AARCH64, 97)):
+            self.assertEqual(interpret(self.prog, arch, unshare_nr, 0x400), _ALLOW)
+            for flag in (0x10000000, 0x00020000, 0x00100000):
+                with self.subTest(arch=arch, flag=flag):
+                    self.assertEqual(
+                        interpret(self.prog, arch, unshare_nr, flag), _ERRNO_EPERM
+                    )
+
+    def test_clone_allows_ordinary_flags_and_denies_namespace_flags(self):
+        for arch, clone_nr in ((_X86_64, 56), (_AARCH64, 220)):
+            self.assertEqual(interpret(self.prog, arch, clone_nr, 0x100), _ALLOW)
+            for flag in (0x10000000, 0x00020000):  # CLONE_NEWUSER, CLONE_NEWNS
+                with self.subTest(arch=arch, flag=flag):
+                    self.assertEqual(
+                        interpret(self.prog, arch, clone_nr, flag), _ERRNO_EPERM
+                    )
+
+    def test_clone3_returns_enosys_for_libc_fallback(self):
+        for arch in (_X86_64, _AARCH64):
+            with self.subTest(arch=arch):
+                self.assertEqual(interpret(self.prog, arch, 435), _ERRNO_ENOSYS)
 
     def test_ordinary_syscalls_are_allowed(self):
         # read, write, openat, execve, exit, clone, mmap — the everyday set.
