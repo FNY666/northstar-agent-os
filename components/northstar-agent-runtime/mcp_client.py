@@ -87,6 +87,8 @@ MAX_UNTRUSTED_NOTIFICATIONS = 64
 MAX_UNTRUSTED_NOTIFICATION_BYTES = 64 * 1024
 MAX_SCHEMA_CHARS = 30_000           # one inputSchema
 MAX_TOOLS_PER_SERVER = 25
+# Bound pagination even when a server keeps returning empty pages and fresh cursors.
+MAX_TOOL_LIST_PAGES = 25
 MAX_DESCRIPTION_CHARS = 600
 MIN_TIMEOUT_MS = 100
 MAX_TIMEOUT_MS = 300_000
@@ -123,6 +125,10 @@ _TOOL_PART_RE = re.compile(TOOL_NAME_PART_RE)
 
 class McpError(ValueError):
     """MCP transport, protocol, or configuration error. Operator-facing."""
+
+
+class _McpToolListError(McpError):
+    """The server returned an invalid or over-budget tools/list pagination chain."""
 
 
 def _strict_json_loads(raw: str, *, server: str) -> Any:
@@ -378,6 +384,41 @@ class McpStdioClient:
         self._untrusted_notifications_dropped = 0
         self._info = {"name": "northstar-agent-runtime", "version": __version__}
 
+    def _list_all_tools(self) -> list[Any]:
+        """Fetch every MCP tools/list page under fixed page and tool-count caps."""
+        tools: list[Any] = []
+        params: dict[str, Any] = {}
+        seen_cursors: set[str] = set()
+        for _page_number in range(MAX_TOOL_LIST_PAGES):
+            listed = self._request("tools/list", params)
+            page = listed.get("tools")
+            if not isinstance(page, list):
+                raise _McpToolListError(
+                    f"mcp server {self.name!r}: tools/list must return an array"
+                )
+            if len(tools) + len(page) > MAX_TOOLS_PER_SERVER:
+                raise _McpToolListError(
+                    f"mcp server {self.name!r}: tools/list returned more than "
+                    f"{MAX_TOOLS_PER_SERVER} tools"
+                )
+            tools.extend(page)
+            cursor = listed.get("nextCursor")
+            if cursor is None:
+                return tools
+            if not isinstance(cursor, str):
+                raise _McpToolListError(
+                    f"mcp server {self.name!r}: tools/list nextCursor must be a string"
+                )
+            if cursor in seen_cursors:
+                raise _McpToolListError(
+                    f"mcp server {self.name!r}: tools/list repeated a pagination cursor"
+                )
+            seen_cursors.add(cursor)
+            params = {"cursor": cursor}
+        raise _McpToolListError(
+            f"mcp server {self.name!r}: tools/list exceeded the {MAX_TOOL_LIST_PAGES} page limit"
+        )
+
     # -- lifecycle -----------------------------------------------------------
 
     @property
@@ -607,13 +648,7 @@ class McpStdioClient:
             self._negotiate()
             if self.modern and self._server_supports_tool_list_changed():
                 self.subscribe_list_changed()
-            listed = self._request("tools/list", {})
-            tools = listed.get("tools") if isinstance(listed, dict) else None
-            if not isinstance(tools, list) or len(tools) > MAX_TOOLS_PER_SERVER:
-                raise McpError(
-                    f"mcp server {self.name!r}: tools/list must return an array of at most "
-                    f"{MAX_TOOLS_PER_SERVER} tools"
-                )
+            tools = self._list_all_tools()
             for raw in tools:
                 if not isinstance(raw, dict):
                     raise McpError(f"mcp server {self.name!r}: a tool entry is not an object")
@@ -979,15 +1014,10 @@ class McpStdioClient:
         """
         if not self.connected:
             raise McpError(f"mcp server {self.name!r} is not connected")
-        listed = self._request("tools/list", {})
-        tools = listed.get("tools") if isinstance(listed, dict) else None
-        if not isinstance(tools, list):
-            raise McpError(f"mcp server {self.name!r}: tools/list must return an array")
-        if len(tools) > MAX_TOOLS_PER_SERVER:
-            self._quarantine(
-                f"tools/list returned more than {MAX_TOOLS_PER_SERVER} tools during refresh",
-                at="refresh",
-            )
+        try:
+            tools = self._list_all_tools()
+        except _McpToolListError as error:
+            self._quarantine(str(error), at="refresh")
             return ()
         observed: dict[str, str] = {}
         for raw in tools:
