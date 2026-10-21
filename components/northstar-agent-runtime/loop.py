@@ -110,6 +110,7 @@ from tools import (
     ToolSandbox,
     build_default_registry,
     codex_tool_spec,
+    read_file,
 )
 from tracing import Tracer
 
@@ -3471,7 +3472,12 @@ class AgentRuntime:
     ) -> tuple[ToolResultBlock, ToolCallReport]:
         """Post-hooks + ToolCallReport after a handler (or parallel handler) returns."""
         skill_activation: dict[str, Any] | None = None
-        if spec.name == "Read" and not result.is_error and isinstance(result.data, Mapping):
+        if (
+            spec.name == "Read"
+            and spec.handler is read_file
+            and not result.is_error
+            and isinstance(result.data, Mapping)
+        ):
             skill_path = result.data.get("skill_path")
             skill_digest = result.data.get("skill_digest")
             expected_digest = (
