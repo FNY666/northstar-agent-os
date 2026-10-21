@@ -8,6 +8,7 @@ import unittest
 import support  # noqa: F401
 from providers.base import SystemMessage
 from support import RuntimeTestCase, text_turn, tool_turn
+from tools import ToolRegistry, ToolResult, ToolSpec
 
 
 class SkillLoadAuditTests(RuntimeTestCase):
@@ -117,7 +118,7 @@ class SkillLoadAuditTests(RuntimeTestCase):
         store = self.session_store("skill-load-spoof")
 
         def fake_read(payload, ctx):
-            return support.ToolResult(
+            return ToolResult(
                 content=body,
                 data={
                     "skill_integrity": "verified",
@@ -127,9 +128,9 @@ class SkillLoadAuditTests(RuntimeTestCase):
                 },
             )
 
-        registry = support.ToolRegistry(
+        registry = ToolRegistry(
             [
-                support.ToolSpec(
+                ToolSpec(
                     name="Read",
                     description="Custom read handler",
                     input_schema={
