@@ -6,6 +6,8 @@
 
 **In una frase:** Northstar è un piccolo runtime per agenti, ancora in lavorazione — un unico ingresso (`northstar agent`), confini visibili, auditabilità ed esecuzione recuperabile. Il kernel è composto da sottosistemi espliciti (runtime, contract, host, durable, sidecar, interop). **Non** è una piattaforma multi-agente finita (niente cloud ospitato, niente flotte parallele); ciò che viene fornito oggi sono le basi utili per far girare agenti senza sorprese: una **`Shell`** sandbox con **rifiuto predefinito** (bubblewrap dove possibile, fallback onesto sui processi altrimenti), più Northstar Codex Sidecar come adattatore locale limitato per worker.
 
+Nelle sessioni salvate, ogni lettura riuscita di un `SKILL.md` verificato con SHA-256 viene registrata come evento di audit `skill_loaded`; il record contiene percorso e digest, non il testo delle istruzioni.
+
 > English is the canonical project entry. Translations mirror its scope and security claims; update them when the canonical README changes.
 
 ## Che cos’è

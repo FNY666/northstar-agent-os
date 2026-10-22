@@ -110,6 +110,7 @@ from tools import (
     ToolSandbox,
     build_default_registry,
     codex_tool_spec,
+    read_file,
 )
 from tracing import Tracer
 
@@ -3470,6 +3471,37 @@ class AgentRuntime:
         governance_seal_error: str = "",
     ) -> tuple[ToolResultBlock, ToolCallReport]:
         """Post-hooks + ToolCallReport after a handler (or parallel handler) returns."""
+        skill_activation: dict[str, Any] | None = None
+        if (
+            spec.name == "Read"
+            and spec.handler is read_file
+            and not result.is_error
+            and isinstance(result.data, Mapping)
+        ):
+            skill_path = result.data.get("skill_path")
+            skill_digest = result.data.get("skill_digest")
+            expected_digest = (
+                self.config.skill_digests.get(skill_path)
+                if isinstance(skill_path, str)
+                else None
+            )
+            if (
+                isinstance(skill_path, str)
+                and "/" in skill_path
+                and skill_path.rsplit("/", 1)[-1] == "SKILL.md"
+                and isinstance(skill_digest, str)
+                and len(skill_digest) == 64
+                and all(char in "0123456789abcdef" for char in skill_digest)
+                and expected_digest == skill_digest
+            ):
+                skill_name = skill_path.rsplit("/", 1)[0].rsplit("/", 1)[-1]
+                if skill_name:
+                    skill_activation = {
+                        "skill_name": skill_name,
+                        "skill_path": skill_path,
+                        "skill_digest": f"sha256:{skill_digest}",
+                        "source_truncated": bool(result.data.get("truncated")),
+                    }
         # Give every handler result an origin before it crosses the provider
         # boundary. MCP adapters provide a more specific server/tool source;
         # ordinary built-ins inherit their registered runtime tool name.
@@ -3514,14 +3546,17 @@ class AgentRuntime:
         block, result_truncated = result.as_block_with_status(
             call.id, max_chars=self.limits.max_result_chars
         )
+        initial_result_truncated = result_truncated
         # Tool output is an input boundary too.  Run the local defensive
         # assessment on the already-bounded representation, then fail closed
         # for high-confidence findings before the provider sees the content.
         # This is deliberately after the result cap: an attacker-sized object
         # cannot force an unbounded stringify just to be inspected.
+        original_display_text = block.display_text()
         sanitized_text, defensive = sanitize_for_model(
-            block.display_text(), preserve_length=True
+            original_display_text, preserve_length=True
         )
+        defensive_sanitized = sanitized_text != original_display_text
         defensive_blocked = defensive.decision.value == "block"
         if defensive.findings:
             self.sessions.append(
@@ -3540,7 +3575,7 @@ class AgentRuntime:
                     ],
                 },
             )
-        if defensive_blocked or sanitized_text != block.display_text():
+        if defensive_blocked or defensive_sanitized:
             rule_ids = ",".join(f.rule_id for f in defensive.findings[:8]) or "unknown"
             if defensive_blocked:
                 result = ToolResult.error(
@@ -3554,6 +3589,23 @@ class AgentRuntime:
                 )
             block, result_truncated = result.as_block_with_status(
                 call.id, max_chars=self.limits.max_result_chars
+            )
+        if skill_activation is not None and not result.is_error:
+            self.sessions.append(
+                "informational",
+                {
+                    "subtype": "skill_loaded",
+                    "agent": self.config.agent,
+                    "tool_use_id": call.id,
+                    "turn_index": turn_index,
+                    **skill_activation,
+                    "truncated": bool(
+                        skill_activation["source_truncated"]
+                        or initial_result_truncated
+                        or result_truncated
+                    ),
+                    "sanitized": defensive_sanitized,
+                },
             )
         provenance_data = result.provenance.as_dict()
         if governance_seal_error:

@@ -1280,17 +1280,17 @@ def read_file(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
             + f"\n[truncated at {limit} of {size} bytes by the runtime read cap; "
             "re-read with an explicit max_bytes or use Grep to search the rest]"
         )
-    return ToolResult(
-        content=content,
-        truncated=truncated,
-        data={
-            "path": ctx.relative(path),
-            "bytes": min(limit, size),
-            "size": size,
-            "truncated": truncated,
-            "skill_integrity": skill_integrity,
-        },
-    )
+    result_data = {
+        "path": ctx.relative(path),
+        "bytes": min(limit, size),
+        "size": size,
+        "truncated": truncated,
+        "skill_integrity": skill_integrity,
+    }
+    if expected_digest is not None and Path(pin_name).name == "SKILL.md":
+        result_data["skill_path"] = pin_name
+        result_data["skill_digest"] = expected_digest
+    return ToolResult(content=content, truncated=truncated, data=result_data)
 
 
 def _is_memory_write_target(path: Path, ctx: ToolContext) -> bool:
