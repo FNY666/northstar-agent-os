@@ -89,10 +89,6 @@ def _canary_evidence() -> bool:
     return False
 
 
-
-    return bool(re.search(rf"^{name}\s*=", module, re.MULTILINE))
-
-
 def _schema(name: str, module: str) -> bool:
     return bool(re.search(rf"^{name}\s*=\s*['\"]northstar\.", module, re.MULTILINE))
 
