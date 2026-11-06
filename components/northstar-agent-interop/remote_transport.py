@@ -194,6 +194,9 @@ class SSHSocketForward:
             if not self.is_alive():
                 raise SSHForwardUnavailable(self._exit_detail())
             if self.local_socket.is_socket() and self._can_connect():
+                # ssh creates the forwarded socket honoring the caller's umask;
+                # pin the mode so the channel is usable regardless of environment.
+                os.chmod(self.local_socket, 0o755)
                 return self.local_socket
             time.sleep(0.05)
         self.close()
