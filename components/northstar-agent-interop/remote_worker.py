@@ -86,7 +86,6 @@ def _canary_evidence() -> bool:
             continue
         if "PASS: remote-worker channel canary succeeded" in text and re.search(r"[\w.-]+@(?:\d{1,3}\.){3}\d{1,3}|[\w.-]+@[A-Za-z0-9.-]+\.[A-Za-z0-9.-]+\.[A-Za-z]{2,}", text):
             return True
-            return True
     return False
 
 
