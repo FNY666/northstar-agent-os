@@ -23,11 +23,8 @@ Verdict types:
 
 Implementation segments:
 - Segment 1: verdict types, pre-parse checks, budgets (done)
-- Segment 2: tokenizer + simple commands (done) -- this segment recognizes a
-  single simple command only: leading VAR=value assignments, a command word,
-  arguments, and literal > >> < 2> redirections. Every other construct
-  (pipelines, lists, subshells, command/process/arithmetic expansion,
-  non-plain parameter expansion) is TooComplex, never Allow.
+- Segment 2: tokenizer + simple commands (done)
+- Segment 3: command lists/pipelines, substitution and subshell Deny (done)
 """
 from __future__ import annotations
 
@@ -142,6 +139,9 @@ _REDIRECT_OPS = frozenset({"<", ">", ">>", "2>"})
 #: Multi-character operators, matched longest-first.
 _MULTI_OPS = ("||", "&&", ">>", "|&", ";;", "&>", "<&", ">&", "<>", "<<")
 
+#: Operators that separate elements of a top-level command list.
+_LIST_OPS = frozenset({";", "&", "&&", "||", "|", "|&"})
+
 
 def _is_name(text: str) -> bool:
     """Return True when *text* is a plain ASCII shell identifier."""
@@ -163,6 +163,15 @@ def _is_name(text: str) -> bool:
 
 class _Reject(Exception):
     """Internal fail-closed signal; converted to TooComplex at the boundary."""
+
+    def __init__(self, node: str, reason: str) -> None:
+        super().__init__(reason)
+        self.node = node
+        self.reason = reason
+
+
+class _Deny(Exception):
+    """Internal dangerous-node signal; converted to Deny at the boundary."""
 
     def __init__(self, node: str, reason: str) -> None:
         super().__init__(reason)
@@ -200,7 +209,9 @@ def _scan_dollar(text: str, i: int, buf: list[str]) -> int:
     if nxt == "(":
         if text.startswith("$((", i):
             raise _Reject("arithmetic_expansion", "$(( )) arithmetic expansion")
-        raise _Reject("command_substitution", "$( ) command substitution")
+        if text.find(")", i + 2) < 0:
+            raise _Reject("command_substitution", "unbalanced $( substitution")
+        raise _Deny("command_substitution", "$( ) command substitution")
     if nxt == "{":
         close = text.find("}", i + 2)
         if close < 0:
@@ -240,7 +251,9 @@ def _scan_double(text: str, i: int, buf: list[str], budget: _ParseBudget) -> int
         if ch == '"':
             return j + 1
         if ch == "`":
-            raise _Reject("command_substitution", "backtick command substitution")
+            if text.find("`", j + 1) < 0:
+                raise _Reject("command_substitution", "unbalanced backtick")
+            raise _Deny("command_substitution", "backtick command substitution")
         if ch == "\\":
             if j + 1 >= n:
                 raise _Reject("escape", "trailing backslash in double quotes")
@@ -253,6 +266,20 @@ def _scan_double(text: str, i: int, buf: list[str], budget: _ParseBudget) -> int
         buf.append(ch)
         j += 1
     raise _Reject("quote", "unbalanced double quote")
+
+
+def _find_matching(text: str, i: int) -> int:
+    """Return the index of the ``)`` matching the ``(`` at *i*, else -1."""
+    depth = 0
+    for j in range(i, len(text)):
+        ch = text[j]
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return j
+    return -1
 
 
 def _tokenize(text: str, budget: _ParseBudget) -> list[_Token]:
@@ -269,14 +296,33 @@ def _tokenize(text: str, budget: _ParseBudget) -> list[_Token]:
         if ch in " \t":
             i += 1
             continue
+        if ch == "\n":
+            if not tokens or (
+                tokens[-1].kind == "op" and tokens[-1].value in _LIST_OPS
+            ):
+                i += 1
+                continue
+            tokens.append(_Token("op", ";"))
+            budget.add_node()
+            i += 1
+            continue
         if ch == "`":
-            raise _Reject("command_substitution", "backtick command substitution")
+            if text.find("`", i + 1) < 0:
+                raise _Reject("command_substitution", "unbalanced backtick")
+            raise _Deny("command_substitution", "backtick command substitution")
         if text.startswith("<(", i) or text.startswith(">(", i):
-            raise _Reject(
+            if _find_matching(text, i + 1) < 0:
+                raise _Reject(
+                    "process_substitution",
+                    f"unbalanced process substitution {text[i:i + 2]}",
+                )
+            raise _Deny(
                 "process_substitution", f"process substitution {text[i:i + 2]}"
             )
         if ch in "()":
-            raise _Reject("subshell", "subshell or grouping parenthesis")
+            if ch == ")" or _find_matching(text, i) < 0:
+                raise _Reject("subshell", "unbalanced parenthesis")
+            raise _Deny("subshell", "subshell or grouping parenthesis")
         if ch.isdigit():
             j = i
             while j < n and text[j].isdigit():
@@ -311,12 +357,14 @@ def _tokenize(text: str, budget: _ParseBudget) -> list[_Token]:
         eq_at: Optional[int] = None
         while i < n:
             ch = text[i]
-            if ch in " \t" or ch in _OP_CHARS:
+            if ch in " \t\n" or ch in _OP_CHARS:
                 break
             if _budget_exceeded(budget):
                 raise _Reject("budget", "parse budget exceeded in word")
             if ch == "`":
-                raise _Reject(
+                if text.find("`", i + 1) < 0:
+                    raise _Reject("command_substitution", "unbalanced backtick")
+                raise _Deny(
                     "command_substitution", "backtick command substitution"
                 )
             if ch == "\\":
@@ -426,6 +474,41 @@ def _parse_simple_command(tokens: list[_Token], budget: _ParseBudget) -> Verdict
     )
 
 
+def _parse_list(tokens: list[_Token], budget: _ParseBudget) -> Verdict:
+    """Split a token stream on list operators and parse each element.
+
+    Every element must be a safe simple command for the list to be Allow.
+    A dangerous element denies the whole list with that element's verdict.
+    """
+    elements: list[list[_Token]] = [[]]
+    for tok in tokens:
+        if tok.kind == "op" and tok.value in _LIST_OPS:
+            if not elements[-1]:
+                raise _Reject("list", "empty list element")
+            elements.append([])
+            continue
+        elements[-1].append(tok)
+    if not elements[-1]:
+        raise _Reject("list", "trailing list operator")
+
+    saw_pipeline = any(
+        tok.kind == "op" and tok.value in ("|", "|&") for tok in tokens
+    )
+    for element in elements:
+        if _budget_exceeded(budget):
+            raise _Reject("budget", "parse budget exceeded while parsing list")
+        verdict = _parse_simple_command(element, budget)
+        if verdict.kind is VerdictKind.DENY:
+            return verdict
+
+    node = "pipeline" if saw_pipeline else "list"
+    return Verdict(
+        VerdictKind.ALLOW,
+        node=node,
+        reason="pipeline of simple commands" if saw_pipeline else "command list",
+    )
+
+
 def check_command(text: str) -> Verdict:
     """Check a shell command and return a verdict. Never raises."""
     try:
@@ -455,7 +538,13 @@ def check_command(text: str) -> Verdict:
         tokens = _tokenize(text, budget)
         if not tokens:
             return Verdict(VerdictKind.ALLOW, node="", reason="empty command")
-        return _parse_simple_command(tokens, budget)
+        return _parse_list(tokens, budget)
+    except _Deny as deny:
+        return Verdict(
+            VerdictKind.DENY,
+            node=deny.node,
+            reason=deny.reason,
+        )
     except _Reject as reject:
         return Verdict(
             VerdictKind.TOO_COMPLEX,
