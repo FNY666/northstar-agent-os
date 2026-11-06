@@ -312,14 +312,24 @@ class T5LivingScoreSyncTests(unittest.TestCase):
     def test_living_docs_carry_the_current_score(self):
         for relative in self.LIVING_DOCS:
             with self.subTest(doc=relative):
-                self.assertIn("97/100", (ROOT / relative).read_text(encoding="utf-8"))
+                self.assertIn("100/100", (ROOT / relative).read_text(encoding="utf-8"))
 
     def test_ops_percentage_phrasing_is_consistent(self):
         concept = (ROOT / "docs/concepts/northstar-remote-worker.md").read_text(encoding="utf-8")
         assessment = (ROOT / "docs/dx-remote-worker-assessment.zh-CN.md").read_text(encoding="utf-8")
-        self.assertIn("ops 5/6 = 83%", concept)
-        self.assertIn("ops **83**", assessment)
-        self.assertIn("ops 83%", (ROOT / "components/northstar-agent-interop/README.md").read_text(encoding="utf-8"))
+        self.assertIn("ops 6/6 = 100%", concept)
+        self.assertIn("ops **100**", assessment)
+        self.assertIn("ops 100%", (ROOT / "components/northstar-agent-interop/README.md").read_text(encoding="utf-8"))
+
+    def test_canary_run_evidence_is_recorded(self):
+        runs = ROOT / "examples" / "remote-canary" / "runs"
+        files = sorted(runs.glob("*.md"))
+        self.assertTrue(files, "at least one operator canary run must be recorded")
+        for path in files:
+            with self.subTest(run=path.name):
+                text = path.read_text(encoding="utf-8")
+                self.assertIn("PASS: remote-worker channel canary succeeded", text)
+                self.assertIn("@", text)
 
     def test_remaining_gap_is_the_real_host_canary(self):
         concept = (ROOT / "docs/concepts/northstar-remote-worker.md").read_text(encoding="utf-8")
