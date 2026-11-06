@@ -25,6 +25,8 @@ Implementation segments:
 - Segment 1: verdict types, pre-parse checks, budgets (done)
 - Segment 2: tokenizer + simple commands (done)
 - Segment 3: command lists/pipelines, substitution and subshell Deny (done)
+- Segment 4: loops, conditionals, function definitions, arithmetic, brace and
+  zsh expansions, array-subscript arithmetic, variable indirection (done)
 """
 from __future__ import annotations
 
@@ -142,6 +144,23 @@ _MULTI_OPS = ("||", "&&", ">>", "|&", ";;", "&>", "<&", ">&", "<>", "<<")
 #: Operators that separate elements of a top-level command list.
 _LIST_OPS = frozenset({";", "&", "&&", "||", "|", "|&"})
 
+#: Reserved words that introduce a compound command, mapped to the Deny node.
+_KEYWORD_NODES = {
+    "for": "loop",
+    "while": "loop",
+    "until": "loop",
+    "if": "conditional",
+    "then": "conditional",
+    "elif": "conditional",
+    "else": "conditional",
+    "fi": "conditional",
+    "case": "conditional",
+    "esac": "conditional",
+    "[[": "conditional",
+    "]]": "conditional",
+    "function": "function_definition",
+}
+
 
 def _is_name(text: str) -> bool:
     """Return True when *text* is a plain ASCII shell identifier."""
@@ -198,8 +217,9 @@ class _Token:
 def _scan_dollar(text: str, i: int, buf: list[str]) -> int:
     """Consume a ``$`` form starting at *i*; append its literal text to *buf*.
 
-    Only ``$VAR`` and ``${VAR}`` with plain names are accepted. Every other
-    dollar form is deferred to a later segment and rejected as TooComplex.
+    ``$VAR`` and ``${VAR}`` with plain names are accepted. Arithmetic
+    expansion, array-subscript arithmetic and indirect expansion are Denied;
+    every other dollar form is rejected as TooComplex.
     Returns the index just past the consumed text.
     """
     n = len(text)
@@ -208,7 +228,11 @@ def _scan_dollar(text: str, i: int, buf: list[str]) -> int:
     nxt = text[i + 1]
     if nxt == "(":
         if text.startswith("$((", i):
-            raise _Reject("arithmetic_expansion", "$(( )) arithmetic expansion")
+            if _find_matching(text, i + 1) < 0:
+                raise _Reject(
+                    "arithmetic_expansion", "unbalanced $(( expansion"
+                )
+            raise _Deny("arithmetic_expansion", "$(( )) arithmetic expansion")
         if text.find(")", i + 2) < 0:
             raise _Reject("command_substitution", "unbalanced $( substitution")
         raise _Deny("command_substitution", "$( ) command substitution")
@@ -217,6 +241,15 @@ def _scan_dollar(text: str, i: int, buf: list[str]) -> int:
         if close < 0:
             raise _Reject("parameter_expansion", "unbalanced ${")
         name = text[i + 2:close]
+        if name.startswith("!"):
+            raise _Deny(
+                "variable_indirection", f"indirect expansion ${{{name}}}"
+            )
+        if "[" in name and ("$(" in name or "`" in name):
+            raise _Deny(
+                "array_subscript_arithmetic",
+                f"array-subscript arithmetic in ${{{name}}}",
+            )
         if not _is_name(name):
             raise _Reject(
                 "parameter_expansion", f"non-plain ${{{name}}} expansion"
@@ -234,6 +267,23 @@ def _scan_dollar(text: str, i: int, buf: list[str]) -> int:
         buf.append("$" + name)
         return j
     raise _Reject("dollar", f"unsupported $ form ${nxt}")
+
+
+def _check_quoted_content(content: str) -> None:
+    """Deny dangerous constructs hidden inside a quoted string.
+
+    Array subscripts containing a command substitution are an RCE vector
+    (``test -v 'a[$(id)]'``); quoted brace expansion is a fail-closed deny.
+    """
+    if "[" in content and ("$(" in content or "`" in content):
+        raise _Deny(
+            "array_subscript_arithmetic",
+            f"array-subscript arithmetic in quoted text {content!r}",
+        )
+    if "{" in content and "}" in content and ("," in content or ".." in content):
+        raise _Deny(
+            "brace_expansion", f"quoted brace expansion {content!r}"
+        )
 
 
 def _scan_double(text: str, i: int, buf: list[str], budget: _ParseBudget) -> int:
@@ -263,6 +313,15 @@ def _scan_double(text: str, i: int, buf: list[str], budget: _ParseBudget) -> int
         if ch == "$":
             j = _scan_dollar(text, j, buf)
             continue
+        if ch == "{":
+            close = text.find("}", j + 1)
+            if close >= 0:
+                inner = text[j + 1:close]
+                if "," in inner or ".." in inner:
+                    raise _Deny(
+                        "brace_expansion",
+                        f"quoted brace expansion {{{inner}}}",
+                    )
         buf.append(ch)
         j += 1
     raise _Reject("quote", "unbalanced double quote")
@@ -289,6 +348,7 @@ def _tokenize(text: str, budget: _ParseBudget) -> list[_Token]:
     """
     tokens: list[_Token] = []
     i, n = 0, len(text)
+    cmd_start = True
     while i < n:
         if _budget_exceeded(budget):
             raise _Reject("budget", "parse budget exceeded while tokenizing")
@@ -320,6 +380,16 @@ def _tokenize(text: str, budget: _ParseBudget) -> list[_Token]:
                 "process_substitution", f"process substitution {text[i:i + 2]}"
             )
         if ch in "()":
+            if (
+                ch == "("
+                and tokens
+                and tokens[-1].kind == "word"
+                and text.startswith("()", i)
+            ):
+                raise _Deny(
+                    "function_definition",
+                    f"function definition {tokens[-1].value!r}",
+                )
             if ch == ")" or _find_matching(text, i) < 0:
                 raise _Reject("subshell", "unbalanced parenthesis")
             raise _Deny("subshell", "subshell or grouping parenthesis")
@@ -342,15 +412,18 @@ def _tokenize(text: str, budget: _ParseBudget) -> list[_Token]:
                 if text.startswith(op, i):
                     tokens.append(_Token("op", op))
                     budget.add_node()
+                    cmd_start = op in _LIST_OPS
                     i += len(op)
                     break
             else:
                 tokens.append(_Token("op", ch))
                 budget.add_node()
                 i += 1
+                cmd_start = ch in ";|&"
             continue
 
         # ---- word ----
+        buf_start = i
         buf: list[str] = []
         plain = True
         prefix_literal = True
@@ -381,7 +454,9 @@ def _tokenize(text: str, budget: _ParseBudget) -> list[_Token]:
                 close = text.find("'", i + 1)
                 if close < 0:
                     raise _Reject("quote", "unbalanced single quote")
-                buf.append(text[i + 1:close])
+                inner = text[i + 1:close]
+                _check_quoted_content(inner)
+                buf.append(inner)
                 i = close + 1
                 continue
             if ch == '"':
@@ -396,21 +471,53 @@ def _tokenize(text: str, budget: _ParseBudget) -> list[_Token]:
                 continue
             if ch == "=" and eq_at is None and prefix_literal:
                 eq_at = len(buf)
+            if ch == "{":
+                close = text.find("}", i + 1)
+                if close >= 0:
+                    inner = text[i + 1:close]
+                    if "," in inner or ".." in inner:
+                        raise _Deny(
+                            "brace_expansion",
+                            f"brace expansion {{{inner}}}",
+                        )
             buf.append(ch)
             i += 1
 
         value = "".join(buf)
         if not value:
             raise _Reject("word", "empty word")
-        if value.startswith("~") and value != "~" and not value.startswith("~/"):
-            raise _Reject("tilde_expansion", f"zsh-style tilde expansion {value!r}")
+        if value.startswith("~[") or (
+            value.startswith("~") and value != "~" and not value.startswith("~/")
+        ):
+            raise _Deny(
+                "zsh_tilde_expansion", f"zsh-style tilde expansion {value!r}"
+            )
         if value.startswith("="):
-            raise _Reject("equals_expansion", f"zsh-style equals expansion {value!r}")
+            raise _Deny(
+                "zsh_equals_expansion", f"zsh-style equals expansion {value!r}"
+            )
+        if not buf or text[buf_start] in "\"'":
+            _check_quoted_content(value)
+        is_cmd_word = cmd_start and plain
+        if is_cmd_word and value in _KEYWORD_NODES:
+            raise _Deny(
+                _KEYWORD_NODES[value], f"shell keyword {value!r}"
+            )
+        if cmd_start and text[buf_start] == "$" and value.startswith("$"):
+            raise _Deny(
+                "variable_indirection",
+                f"variable expansion in command position {value!r}",
+            )
+        if is_cmd_word and "(" in value:
+            raise _Deny(
+                "function_definition", f"function definition {value!r}"
+            )
         assign_name = None if eq_at is None else "".join(buf[:eq_at])
         tokens.append(
             _Token("word", value, plain=plain, assign_name=assign_name)
         )
         budget.add_node()
+        cmd_start = False
     return tokens
 
 
