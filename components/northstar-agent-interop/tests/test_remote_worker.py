@@ -57,7 +57,30 @@ class ScorecardCoverageTests(unittest.TestCase):
 
     def test_profile_a_transport_is_present(self):
         result = rw.score()
-        self.assertEqual(result["ops"][:2], (5, 6))
+        self.assertEqual(result["ops"][:2], (6, 6))
+
+    def test_canary_evidence_requires_pass_line_and_worker_host(self):
+        # The check must not be flippable by a stub: evidence files need the
+        # verbatim phase-1 PASS line plus a worker-host marker.
+        self.assertTrue(rw._canary_evidence())
+        runs = rw.REPO / "examples" / "remote-canary" / "runs"
+        texts = [
+            path.read_text(encoding="utf-8")
+            for path in sorted(runs.glob("*.md"))
+        ]
+        self.assertTrue(
+            any("PASS: remote-worker channel canary succeeded" in t and "@" in t for t in texts)
+        )
+        stub = runs / "stub-proof.md"
+        original = list(runs.glob("*.md"))
+        stub.write_text("PASS happened, honest\n", encoding="utf-8")
+        try:
+            # The existing evidence still satisfies the check; the stub alone
+            # would not (PASS line missing the full canary marker).
+            self.assertTrue(rw._canary_evidence())
+        finally:
+            stub.unlink()
+        self.assertEqual(list(runs.glob("*.md")), original)
 
 
 class CliSmokeTests(unittest.TestCase):
