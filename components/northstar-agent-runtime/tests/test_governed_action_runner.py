@@ -137,6 +137,24 @@ def test_runner_fail_closed_on_bad_input():
         runner.run(intent="x", action="y", subject="z", tool="")
 
 
+def test_bash_parser_gate_blocks_denied_command():
+    runner, ledger, checkpoint, observer, executed, ik, ck = _build_runner()
+    outcome = runner.run(
+        intent="run shell",
+        action="shell",
+        subject="workspace",
+        tool="shell",
+        tool_args={"command": "echo $(id)"},
+        mutating=False,
+    )
+    assert outcome.executed is False
+    assert outcome.gate == "bash_parser"
+    assert outcome.decision == "blocked"
+    assert "command_substitution" in outcome.reason
+    assert executed == []  # the executor never saw the command
+    assert len(ledger) >= 1  # the denial was sealed
+
+
 def test_runner_module_self_check():
     assert gar.stdlib_only() is True
     assert gar.GOVERNED_RUNNER_VERSION == "governed-action-runner.v2"
