@@ -24546,6 +24546,28 @@ Shape an ``audit.ndjson/1`` record for a barcode-scanner event.
 
 #### `main()`
 
+### `bash_parser`
+
+Source: `components/northstar-agent-runtime/bash_parser.py`
+
+Hand-written recursive-descent Bash AST parser for security checks.
+
+#### `VerdictKind`
+
+Outcome of a bash command check.
+
+#### `Verdict`
+
+Structured verdict for a shell command.
+
+#### `check_command(text: str)`
+
+Check a shell command and return a verdict. Never raises.
+
+#### `stdlib_only()`
+
+Return True when this module imports only the standard library.
+
 ### `batch_processing`
 
 Source: `components/northstar-agent-runtime/batch_processing.py`
@@ -43972,6 +43994,72 @@ Goal-misgeneralization detection/correction bookkeeping ledger.
 
 Self-check: declare, observe, detect, correct, test.
 
+### `gossip_announcer`
+
+Source: `components/northstar-agent-runtime/gossip_announcer.py`
+
+Gossip announcer: host-side wiring for the gossip dissemination plane.
+
+#### `GossipAnnouncerError`
+
+Configuration or usage error (fail-closed).
+
+#### `LocalGossipTransport`
+
+In-process loopback transport: node id -> receiver registry.
+
+- `register(node_id: str, receiver: Callable[[Rumor], Any])`
+  - Register a receiver for ``node_id``. Duplicates are refused.
+- `unregister(node_id: str)`
+  - Drop a receiver. Returns True if one was registered.
+- `deliver(target_id: str, rumor: Rumor)`
+  - Deliver ``rumor`` to ``target_id``. False when unknown.
+- `members()`
+  - Registered node ids, sorted.
+#### `GossipAnnouncer`
+
+Host-side gossip announcer: ledger head -> rumors -> peers.
+
+- `announce_head(ledger: Any)`
+  - Announce the sealed ledger's head if it advanced.
+- `announce_alert(kind: str, detail: Optional[Mapping]=None)`
+  - Originate an immediate alert rumor (kill-switch / config-drift).
+- `tick()`
+  - One anti-entropy round: re-disseminate live rumors.
+- `receive(rumor: Rumor)`
+  - Accept a rumor from the transport; True on first sight.
+- `join_peer(peer_id: str)`
+  - Admit a peer into the membership ledger (host-called).
+- `mark_suspect(peer_id: str)`
+  - Mark a live peer suspect (missed probes; host-called).
+- `confirm_dead(peer_id: str)`
+  - Confirm a suspect peer dead (terminal; host-called).
+- `mark_alive(peer_id: str)`
+  - Refute a suspicion: suspect -> alive, incarnation bumps.
+- `peers` (property)
+  - Peer node ids named at construction.
+- `last_head_seq` (property)
+  - Ledger seq of the last announced head (0 = none yet).
+- `has_seen(rumor_id: str)`
+  - True when this host has seen ``rumor_id`` (origin or relay).
+- `seen_ids()`
+  - Rumor ids seen, in first-sight order.
+- `reports()`
+  - Dissemination decisions booked by the membership ledger.
+- `audit_log()`
+  - Announcer audit events (received / spread), in order.
+- `membership_audit_log()`
+  - Membership-plane audit events (join / suspect / confirm / ...).
+- `alive_members()`
+  - Members currently alive, sorted.
+- `stats()`
+  - Counters and current head position (pure view).
+- `as_dict()`
+  - State snapshot (pure view).
+#### `main()`
+
+Self-check: line topology proves multi-hop relay over loopback.
+
 ### `gossip_protocol`
 
 Source: `components/northstar-agent-runtime/gossip_protocol.py`
@@ -53086,6 +53174,8 @@ Everything a caller gets back from :meth:`AgentRuntime.run_collect`.
 
 One configured governed loop.
 
+- `announce_alert(kind: str, detail: Mapping[str, Any] | None=None)`
+  - Announce a kill-switch / config-drift alert immediately.
 - `provider_name` (property)
 - `durable` (property)
 - `last_report` (property)
