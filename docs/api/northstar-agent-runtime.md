@@ -64,6 +64,10 @@ Host state directory used when the caller did not choose an evidence path.
 The host-owned task contract for one programming run.
 
 - `as_dict()`
+#### `validate_check_inputs(inputs: Iterable[str])`
+
+Return a stable, validated tuple of repository-relative check inputs.
+
 #### `IsolatedCodeWorkspace`
 
 Lifecycle of a detached task worktree and its durable evidence directory.

@@ -25,6 +25,7 @@ MAX_SNAPSHOT_FILES = 8_000
 MAX_DELIVERY_PATCH_BYTES = 8 * 1024 * 1024
 MAX_DELIVERY_FILE_BYTES = 1024 * 1024
 MAX_DELIVERY_FILES = 200
+MAX_CHECK_INPUTS = 64
 
 _GENERATED_PARTS = frozenset({"build", "dist", "node_modules", "__pycache__"})
 _GENERATED_SUFFIXES = frozenset(
@@ -117,6 +118,7 @@ class CodePhaseMachine:
         plan_only: bool = False,
         worktree: str | Path | None = None,
         start_commit: str = "",
+        check_inputs: tuple[str, ...] = (),
     ) -> None:
         if not isinstance(run_id, str) or not run_id.strip():
             raise CodeTaskError("code phase machine needs a run id")
@@ -125,6 +127,8 @@ class CodePhaseMachine:
         self.path = Path(evidence_dir) / "phases.json"
         self.worktree = Path(worktree).resolve() if worktree is not None else None
         self.start_commit = start_commit
+        self.check_inputs = validate_check_inputs(check_inputs)
+        self._check_input_pins: tuple[dict[str, Any], ...] | None = None
         self._state = "created"
         self._outcome: str | None = None
         self._transitions: list[dict[str, Any]] = []
@@ -161,6 +165,8 @@ class CodePhaseMachine:
             "transitions": list(self._transitions),
             "effect_journal_version": 1,
             "effects": [dict(effect) for effect in self._effects],
+            "check_inputs": list(self.check_inputs),
+            "check_input_pins": [dict(pin) for pin in (self._check_input_pins or ())],
         }
 
     def _persist(self) -> None:
@@ -286,6 +292,69 @@ class CodePhaseMachine:
                 effect.update(previous)
                 raise
 
+    def _pin_check_inputs(self) -> tuple[dict[str, Any], ...]:
+        """Content-address every declared check input at the starting commit.
+
+        Each input resolves to the blob object id Git itself assigns to that
+        content, so the pin is the repository's own addressing, not a second
+        hash scheme. A declared input that is missing at the start commit, or
+        that resolves to a tree instead of a file, fails closed: the check
+        cannot be shown to have run against pinned inputs.
+        """
+        if self.worktree is None or not self.start_commit:
+            raise CodeTaskError(
+                "check inputs cannot be pinned without a worktree and start commit"
+            )
+        pins: list[dict[str, Any]] = []
+        for path in self.check_inputs:
+            resolved = _run_git(
+                self.worktree, "rev-parse", f"{self.start_commit}:{path}", check=False
+            )
+            if resolved.returncode != 0:
+                raise CodeTaskError(
+                    f"check input is missing at the starting commit: {path}"
+                )
+            blob_sha = resolved.stdout.decode("ascii", errors="strict").strip()
+            kind = _run_git(self.worktree, "cat-file", "-t", blob_sha, check=False)
+            if (
+                kind.returncode != 0
+                or kind.stdout.decode("ascii", errors="replace").strip() != "blob"
+            ):
+                raise CodeTaskError(
+                    f"check input is not a file at the starting commit: {path}"
+                )
+            pins.append({"path": path, "baseline_blob_sha": blob_sha})
+        return tuple(pins)
+
+    def _verify_check_input_pins(self) -> list[dict[str, Any]]:
+        """Compare each pinned input against the worktree's current content.
+
+        Returns one record per input with its baseline blob, its current blob
+        (None when the file is gone), and whether they match. ``git
+        hash-object`` produces the same object id Git assigns to stored
+        content, so the comparison is exact.
+        """
+        if self.worktree is None or self._check_input_pins is None:
+            raise CodeTaskError("check input pins have not been captured")
+        records: list[dict[str, Any]] = []
+        for pin in self._check_input_pins:
+            path = str(pin["path"])
+            current = _run_git(self.worktree, "hash-object", "--", path, check=False)
+            current_sha = (
+                current.stdout.decode("ascii", errors="strict").strip()
+                if current.returncode == 0
+                else None
+            )
+            records.append(
+                {
+                    "path": path,
+                    "baseline_blob_sha": pin["baseline_blob_sha"],
+                    "current_blob_sha": current_sha,
+                    "unchanged": current_sha == pin["baseline_blob_sha"],
+                }
+            )
+        return records
+
     def begin_verification(self) -> None:
         with self._lock:
             in_flight = [
@@ -330,15 +399,46 @@ class CodePhaseMachine:
                         sorted({str(item.get("code", "unknown")) for item in audit["findings"]})
                     )
                     raise CodeTaskError(f"final patch failed delivery audit: {codes}")
+                if self.check_inputs:
+                    # Pin the check inputs at the starting commit before any
+                    # check executes, then refuse a patch that touches one.
+                    # A rewritten check script (or helper/fixture it reads)
+                    # must never get to run and report success.
+                    self._check_input_pins = self._pin_check_inputs()
+                    touched = sorted(
+                        set(_changed_paths(self.worktree))
+                        & {str(pin["path"]) for pin in self._check_input_pins}
+                    )
+                    if touched:
+                        raise CodeTaskError(
+                            "final patch touches pinned check inputs: " + ", ".join(touched)
+                        )
+                    self._persist()
+            elif self.check_inputs:
+                raise CodeTaskError("check inputs cannot be verified without a worktree")
 
     def seal_verification(self) -> None:
-        """Prove host checks did not change the audited delivery patch."""
+        """Prove host checks did not change the audited delivery patch.
+
+        The seal also re-verifies every pinned check input: the harness and
+        fixtures the checks ran against must still be the content pinned at
+        the starting commit. A patch that rewrote a check script (or a helper
+        or fixture it reads) cannot validate its seal, even if the rewritten
+        check reported success.
+        """
         with self._lock:
             if self.plan_only or self.worktree is None:
                 return
             if self._state != "verifying" or self._verification_patch_sha256 is None:
                 raise CodeTaskError("delivery sealing requires completed patch prechecks")
             audit = audit_delivery_patch(self.worktree, evidence_dir=self.path.parent)
+            input_records = (
+                self._verify_check_input_pins() if self._check_input_pins is not None else []
+            )
+            inputs_unchanged = all(record["unchanged"] for record in input_records)
+            mismatched = sorted(
+                record["path"] for record in input_records if not record["unchanged"]
+            )
             unchanged = audit["patch_sha256"] == self._verification_patch_sha256
             receipt = {
                 "schema": "northstar.delivery-seal.v1",
@@ -347,13 +447,20 @@ class CodePhaseMachine:
                 "patch_sha256": audit["patch_sha256"],
                 "unchanged_during_verification": unchanged,
                 "patch_audit_ok": bool(audit["ok"]),
-                "ok": unchanged and bool(audit["ok"]),
+                "check_inputs_pinned": self._check_input_pins is not None,
+                "check_input_pins": input_records,
+                "check_inputs_unchanged": inputs_unchanged,
+                "ok": unchanged and bool(audit["ok"]) and inputs_unchanged,
             }
             _atomic_write(
                 self.path.parent / "delivery-seal.json",
                 (json.dumps(receipt, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode("utf-8"),
             )
             self._delivery_sealed = bool(receipt["ok"])
+            if mismatched:
+                raise CodeTaskError(
+                    "pinned check inputs changed during verification: " + ", ".join(mismatched)
+                )
             if not unchanged:
                 raise CodeTaskError("host verification modified the audited delivery patch")
             if not audit["ok"]:
@@ -512,6 +619,14 @@ def validate_patch_replay(
     return receipt
 
 
+def _changed_paths(worktree: Path) -> tuple[str, ...]:
+    """Repository-relative paths the worktree changes against HEAD."""
+    names_process = _run_git(worktree, "diff", "--name-only", "-z", "HEAD", "--")
+    return tuple(
+        item for item in names_process.stdout.decode("utf-8", errors="replace").split("\0") if item
+    )
+
+
 def audit_delivery_patch(
     worktree: str | Path,
     *,
@@ -521,10 +636,7 @@ def audit_delivery_patch(
     root = Path(worktree).resolve()
     destination = Path(evidence_dir).resolve() / "patch-audit.json"
     patch = _current_patch(root)
-    names_process = _run_git(root, "diff", "--name-only", "-z", "HEAD", "--")
-    paths = tuple(
-        item for item in names_process.stdout.decode("utf-8", errors="replace").split("\0") if item
-    )
+    paths = _changed_paths(root)
     findings: list[dict[str, str]] = []
 
     def finding(code: str, path: str, detail: str) -> None:
@@ -592,6 +704,8 @@ def audit_delivery_patch(
         "schema": "northstar.patch-audit.v1",
         "ok": not findings,
         "changed_files": len(paths),
+        "changed_paths": sorted(paths)[: MAX_DELIVERY_FILES + 1],
+        "changed_paths_truncated": len(paths) > MAX_DELIVERY_FILES + 1,
         "patch_bytes": len(patch),
         "patch_sha256": hashlib.sha256(patch).hexdigest(),
         "findings": findings,
@@ -828,13 +942,23 @@ def default_state_root() -> Path:
 
 @dataclass(frozen=True)
 class CodeTask:
-    """The host-owned task contract for one programming run."""
+    """The host-owned task contract for one programming run.
+
+    ``check_inputs`` names the repository-relative files the host-declared
+    checks read (check scripts, helpers, fixtures). The list is host
+    configuration, never model output: the model cannot declare, widen, or
+    undeclare it. Each input is content-addressed at the starting commit and
+    sealed, so a delivery patch that rewrites a check script — or a helper or
+    fixture the check reads — fails verification instead of passing audit with
+    a compromised verifier.
+    """
 
     goal: str
     workspace: str = "."
     checks: tuple[str, ...] = ()
     plan_only: bool = False
     network_targets: tuple[str, ...] = ()
+    check_inputs: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.goal, str) or not self.goal.strip():
@@ -845,6 +969,7 @@ class CodeTask:
             not isinstance(command, str) or not command.strip() for command in self.checks
         ):
             raise CodeTaskError("checks must be a tuple of non-empty command strings")
+        object.__setattr__(self, "check_inputs", validate_check_inputs(self.check_inputs))
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -852,7 +977,45 @@ class CodeTask:
             "checks": list(self.checks),
             "plan_only": self.plan_only,
             "network_targets": list(self.network_targets),
+            "check_inputs": list(self.check_inputs),
         }
+
+
+def validate_check_inputs(inputs: Iterable[str]) -> tuple[str, ...]:
+    """Return a stable, validated tuple of repository-relative check inputs.
+
+    A check input is a file the host-declared checks read. Paths are relative
+    to the repository root, never absolute, never escaping it, and never
+    duplicated. Silently discarding a bad entry would let the evidence claim a
+    different pinned set from the one the operator supplied, so every bad entry
+    is refused.
+    """
+    values = tuple(inputs)
+    if len(values) > MAX_CHECK_INPUTS:
+        raise CodeTaskError(
+            f"at most {MAX_CHECK_INPUTS} check inputs are allowed"
+        )
+    seen: set[str] = set()
+    for index, path in enumerate(values):
+        if not isinstance(path, str) or not path.strip():
+            raise CodeTaskError(f"check input {index} must be non-empty text")
+        if path != path.strip():
+            raise CodeTaskError(
+                f"check input {index} must not have leading or trailing whitespace"
+            )
+        if path.startswith("/") or "\x00" in path or ":" in path:
+            raise CodeTaskError(
+                f"check input {index} must be a relative repository path without ':'"
+            )
+        parts = path.split("/")
+        if any(part in {"", ".", ".."} for part in parts):
+            raise CodeTaskError(
+                f"check input {index} must not contain empty, '.', or '..' segments"
+            )
+        if path in seen:
+            raise CodeTaskError(f"check input {index} duplicates an earlier check input")
+        seen.add(path)
+    return values
 
 
 @dataclass
