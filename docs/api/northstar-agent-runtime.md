@@ -24546,6 +24546,28 @@ Shape an ``audit.ndjson/1`` record for a barcode-scanner event.
 
 #### `main()`
 
+### `bash_parser`
+
+Source: `components/northstar-agent-runtime/bash_parser.py`
+
+Hand-written recursive-descent Bash AST parser for security checks.
+
+#### `VerdictKind`
+
+Outcome of a bash command check.
+
+#### `Verdict`
+
+Structured verdict for a shell command.
+
+#### `check_command(text: str)`
+
+Check a shell command and return a verdict. Never raises.
+
+#### `stdlib_only()`
+
+Return True when this module imports only the standard library.
+
 ### `batch_processing`
 
 Source: `components/northstar-agent-runtime/batch_processing.py`
