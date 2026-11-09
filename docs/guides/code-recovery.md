@@ -50,9 +50,11 @@ copied into the effect journal.
 
 At delivery, `patch-replay.json` proves that the model's patch applies to the
 starting commit, `patch-audit.json` checks delivery boundaries, and
-`delivery-seal.json` proves host verification did not change that patch. A
-verification command that returns zero while changing delivered files still
-ends as `error_postconditions_failed`.
+`delivery-seal.json` proves host verification did not change that patch. The
+seal (v2) records the start commit's tree hash explicitly and lists files
+deliberately excluded from pinning, making omissions visible. A verification
+command that returns zero while changing delivered files still ends as
+`error_postconditions_failed`.
 
 To resume manually, inspect unresolved files and any affected external system
 first. Carry the original permission and budget constraints into a fresh run.

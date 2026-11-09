@@ -119,6 +119,7 @@ class CodePhaseMachine:
         worktree: str | Path | None = None,
         start_commit: str = "",
         check_inputs: tuple[str, ...] = (),
+        check_exclusions: tuple[tuple[str, str], ...] = (),
     ) -> None:
         if not isinstance(run_id, str) or not run_id.strip():
             raise CodeTaskError("code phase machine needs a run id")
@@ -128,7 +129,9 @@ class CodePhaseMachine:
         self.worktree = Path(worktree).resolve() if worktree is not None else None
         self.start_commit = start_commit
         self.check_inputs = validate_check_inputs(check_inputs)
+        self.check_exclusions = validate_check_exclusions(check_exclusions, check_inputs)
         self._check_input_pins: tuple[dict[str, Any], ...] | None = None
+        self._start_tree_hash: str | None = None
         self._state = "created"
         self._outcome: str | None = None
         self._transitions: list[dict[str, Any]] = []
@@ -300,11 +303,43 @@ class CodePhaseMachine:
         hash scheme. A declared input that is missing at the start commit, or
         that resolves to a tree instead of a file, fails closed: the check
         cannot be shown to have run against pinned inputs.
+
+        Also captures the tree hash and validates exclusions at pin time.
         """
         if self.worktree is None or not self.start_commit:
             raise CodeTaskError(
                 "check inputs cannot be pinned without a worktree and start commit"
             )
+
+        # Capture the tree hash of the start commit
+        tree_resolved = _run_git(
+            self.worktree, "rev-parse", f"{self.start_commit}^{{tree}}", check=False
+        )
+        if tree_resolved.returncode != 0:
+            raise CodeTaskError(
+                f"cannot resolve tree hash for start commit {self.start_commit}"
+            )
+        self._start_tree_hash = tree_resolved.stdout.decode("ascii", errors="strict").strip()
+
+        # Validate each exclusion path exists as a file at the start commit
+        for path, reason in self.check_exclusions:
+            resolved = _run_git(
+                self.worktree, "rev-parse", f"{self.start_commit}:{path}", check=False
+            )
+            if resolved.returncode != 0:
+                raise CodeTaskError(
+                    f"check exclusion is missing at the starting commit: {path}"
+                )
+            blob_sha = resolved.stdout.decode("ascii", errors="strict").strip()
+            kind = _run_git(self.worktree, "cat-file", "-t", blob_sha, check=False)
+            if (
+                kind.returncode != 0
+                or kind.stdout.decode("ascii", errors="replace").strip() != "blob"
+            ):
+                raise CodeTaskError(
+                    f"check exclusion is not a file at the starting commit: {path}"
+                )
+
         pins: list[dict[str, Any]] = []
         for path in self.check_inputs:
             resolved = _run_git(
@@ -399,23 +434,25 @@ class CodePhaseMachine:
                         sorted({str(item.get("code", "unknown")) for item in audit["findings"]})
                     )
                     raise CodeTaskError(f"final patch failed delivery audit: {codes}")
-                if self.check_inputs:
+                if self.check_inputs or self.check_exclusions:
                     # Pin the check inputs at the starting commit before any
                     # check executes, then refuse a patch that touches one.
                     # A rewritten check script (or helper/fixture it reads)
                     # must never get to run and report success.
+                    # Also validate exclusions exist at start commit.
                     self._check_input_pins = self._pin_check_inputs()
-                    touched = sorted(
-                        set(_changed_paths(self.worktree))
-                        & {str(pin["path"]) for pin in self._check_input_pins}
-                    )
-                    if touched:
-                        raise CodeTaskError(
-                            "final patch touches pinned check inputs: " + ", ".join(touched)
+                    if self.check_inputs:
+                        touched = sorted(
+                            set(_changed_paths(self.worktree))
+                            & {str(pin["path"]) for pin in self._check_input_pins}
                         )
+                        if touched:
+                            raise CodeTaskError(
+                                "final patch touches pinned check inputs: " + ", ".join(touched)
+                            )
                     self._persist()
-            elif self.check_inputs:
-                raise CodeTaskError("check inputs cannot be verified without a worktree")
+            elif self.check_inputs or self.check_exclusions:
+                raise CodeTaskError("check inputs or exclusions cannot be verified without a worktree")
 
     def seal_verification(self) -> None:
         """Prove host checks did not change the audited delivery patch.
@@ -425,12 +462,34 @@ class CodePhaseMachine:
         the starting commit. A patch that rewrote a check script (or a helper
         or fixture it reads) cannot validate its seal, even if the rewritten
         check reported success.
+
+        The seal records the start commit's tree hash explicitly and re-verifies
+        it matches, so a stranger can verify "this seal is about this exact tree"
+        without re-deriving it from the commit. The seal also records paths
+        deliberately NOT pinned (check_exclusions), making omissions visible.
         """
         with self._lock:
             if self.plan_only or self.worktree is None:
                 return
             if self._state != "verifying" or self._verification_patch_sha256 is None:
                 raise CodeTaskError("delivery sealing requires completed patch prechecks")
+
+            # Re-verify the tree hash matches what we captured at pin time
+            tree_resolved = _run_git(
+                self.worktree, "rev-parse", f"{self.start_commit}^{{tree}}", check=False
+            )
+            if tree_resolved.returncode != 0:
+                raise CodeTaskError(
+                    f"cannot resolve tree hash for start commit {self.start_commit}"
+                )
+            tree_hash = tree_resolved.stdout.decode("ascii", errors="strict").strip()
+
+            # If we already captured the tree hash during pinning, verify it matches
+            if self._start_tree_hash is not None and tree_hash != self._start_tree_hash:
+                raise CodeTaskError(
+                    f"start commit tree hash changed: expected {self._start_tree_hash}, got {tree_hash}"
+                )
+
             audit = audit_delivery_patch(self.worktree, evidence_dir=self.path.parent)
             input_records = (
                 self._verify_check_input_pins() if self._check_input_pins is not None else []
@@ -440,9 +499,17 @@ class CodePhaseMachine:
                 record["path"] for record in input_records if not record["unchanged"]
             )
             unchanged = audit["patch_sha256"] == self._verification_patch_sha256
+
+            # Format exclusions as list of {path, reason} objects
+            exclusion_list = [
+                {"path": path, "reason": reason}
+                for path, reason in self.check_exclusions
+            ]
+
             receipt = {
-                "schema": "northstar.delivery-seal.v1",
+                "schema": "northstar.delivery-seal.v2",
                 "start_commit": self.start_commit,
+                "start_tree_hash": tree_hash,
                 "precheck_patch_sha256": self._verification_patch_sha256,
                 "patch_sha256": audit["patch_sha256"],
                 "unchanged_during_verification": unchanged,
@@ -450,6 +517,7 @@ class CodePhaseMachine:
                 "check_inputs_pinned": self._check_input_pins is not None,
                 "check_input_pins": input_records,
                 "check_inputs_unchanged": inputs_unchanged,
+                "check_exclusions": exclusion_list,
                 "ok": unchanged and bool(audit["ok"]) and inputs_unchanged,
             }
             _atomic_write(
@@ -951,6 +1019,9 @@ class CodeTask:
     sealed, so a delivery patch that rewrites a check script — or a helper or
     fixture the check reads — fails verification instead of passing audit with
     a compromised verifier.
+
+    ``check_exclusions`` names files deliberately NOT pinned, with a reason for
+    each omission. This makes the exclusion list visible in the seal.
     """
 
     goal: str
@@ -959,6 +1030,7 @@ class CodeTask:
     plan_only: bool = False
     network_targets: tuple[str, ...] = ()
     check_inputs: tuple[str, ...] = ()
+    check_exclusions: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.goal, str) or not self.goal.strip():
@@ -970,6 +1042,9 @@ class CodeTask:
         ):
             raise CodeTaskError("checks must be a tuple of non-empty command strings")
         object.__setattr__(self, "check_inputs", validate_check_inputs(self.check_inputs))
+        object.__setattr__(
+            self, "check_exclusions", validate_check_exclusions(self.check_exclusions, self.check_inputs)
+        )
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -978,6 +1053,7 @@ class CodeTask:
             "plan_only": self.plan_only,
             "network_targets": list(self.network_targets),
             "check_inputs": list(self.check_inputs),
+            "check_exclusions": [list(excl) for excl in self.check_exclusions],
         }
 
 
@@ -1014,6 +1090,57 @@ def validate_check_inputs(inputs: Iterable[str]) -> tuple[str, ...]:
             )
         if path in seen:
             raise CodeTaskError(f"check input {index} duplicates an earlier check input")
+        seen.add(path)
+    return values
+
+
+def validate_check_exclusions(
+    exclusions: tuple[tuple[str, str], ...] | Iterable[tuple[str, str]],
+    check_inputs: tuple[str, ...],
+) -> tuple[tuple[str, str], ...]:
+    """Return a stable, validated tuple of (path, reason) check exclusions.
+
+    Each exclusion names a repository-relative file deliberately NOT pinned as
+    a check input, with a reason explaining the omission. Paths follow the same
+    rules as check_inputs. An exclusion overlapping a declared check input is a
+    contradiction and fails closed.
+    """
+    values = tuple(exclusions)
+    if len(values) > MAX_CHECK_INPUTS:
+        raise CodeTaskError(
+            f"at most {MAX_CHECK_INPUTS} check exclusions are allowed"
+        )
+    seen: set[str] = set()
+    input_set = set(check_inputs)
+    for index, entry in enumerate(values):
+        if not isinstance(entry, tuple) or len(entry) != 2:
+            raise CodeTaskError(
+                f"check exclusion {index} must be a (path, reason) pair"
+            )
+        path, reason = entry
+        if not isinstance(path, str) or not path.strip():
+            raise CodeTaskError(f"check exclusion {index} path must be non-empty text")
+        if not isinstance(reason, str) or not reason.strip():
+            raise CodeTaskError(f"check exclusion {index} reason must be non-empty text")
+        if path != path.strip():
+            raise CodeTaskError(
+                f"check exclusion {index} path must not have leading or trailing whitespace"
+            )
+        if path.startswith("/") or "\x00" in path or ":" in path:
+            raise CodeTaskError(
+                f"check exclusion {index} path must be a relative repository path without ':'"
+            )
+        parts = path.split("/")
+        if any(part in {"", ".", ".."} for part in parts):
+            raise CodeTaskError(
+                f"check exclusion {index} path must not contain empty, '.', or '..' segments"
+            )
+        if path in seen:
+            raise CodeTaskError(f"check exclusion {index} duplicates an earlier exclusion")
+        if path in input_set:
+            raise CodeTaskError(
+                f"check exclusion {index} path '{path}' is also a declared check input"
+            )
         seen.add(path)
     return values
 
