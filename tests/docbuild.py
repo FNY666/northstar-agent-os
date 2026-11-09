@@ -207,7 +207,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "fragile_watermark", "fraud_detector", "frontmatter", "full_text_search",
         "fulltext_search", "fuzzer", "game_agents", "gdpr",
         "geocoder", "geofence_manager", "glba", "goal_misgeneralization",
-        "gossip_protocol", "governance", "governance_bench", "governed_action_runner",
+        "gossip_announcer", "gossip_protocol", "governance", "governance_bench", "governed_action_runner",
         "govservices_agents", "gpai", "graceful_shutdown", "gradient_hacking",
         "graph_database", "graph_db", "graphql_gateway", "grc",
         "greenwash", "grid_agents", "grpc_gateway", "grpc_interface",
