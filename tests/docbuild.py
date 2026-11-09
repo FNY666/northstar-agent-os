@@ -147,7 +147,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "audit_merkle", "audit_rekor", "audit_scitt", "audit_shipper",
         "auth_dict", "automated_alignment", "backdoor", "backdoor_detection",
         "backdoor_detector", "backpressure", "backup_manager", "bandit_algorithm",
-        "barcode_scanner", "batch_processing", "bcp", "bdd_interface",
+        "barcode_scanner", "bash_parser", "batch_processing", "bcp", "bdd_interface",
         "benchmark", "benchmark_runner", "beneficial_ai", "bft_interface",
         "bilinear_accumulator", "billing_engine", "bloom_filter", "blue_green_deploy",
         "booking_agents", "bot_manager", "bpmn_engine", "btree_index",
