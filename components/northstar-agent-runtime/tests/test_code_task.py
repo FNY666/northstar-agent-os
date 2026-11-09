@@ -19,6 +19,7 @@ from code_task import (
     audit_delivery_patch,
     reconcile_code_evidence,
     validate_check_inputs,
+    validate_check_exclusions,
 )
 
 
@@ -673,6 +674,239 @@ class CheckInputPinningTests(unittest.TestCase):
                 self.assertTrue(seal["ok"])
                 self.assertFalse(seal["check_inputs_pinned"])
                 self.assertEqual(seal["check_input_pins"], [])
+            finally:
+                isolated.cleanup()
+
+
+class DeliverySealV2Tests(unittest.TestCase):
+    """Tests for delivery seal v2: tree hash and check exclusions."""
+
+    def make_check_repository(self, parent: Path) -> Path:
+        root = parent / "repo"
+        root.mkdir()
+        git(root, "init")
+        git(root, "config", "user.email", "northstar-tests@example.invalid")
+        git(root, "config", "user.name", "Northstar Tests")
+        (root / "app.py").write_text("value = 1\n", encoding="utf-8")
+        (root / "checks").mkdir()
+        (root / "checks" / "helper.py").write_text("EXPECTED = 2\n", encoding="utf-8")
+        (root / "checks" / "run_check.py").write_text(
+            "import sys\nsys.exit(0)\n", encoding="utf-8"
+        )
+        (root / "docs").mkdir()
+        (root / "docs" / "readme.md").write_text("# README\n", encoding="utf-8")
+        git(root, "add", "app.py", "checks/helper.py", "checks/run_check.py", "docs/readme.md")
+        git(root, "commit", "-m", "initial")
+        return root
+
+    def test_seal_includes_tree_hash(self):
+        """Tree hash in the seal equals git rev-parse <start_commit>^{tree}."""
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            source = self.make_check_repository(parent)
+            isolated = IsolatedCodeWorkspace(
+                source, evidence_root=parent / "evidence"
+            ).prepare()
+            try:
+                assert isolated.worktree is not None
+                assert isolated.evidence_dir is not None
+                (isolated.worktree / "app.py").write_text("value = 2\n", encoding="utf-8")
+
+                phases = CodePhaseMachine(
+                    run_id=isolated.run_id,
+                    evidence_dir=isolated.evidence_dir,
+                    worktree=isolated.worktree,
+                    start_commit=isolated.start_commit,
+                    check_inputs=("checks/run_check.py",),
+                )
+                phases.start()
+                phases.submit_plan({"files": ["app.py"], "steps": ["edit"], "check_indices": [0]})
+                phases.begin_verification()
+                phases.seal_verification()
+
+                seal = json.loads(
+                    (isolated.evidence_dir / "delivery-seal.json").read_text(encoding="utf-8")
+                )
+                expected_tree_hash = git(isolated.worktree, "rev-parse", f"{isolated.start_commit}^{{tree}}")
+                self.assertEqual(seal["start_tree_hash"], expected_tree_hash)
+            finally:
+                isolated.cleanup()
+
+    def test_seal_schema_is_v2(self):
+        """Seal schema field is northstar.delivery-seal.v2."""
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            source = self.make_check_repository(parent)
+            isolated = IsolatedCodeWorkspace(
+                source, evidence_root=parent / "evidence"
+            ).prepare()
+            try:
+                assert isolated.worktree is not None
+                assert isolated.evidence_dir is not None
+                (isolated.worktree / "app.py").write_text("value = 2\n", encoding="utf-8")
+
+                phases = CodePhaseMachine(
+                    run_id=isolated.run_id,
+                    evidence_dir=isolated.evidence_dir,
+                    worktree=isolated.worktree,
+                    start_commit=isolated.start_commit,
+                )
+                phases.start()
+                phases.submit_plan({"files": ["app.py"], "steps": ["edit"]})
+                phases.begin_verification()
+                phases.seal_verification()
+
+                seal = json.loads(
+                    (isolated.evidence_dir / "delivery-seal.json").read_text(encoding="utf-8")
+                )
+                self.assertEqual(seal["schema"], "northstar.delivery-seal.v2")
+            finally:
+                isolated.cleanup()
+
+    def test_empty_exclusion_list_is_explicit(self):
+        """Seal with empty exclusion list records explicit empty list."""
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            source = self.make_check_repository(parent)
+            isolated = IsolatedCodeWorkspace(
+                source, evidence_root=parent / "evidence"
+            ).prepare()
+            try:
+                assert isolated.worktree is not None
+                assert isolated.evidence_dir is not None
+                (isolated.worktree / "app.py").write_text("value = 2\n", encoding="utf-8")
+
+                phases = CodePhaseMachine(
+                    run_id=isolated.run_id,
+                    evidence_dir=isolated.evidence_dir,
+                    worktree=isolated.worktree,
+                    start_commit=isolated.start_commit,
+                    check_exclusions=(),
+                )
+                phases.start()
+                phases.submit_plan({"files": ["app.py"], "steps": ["edit"]})
+                phases.begin_verification()
+                phases.seal_verification()
+
+                seal = json.loads(
+                    (isolated.evidence_dir / "delivery-seal.json").read_text(encoding="utf-8")
+                )
+                self.assertIn("check_exclusions", seal)
+                self.assertEqual(seal["check_exclusions"], [])
+            finally:
+                isolated.cleanup()
+
+    def test_exclusion_list_round_trips(self):
+        """Exclusion list round-trips path + reason into the seal."""
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            source = self.make_check_repository(parent)
+            isolated = IsolatedCodeWorkspace(
+                source, evidence_root=parent / "evidence"
+            ).prepare()
+            try:
+                assert isolated.worktree is not None
+                assert isolated.evidence_dir is not None
+                (isolated.worktree / "app.py").write_text("value = 2\n", encoding="utf-8")
+
+                exclusions = (
+                    ("docs/readme.md", "documentation not pinned"),
+                    ("checks/helper.py", "test data varies"),
+                )
+                phases = CodePhaseMachine(
+                    run_id=isolated.run_id,
+                    evidence_dir=isolated.evidence_dir,
+                    worktree=isolated.worktree,
+                    start_commit=isolated.start_commit,
+                    check_inputs=("checks/run_check.py",),
+                    check_exclusions=exclusions,
+                )
+                phases.start()
+                phases.submit_plan({"files": ["app.py"], "steps": ["edit"]})
+                phases.begin_verification()
+                phases.seal_verification()
+
+                seal = json.loads(
+                    (isolated.evidence_dir / "delivery-seal.json").read_text(encoding="utf-8")
+                )
+                self.assertEqual(len(seal["check_exclusions"]), 2)
+                self.assertEqual(seal["check_exclusions"][0]["path"], "docs/readme.md")
+                self.assertEqual(seal["check_exclusions"][0]["reason"], "documentation not pinned")
+                self.assertEqual(seal["check_exclusions"][1]["path"], "checks/helper.py")
+                self.assertEqual(seal["check_exclusions"][1]["reason"], "test data varies")
+            finally:
+                isolated.cleanup()
+
+    def test_exclusion_overlapping_check_input_fails(self):
+        """Exclusion overlapping a pinned check input fails closed."""
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            source = self.make_check_repository(parent)
+            with self.assertRaisesRegex(
+                CodeTaskError, "is also a declared check input"
+            ):
+                CodePhaseMachine(
+                    run_id="test",
+                    evidence_dir=parent / "evidence",
+                    worktree=source,
+                    start_commit="HEAD",
+                    check_inputs=("checks/run_check.py",),
+                    check_exclusions=(("checks/run_check.py", "contradiction"),),
+                )
+
+    def test_exclusion_missing_at_start_fails(self):
+        """Exclusion naming a path missing at the start commit fails closed."""
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            source = self.make_check_repository(parent)
+            isolated = IsolatedCodeWorkspace(
+                source, evidence_root=parent / "evidence"
+            ).prepare()
+            try:
+                assert isolated.worktree is not None
+                assert isolated.evidence_dir is not None
+
+                phases = CodePhaseMachine(
+                    run_id=isolated.run_id,
+                    evidence_dir=isolated.evidence_dir,
+                    worktree=isolated.worktree,
+                    start_commit=isolated.start_commit,
+                    check_exclusions=(("missing.txt", "does not exist"),),
+                )
+                phases.start()
+                phases.submit_plan({"files": ["app.py"], "steps": ["edit"]})
+                with self.assertRaisesRegex(
+                    CodeTaskError, "check exclusion is missing at the starting commit: missing.txt"
+                ):
+                    phases.begin_verification()
+            finally:
+                isolated.cleanup()
+
+    def test_exclusion_naming_directory_fails(self):
+        """Exclusion naming a directory/tree (not a file) fails closed."""
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            source = self.make_check_repository(parent)
+            isolated = IsolatedCodeWorkspace(
+                source, evidence_root=parent / "evidence"
+            ).prepare()
+            try:
+                assert isolated.worktree is not None
+                assert isolated.evidence_dir is not None
+
+                phases = CodePhaseMachine(
+                    run_id=isolated.run_id,
+                    evidence_dir=isolated.evidence_dir,
+                    worktree=isolated.worktree,
+                    start_commit=isolated.start_commit,
+                    check_exclusions=(("checks", "directory not allowed"),),
+                )
+                phases.start()
+                phases.submit_plan({"files": ["app.py"], "steps": ["edit"]})
+                with self.assertRaisesRegex(
+                    CodeTaskError, "check exclusion is not a file at the starting commit: checks"
+                ):
+                    phases.begin_verification()
             finally:
                 isolated.cleanup()
 
