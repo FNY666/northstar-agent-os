@@ -201,6 +201,25 @@ class OsSandboxProbeTests(unittest.TestCase):
         self.assertIn("kernel rejected filter", caps.bwrap_seccomp_detail)
         self.assertEqual(feature_probe.call_count, 2)
 
+    def test_bwrap_seccomp_probe_rewinds_filter_fd(self):
+        from tools import os_sandbox
+
+        ok = subprocess.CompletedProcess([], 0, "", "")
+        offsets = []
+
+        def inspect_probe(_path, *, cap_drop=False, seccomp_fd=None):
+            if seccomp_fd is not None:
+                offsets.append(os.lseek(seccomp_fd, 0, os.SEEK_CUR))
+            return ok
+
+        with patch.object(os_sandbox.subprocess, "run", return_value=ok), patch.object(
+            os_sandbox, "_probe_bwrap_feature", side_effect=inspect_probe
+        ):
+            caps = probe_capabilities(force=True, bwrap_bin="/fake/bwrap")
+
+        self.assertTrue(caps.bwrap_seccomp)
+        self.assertEqual(offsets, [0])
+
     def test_bwrap_capdrop_refuses_before_spawn_when_live_probe_failed(self):
         from tools import os_sandbox
 
@@ -229,6 +248,31 @@ class OsSandboxProbeTests(unittest.TestCase):
                 run_sandboxed(request, backend="bwrap", capabilities=caps)
             launch.assert_not_called()
             self.assertFalse(Path(root, ".northstar").exists())
+
+    def test_bwrap_run_rewinds_filter_fd_before_spawn(self):
+        from tools import os_sandbox
+
+        caps = SandboxCapabilities(
+            bwrap_path="/fake/bwrap", bwrap_usable=True, bwrap_detail="base probe passed",
+            bwrap_cap_drop=True, bwrap_seccomp=True, preferred="bwrap",
+        )
+        stub = SandboxResult(("true",), "bwrap", "os", 0, False, "", "", 1)
+        offsets = []
+
+        def inspect_spawn(*_args, **kwargs):
+            seccomp_fds = kwargs["pass_fds"]
+            self.assertEqual(len(seccomp_fds), 1)
+            offsets.append(os.lseek(seccomp_fds[0], 0, os.SEEK_CUR))
+            return stub
+
+        with tempfile.TemporaryDirectory() as root, patch.object(
+            os_sandbox, "_run_scoped_popen", side_effect=inspect_spawn
+        ):
+            request = SandboxRequest(argv=("true",), cwd=Path(root), workspace=Path(root))
+            result = run_sandboxed(request, backend="bwrap", capabilities=caps)
+
+        self.assertIs(result, stub)
+        self.assertEqual(offsets, [0])
 
     def test_operator_disabled_capdrop_is_explicit_and_can_run(self):
         from tools import os_sandbox
