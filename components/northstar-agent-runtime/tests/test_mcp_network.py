@@ -68,12 +68,12 @@ class SpawnArgvTests(unittest.TestCase):
     def test_denied_wraps_with_landlock_on_linux(self):
         with mock.patch.object(mcp_client, "landlock_abi_version", return_value=10):
             argv = self._popen_argv(network="denied", seccomp="off")
-        # Landlock loader outside: [python3, -c, LOADER, b64spec, echo, hi]
+        # Landlock loader outside: [python3, -S, -c, LOADER, b64spec, echo, hi]
         self.assertEqual(argv[-2:], ["echo", "hi"])
-        self.assertEqual(argv[1], "-c")
+        self.assertEqual(argv[1:3], ["-S", "-c"])
         import base64, json
 
-        spec = json.loads(base64.b64decode(argv[3]).decode())
+        spec = json.loads(base64.b64decode(argv[4]).decode())
         self.assertFalse(spec["network"], "all handled IP protocols must be denied")
         self.assertTrue(spec["deny_unix_sockets"])
         self.assertEqual(spec["scoped"], ["ABSTRACT_UNIX_SOCKET"])

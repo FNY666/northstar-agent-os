@@ -61,7 +61,9 @@ def resource_limits_loader_argv(
     encoded = base64.b64encode(
         json.dumps(dict(limits), sort_keys=True, separators=(",", ":")).encode("ascii")
     ).decode("ascii")
-    return (python or sys.executable, "-c", _LOADER, encoded, *argv)
+    # This inline stdlib-only loader may run under Landlock; skip site startup
+    # so Python does not try to read a venv's pyvenv.cfg outside the allowlist.
+    return (python or sys.executable, "-S", "-c", _LOADER, encoded, *argv)
 
 
 __all__ = ["resource_limits_loader_argv"]

@@ -290,13 +290,15 @@ _o.execvp(_s.argv[2], _s.argv[2:])
 def prctl_loader_argv(target_argv: Sequence[str], *, python: str = "python3") -> list[str]:
     """Wrap ``target_argv`` so the denylist is installed via prctl before exec.
 
-    Returns ``[python, "-c", LOADER, b64(filter), *target_argv]``. The filter
+    Returns ``[python, "-S", "-c", LOADER, b64(filter), *target_argv]``. ``-S``
+    avoids site startup when this stdlib-only loader is nested under Landlock.
+    The filter
     bytes travel as base64 inside argv (the program is ~0.5KB, far below the
     argv ceiling); no temp file is needed. A prctl failure exits 126 with a
     stderr note instead of running unfiltered.
     """
     encoded = base64.b64encode(build_default_filter()).decode("ascii")
-    return [python, "-c", _PRCTL_LOADER, encoded, *target_argv]
+    return [python, "-S", "-c", _PRCTL_LOADER, encoded, *target_argv]
 
 
 __all__ = [

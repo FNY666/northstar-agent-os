@@ -495,7 +495,9 @@ def landlock_loader_argv(
 ) -> list[str]:
     """Wrap ``inner_argv`` so the Landlock allowlist is installed before exec.
 
-    Returns ``[python, "-c", LOADER, b64(spec), *inner_argv]``. ``inner_argv``
+    Returns ``[python, "-S", "-c", LOADER, b64(spec), *inner_argv]``. ``-S``
+    skips site startup: this stdlib-only loader may run under an existing
+    Landlock boundary, where a venv's ``pyvenv.cfg`` is not readable. ``inner_argv``
     is normally the seccomp prctl wrapper's argv, giving the syscall layer
     (seccomp denylist) inside the path layer (Landlock allowlist). A Landlock
     failure exits 126 in mode ``on``; in mode ``auto`` it warns and execs the
@@ -504,7 +506,7 @@ def landlock_loader_argv(
     if not inner_argv:
         raise LandlockError("inner_argv must not be empty")
     encoded = base64.b64encode(json.dumps(spec, sort_keys=True).encode("utf-8")).decode("ascii")
-    return [python, "-c", _LANDLOCK_LOADER, encoded, *inner_argv]
+    return [python, "-S", "-c", _LANDLOCK_LOADER, encoded, *inner_argv]
 
 
 __all__ = [

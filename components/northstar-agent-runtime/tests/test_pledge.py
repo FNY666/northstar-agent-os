@@ -206,7 +206,7 @@ class LandlockProbeTest(RuntimeTestCase):
 class PledgeLoaderTest(RuntimeTestCase):
     def test_no_new_privileges_is_set_before_landlock_restriction(self):
         import ast
-        code = pledge_loader_argv([FsRule('/tmp', 0xC)], ['true'])[2]
+        code = pledge_loader_argv([FsRule('/tmp', 0xC)], ['true'])[3]
         calls = []
         for node in ast.walk(ast.parse(code)):
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
@@ -221,15 +221,15 @@ class PledgeLoaderTest(RuntimeTestCase):
         rules = [FsRule("/ws", 0xC)]
         argv = pledge_loader_argv(rules, ["true"], python="python3")
         self.assertEqual(argv[0], "python3")
-        self.assertEqual(argv[1], "-c")
-        self.assertIn("landlock", argv[2])
-        self.assertIn("prctl", argv[2])
+        self.assertEqual(argv[1:3], ["-S", "-c"])
+        self.assertIn("landlock", argv[3])
+        self.assertIn("prctl", argv[3])
         # Rules travel as JSON, filter as base64.
         import json as _json
 
-        parsed = _json.loads(argv[4])
+        parsed = _json.loads(argv[5])
         self.assertEqual(parsed, [{"access": 12, "path": "/ws"}])
-        self.assertEqual(argv[5:], ["true"])
+        self.assertEqual(argv[6:], ["true"])
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "needs Linux")
     def test_landlock_really_blocks_a_write(self):

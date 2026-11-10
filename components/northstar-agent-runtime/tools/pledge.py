@@ -451,10 +451,12 @@ def pledge_loader_argv(
 
     The seccomp program is the same denylist :mod:`tools.seccomp` builds —
     the pledge loader never weakens it, it only adds the Landlock layer.
+    ``-S`` skips site startup: this stdlib-only loader can be nested beneath
+    Landlock, where a venv's ``pyvenv.cfg`` may not be readable.
     """
     encoded = base64.b64encode(build_default_filter()).decode("ascii")
     payload = json.dumps([rule.as_dict() for rule in rules], sort_keys=True)
-    return [python, "-c", _PLEDGE_LOADER, encoded, payload, *target_argv]
+    return [python, "-S", "-c", _PLEDGE_LOADER, encoded, payload, *target_argv]
 
 
 def enforcement_report(

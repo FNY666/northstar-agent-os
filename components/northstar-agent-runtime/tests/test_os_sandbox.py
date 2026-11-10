@@ -434,6 +434,7 @@ class OsSandboxProcessBackendTests(RuntimeTestCase):
                 "open_files": MAX_OPEN_FILES,
             },
         )
+        self.assertEqual(target[1:3], ("-S", "-c"))
         parent = (
             "import os,resource,sys; "
             "resource.setrlimit(resource.RLIMIT_AS,(64*1024*1024,64*1024*1024)); "
