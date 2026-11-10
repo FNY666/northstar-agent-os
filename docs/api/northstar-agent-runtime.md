@@ -68,6 +68,10 @@ The host-owned task contract for one programming run.
 
 Return a stable, validated tuple of repository-relative check inputs.
 
+#### `validate_check_exclusions(exclusions: tuple[tuple[str, str], ...] | Iterable[tuple[str, str]], check_inputs: tuple[str, ...])`
+
+Return a stable, validated tuple of (path, reason) check exclusions.
+
 #### `IsolatedCodeWorkspace`
 
 Lifecycle of a detached task worktree and its durable evidence directory.
