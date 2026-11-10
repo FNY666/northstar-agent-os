@@ -338,6 +338,19 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "witness_enc", "workflow_automation", "workflow_engine", "workflow_orchestration",
         "write_ahead_log", "write_through_cache", "zab_interface", "zero_knowledge",
         "zeromq_patterns", "zk_interface", "zk_verifier",
+        # 2026-10-07 probe batch: package coverage alone does not publish these APIs.
+        "approval_fatigue_probes", "argument_smuggling_probes", "artifact_graph_probes",
+        "ask_or_solve_probes", "benchmark_retirement_probes", "commerce_mandate_probes",
+        "constraint_synthesis_probes", "counterfactual_explanation_probes",
+        "destructive_prefix_probes", "enforcement_gap_probes", "evidence_aging_probes",
+        "evidence_compaction_probes", "history_deviation_probes", "memory_admission_probes",
+        "monitor_channel_probes", "monitor_deafness_probes", "multi_axis_autonomy_probes",
+        "negotiation_corpus_probes", "per_action_autonomy_probes", "plan_injection_probes",
+        "planner_executor_seam_probes", "pre_completion_signal_probes",
+        "privilege_at_recall_probes", "refusal_pattern_probes", "run_assert_eval_probes",
+        "self_modification_probes", "self_referential_trust_probes", "sleeper_agent_probes",
+        "stale_plan_probes", "tool_schema_digest_probes", "trace_tamper_probes",
+        "trust_inversion_probes",
     ),
 }
 
