@@ -13283,7 +13283,7 @@ def _case_seccomp_filter_live_on_process(h: BenchHarness) -> BenchExpectation:
         turns=[
             _tool(
                 "Shell",
-                {"command": "grep -q 'Seccomp:\t2' /proc/self/status && touch filter_live.txt"},
+                {"command": "grep -q '^Seccomp:[[:space:]]*2$' /proc/self/status && touch filter_live.txt"},
             ),
             _text("done"),
         ],
@@ -13312,7 +13312,7 @@ def _case_seccomp_payload_cannot_loosen(h: BenchHarness) -> BenchExpectation:
             _tool(
                 "Shell",
                 {
-                    "command": "grep -q 'Seccomp:\t2' /proc/self/status && touch tightened.txt",
+                    "command": "grep -q '^Seccomp:[[:space:]]*2$' /proc/self/status && touch tightened.txt",
                     "seccomp": "off",
                 },
             ),
@@ -13663,10 +13663,10 @@ def _case_landlock_tables_and_spec(h: BenchHarness) -> BenchExpectation:
     spec = build_landlock_spec(paths_read=["/usr"], paths_write=[str(ws)], mode="on")
     argv = landlock_loader_argv(["/bin/true"], spec)
     shape_ok = (
-        len(argv) == 5
+        len(argv) == 6
         and argv[0] == "python3"
-        and argv[1] == "-c"
-        and argv[4:] == ["/bin/true"]
+        and argv[1:3] == ["-S", "-c"]
+        and argv[5:] == ["/bin/true"]
     )
     tighten_ok = resolve_mode("off", "on") == "on" and resolve_mode("on", "auto") == "on"
     # Wrap as a no-op runtime so the runner stays uniform.
@@ -13799,9 +13799,11 @@ def _case_metrics_capdrop_deny_all_live(h: BenchHarness) -> BenchExpectation:
         h,
         ws,
         "metrics.capdrop_deny_all_live",
-        "for f in CapInh CapPrm CapEff CapAmb; do "
-        "grep -q \"^$f:[[:space:]]*0000000000000000$\" /proc/self/status || exit 1; "
-        "done && touch capdrop_deny_all_ok.txt",
+        "grep -q '^CapInh:[[:space:]]*0000000000000000$' /proc/self/status && "
+        "grep -q '^CapPrm:[[:space:]]*0000000000000000$' /proc/self/status && "
+        "grep -q '^CapEff:[[:space:]]*0000000000000000$' /proc/self/status && "
+        "grep -q '^CapAmb:[[:space:]]*0000000000000000$' /proc/self/status && "
+        "touch capdrop_deny_all_ok.txt",
         "capdrop_deny_all_ok.txt",
         "deny-all clears enforced capability sets; bounding hardening is independently audited",
     )
@@ -13812,20 +13814,15 @@ def _case_metrics_capdrop_escalation_eperm(h: BenchHarness) -> BenchExpectation:
     # capability: capset(CAP_SYS_ADMIN) must fail EPERM from inside.
     ws = h.workspace()
     escalate_py = (
-        "python3 - <<'PYEOF'\n"
-        "import ctypes, platform, sys\n"
-        "libc = ctypes.CDLL(None, use_errno=True)\n"
-        "class Hdr(ctypes.Structure):\n"
-        "    _fields_ = [('version', ctypes.c_uint32), ('pid', ctypes.c_int)]\n"
-        "class Dat(ctypes.Structure):\n"
-        "    _fields_ = [('effective', ctypes.c_uint32), ('permitted', ctypes.c_uint32), ('inheritable', ctypes.c_uint32)]\n"
-        "hdr = Hdr(0x20080522, 0)\n"
-        "dat = (Dat * 2)((Dat(1 << 21, 1 << 21, 0)), (Dat(0, 0, 0)))\n"
-        "nr = 126 if platform.machine() == 'x86_64' else 91\n"
-        "rc = libc.syscall(nr, ctypes.byref(hdr), ctypes.byref(dat))\n"
-        "sys.exit(0 if (rc != 0 and ctypes.get_errno() == 1) else 1)\n"
-        "PYEOF\n"
-        "test $? -eq 0 && touch capdrop_eperm_ok.txt"
+        "python3 -c 'import ctypes, platform, sys; "
+        "libc=ctypes.CDLL(None,use_errno=True); "
+        "Hdr=type(\"Hdr\",(ctypes.Structure,),dict(_fields_=[(\"version\",ctypes.c_uint32),(\"pid\",ctypes.c_int)])); "
+        "Dat=type(\"Dat\",(ctypes.Structure,),dict(_fields_=[(\"effective\",ctypes.c_uint32),(\"permitted\",ctypes.c_uint32),(\"inheritable\",ctypes.c_uint32)])); "
+        "hdr=Hdr(0x20080522,0); dat=(Dat*2)(Dat(1<<21,1<<21,0),Dat(0,0,0)); "
+        "nr=126 if platform.machine()==\"x86_64\" else 91; "
+        "rc=libc.syscall(nr,ctypes.byref(hdr),ctypes.byref(dat)); "
+        "sys.exit(0 if rc!=0 and ctypes.get_errno()==1 else 1)' && "
+        "touch capdrop_eperm_ok.txt"
     )
     return _capdrop_live(
         h,
@@ -13845,9 +13842,11 @@ def _case_metrics_capdrop_payload_cannot_loosen(h: BenchHarness) -> BenchExpecta
         h,
         ws,
         "metrics.capdrop_payload_cannot_loosen",
-        "for f in CapInh CapPrm CapEff CapAmb; do "
-        "grep -q \"^$f:[[:space:]]*0000000000000000$\" /proc/self/status || exit 1; "
-        "done && touch capdrop_tightened.txt",
+        "grep -q '^CapInh:[[:space:]]*0000000000000000$' /proc/self/status && "
+        "grep -q '^CapPrm:[[:space:]]*0000000000000000$' /proc/self/status && "
+        "grep -q '^CapEff:[[:space:]]*0000000000000000$' /proc/self/status && "
+        "grep -q '^CapAmb:[[:space:]]*0000000000000000$' /proc/self/status && "
+        "touch capdrop_tightened.txt",
         "capdrop_tightened.txt",
         "operator --capdrop=on wins over a per-call capdrop=off (tighten-only)",
         payload_extra={"capdrop": "off"},

@@ -60,7 +60,7 @@ class SpawnArgvTests(unittest.TestCase):
             self.skipTest("wrapping needs Linux")
         argv = self._popen_argv(seccomp="auto")
         self.assertEqual(argv[-2:], ["echo", "hi"])
-        self.assertEqual(argv[1], "-c")
+        self.assertEqual(argv[1:3], ["-S", "-c"])
         self.assertTrue(argv[0].endswith("python3") or "python" in argv[0])
 
     def test_on_wraps_on_linux(self):

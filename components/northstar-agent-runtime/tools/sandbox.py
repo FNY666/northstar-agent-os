@@ -163,12 +163,13 @@ def _runtime_read_paths() -> tuple[str, ...]:
     import os
     import sysconfig
 
+    system_paths = [path for path in _SYSTEM_READ_PATHS if os.path.isdir(path)]
     candidates = [os.path.dirname(os.path.realpath(sys.executable))]
     for prefix in {sys.prefix, sys.base_prefix}:
         candidates.extend(os.path.join(prefix, part) for part in ("bin", "lib", "lib64"))
     candidates.extend(sysconfig.get_path(key) for key in ("stdlib", "platstdlib"))
     extra = [os.path.realpath(path) for path in candidates if path and os.path.isdir(path)]
-    return tuple(dict.fromkeys([*_SYSTEM_READ_PATHS, *extra]))
+    return tuple(dict.fromkeys([*system_paths, *extra]))
 
 
 class LandlockError(ValueError):
@@ -494,7 +495,9 @@ def landlock_loader_argv(
 ) -> list[str]:
     """Wrap ``inner_argv`` so the Landlock allowlist is installed before exec.
 
-    Returns ``[python, "-c", LOADER, b64(spec), *inner_argv]``. ``inner_argv``
+    Returns ``[python, "-S", "-c", LOADER, b64(spec), *inner_argv]``. ``-S``
+    skips site startup: this stdlib-only loader may run under an existing
+    Landlock boundary, where a venv's ``pyvenv.cfg`` is not readable. ``inner_argv``
     is normally the seccomp prctl wrapper's argv, giving the syscall layer
     (seccomp denylist) inside the path layer (Landlock allowlist). A Landlock
     failure exits 126 in mode ``on``; in mode ``auto`` it warns and execs the
@@ -503,7 +506,7 @@ def landlock_loader_argv(
     if not inner_argv:
         raise LandlockError("inner_argv must not be empty")
     encoded = base64.b64encode(json.dumps(spec, sort_keys=True).encode("utf-8")).decode("ascii")
-    return [python, "-c", _LANDLOCK_LOADER, encoded, *inner_argv]
+    return [python, "-S", "-c", _LANDLOCK_LOADER, encoded, *inner_argv]
 
 
 __all__ = [

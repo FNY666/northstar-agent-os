@@ -159,11 +159,30 @@ class FilesystemRulesTest(RuntimeTestCase):
         self.assertFalse([r for r in rules if r.path == "/ws/.northstar/tmp"])
 
     def test_runtime_roots_are_always_read_exec(self):
+        import os
+        from unittest.mock import patch
+        from tools.sandbox import _SYSTEM_READ_PATHS, _runtime_read_paths
+
         rules = filesystem_rules(frozenset({"stdio"}), workspace="/ws", tmpdir="/t")
-        for root in ("/usr", "/bin", "/lib", "/lib64", "/sbin"):
+        roots = _runtime_read_paths()
+        self.assertEqual(
+            set(roots) & set(_SYSTEM_READ_PATHS),
+            {path for path in _SYSTEM_READ_PATHS if os.path.isdir(path)},
+        )
+        for root in roots:
             rule = [r for r in rules if r.path == root]
             self.assertEqual(len(rule), 1)
             self.assertTrue(rule[0].access & 0x1)  # EXECUTE
+
+        missing = "/lib64"
+        real_isdir = os.path.isdir
+        with patch("os.path.isdir", side_effect=lambda path: False if path == missing else real_isdir(path)):
+            filtered = _runtime_read_paths()
+        self.assertNotIn(missing, filtered)
+        filtered_rules = filesystem_rules(
+            frozenset({"stdio"}), workspace="/ws", tmpdir="/t", runtime_roots=filtered
+        )
+        self.assertNotIn(missing, {rule.path for rule in filtered_rules})
 
 
 class LandlockProbeTest(RuntimeTestCase):
@@ -187,7 +206,7 @@ class LandlockProbeTest(RuntimeTestCase):
 class PledgeLoaderTest(RuntimeTestCase):
     def test_no_new_privileges_is_set_before_landlock_restriction(self):
         import ast
-        code = pledge_loader_argv([FsRule('/tmp', 0xC)], ['true'])[2]
+        code = pledge_loader_argv([FsRule('/tmp', 0xC)], ['true'])[3]
         calls = []
         for node in ast.walk(ast.parse(code)):
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
@@ -202,15 +221,15 @@ class PledgeLoaderTest(RuntimeTestCase):
         rules = [FsRule("/ws", 0xC)]
         argv = pledge_loader_argv(rules, ["true"], python="python3")
         self.assertEqual(argv[0], "python3")
-        self.assertEqual(argv[1], "-c")
-        self.assertIn("landlock", argv[2])
-        self.assertIn("prctl", argv[2])
+        self.assertEqual(argv[1:3], ["-S", "-c"])
+        self.assertIn("landlock", argv[3])
+        self.assertIn("prctl", argv[3])
         # Rules travel as JSON, filter as base64.
         import json as _json
 
-        parsed = _json.loads(argv[4])
+        parsed = _json.loads(argv[5])
         self.assertEqual(parsed, [{"access": 12, "path": "/ws"}])
-        self.assertEqual(argv[5:], ["true"])
+        self.assertEqual(argv[6:], ["true"])
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "needs Linux")
     def test_landlock_really_blocks_a_write(self):

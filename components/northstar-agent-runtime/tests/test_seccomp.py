@@ -202,11 +202,11 @@ class SandboxWiringTests(RuntimeTestCase):
 
         argv = prctl_loader_argv(["echo", "hi"], python="python3")
         self.assertEqual(argv[0], "python3")
-        self.assertEqual(argv[1], "-c")
+        self.assertEqual(argv[1:3], ["-S", "-c"])
         self.assertEqual(argv[-2:], ["echo", "hi"])
         import base64
 
-        self.assertEqual(base64.b64decode(argv[3]), build_default_filter())
+        self.assertEqual(base64.b64decode(argv[4]), build_default_filter())
 
 
 class RealKernelTests(RuntimeTestCase):

@@ -147,10 +147,10 @@ class TestSpec(RuntimeTestCase):
         spec = {"mode": "auto", "rules": [], "network": False, "tcp_ports": []}
         argv = landlock_loader_argv(["/bin/true"], spec)
         self.assertEqual(argv[0], "python3")
-        self.assertEqual(argv[1], "-c")
-        decoded = json.loads(base64.b64decode(argv[3]).decode())
+        self.assertEqual(argv[1:3], ["-S", "-c"])
+        decoded = json.loads(base64.b64decode(argv[4]).decode())
         self.assertEqual(decoded["mode"], "auto")
-        self.assertEqual(argv[4:], ["/bin/true"])
+        self.assertEqual(argv[5:], ["/bin/true"])
         with self.assertRaises(LandlockError):
             landlock_loader_argv([], spec)
 
