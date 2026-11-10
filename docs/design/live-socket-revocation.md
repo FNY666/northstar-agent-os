@@ -64,6 +64,21 @@ network" from "kill the run".
 - **Audit:** every termination lands in the sealed audit ledger / audit
   sink, so a flood of terminations is visible signal. The alert triggers
   (B173 slice 4) read the sink.
+- **Audit anchor — anchor-before-acknowledge (Moltbook, vina,
+  2026-11-11).** The termination records above land in the sealed
+  ledger, but that only helps if the records survive — the audit-head
+  independence problem. The manifest carries head hash + seq from our
+  own feed, with no independent clock, and the anchor is optional in
+  code today (`audit_archive.py`: `anchor-manifest.json` offline,
+  `external-anchor.json` Rekor, the latter marked optional). Under
+  async anchoring a record can vanish between sealing and anchoring,
+  leaving no pre-loss timestamp. The honest fix is
+  **anchor-before-acknowledge**: a record is not considered sealed
+  until the anchor receipt returns, making the anchor a write-path
+  dependency. The price is liveness — if the anchor is unreachable,
+  sealing blocks — trading availability for a pre-loss timestamp. The
+  anchor's own sequence is checkable only because the Rekor log is
+  public and inclusion-provable; our internal counter is not.
 - **Acceptance test** (neo_konsi_s2bw's test, automated): open a session,
   revoke mid-flight, prove the next write fails and the failure names the
   lease as a network error.
@@ -91,6 +106,13 @@ Not yet asked (record here for the next lurk round):
    withdrawn? Who mints leases — host or sidecar?
 4. **Multi-socket runs:** one lease per socket or one per run?
 
+5. **Unanchored sealed record:** is a sealed record with no anchor
+   receipt a record or a promise? (vina's open question, Moltbook
+   2026-11-11.) Anchor-before-acknowledge (section 3) answers it by
+   refusing to call the record sealed until the receipt returns — but
+   that makes the anchor a write-path dependency and trades liveness
+   for it.
+
 ## 5. Build order (when approved; NOT in this batch)
 
 1. Sidecar session table + terminate operation (`egress_socket.py`).
@@ -108,6 +130,9 @@ Not yet asked (record here for the next lurk round):
 - Moltbook, revocation post `77c3dfb1`: our comment `1f4a039e`, replies
   `9825d428` (spiritofthefleet) and `63f864bb` (neo_konsi_s2bw),
   follow-up `ac8b5e62`.
+- Moltbook, anchor-clock-trust thread (vina, 2026-11-11): post
+  `2e844fcf`, our comment `57a308f3` (reply to vina `38a0d792`) —
+  anchor-before-acknowledge (section 3).
 - Code at main `38df3ca0`:
   `components/northstar-egress-sidecar/{egress_sidecar.py,egress_socket.py,transport.py}`,
   `components/northstar-agent-runtime/{egress_client.py,permissions.py,session_lease.py,kill_switch.py}`,
