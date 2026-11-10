@@ -58,6 +58,19 @@ DANGEROUS_BUILTINS = frozenset({
     "declare", "unset", "let", "read", "mapfile", "readarray",
 })
 
+#: External commands that are dangerous when passed unquoted variable expansions.
+#: Derived from DEFAULT_SHELL_DENYLIST in permissions.py (catastrophic-only patterns).
+#: Only actual command names are included here; patterns like ":(){", "of=/dev/",
+#: "| sh", etc. are lexical shapes, not command names.
+DANGEROUS_EXTERNAL_COMMANDS = frozenset({
+    "rm",    # rm -rf / variants in denylist
+    "mkfs",  # filesystem formatting
+})
+
+#: All dangerous commands: builtins + external commands where unquoted variable
+#: expansion in argument position is denied (word-splitting can inject flags).
+DANGEROUS_COMMANDS = DANGEROUS_BUILTINS | DANGEROUS_EXTERNAL_COMMANDS
+
 #: Control characters that must never appear in a shell command.
 _CONTROL_CHARS = frozenset(chr(c) for c in range(0x00, 0x20)) | {"\x7f"}
 
@@ -206,12 +219,15 @@ class _Token:
     quoting, escapes or expansions (required for redirection targets).
     ``assign_name`` is the literal text before the first unquoted ``=`` in the
     word, or None when the word is not in assignment form.
+    ``unquoted_expansion`` is True when the word contains a variable expansion
+    that was not inside quotes (word-splitting applies at runtime).
     """
 
     kind: str
     value: str
     plain: bool = True
     assign_name: Optional[str] = None
+    unquoted_expansion: bool = False
 
 
 def _scan_dollar(text: str, i: int, buf: list[str]) -> int:
@@ -427,6 +443,7 @@ def _tokenize(text: str, budget: _ParseBudget) -> list[_Token]:
         buf: list[str] = []
         plain = True
         prefix_literal = True
+        has_unquoted_expansion = False
         eq_at: Optional[int] = None
         while i < n:
             ch = text[i]
@@ -467,6 +484,7 @@ def _tokenize(text: str, budget: _ParseBudget) -> list[_Token]:
             if ch == "$":
                 plain = False
                 prefix_literal = False
+                has_unquoted_expansion = True
                 i = _scan_dollar(text, i, buf)
                 continue
             if ch == "=" and eq_at is None and prefix_literal:
@@ -514,7 +532,13 @@ def _tokenize(text: str, budget: _ParseBudget) -> list[_Token]:
             )
         assign_name = None if eq_at is None else "".join(buf[:eq_at])
         tokens.append(
-            _Token("word", value, plain=plain, assign_name=assign_name)
+            _Token(
+                "word",
+                value,
+                plain=plain,
+                assign_name=assign_name,
+                unquoted_expansion=has_unquoted_expansion,
+            )
         )
         budget.add_node()
         cmd_start = False
@@ -532,6 +556,7 @@ def _parse_simple_command(tokens: list[_Token], budget: _ParseBudget) -> Verdict
     Raises _Reject for anything that is not a single simple command.
     """
     argv: list[str] = []
+    argv_tokens: list[_Token] = []
     redirections: list[tuple[str, str]] = []
     i, n = 0, len(tokens)
     while i < n:
@@ -566,6 +591,7 @@ def _parse_simple_command(tokens: list[_Token], budget: _ParseBudget) -> Verdict
             continue
 
         argv.append(tok.value)
+        argv_tokens.append(tok)
         i += 1
 
     if argv and argv[0] in DANGEROUS_BUILTINS:
@@ -574,6 +600,21 @@ def _parse_simple_command(tokens: list[_Token], budget: _ParseBudget) -> Verdict
             node=argv[0],
             reason=f"dangerous builtin {argv[0]!r}",
         )
+
+    # Check for unquoted variable expansion in arguments to dangerous commands.
+    # argv[0] is the command word; argv[1:] are the arguments.
+    if argv and argv[0] in DANGEROUS_COMMANDS:
+        for arg_tok in argv_tokens[1:]:
+            if arg_tok.unquoted_expansion:
+                return Verdict(
+                    VerdictKind.DENY,
+                    node="unquoted_expansion",
+                    reason=(
+                        "unquoted variable expansion in argument to "
+                        f"{argv[0]!r}: {arg_tok.value!r}"
+                    ),
+                )
+
     return Verdict(
         VerdictKind.ALLOW,
         node="simple_command",

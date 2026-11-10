@@ -125,6 +125,50 @@ def test_plain_variable_expansion_allowed():
 
 
 # ---------------------------------------------------------------------------
+# Unquoted variable expansion in arguments to dangerous commands
+# ---------------------------------------------------------------------------
+# An unquoted $VAR word-splits at runtime into unseen flags: `rm $VAR` with
+# VAR='-rf /' executes as `rm -rf /`. The parser sees only the literal token,
+# so it must deny the expansion structurally when the command is dangerous.
+# Quoted expansions ("$VAR" / "${VAR}") do not word-split and stay allowed.
+
+UNQUOTED_EXPANSION_DENY_CASES = [
+    ("rm $VAR", "unquoted_expansion"),
+    ("rm ${VAR}", "unquoted_expansion"),
+    ("rm x$VAR", "unquoted_expansion"),
+    ("mkfs $DEV", "unquoted_expansion"),
+    ("rm $A $B", "unquoted_expansion"),
+    ("rm $VAR | cat", "unquoted_expansion"),
+]
+
+
+@pytest.mark.parametrize("command,node", UNQUOTED_EXPANSION_DENY_CASES)
+def test_unquoted_expansion_to_dangerous_command_denied(command, node):
+    verdict = bp.check_command(command)
+    assert verdict.kind is DENY, (command, verdict)
+    assert verdict.node == node, (command, verdict)
+    assert verdict.reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo $HOME",
+        "echo ${HOME}",
+        'rm "$VAR"',
+        'rm "${VAR}"',
+        "rm file.txt",
+        'rm -- "$VAR"',
+    ],
+)
+def test_quoted_or_safe_expansion_allowed(command):
+    assert bp.check_command(command).kind is ALLOW, (
+        command,
+        bp.check_command(command),
+    )
+
+
+# ---------------------------------------------------------------------------
 # The 15 dangerous node classes
 # ---------------------------------------------------------------------------
 
