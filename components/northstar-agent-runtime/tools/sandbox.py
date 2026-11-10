@@ -163,12 +163,13 @@ def _runtime_read_paths() -> tuple[str, ...]:
     import os
     import sysconfig
 
+    system_paths = [path for path in _SYSTEM_READ_PATHS if os.path.isdir(path)]
     candidates = [os.path.dirname(os.path.realpath(sys.executable))]
     for prefix in {sys.prefix, sys.base_prefix}:
         candidates.extend(os.path.join(prefix, part) for part in ("bin", "lib", "lib64"))
     candidates.extend(sysconfig.get_path(key) for key in ("stdlib", "platstdlib"))
     extra = [os.path.realpath(path) for path in candidates if path and os.path.isdir(path)]
-    return tuple(dict.fromkeys([*_SYSTEM_READ_PATHS, *extra]))
+    return tuple(dict.fromkeys([*system_paths, *extra]))
 
 
 class LandlockError(ValueError):
