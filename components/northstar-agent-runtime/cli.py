@@ -861,6 +861,7 @@ def _run_code(args: argparse.Namespace) -> int:
     repository lifecycle and evidence artifacts, then delegates to :func:`_run`.
     """
     from code_task import CodePhaseMachine, CodeTask, IsolatedCodeWorkspace, validate_check_inputs
+    from alert_trigger_registry import REGISTRY_PATH
     from verification import validate_commands
 
     task_text = _read_prompt(args)
@@ -871,7 +872,20 @@ def _run_code(args: argparse.Namespace) -> int:
         )
         return USAGE_ERROR
     checks = validate_commands(tuple(getattr(args, "checks", ()) or ()))
-    check_inputs = validate_check_inputs(tuple(getattr(args, "check_inputs", ()) or ()))
+    # The alert trigger registry is host-owned verifier input.  Pin it in the
+    # delivery seal even when the operator did not list it explicitly: changing,
+    # disabling, or removing a trigger must produce a visible seal diff.
+    # Only pin when the registry is present in this workspace: pinning resolves
+    # inputs at the starting commit and fails closed on a missing input, so a
+    # workspace without the runtime component must not inherit the pin.
+    registry_pin = (
+        (REGISTRY_PATH,)
+        if (Path(args.workspace) / REGISTRY_PATH).is_file()
+        else ()
+    )
+    check_inputs = validate_check_inputs(
+        tuple(dict.fromkeys((*(getattr(args, "check_inputs", ()) or ()), *registry_pin)))
+    )
     task = CodeTask(
         goal=task_text.strip(),
         workspace=args.workspace,
