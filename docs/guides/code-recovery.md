@@ -52,7 +52,11 @@ At delivery, `patch-replay.json` proves that the model's patch applies to the
 starting commit, `patch-audit.json` checks delivery boundaries, and
 `delivery-seal.json` proves host verification did not change that patch. The
 seal (v2) records the start commit's tree hash explicitly and lists files
-deliberately excluded from pinning, making omissions visible. A verification
+deliberately excluded from pinning, making omissions visible. It also records
+the declared verifier set and versioned verifier derivation rule, plus hashes
+of prior dissent artifacts (dissent is witnessed by a later seal, never the
+seal it names). A dissent is stored as a separate `delivery-dissent.json`
+artifact and does not change the seal or its `ok` claim. A verification
 command that returns zero while changing delivered files still ends as
 `error_postconditions_failed`.
 

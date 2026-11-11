@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import subprocess
 import sys
@@ -17,7 +18,11 @@ from code_task import (
     CodeTaskError,
     IsolatedCodeWorkspace,
     audit_delivery_patch,
+    build_delivery_dissent,
+    find_orphan_dissents,
+    load_delivery_dissent,
     reconcile_code_evidence,
+    write_delivery_dissent,
     validate_check_inputs,
     validate_check_exclusions,
 )
@@ -454,6 +459,75 @@ class CheckInputPinningTests(unittest.TestCase):
                 "check_indices": [0],
             }
         )
+
+    def test_dissent_artifact_and_forward_sealing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            _, isolated, phases = self._setup(parent, check_inputs=())
+            try:
+                assert isolated.worktree is not None and isolated.evidence_dir is not None
+                (isolated.worktree / "app.py").write_text("value = 2\n", encoding="utf-8")
+                phases.start()
+                phases.submit_plan({"files": ["app.py"], "steps": ["edit"]})
+                phases.begin_verification()
+                phases.seal_verification()
+                seal_path = isolated.evidence_dir / "delivery-seal.json"
+                seal_bytes = seal_path.read_bytes()
+                seal = json.loads(seal_bytes)
+                self.assertEqual(seal["verifier_rule"], phases.verifier_rule)
+                self.assertEqual(seal["verifier_rule_version"], "v1")
+                self.assertEqual(seal["verifier_rule_hash"], hashlib.sha256(phases.verifier_rule.encode()).hexdigest())
+                self.assertEqual(seal["verifier_set"], [])
+
+                with self.assertRaises(CodeTaskError):
+                    build_delivery_dissent(seal_path=seal_path, dissenter="reviewer", rule_hash="", rule_version="v1", corpus_hash="a" * 64, verdict="pin_disputed", reason="missing rule")
+                with self.assertRaises(CodeTaskError):
+                    build_delivery_dissent(seal_path=seal_path, dissenter="reviewer", rule_hash="a" * 64, rule_version="v1", corpus_hash="", verdict="pin_disputed", reason="missing corpus")
+                dissent = build_delivery_dissent(
+                    seal_path=seal_path, dissenter="reviewer", rule_hash="a" * 64,
+                    rule_version="v1", corpus_hash="b" * 64, verdict="pin_disputed",
+                    reason="the declared check inputs omitted a helper",
+                )
+                dissent_path = write_delivery_dissent(isolated.evidence_dir, dissent)
+                loaded = load_delivery_dissent(dissent_path)
+                self.assertEqual(loaded["seal_sha256"], hashlib.sha256(seal_bytes).hexdigest())
+                self.assertEqual(seal_path.read_bytes(), seal_bytes)
+                self.assertEqual(json.loads(seal_path.read_bytes())["ok"], seal["ok"])
+                self.assertEqual(seal["dissents_pinned"], [])
+
+                later = CodePhaseMachine(
+                    run_id="later", evidence_dir=parent / "later-evidence",
+                    worktree=isolated.worktree, start_commit=isolated.start_commit,
+                    prior_dissents=(dissent_path,),
+                    verifiers=(("reviewer", "https://example.invalid/dissent-feed"),),
+                )
+                (isolated.worktree / "app.py").write_text("value = 3\n", encoding="utf-8")
+                later.start()
+                later.submit_plan({"files": ["app.py"], "steps": ["edit"]})
+                later.begin_verification()
+                later.seal_verification()
+                later_seal = json.loads((parent / "later-evidence" / "delivery-seal.json").read_text())
+                self.assertEqual(later_seal["verifier_set"], [{"id": "reviewer", "dissent_feed": "https://example.invalid/dissent-feed"}])
+                digest = hashlib.sha256(dissent_path.read_bytes()).hexdigest()
+                self.assertEqual(later_seal["dissents_pinned"][0]["dissent_sha256"], digest)
+                records = [{"dissent_sha256": digest}, {"dissent_sha256": "c" * 64}]
+                self.assertEqual(find_orphan_dissents(records, [later_seal]), [records[1]])
+            finally:
+                isolated.cleanup()
+
+    def test_malformed_dissent_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "dissent.json"
+            for value in (
+                {"schema": "wrong"},
+                {"schema": "northstar.delivery-dissent.v1"},
+                {"schema": "northstar.delivery-dissent.v1", "seal_sha256": "z" * 64,
+                 "dissenter": "x", "rule_hash": "a" * 64, "rule_version": "v1",
+                 "corpus_hash": "b" * 64, "verdict": "no", "reason": "bad hash"},
+            ):
+                path.write_text(json.dumps(value), encoding="utf-8")
+                with self.assertRaises(CodeTaskError):
+                    load_delivery_dissent(path)
 
     def _run_check(self, worktree: Path) -> int:
         # PYTHONDONTWRITEBYTECODE keeps the run from leaving __pycache__
