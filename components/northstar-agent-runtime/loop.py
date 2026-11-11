@@ -39,6 +39,7 @@ from hooks import HookInput, HookRegistry
 from observer_verdict_ledger import ObserverVerdictLedger
 from safr_checkpoint import SafrCheckpoint
 from sealed_audit_sink import SealedAuditSink
+from alert_trigger_registry import DEFAULT_REGISTRY, AlertTriggerRegistry
 from checkpoints import CheckpointError, build as build_checkpoint, digest_transcript, prepare_resume
 from dataflow_policy import DataflowPolicy, SessionDataflow
 from egress_scope import canonical_egress_host, validate_egress_target_scope
@@ -946,6 +947,22 @@ class AgentRuntime:
             if isinstance(inherited_ledger, ForwardSealLedger)
             else default_ledger
         )
+        self.alert_trigger_registry = DEFAULT_REGISTRY
+        self._alert_sink_seen_seq = 0
+        # Pin the concrete trigger registry into the run's sealed chain.  This
+        # is a same-domain tripwire, not proof against a malicious host.
+        _registry_pin = self.alert_trigger_registry.digest()
+        import hashlib as _hashlib
+        self.sealed_ledger.append(
+            intent="runtime.alert-trigger-registry",
+            action="registry-pin",
+            subject=self.config.agent,
+            authorization="host",
+            inputs_digest=_registry_pin,
+            logic_digest="sha256:" + _hashlib.sha256(b"alert-trigger-registry.v1").hexdigest(),
+            execution_digest="sha256:" + _hashlib.sha256(_registry_pin.encode()).hexdigest(),
+            outcome="registry.pinned",
+        )
         if can_use_tool is not None and self.permissions.config.can_use_tool is None:
             self.permissions = PermissionEngine(
                 replace(self.permissions.config, can_use_tool=can_use_tool),
@@ -1049,11 +1066,33 @@ class AgentRuntime:
         if announcer is None:
             return
         try:
+            self._scan_alert_sink()
             announcer.announce_head(self.sealed_ledger)
             announcer.tick()
             self._gossip_announce_error = None
         except Exception as error:  # noqa: BLE001 - announcement is best-effort
             self._gossip_announce_error = f"{type(error).__name__}: {error}"
+
+    def _scan_alert_sink(self) -> None:
+        """Read new sealed permission events and best-effort announce alerts."""
+        ledger = self.sealed_ledger
+        for seq in range(self._alert_sink_seen_seq + 1, len(ledger) + 1):
+            record = ledger.record(seq)
+            self._alert_sink_seen_seq = seq
+            fields = dict(record.event)
+            for trigger in self.alert_trigger_registry.matches(fields):
+                try:
+                    self.announce_alert(trigger.kind, self.alert_trigger_registry.detail(trigger, fields))
+                    # Put the alert in the run conversation, where operators look.
+                    pending = self._pending_state
+                    if pending is not None:
+                        pending.transcript.append(SystemMessage(
+                            subtype="informational",
+                            content=f"[ALERT {trigger.kind}] {self.alert_trigger_registry.detail(trigger, fields)}",
+                            data={"kind": trigger.kind, "detail": self.alert_trigger_registry.detail(trigger, fields)},
+                        ))
+                except Exception as error:  # noqa: BLE001
+                    self._gossip_announce_error = f"{type(error).__name__}: {error}"
 
     def announce_alert(self, kind: str, detail: Mapping[str, Any] | None = None) -> Any:
         """Announce a kill-switch / config-drift alert immediately.
