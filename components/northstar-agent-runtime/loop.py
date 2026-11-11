@@ -949,6 +949,7 @@ class AgentRuntime:
         )
         self.alert_trigger_registry = DEFAULT_REGISTRY
         self._alert_sink_seen_seq = 0
+        self._alert_trigger_seen: set[tuple[str, str]] = set()
         # Pin the concrete trigger registry into the run's sealed chain.  This
         # is a same-domain tripwire, not proof against a malicious host.
         _registry_pin = self.alert_trigger_registry.digest()
@@ -1081,6 +1082,14 @@ class AgentRuntime:
             self._alert_sink_seen_seq = seq
             fields = dict(record.event)
             for trigger in self.alert_trigger_registry.matches(fields):
+                # Permission engines may emit the same denial more than once;
+                # deduplicate by trigger plus its semantic event fields, not
+                # by ledger sequence (duplicate records get new sequences).
+                import json as _json
+                event_key = (trigger.name, _json.dumps(fields, sort_keys=True, default=str))
+                if event_key in self._alert_trigger_seen:
+                    continue
+                self._alert_trigger_seen.add(event_key)
                 try:
                     self.announce_alert(trigger.kind, self.alert_trigger_registry.detail(trigger, fields))
                     # Put the alert in the run conversation, where operators look.
