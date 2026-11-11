@@ -28,6 +28,7 @@ import json
 import os
 import secrets
 import socket
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
@@ -115,6 +116,7 @@ class EgressResult:
     errors: tuple[str, ...] = ()
     receipt: dict[str, Any] | None = None
     latency_ms: int = 0
+    lease_id: str = ""
 
 
 def validate_socket_path(value: str | os.PathLike[str]) -> tuple[bool, tuple[str, ...]]:
@@ -154,6 +156,8 @@ class EgressClient:
         self.timeout_ms = int(timeout_ms)
         self.connect_timeout_s = float(connect_timeout_s)
         self.max_response_bytes = max_response_bytes
+        self._leases: dict[tuple[str, str, str], str] = {}
+        self._lease_lock = threading.Lock()
 
     def new_request_id(self) -> str:
         return f"egress-{secrets.token_hex(8)}"
@@ -175,6 +179,7 @@ class EgressClient:
         card: dict[str, Any] | None = None,
         approval_receipt: dict[str, Any] | None = None,
         request_id: str | None = None,
+        session_id: str | None = None,
     ) -> EgressResult:
         """Send one egress request through the sidecar. Never raises for an
         expected condition (denial, rejection, transport failure)."""
@@ -195,6 +200,7 @@ class EgressClient:
             arguments=arguments,
             card=card,
             approval_receipt=approval_receipt,
+            session_id=session_id,
         )
         if validation_errors:
             return self._failure(rid if isinstance(rid, str) else "", "rejected", "; ".join(validation_errors), started)
@@ -213,6 +219,13 @@ class EgressClient:
             "call_id": call_id,
             "arguments": dict(arguments or {}),
         }
+        effective_session = session_id or run_id
+        lease_key = (run_id, effective_session, f"{host}:{port}")
+        wire["session_id"] = effective_session
+        with self._lease_lock:
+            known_lease = self._leases.get(lease_key)
+        if known_lease:
+            wire["lease_id"] = known_lease
         if card is not None:
             wire["card"] = card
         if approval_receipt is not None:
@@ -257,6 +270,12 @@ class EgressClient:
             field_value = payload.get(field_name)
             if field_value is not None and not isinstance(field_value, str):
                 return self._failure(rid, "protocol_error", f"sidecar {field_name} must be a string", started)
+        lease_id = payload.get("lease_id", "")
+        if not isinstance(lease_id, str):
+            return self._failure(rid, "protocol_error", "sidecar lease_id must be a string", started)
+        if lease_id:
+            with self._lease_lock:
+                self._leases[lease_key] = lease_id
         body_bytes = b""
         raw_body = payload.get("body_b64", "")
         if isinstance(raw_body, str) and raw_body:
@@ -280,6 +299,7 @@ class EgressClient:
             errors=tuple(_safe_remote_text(item) for item in errors_out),
             receipt=payload.get("receipt") if isinstance(payload.get("receipt"), dict) else None,
             latency_ms=latency_ms,
+            lease_id=lease_id,
         )
 
     @staticmethod
@@ -289,6 +309,9 @@ class EgressClient:
             value = values[field_name]
             if not isinstance(value, str) or (field_name != "call_id" and not value.strip()):
                 errors.append(f"{field_name} must be a string" + ("" if field_name == "call_id" else " and non-empty"))
+        session_id = values.get("session_id")
+        if session_id is not None and (not isinstance(session_id, str) or not session_id.strip()):
+            errors.append("session_id must be a non-empty string")
         port = values["port"]
         if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65_535:
             errors.append("port must be an integer between 1 and 65535")

@@ -15,6 +15,7 @@ import socket
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from unittest import mock
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -33,6 +34,7 @@ from egress_sidecar import (  # noqa: E402
     run_one,
     _scrub_bytes,
 )
+from lease_table import LeaseTable  # noqa: E402
 from egress_enforcer import DestinationRule, EgressPolicy, EgressPolicyError  # noqa: E402
 from transport import decode_request, encode_response  # noqa: E402
 import egress_socket  # noqa: E402
@@ -596,6 +598,124 @@ class ReceiptFeedTests(unittest.TestCase):
             feed = ReceiptFeed(Path(tmp) / "r.jsonl")
             self.assertFalse(feed.append({"bad": object()}))
             self.assertIsNotNone(feed.last_error)
+
+
+class LeaseRevocationTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        Path(self.tmp.name, "northstar-egress.toml").write_text(POLICY_TOML)
+        self.feed_path = Path(self.tmp.name) / "receipts.jsonl"
+        self.old_credential = os.environ.get("NORTHSTAR_EGRESS_CRED_HOOK_TOKEN")
+        os.environ["NORTHSTAR_EGRESS_CRED_HOOK_TOKEN"] = "hook-secret-value"
+
+    def tearDown(self):
+        if self.old_credential is None:
+            os.environ.pop("NORTHSTAR_EGRESS_CRED_HOOK_TOKEN", None)
+        else:
+            os.environ["NORTHSTAR_EGRESS_CRED_HOOK_TOKEN"] = self.old_credential
+        self.tmp.cleanup()
+
+    def context(self, *, refresh=5.0, ttl=300.0):
+        ctx = build_context(policy_dir=self.tmp.name, receipt_feed_path=self.feed_path,
+                            lease_refresh_interval_s=refresh, lease_ttl_seconds=ttl)
+        ctx._resolver = lambda _host: ["127.0.0.1"]
+        return ctx
+
+    def allowed(self, ctx, **overrides):
+        with mock.patch.object(egress_sidecar, "_perform_http", return_value=(200, {}, b"ok", False)) as dial:
+            response = run_one(wire(session_id="session-1", **overrides), ctx)
+        return response, dial
+
+    def test_first_authorized_request_mints_persistent_lease(self):
+        ctx = self.context()
+        response, _ = self.allowed(ctx)
+        self.assertEqual(response["status"], "ok")
+        self.assertTrue(response["lease_id"].startswith("lease-"))
+        self.assertEqual(len(ctx.lease_table.read()), 1)
+
+    def test_subsequent_write_reuses_lease(self):
+        ctx = self.context()
+        first, _ = self.allowed(ctx)
+        second, _ = self.allowed(ctx, request_id="r-2", lease_id=first["lease_id"])
+        self.assertEqual(second["lease_id"], first["lease_id"])
+
+    def test_strict_push_revocation_rejects_next_write_before_dial(self):
+        ctx = self.context(refresh=0)
+        first, _ = self.allowed(ctx)
+        revoked = run_one({"op": "revoke_lease", "request_id": "kill", "lease_id": first["lease_id"], "revoked_by": "operator"}, ctx)
+        response, dial = self.allowed(ctx, request_id="r-next", lease_id=first["lease_id"])
+        self.assertEqual(revoked["status"], "ok")
+        self.assertEqual((response["status"], response["deny_code"]), ("error", "lease_revoked"))
+        self.assertIn(first["lease_id"], response["reason"])
+        dial.assert_not_called()
+
+    def test_backstop_table_reload_rejects_under_interval(self):
+        ctx = self.context(refresh=0.05)
+        first, _ = self.allowed(ctx)
+        LeaseTable(ctx.lease_table.path).revoke(first["lease_id"], "oracle")
+        started = time.monotonic()
+        time.sleep(0.06)
+        response, dial = self.allowed(ctx, request_id="r-backstop", lease_id=first["lease_id"])
+        self.assertLess(time.monotonic() - started, 0.15)
+        self.assertEqual(response["deny_code"], "lease_revoked")
+        dial.assert_not_called()
+
+    def test_in_flight_write_finishes_then_next_fails(self):
+        ctx = self.context(refresh=0)
+        first, _ = self.allowed(ctx)
+        entered, release = threading.Event(), threading.Event()
+        result = {}
+        def slow_http(**_kwargs):
+            entered.set(); release.wait(2); return 200, {}, b"done", False
+        with mock.patch.object(egress_sidecar, "_perform_http", side_effect=slow_http):
+            thread = threading.Thread(target=lambda: result.update(run_one(wire(request_id="inflight", session_id="session-1", lease_id=first["lease_id"]), ctx)))
+            thread.start(); self.assertTrue(entered.wait(1))
+            run_one({"op": "revoke_lease", "request_id": "kill", "lease_id": first["lease_id"], "revoked_by": "operator"}, ctx)
+            release.set(); thread.join(2)
+        self.assertEqual(result["status"], "ok")
+        next_result, dial = self.allowed(ctx, request_id="after", lease_id=first["lease_id"])
+        self.assertEqual(next_result["deny_code"], "lease_revoked")
+        dial.assert_not_called()
+
+    def test_lease_owner_cannot_be_revoker(self):
+        ctx = self.context()
+        first, _ = self.allowed(ctx)
+        response = run_one({"op": "revoke_lease", "request_id": "kill", "lease_id": first["lease_id"], "revoked_by": "run1"}, ctx)
+        self.assertEqual(response["status"], "rejected")
+
+    def test_expired_lease_is_network_error_before_dial(self):
+        ctx = self.context(ttl=0.001)
+        first, _ = self.allowed(ctx)
+        time.sleep(0.002)
+        response, dial = self.allowed(ctx, request_id="expired", lease_id=first["lease_id"])
+        self.assertEqual((response["status"], response["deny_code"]), ("error", "lease_expired"))
+        dial.assert_not_called()
+
+    def test_revoke_and_refused_write_append_termination_receipts(self):
+        ctx = self.context(refresh=0)
+        first, _ = self.allowed(ctx)
+        run_one({"op": "revoke_lease", "request_id": "kill", "lease_id": first["lease_id"], "revoked_by": "operator"}, ctx)
+        self.allowed(ctx, request_id="refused", lease_id=first["lease_id"])
+        records = [json.loads(line)["receipt"] for line in self.feed_path.read_text().splitlines()]
+        terminations = [r for r in records if r.get("receipt_type") == "egress-lease-terminated"]
+        self.assertEqual(len(terminations), 2)
+        self.assertTrue(all(r["anchor_status"] == "not_anchored_optional_path" for r in terminations))
+
+    def test_unreadable_table_fails_closed_before_dial(self):
+        ctx = self.context(refresh=0.01)
+        first, _ = self.allowed(ctx)
+        ctx.lease_table.path.write_text("not-json")
+        ctx._lease_refreshed_at = 0
+        response, dial = self.allowed(ctx, request_id="unreadable", lease_id=first["lease_id"])
+        self.assertEqual((response["status"], response["deny_code"]), ("error", "lease_revoked"))
+        dial.assert_not_called()
+
+    def test_wrong_lease_id_fails_before_dial(self):
+        ctx = self.context()
+        self.allowed(ctx)
+        response, dial = self.allowed(ctx, request_id="wrong", lease_id="lease-attacker")
+        self.assertEqual(response["deny_code"], "lease_revoked")
+        dial.assert_not_called()
 
 
 if __name__ == "__main__":
