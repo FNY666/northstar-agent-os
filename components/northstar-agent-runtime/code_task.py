@@ -26,6 +26,11 @@ MAX_DELIVERY_PATCH_BYTES = 8 * 1024 * 1024
 MAX_DELIVERY_FILE_BYTES = 1024 * 1024
 MAX_DELIVERY_FILES = 200
 MAX_CHECK_INPUTS = 64
+DEFAULT_VERIFIER_RULE = (
+    "the verifier set is the declared check_inputs manifest: every file the checks read, "
+    "as declared by the host before verification; a path is a verifier iff it appears in check_input_pins."
+)
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 _GENERATED_PARTS = frozenset({"build", "dist", "node_modules", "__pycache__"})
 _GENERATED_SUFFIXES = frozenset(
@@ -120,6 +125,10 @@ class CodePhaseMachine:
         start_commit: str = "",
         check_inputs: tuple[str, ...] = (),
         check_exclusions: tuple[tuple[str, str], ...] = (),
+        verifiers: tuple[tuple[str, str], ...] = (),
+        verifier_rule: str = DEFAULT_VERIFIER_RULE,
+        verifier_rule_version: str = "v1",
+        prior_dissents: tuple[str | Path, ...] = (),
     ) -> None:
         if not isinstance(run_id, str) or not run_id.strip():
             raise CodeTaskError("code phase machine needs a run id")
@@ -130,6 +139,23 @@ class CodePhaseMachine:
         self.start_commit = start_commit
         self.check_inputs = validate_check_inputs(check_inputs)
         self.check_exclusions = validate_check_exclusions(check_exclusions, check_inputs)
+        if not isinstance(verifier_rule, str) or not verifier_rule.strip():
+            raise CodeTaskError("verifier rule must be non-empty text")
+        if not isinstance(verifier_rule_version, str) or not verifier_rule_version.strip():
+            raise CodeTaskError("verifier rule version must be non-empty text")
+        self.verifier_rule = verifier_rule
+        self.verifier_rule_version = verifier_rule_version
+        self.verifier_set = []
+        for verifier_id, dissent_feed in verifiers:
+            if (
+                not isinstance(verifier_id, str)
+                or not verifier_id.strip()
+                or not isinstance(dissent_feed, str)
+                or not dissent_feed.strip()
+            ):
+                raise CodeTaskError("verifiers require non-empty id and dissent_feed")
+            self.verifier_set.append({"id": verifier_id, "dissent_feed": dissent_feed})
+        self.prior_dissents = tuple(prior_dissents)
         self._check_input_pins: tuple[dict[str, Any], ...] | None = None
         self._start_tree_hash: str | None = None
         self._state = "created"
@@ -518,6 +544,11 @@ class CodePhaseMachine:
                 "check_input_pins": input_records,
                 "check_inputs_unchanged": inputs_unchanged,
                 "check_exclusions": exclusion_list,
+                "verifier_set": list(self.verifier_set),
+                "verifier_rule": self.verifier_rule,
+                "verifier_rule_version": self.verifier_rule_version,
+                "verifier_rule_hash": hashlib.sha256(self.verifier_rule.encode("utf-8")).hexdigest(),
+                "dissents_pinned": pin_dissents(self.prior_dissents),
                 "ok": unchanged and bool(audit["ok"]) and inputs_unchanged,
             }
             _atomic_write(
@@ -572,6 +603,126 @@ class CodePhaseMachine:
     def as_dict(self) -> dict[str, Any]:
         with self._lock:
             return self._payload()
+
+
+def _valid_sha256(value: Any) -> bool:
+    return isinstance(value, str) and _SHA256_RE.fullmatch(value) is not None
+
+
+def build_delivery_dissent(
+    *,
+    seal_path: str | Path,
+    dissenter: str,
+    rule_hash: str,
+    rule_version: str,
+    corpus_hash: str,
+    verdict: str,
+    reason: str,
+) -> dict[str, str]:
+    """Build a dissent linked to the exact bytes of its delivery seal."""
+    if not _valid_sha256(rule_hash):
+        raise CodeTaskError("dissent rule_hash must be a 64-hex SHA-256")
+    if not _valid_sha256(corpus_hash):
+        raise CodeTaskError("dissent corpus_hash must be a 64-hex SHA-256")
+    for name, value in (
+        ("dissenter", dissenter),
+        ("rule_version", rule_version),
+        ("verdict", verdict),
+        ("reason", reason),
+    ):
+        if not isinstance(value, str) or not value.strip():
+            raise CodeTaskError(f"dissent {name} must be non-empty text")
+    try:
+        seal_bytes = Path(seal_path).read_bytes()
+    except OSError as exc:
+        raise CodeTaskError(f"cannot read delivery seal: {exc}") from exc
+    return {
+        "schema": "northstar.delivery-dissent.v1",
+        "seal_sha256": hashlib.sha256(seal_bytes).hexdigest(),
+        "dissenter": dissenter,
+        "rule_hash": rule_hash,
+        "rule_version": rule_version,
+        "corpus_hash": corpus_hash,
+        "verdict": verdict,
+        "reason": reason,
+    }
+
+
+def validate_delivery_dissent(record: Any) -> dict[str, str]:
+    """Validate and return a delivery dissent record."""
+    required = (
+        "seal_sha256",
+        "dissenter",
+        "rule_hash",
+        "rule_version",
+        "corpus_hash",
+        "verdict",
+        "reason",
+    )
+    if not isinstance(record, dict) or record.get("schema") != "northstar.delivery-dissent.v1":
+        raise CodeTaskError("invalid delivery dissent schema")
+    for key in required:
+        if key not in record:
+            raise CodeTaskError(f"delivery dissent is missing {key}")
+    for key in ("seal_sha256", "rule_hash", "corpus_hash"):
+        if not _valid_sha256(record[key]):
+            raise CodeTaskError(f"delivery dissent {key} must be a 64-hex SHA-256")
+    for key in ("dissenter", "rule_version", "verdict", "reason"):
+        if not isinstance(record[key], str) or not record[key].strip():
+            raise CodeTaskError(f"delivery dissent {key} must be non-empty text")
+    return {"schema": record["schema"], **{key: record[key] for key in required}}
+
+
+def write_delivery_dissent(evidence_dir: str | Path, dissent: dict[str, Any]) -> Path:
+    """Atomically write a validated dissent beside the delivery seal."""
+    validated = validate_delivery_dissent(dissent)
+    path = Path(evidence_dir) / "delivery-dissent.json"
+    raw = (
+        json.dumps(validated, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
+    ).encode("utf-8")
+    _atomic_write(path, raw)
+    return path
+
+
+def load_delivery_dissent(path: str | Path) -> dict[str, str]:
+    """Load and validate a delivery dissent artifact."""
+    try:
+        record = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise CodeTaskError(f"cannot load delivery dissent: {exc}") from exc
+    return validate_delivery_dissent(record)
+
+
+def pin_dissents(dissents: Sequence[str | Path]) -> list[dict[str, str]]:
+    """Pin dissent files by raw canonical bytes, or accept an existing SHA-256."""
+    pinned = []
+    for dissent in dissents:
+        if isinstance(dissent, str) and _valid_sha256(dissent):
+            digest = dissent
+            record = {"dissent_sha256": digest}
+        else:
+            try:
+                path = Path(dissent)
+                raw = path.read_bytes()
+            except (OSError, TypeError) as exc:
+                raise CodeTaskError(f"cannot read prior dissent: {exc}") from exc
+            digest = hashlib.sha256(raw).hexdigest()
+            record = {"dissent_sha256": digest, "path": str(path)}
+        pinned.append(record)
+    return pinned
+
+
+def find_orphan_dissents(
+    dissents: Sequence[dict[str, Any]], seals: Sequence[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Return dissents not referenced by any later seal; callers pass only post-dissent seals."""
+    witnessed = {
+        item.get("dissent_sha256")
+        for seal in seals
+        for item in seal.get("dissents_pinned", ())
+        if isinstance(item, dict)
+    }
+    return [dissent for dissent in dissents if dissent.get("dissent_sha256") not in witnessed]
 
 
 def _run_git(
