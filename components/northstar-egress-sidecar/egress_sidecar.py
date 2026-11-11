@@ -82,6 +82,7 @@ from audit_chain import (  # noqa: E402
 )
 from canonical_json import jcs_canonical_json  # noqa: E402
 from ed25519 import public_key as ed25519_public_key  # noqa: E402
+from lease_table import LeaseTable, LeaseTableError  # noqa: E402
 
 # Wire bounds. The engine caps bodies at 1 MiB; the transport caps the line.
 MAX_BODY_B64_CHARS = 1_800_000  # ~1.3 MiB of base64, headroom over the 1 MiB body cap.
@@ -354,6 +355,8 @@ class SidecarContext:
         key_id: str | None = None,
         resolver: Any | None = None,
         receipt_feed: ReceiptFeed | None = None,
+        lease_table: LeaseTable | None = None,
+        lease_refresh_interval_s: float = 5.0,
     ) -> None:
         self.policy = policy
         self.credentials = credentials
@@ -363,9 +366,55 @@ class SidecarContext:
         self.budgets = EgressBudgetLedger()
         self._resolver = resolver or _system_resolver
         self.receipt_feed = receipt_feed
+        self.lease_table = lease_table
+        self.lease_refresh_interval_s = max(0.0, float(lease_refresh_interval_s))
+        self._lease_lock = threading.RLock()
+        self._lease_sessions: dict[str, dict[str, Any]] = lease_table.read() if lease_table is not None else {}
+        self._lease_refreshed_at = time.monotonic()
 
     def resolve(self, host: str) -> list[str]:
         return self._resolver(host)
+
+    def refresh_leases(self, *, force: bool = False) -> None:
+        if self.lease_table is None:
+            return
+        with self._lease_lock:
+            if not force and (self.lease_refresh_interval_s == 0 or
+                              time.monotonic() - self._lease_refreshed_at < self.lease_refresh_interval_s):
+                return
+            # Deliberately let LeaseTableError escape: callers fail closed.
+            self._lease_sessions = self.lease_table.read()
+            self._lease_refreshed_at = time.monotonic()
+
+    def lease_for(self, run_id: str, session_id: str, destination: str) -> dict[str, Any] | None:
+        self.refresh_leases()
+        with self._lease_lock:
+            record = self._lease_sessions.get(LeaseTable.key(run_id, session_id, destination))
+            return dict(record) if record is not None else None
+
+    def mint_lease(self, run_id: str, session_id: str, destination: str, now: float) -> dict[str, Any]:
+        if self.lease_table is None:
+            return {}
+        record = self.lease_table.mint(run_id, session_id, destination, now=now)
+        with self._lease_lock:
+            self._lease_sessions[LeaseTable.key(run_id, session_id, destination)] = dict(record)
+        return record
+
+    def revoke_lease(self, lease_id: str, revoked_by: str) -> dict[str, Any]:
+        if self.lease_table is None:
+            raise LeaseTableError("lease table is not configured")
+        record = self.lease_table.revoke(lease_id, revoked_by)
+        with self._lease_lock:
+            self._lease_sessions[LeaseTable.key(record["run_id"], record["session_id"], record["destination"])] = dict(record)
+        return record
+
+    def expire_lease(self, lease_id: str) -> dict[str, Any]:
+        if self.lease_table is None:
+            raise LeaseTableError("lease table is not configured")
+        record = self.lease_table.expire(lease_id)
+        with self._lease_lock:
+            self._lease_sessions[LeaseTable.key(record["run_id"], record["session_id"], record["destination"])] = dict(record)
+        return record
 
 
 def _system_resolver(host: str) -> list[str]:
@@ -466,6 +515,10 @@ def classify_request(value: Any) -> RequestValidation:
     arguments = value.get("arguments", {})
     if not isinstance(arguments, dict):
         errors.append("arguments must be an object")
+    for name in ("session_id", "lease_id"):
+        optional = value.get(name)
+        if optional is not None and (not isinstance(optional, str) or not optional.strip() or len(optional) > 200):
+            errors.append(f"{name} must be a non-empty bounded string when present")
 
     return RequestValidation(not errors, tuple(errors))
 
@@ -576,6 +629,47 @@ def _scrub_bytes(value: bytes, secrets_: tuple[str, ...]) -> bytes:
     return value
 
 
+def _termination_receipt(record: Mapping[str, Any], *, request_id: str, event: str) -> dict[str, Any]:
+    """Detector-ready termination event. External anchoring is optional today."""
+    return {
+        "kind": "egress-lease-terminated", "receipt_type": "egress-lease-terminated",
+        "receipt_id": "termination-" + hashlib.sha256(
+            f"{request_id}:{record['lease_id']}:{event}:{time.time_ns()}".encode()
+        ).hexdigest()[:32],
+        "request_id": request_id, "event": event, "recorded_at": time.time(),
+        "lease_id": record["lease_id"], "revocation_epoch": record["revocation_epoch"],
+        "revoked_by": record.get("revoked_by", ""),
+        "anchor_status": "not_anchored_optional_path",
+    }
+
+
+def _append_termination(ctx: SidecarContext, record: Mapping[str, Any], *, request_id: str, event: str) -> bool:
+    return ctx.receipt_feed is None or ctx.receipt_feed.append(
+        _termination_receipt(record, request_id=request_id, event=event)
+    )
+
+
+def _run_revoke(value: dict[str, Any], ctx: SidecarContext) -> dict[str, Any]:
+    request_id = value.get("request_id")
+    lease_id = value.get("lease_id")
+    revoked_by = value.get("revoked_by")
+    if not isinstance(request_id, str) or not request_id or not isinstance(lease_id, str) or not lease_id or not isinstance(revoked_by, str) or not revoked_by:
+        return {"request_id": request_id, "status": "rejected", "errors": ["revoke_lease requires request_id, lease_id, and revoked_by"]}
+    try:
+        record = ctx.revoke_lease(lease_id, revoked_by)
+    except KeyError:
+        return {"request_id": request_id, "status": "rejected", "errors": [f"unknown lease {lease_id}"]}
+    except PermissionError as exc:
+        return {"request_id": request_id, "status": "rejected", "errors": [str(exc)]}
+    except LeaseTableError as exc:
+        return {"request_id": request_id, "status": "error", "error": str(exc)}
+    anchored = _append_termination(ctx, record, request_id=request_id, event="revoked")
+    if not anchored:
+        return {"request_id": request_id, "status": "error", "error": "termination receipt could not be persisted", "lease_id": lease_id}
+    return {"request_id": request_id, "status": "ok", "lease_id": lease_id,
+            "revocation_epoch": record["revocation_epoch"], "anchor_status": "not_anchored_optional_path"}
+
+
 def _run_one_inner(value: dict[str, Any], ctx: SidecarContext) -> dict[str, Any]:
     """Handle one validated wire request. Never raises: failures are
     encoded as ``status: denied | error`` with a receipt when one exists."""
@@ -637,6 +731,38 @@ def _run_one_inner(value: dict[str, Any], ctx: SidecarContext) -> dict[str, Any]
             "reason": verdict.reason,
             "receipt": verdict.receipt,
         }
+
+    session_id = str(value.get("session_id") or request.run_id)
+    destination = f"{request.host}:{request.port}"
+    lease: dict[str, Any] = {}
+    if ctx.lease_table is not None:
+        try:
+            lease = ctx.lease_for(request.run_id, session_id, destination) or ctx.mint_lease(
+                request.run_id, session_id, destination, now
+            )
+        except LeaseTableError as exc:
+            return {"request_id": request_id, "status": "error", "deny_code": "lease_revoked",
+                    "reason": f"lease state unavailable: network session terminated ({exc})"}
+        supplied = value.get("lease_id")
+        if supplied is not None and supplied != lease["lease_id"]:
+            return {"request_id": request_id, "status": "error", "deny_code": "lease_revoked",
+                    "reason": f"lease {supplied} revoked: network session terminated", "lease_id": supplied}
+        expired = float(lease["expires_at"]) <= now
+        if lease["status"] == "revoked" or expired:
+            if expired and lease["status"] == "active":
+                try:
+                    lease = ctx.expire_lease(lease["lease_id"])
+                except (KeyError, LeaseTableError):
+                    pass  # Already fail closed below; persistence trouble cannot allow the write.
+            deny_code = "lease_expired" if expired and lease["status"] != "revoked" else "lease_revoked"
+            event = "expired-write-refused" if deny_code == "lease_expired" else "revoked-write-refused"
+            if not _append_termination(ctx, lease, request_id=str(request_id), event=event):
+                return {"request_id": request_id, "status": "error", "deny_code": deny_code,
+                        "reason": f"lease {lease['lease_id']} terminated; termination receipt persistence failed",
+                        "lease_id": lease["lease_id"]}
+            return {"request_id": request_id, "status": "error", "deny_code": deny_code,
+                    "reason": f"lease {lease['lease_id']} {'expired' if deny_code == 'lease_expired' else 'revoked'}: network session terminated",
+                    "lease_id": lease["lease_id"]}
 
     # The authorization decision is itself security-relevant. Make it
     # durable before any credential is attached or socket is opened; if the
@@ -708,6 +834,7 @@ def _run_one_inner(value: dict[str, Any], ctx: SidecarContext) -> dict[str, Any]
         "body_b64": base64.b64encode(scrubbed_body).decode("ascii"),
         "truncated": truncated,
         "receipt": verdict.receipt,
+        "lease_id": lease.get("lease_id", ""),
     }
 
 
@@ -720,6 +847,8 @@ def run_one(value: dict[str, Any], ctx: SidecarContext) -> dict[str, Any]:
     explicit avoids relying on a bounded digest cache to suppress a second
     append after slow, concurrent requests.
     """
+    if isinstance(value, dict) and value.get("op") == "revoke_lease":
+        return _run_revoke(value, ctx)
     response = _run_one_inner(value, ctx)
     feed = ctx.receipt_feed
     receipt = response.get("receipt")
@@ -736,6 +865,9 @@ def build_context(
     key_id: str | None = None,
     trusted_public_keys: Mapping[str, bytes] | None = None,
     receipt_feed_path: str | Path | None = None,
+    lease_table_path: str | Path | None = None,
+    lease_ttl_seconds: float = 300.0,
+    lease_refresh_interval_s: float = 5.0,
 ) -> SidecarContext:
     """Build the sidecar context from on-disk config + environment.
 
@@ -761,6 +893,9 @@ def build_context(
         if receipt_feed_path
         else None
     )
+    if lease_table_path is None and receipt_feed_path is not None:
+        lease_table_path = Path(receipt_feed_path).with_name("leases.json")
+    lease_table = LeaseTable(lease_table_path, ttl_seconds=lease_ttl_seconds) if lease_table_path else None
     return SidecarContext(
         policy=policy,
         credentials=credentials,
@@ -768,4 +903,6 @@ def build_context(
         enforcer_seed=enforcer_seed,
         key_id=key_id,
         receipt_feed=feed,
+        lease_table=lease_table,
+        lease_refresh_interval_s=lease_refresh_interval_s,
     )

@@ -1,139 +1,105 @@
-# Live-socket revocation via the egress sidecar (design draft)
+# Live-socket revocation via the egress sidecar
 
-Status: **DRAFT**. Direction endorsed on Moltbook (2026-11-10); two protocol
-questions are open and asked (see §4). No implementation in this batch —
-this document is the deliverable for B173 item 6.
+Status: **FINAL** (B173 slice 6, 2026-11-11). Implemented on
+`batch-173-moltbook-absorb`.
 
-## 1. The failing test
+## 1. Boundary and failing test
 
-From Moltbook (neo_konsi_s2bw, on the revocation thread): *"revoke while a
-command is in flight, then prove the next write fails"* — and the fork inside
-it: does the kill path own the connection, or just the task that opened it?
+The permission gate is admission control. Before this slice, revocation did
+not fence an already admitted network session. The acceptance test from
+neo_konsi_s2bw is: revoke while a command is in flight, then prove the next
+write fails. The stronger second assertion is that the refusal occurs in the
+sidecar before an upstream socket is opened; that proves ownership moved.
 
-Today's gate fails that test. The permission gate is admission control at
-dispatch: per-call, never cached, revocation-oracle failure fails closed.
-Revoke the permission and the next admission is refused — but a socket that
-is already open keeps working. The revoke button changes paperwork. The
-honest boundary today is the run's lifetime: kill the run and the socket
-dies with it, which is coarse — it cannot distinguish "revoke this tool's
-network" from "kill the run".
+The design does not unsend accepted packets and does not cover a process that
+bypasses the sidecar. The required pre-build command, `doctor --check-egress`,
+does not exist in this checkout. `doctor --help` exposes only a sidecar socket
+probe, so this slice could not confirm that the agent has no direct route. A
+deployment bypass remains a prerequisite failure, not something this design
+papers over.
 
-## 2. Current state (verified in code at main 38df3ca0)
+## 2. Lease and withdrawal design
 
-- **Admission-only revocation.** `permissions.py`: `revocation_oracle`
-  checked per call and for every link of a delegation chain (cascade
-  revocation); an oracle error fails closed rather than skipping the link
-  (line 1039). No re-check exists for anything already admitted.
-- **KillSwitch owns the task, not the connection.**
-  `kill_switch.py`: file-persisted emergency brake (`arm` / `trigger` /
-  `check` / rollback points). `check()` gates decisions. It stops the
-  task; it does not close or fence sockets.
-- **The egress sidecar exists — as a request broker, not a session
-  holder.** `components/northstar-egress-sidecar/`: the daemon is the only
-  process that may open outbound connections. It validates the wire
-  request, resolves DNS itself, authorizes via `egress_enforcer` at
-  CONNECT time against the real resolved destination, dials the authorized
-  IP directly, injects the brokered credential server-side, and returns a
-  signed egress receipt. The runtime client is `egress_client.py`
-  (`EgressClient.request` / `probe` over an AF_UNIX JSON-lines socket).
-  But `egress_socket.py` handles one JSON-lines connection at a time
-  (`handle_line` / `handle_connection`); there is no session table and no
-  terminate operation. A persistent connection established before
-  revocation is never re-checked.
-- **SessionLease is not a network lease.** `session_lease.py` is a local
-  session lock (file lock, `owner_id`, expiry). It must not be confused
-  with the lease proposed in §3.
-- **Gossip transport is loopback by default** (`loop.py:978`:
-  "The transport is in-process loopback unless the host supplies its own
-  register()/deliver() implementation"). That is the gossip announce
-  plane, not the egress data path — a separate concern.
-- **Revocation cannot unsend a packet already accepted downstream.**
-  Conceded; out of scope for this design.
+The file-persisted lease table (`lease_table.py`, `leases.json` beside the
+receipt feed by default) is the sole source of truth. It is thread-safe and
+atomically replaced. The sidecar maintains an in-memory session cache and
+mints the first lease after authorization for a new
+`(run_id, session_id, destination)`.
 
-## 3. Design: network-session lease
+Each record is `{lease_id, run_id, session_id, destination, granted_at,
+expires_at, revocation_epoch, status, revoked_by}`. Status is `active`,
+`revoked`, or `expired`. The implementation uses a configurable fixed expiry
+(300 seconds by default), with one lease per session+destination.
 
-- The sidecar holds the socket; the run holds a **lease** on it. Lease
-  record: `{lease_id, run_id, session_id, destination, granted_at,
-  expires_at, revocation_epoch}`.
-- **Withdrawal:** the revocation oracle notifies the sidecar, and the
-  sidecar terminates the session (closes the socket). The tool's next
-  write fails with a **network error, not a logic error** — an objective
-  infrastructure state, easy to monitor and alert on (spiritofthefleet's
-  point: revocation-of-intent vs termination-of-session are different
-  things, and the design must keep them apart).
-- **Audit:** every termination lands in the sealed audit ledger / audit
-  sink, so a flood of terminations is visible signal. The alert triggers
-  (B173 slice 4) read the sink.
-- **Audit anchor — anchor-before-acknowledge (Moltbook, vina,
-  2026-11-11).** The termination records above land in the sealed
-  ledger, but that only helps if the records survive — the audit-head
-  independence problem. The manifest carries head hash + seq from our
-  own feed, with no independent clock, and the anchor is optional in
-  code today (`audit_archive.py`: `anchor-manifest.json` offline,
-  `external-anchor.json` Rekor, the latter marked optional). Under
-  async anchoring a record can vanish between sealing and anchoring,
-  leaving no pre-loss timestamp. The honest fix is
-  **anchor-before-acknowledge**: a record is not considered sealed
-  until the anchor receipt returns, making the anchor a write-path
-  dependency. The price is liveness — if the anchor is unreachable,
-  sealing blocks — trading availability for a pre-loss timestamp. The
-  anchor's own sequence is checkable only because the Rekor log is
-  public and inclusion-provable; our internal counter is not.
-- **Acceptance test** (neo_konsi_s2bw's test, automated): open a session,
-  revoke mid-flight, prove the next write fails and the failure names the
-  lease as a network error.
-- **Does NOT do:** unsend accepted packets; cover sockets that bypass
-  the sidecar. Verification step before building: `doctor
-  --check-egress` must show no direct route for the agent process. Any
-  bypass is out of scope here and must be closed first, not papered over.
+`revoke_lease` is the best-effort push accelerator. It durably marks the table,
+increments `revocation_epoch`, and updates the cache immediately. A revoker
+whose identity is the lease-owning run is rejected: the revoker must not be
+the sender. Independently, the sidecar reloads the authoritative table every
+five seconds by default. Interval zero disables this backstop for strict
+push-only testing. A read or persistence failure fails closed.
 
-## 4. Open questions
+Every ordinary request is policy-authorized and then checks its cached lease
+state before receipt persistence, credential injection, or upstream dial. A
+revoked or expired lease returns infrastructure state, not policy denial:
+`status=error`, `deny_code=lease_revoked|lease_expired`, and a reason naming
+the lease. The client stores lease IDs by session+destination, resends them,
+and preserves this network error without retry or downgrade.
 
-Asked on Moltbook 2026-11-10 (comment `ac8b5e62`, reply to neo_konsi_s2bw
-`63f864bb` on post `77c3dfb1`); awaiting replies:
+## 3. In-flight rule and premise
 
-1. **Push vs poll:** how does the sidecar learn a lease was withdrawn —
-   push an event to the sidecar, or does the sidecar poll a lease table?
-   Proposal in the comment: push (faster; poll leaves a window where a
-   revoked socket still writes).
-2. **In-flight write:** fail it mid-write, or let the current write
-   finish and fail the next one? Proposal in the comment: let it finish —
-   it was authorized when it started — and fail the next write.
+A request already past the lease check is allowed to finish; only the next
+write fails. This rule is conditional on the downstream property that a
+truncated command is a no-op or is rolled back on disconnect. The tests do not
+claim to make arbitrary partially applied downstream commands safe.
 
-Not yet asked (record here for the next lurk round):
+## 4. Audit and anchoring
 
-3. **Lease TTL / renewal:** fixed TTL with renewal, or indefinite until
-   withdrawn? Who mints leases — host or sidecar?
-4. **Multi-socket runs:** one lease per socket or one per run?
+Every revoke and every refused write under a revoked or expired lease is
+appended to the chained `ReceiptFeed` as an `egress-lease-terminated` receipt.
+It carries `lease_id`, `revocation_epoch`, `revoked_by`, event type, and anchor
+status, and is the input slice-4 detectors can filter. This slice does not
+rewire those detectors.
 
-5. **Unanchored sealed record:** is a sealed record with no anchor
-   receipt a record or a promise? (vina's open question, Moltbook
-   2026-11-11.) Anchor-before-acknowledge (section 3) answers it by
-   refusing to call the record sealed until the receipt returns — but
-   that makes the anchor a write-path dependency and trades liveness
-   for it.
+Moltbook's anchor-before-acknowledge conclusion stands: a record should not be
+considered sealed until its independent anchor receipt returns; making that a
+write-path dependency trades liveness for durable evidence. The Rekor path in
+`audit_archive.py` remains optional, so this slice does **not** claim that
+anchor-before-acknowledge is enforced. Termination receipts honestly record
+`anchor_status=not_anchored_optional_path`.
 
-## 5. Build order (when approved; NOT in this batch)
+**OPEN — audit-head independence:** the feed's own hash and sequence have no
+independent clock. This slice does not fabricate one or solve survivability
+between local sealing and external anchoring.
 
-1. Sidecar session table + terminate operation (`egress_socket.py`).
-2. Withdrawal channel, oracle → sidecar (push vs poll per the forum
-   answer to §4 Q1).
-3. Client lease handling (`egress_client.py`: hold the lease id, surface
-   termination as a network error naming the lease).
-4. Acceptance test (§3).
-5. Audit + alert wiring (termination receipts into the sealed ledger;
-   slice-4 detectors read them).
-6. Docs (egress sidecar README + this document to final).
+## 5. Moltbook question disposition
 
-## 6. Sources
+1. Push vs poll is settled: table is authoritative; push accelerates; periodic
+   reload is the backstop; zero is strict push-only mode.
+2. In-flight behavior is settled: finish the admitted write, fail the next,
+   under the downstream no-op/rollback premise.
+3. TTL/mint authority is settled by implementation for this slice: fixed
+   configurable expiry and sidecar minting. The broader renewal and authority
+   question remains open for the next Moltbook lurk round.
+4. Lease granularity is settled by implementation as session+destination. The
+   broader one-socket/one-run question remains open for the lurk round.
+5. Unanchored sealed records remain conditional on the optional anchor path;
+   anchor-before-acknowledge is not claimed here.
 
-- Moltbook, revocation post `77c3dfb1`: our comment `1f4a039e`, replies
-  `9825d428` (spiritofthefleet) and `63f864bb` (neo_konsi_s2bw),
-  follow-up `ac8b5e62`.
-- Moltbook, anchor-clock-trust thread (vina, 2026-11-11): post
-  `2e844fcf`, our comment `57a308f3` (reply to vina `38a0d792`) —
-  anchor-before-acknowledge (section 3).
-- Code at main `38df3ca0`:
-  `components/northstar-egress-sidecar/{egress_sidecar.py,egress_socket.py,transport.py}`,
-  `components/northstar-agent-runtime/{egress_client.py,permissions.py,session_lease.py,kill_switch.py}`,
-  `components/northstar-agent-runtime/loop.py:978`.
+## 6. Acceptance evidence
+
+Automated tests prove two separate assertions: an admitted in-flight request
+finishes after a concurrent push revoke, and the next request fails with a
+lease-naming network error while the mocked upstream dial is never called.
+Strict interval-zero push-only mode passes. A separate table-only revoke with
+a 50 ms refresh interval is observed below the test's 150 ms bound. Dedicated
+tests also cover mint/reuse, expiry, owner self-revoke rejection, unreadable
+table fail-closed behavior, mismatched lease IDs, and both termination receipt
+events. Client tests cover per-session storage/resend and error surfacing.
+
+## 7. Sources
+
+- Moltbook revocation post `77c3dfb1`, including spiritofthefleet and
+  neo_konsi_s2bw replies and follow-up `ac8b5e62`.
+- Moltbook anchor-clock-trust post `2e844fcf` and vina reply `38a0d792`.
+- `components/northstar-egress-sidecar/{egress_sidecar.py,egress_socket.py,lease_table.py}`
+  and `components/northstar-agent-runtime/{egress_client.py,audit_archive.py}`.

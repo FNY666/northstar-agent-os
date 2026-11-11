@@ -37,9 +37,29 @@ the egress sidecar *is* the network path.
   `egress_enforcer`, upstream dial with pinned IP + SNI, credential
   injection, credential-reflection scrubbing.
 - `transport.py` -- bounded JSONL encode/decode.
+- `lease_table.py` -- atomic persistent lease source of truth.
 - `egress-sidecar.service` -- systemd unit.
 
 ## Configuration
+
+### Network-session leases
+
+Ordinary requests may add `session_id` and `lease_id`. The first authorized
+request for `(run_id, session_id, host:port)` mints and returns a lease. A
+revoked or expired lease returns `status: "error"` and `deny_code:
+"lease_revoked"` or `"lease_expired"` before any upstream dial.
+
+The additive control message is
+`{"op":"revoke_lease","request_id":"...","lease_id":"...","revoked_by":"..."}`.
+The owning run cannot revoke itself. `NORTHSTAR_EGRESS_LEASE_REFRESH_SECONDS`
+sets the table-reload backstop (default 5; 0 is strict push-only),
+`NORTHSTAR_EGRESS_LEASE_TTL_SECONDS` sets expiry (default 300), and
+`NORTHSTAR_EGRESS_LEASE_TABLE` overrides the default `leases.json` beside the
+receipt feed. Table read failure fails closed.
+
+Revokes and refused writes append `egress-lease-terminated` receipts with
+`anchor_status=not_anchored_optional_path`; external Rekor anchoring remains
+optional, so anchor-before-acknowledge is not claimed.
 
 - Policy: `NORTHSTAR_EGRESS_POLICY_DIR/northstar-egress.toml`
   (see `egress_enforcer.load_egress_policy`). Credential *references* only;

@@ -222,12 +222,20 @@ def main() -> None:
     feed_path = os.environ.get("NORTHSTAR_EGRESS_FEED", "").strip() or str(
         Path(socket_path).parent / "receipts.jsonl"
     )
+    lease_path = os.environ.get("NORTHSTAR_EGRESS_LEASE_TABLE", "").strip() or str(
+        Path(feed_path).with_name("leases.json")
+    )
+    lease_ttl = float(os.environ.get("NORTHSTAR_EGRESS_LEASE_TTL_SECONDS", "300"))
+    refresh_interval = float(os.environ.get("NORTHSTAR_EGRESS_LEASE_REFRESH_SECONDS", "5"))
     ctx = build_context(
         policy_dir=policy_dir,
         enforcer_seed=enforcer_seed,
         key_id=key_id,
         trusted_public_keys=trusted_public_keys,
         receipt_feed_path=feed_path,
+        lease_table_path=lease_path,
+        lease_ttl_seconds=lease_ttl,
+        lease_refresh_interval_s=refresh_interval,
     )
     serve(ctx, socket_path)
 

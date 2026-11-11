@@ -104,5 +104,34 @@ class EgressResponseBoundaryTests(unittest.TestCase):
         self.assertEqual(result.status, "transport_unavailable")
         self.assertIn("byte cap", result.errors[0])
 
+    def test_client_stores_and_resends_lease_per_session(self):
+        client = EgressClient("/var/run/northstar-egress/egress.sock")
+        wires = []
+        responses = iter((
+            json.dumps({"request_id": "r1", "status": "ok", "lease_id": "lease-one"}),
+            json.dumps({"request_id": "r2", "status": "ok", "lease_id": "lease-one"}),
+        ))
+        client._round_trip = lambda wire: (wires.append(dict(wire)) or next(responses))  # type: ignore[method-assign]
+        common = dict(agent_id="a", run_id="run", session_id="s", host="example.com", port=443, method="GET", path="/")
+        first = client.request(request_id="r1", **common)
+        client.request(request_id="r2", **common)
+        self.assertEqual(first.lease_id, "lease-one")
+        self.assertNotIn("lease_id", wires[0])
+        self.assertEqual(wires[1]["lease_id"], "lease-one")
+
+    def test_revoked_lease_stays_network_error_naming_lease(self):
+        client = self._client(json.dumps({"request_id": "r", "status": "error", "deny_code": "lease_revoked",
+                                          "reason": "lease lease-one revoked: network session terminated", "lease_id": "lease-one"}))
+        result = client.request(agent_id="a", run_id="run", session_id="s", host="example.com", port=443,
+                                method="GET", path="/", request_id="r")
+        self.assertEqual((result.status, result.deny_code), ("error", "lease_revoked"))
+        self.assertIn(result.lease_id, result.reason)
+
+    def test_malformed_lease_id_is_protocol_error(self):
+        client = self._client(json.dumps({"request_id": "r", "status": "ok", "lease_id": 7}))
+        result = client.request(agent_id="a", run_id="run", host="example.com", port=443,
+                                method="GET", path="/", request_id="r")
+        self.assertEqual(result.status, "protocol_error")
+
 if __name__ == "__main__":
     unittest.main()
