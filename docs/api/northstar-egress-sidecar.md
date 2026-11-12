@@ -34,6 +34,11 @@ Persistent, append-only JSONL feed of egress receipts.
 Everything the sidecar needs beyond one request.
 
 - `resolve(host: str)`
+- `refresh_leases(*, force: bool=False)`
+- `lease_for(run_id: str, session_id: str, destination: str)`
+- `mint_lease(run_id: str, session_id: str, destination: str, now: float)`
+- `revoke_lease(lease_id: str, revoked_by: str)`
+- `expire_lease(lease_id: str)`
 #### `classify_request(value: Any)`
 
 Validate the wire request. Narrow by construction: only the declared fields are read; shell commands, environment data, and tool declarations are not accepted from the caller.
@@ -42,7 +47,7 @@ Validate the wire request. Narrow by construction: only the declared fields are 
 
 Handle one wire request and persist receipts not already prewritten.
 
-#### `build_context(*, policy_dir: str | Path, approver_keys: dict[str, bytes] | None=None, enforcer_seed: bytes | None=None, key_id: str | None=None, trusted_public_keys: Mapping[str, bytes] | None=None, receipt_feed_path: str | Path | None=None)`
+#### `build_context(*, policy_dir: str | Path, approver_keys: dict[str, bytes] | None=None, enforcer_seed: bytes | None=None, key_id: str | None=None, trusted_public_keys: Mapping[str, bytes] | None=None, receipt_feed_path: str | Path | None=None, lease_table_path: str | Path | None=None, lease_ttl_seconds: float=300.0, lease_refresh_interval_s: float=5.0)`
 
 Build the sidecar context from on-disk config + environment.
 

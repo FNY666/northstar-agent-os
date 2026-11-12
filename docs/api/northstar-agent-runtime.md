@@ -43,6 +43,30 @@ Host-owned phase gate with a durable, atomic transition journal.
   - Prove host checks did not change the audited delivery patch.
 - `finish(outcome: str, *, reason: str='runtime terminal result')`
 - `as_dict()`
+#### `build_delivery_dissent(*, seal_path: str | Path, dissenter: str, rule_hash: str, rule_version: str, corpus_hash: str, verdict: str, reason: str)`
+
+Build a dissent linked to the exact bytes of its delivery seal.
+
+#### `validate_delivery_dissent(record: Any)`
+
+Validate and return a delivery dissent record.
+
+#### `write_delivery_dissent(evidence_dir: str | Path, dissent: dict[str, Any])`
+
+Atomically write a validated dissent beside the delivery seal.
+
+#### `load_delivery_dissent(path: str | Path)`
+
+Load and validate a delivery dissent artifact.
+
+#### `pin_dissents(dissents: Sequence[str | Path])`
+
+Pin dissent files by raw canonical bytes, or accept an existing SHA-256.
+
+#### `find_orphan_dissents(dissents: Sequence[dict[str, Any]], seals: Sequence[dict[str, Any]])`
+
+Return dissents not referenced by any later seal; callers pass only post-dissent seals.
+
 #### `validate_patch_replay(worktree: str | Path, *, start_commit: str, evidence_dir: str | Path)`
 
 Check the final patch against a temporary index seeded from start_commit.
@@ -21028,6 +21052,21 @@ Alertmanager-shaped alert registry, silences, and routing.
   - Compute the routing decision for every active alert at this seq.
 #### `main()`
 
+### `alert_trigger_registry`
+
+Source: `components/northstar-agent-runtime/alert_trigger_registry.py`
+
+Concrete audit-sink alert trigger registry.
+
+#### `AlertTrigger`
+
+#### `AlertTriggerRegistryError`
+
+#### `AlertTriggerRegistry`
+
+- `matches(record: Mapping[str, Any])`
+- `detail(trigger: AlertTrigger, record: Mapping[str, Any])`
+- `digest()`
 ### `aligned_ai`
 
 Source: `components/northstar-agent-runtime/aligned_ai.py`
@@ -25465,6 +25504,53 @@ Metered-billing ledger: plans, usage, invoices, proration.
 Shape an ``audit.ndjson/1`` record for billing events.
 
 #### `main()`
+
+### `blind_rerunner`
+
+Source: `components/northstar-agent-runtime/blind_rerunner.py`
+
+Blind re-runner bundle and check-set comparison helpers.
+
+#### `BlindRerunnerError`
+
+Malformed input or a fail-closed bundle/evidence error.
+
+#### `AuditorChecksUnavailable`
+
+A delivery seal does not contain a usable pinned check-input set.
+
+#### `BlindCheck`
+
+One named, runnable check and the assertion it makes.
+
+- `as_dict()`
+#### `BlindBundle`
+
+A minimal repository reference plus the caller's one-sentence claim.
+
+- `as_dict()`
+#### `DivergenceReport`
+
+Structured comparison; ``None`` auditor availability is not an empty set.
+
+- `as_dict()`
+#### `build_blind_bundle(start_commit: str, claim: str, *, repo_root: str | Path='.', candidate_material: Mapping[str, str] | None=None)`
+
+Build only ``{repo snapshot reference, claim}``; reject evidence inputs.
+
+#### `extract_auditor_checks(delivery: Mapping[str, Any] | str | Path)`
+
+Derive integrity checks from the existing delivery-seal check-input pins.
+
+#### `compare_check_sets(blind_checks: Sequence[BlindCheck], auditor_checks: Sequence[BlindCheck])`
+
+Return set divergence; do not turn divergence into an automatic verdict.
+
+#### `run_blind_rerun(*, start_commit: str, claim: str, repo_root: str | Path, blind_checks: Sequence[BlindCheck], delivery: Mapping[str, Any] | str | Path | None, report_path: str | Path | None=None)`
+
+Issue the blind bundle, then compare submitted blind checks to seal pins.
+
+#### `main(argv: Sequence[str] | None=None)`
 
 ### `bloom_filter`
 
@@ -38751,7 +38837,7 @@ One completed sidecar round-trip. Never raises for expected conditions.
 One-connection-per-request Unix socket client for the egress sidecar.
 
 - `new_request_id()`
-- `request(*, agent_id: str, run_id: str, host: str, port: int, method: str, path: str, headers: dict[str, str] | None=None, body: bytes=b'', timeout_ms: int | None=None, call_id: str='', arguments: dict[str, Any] | None=None, card: dict[str, Any] | None=None, approval_receipt: dict[str, Any] | None=None, request_id: str | None=None)`
+- `request(*, agent_id: str, run_id: str, host: str, port: int, method: str, path: str, headers: dict[str, str] | None=None, body: bytes=b'', timeout_ms: int | None=None, call_id: str='', arguments: dict[str, Any] | None=None, card: dict[str, Any] | None=None, approval_receipt: dict[str, Any] | None=None, request_id: str | None=None, session_id: str | None=None)`
   - Send one egress request through the sidecar. Never raises for an expected condition (denial, rejection, transport failure).
 - `probe()`
   - Health check: a deliberately invalid request; the sidecar must answer ``rejected`` (proving it is alive) rather than time out.
