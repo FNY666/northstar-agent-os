@@ -1,4 +1,4 @@
-.PHONY: help demo test ts-test install bench install-smoke
+.PHONY: help demo test ts-test install bench install-smoke code-security-lab
 
 help:
 	@echo "northstar-agent-os targets:"
@@ -10,6 +10,7 @@ help:
 	@echo "  make install install every component into a virtualenv (python3 -m venv .venv)"
 	@echo "  make bench   public governance benchmark (denial / injection / budget / redteam)"
 	@echo "  make install-smoke  clean-venv wheel install + northstar --version + bench"
+	@echo "  make code-security-lab  local coding attacks + paired benign controls (fixture-only)"
 	@echo ""
 	@echo "product entry (checkout, no pip):"
 	@echo "  bin/northstar --version"
@@ -31,6 +32,9 @@ help:
 
 demo:
 	sh examples/demo/run_offline.sh
+
+code-security-lab:
+	python3 scripts/run-code-security-lab.py run
 
 test:
 	@set -e; \
