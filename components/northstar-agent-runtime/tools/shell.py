@@ -225,6 +225,13 @@ def shell_handler(payload: dict[str, Any], ctx: "ToolContext") -> Any:
                     candidates.extend(shlex.split(argv[2]))
                 except ValueError:
                     pass  # the shell itself will report the malformed command
+            # Nested shell -c arguments remain opaque after one shlex pass.
+            # Also match exact pinned paths in the original argv text so a
+            # wrapper cannot hide a changed script one quoting level deeper.
+            raw_arguments = "\0".join(token for token in argv if isinstance(token, str))
+            for relative in pins:
+                if isinstance(relative, str) and relative and relative in raw_arguments:
+                    candidates.append(str(ctx.sandbox.root_real / relative))
             for token in candidates:
                 if not isinstance(token, str) or not token or token.startswith("-"):
                     continue
