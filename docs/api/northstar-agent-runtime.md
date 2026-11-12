@@ -36574,6 +36574,102 @@ Offline verification with the root public key only.
 
 Audit events for each block of the credential, for the hash chain.
 
+### `deny_hotpath`
+
+Source: `components/northstar-agent-runtime/deny_hotpath.py`
+
+Hot-path deny lookup: one indexed read against a revocation counter.
+
+#### `DenyHotPathError`
+
+Base class for deny-hotpath errors.
+
+#### `DenyStoreError`
+
+The deny store could not be opened or written.
+
+#### `DenyLookup`
+
+The result of one deny lookup.
+
+- `cacheable` (property)
+  - A deny lookup result is never cacheable (see DENY_CACHE_TTL_MS).
+- `cache_ttl_ms` (property)
+  - The cache TTL a result may be reused for. Always zero.
+- `as_dict()`
+  - Dict form, for audit rows and test assertions.
+#### `DenyDecision`
+
+The outcome of one dispatch decision.
+
+- `reason` (property)
+  - The reason carried by the lookup.
+- `as_dict()`
+  - Dict form, for audit rows and test assertions.
+#### `LatencyStats`
+
+A latency distribution, in milliseconds.
+
+- `as_dict()`
+  - Dict form, for the acceptance report.
+#### `DenyStore`
+
+The deny state: a revocation counter per scope, plus a refusal log.
+
+- `statements` (property)
+  - Every SQL statement executed so far, in order.
+- `events` (property)
+  - The operation order: ``refusal`` / ``lookup`` / ``finalize``.
+- `reset_statements()`
+  - Forget the recorded statements (test helper).
+- `close()`
+  - Close the connection.
+- `set_state(scope: str, *, denied: bool, reason: str='', seq: int=0, counter: Optional[int]=None)`
+  - Set the denial state of a scope and return its new counter.
+- `revoke(scope: str, *, reason: str='', seq: int=0)`
+  - Deny a scope. Returns the new counter.
+- `clear(scope: str, *, seq: int=0)`
+  - Un-deny a scope (a later, counter-bumping state change).
+- `counter(scope: str)`
+  - Read a scope's current counter, or None if the scope is unknown.
+- `lookup(scope: str)`
+  - The deny lookup: **one** indexed read of the revocation counter.
+- `explain_lookup(scope: str)`
+  - The query plan for the lookup statement.
+- `write_refusal(scope: str, *, seq: int=0)`
+  - Write a refusal row with outcome ``unknown`` and return its id.
+- `finalize_refusal(refusal_id: str, *, outcome: str, reason: str='', counter: Optional[int]=None, lookup_source: str='')`
+  - Finalize a refusal row with the decision that was reached.
+- `refusal(refusal_id: str)`
+  - Read one refusal row back, or None if it is not there.
+- `refusals()`
+  - All refusal rows, in insertion order (archaeology, not the hot path).
+- `refusal_count()`
+  - How many refusal rows exist.
+#### `DenyDispatcher`
+
+The dispatch-side deny check: refusal row first, then the lookup.
+
+- `store` (property)
+  - The store this dispatcher reads and writes.
+- `check(scope: str)`
+  - Run the deny check for ``scope``.
+#### `measure_p99(dispatcher: DenyDispatcher, scope: str, *, samples: int=200)`
+
+Measure the latency distribution of the deny lookup.
+
+#### `deny_audit_event(decision: DenyDecision, *, seq: int=0)`
+
+The audit event for one dispatch deny check.
+
+#### `stdlib_only()`
+
+AST check: this module imports stdlib modules only.
+
+#### `main()`
+
+Self-check: the refusal row lands first, the lookup is one read, and an unreadable counter denies.
+
 ### `deny_monotonicity`
 
 Source: `components/northstar-agent-runtime/deny_monotonicity.py`

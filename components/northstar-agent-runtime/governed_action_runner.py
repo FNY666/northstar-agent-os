@@ -171,6 +171,7 @@ class GovernedActionRunner:
         ledger: Any,
         executor: Optional[Callable[[str, Dict[str, Any]], Any]] = None,
         observer_id: str = "observer-1",
+        deny_dispatcher: Any = None,
     ) -> None:
         for name, comp in (
             ("safr", safr),
@@ -188,6 +189,12 @@ class GovernedActionRunner:
         self._ledger = ledger
         self._executor = executor
         self._observer_id = observer_id
+        # C54: the hot-path deny lookup.  Optional -- when the host wires
+        # a dispatcher, every dispatch consults the sealed deny *before* the
+        # gate decides, and the refusal row is written before that lookup
+        # so "no row" never reads as "nothing was denied".  The dispatcher
+        # fails closed: a scope it cannot resolve is denied.
+        self._deny_dispatcher = deny_dispatcher
         self._seq = 0
         self._observer_seq = 0
         # RLock: run() holds it across the gate phase; _next_seq() also
@@ -232,6 +239,18 @@ class GovernedActionRunner:
         with self._lock:
             self._observer_seq += 1
             return self._observer_seq
+
+    @staticmethod
+    def _deny_scope(subject: str, tool: str) -> str:
+        """The scope a deny lookup reads for this dispatch.
+
+        The scope names the subject the action runs as and the tool it
+        runs: ``<subject>/<tool>``.  A denial is therefore scoped to the
+        pair, which is the granularity at which a revocation is issued
+        (a revoked tool for a subject, not a blanket refusal of every
+        action the process ever takes).
+        """
+        return f"{subject}/{tool}"
 
     def _seal(
         self,
@@ -338,6 +357,39 @@ class GovernedActionRunner:
             seq = self._next_seq()
             declaration = self._safr.declare(seq, intent, action, subject, inputs_digest)
             decl_id = declaration.declaration_id
+
+            # C54: the deny lookup is a hot-path precondition.  It runs
+            # BEFORE the gate decides, so a revoked scope never reaches
+            # the gate at all -- and the dispatcher's refusal row is
+            # written before its lookup, so the refusal is on record even
+            # if the lookup fails closed.
+            if self._deny_dispatcher is not None:
+                deny_scope = self._deny_scope(subject, tool)
+                deny_decision = self._deny_dispatcher.check(deny_scope)
+                if deny_decision.denied:
+                    deny_reason = deny_decision.reason or (
+                        f"scope {deny_scope} is revoked"
+                    )
+                    deny_outcome: GovernedOutcome = GovernedOutcome(
+                        declaration_id=decl_id,
+                        executed=False,
+                        gate="deny",
+                        decision="deny",
+                        reason=deny_reason,
+                    )
+                    seal_error = self._seal(
+                        tool=tool, subject=subject, declaration_id=decl_id,
+                        criteria_digest=criteria_digest, inputs_digest=inputs_digest,
+                        gate_decision="deny",
+                        observer_verdict="-",
+                        outcome="denied:hotpath", reason=deny_reason,
+                    )
+                    if seal_error:
+                        deny_outcome = GovernedOutcome(
+                            decl_id, False, "deny", "deny", deny_reason,
+                            audit_seal_error=seal_error,
+                        )
+                    return deny_outcome
 
             # Observer pre-commits criteria BEFORE authorization (Hubinger).
             obs_seq = self._next_observer_seq()
