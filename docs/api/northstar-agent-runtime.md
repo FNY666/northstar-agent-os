@@ -43080,6 +43080,8 @@ Single-writer forward-secure sealed ledger.
   - Seal one 8-field event with triple fingerprints.
 - `checkpoint()`
   - Seal the current chain head (manual checkpoint).
+- `append_grant(*, grant_id: str, version: Optional[str]=None, counter: Optional[int]=None, intent: str='grant-dispatch', action: str='dispatch', subject: str='', inputs_digest: str='', logic_digest: str='', execution_digest: str='', outcome: str='executed')`
+  - Seal one grant event, enforcing the conclusion-52 pin rule.
 - `verify(initial_key: bytes, checkpoint_key: bytes)`
   - Verify the full chain from the initial key (pure read).
 #### `stdlib_only()`
@@ -45646,6 +45648,75 @@ Deterministic GraphQL gateway bookkeeping.
 Shape an ``audit.ndjson/1`` record for the graphql-gateway module.
 
 #### `main()`
+
+### `grant_pin_ledger`
+
+Source: `components/northstar-agent-runtime/grant_pin_ledger.py`
+
+Authorization grant pins: a three-field pin, and a seal layer that refuses unnamed grants.
+
+#### `GrantPinError`
+
+Base class for grant-pin errors.
+
+#### `MalformedPinError`
+
+The pin is not a well-formed three-field pin.
+
+#### `MissingGrantIdError`
+
+The grant id is empty or missing: the seal is refused, no row lands.
+
+#### `GrantPin`
+
+The three-field authorization pin: grant id, version, counter.
+
+- `from_dict(value: Any)`
+  - Build a pin from a mapping over the three pinned fields.
+- `to_dict()`
+  - The three fields, verbatim -- nulls included.
+- `is_named()`
+  - True when the grant id is a non-empty, non-blank name.
+- `is_resolvable()`
+  - True when the grant can be placed in its version/counter order.
+- `render()`
+  - Render the three fields into the ledger's ``authorization`` string.
+- `parse(rendered: Any)`
+  - Parse a rendered authorization string back into a pin.
+#### `SealedGrantRow`
+
+One sealed row: the pin verbatim, plus the outcome it was sealed with.
+
+- `to_dict()`
+- `verify()`
+  - Re-derive the row digest (never raises).
+#### `resolve_seal_outcome(pin: 'GrantPin', outcome: str)`
+
+The outcome a row carrying ``pin`` is sealed with.
+
+#### `GrantPinLedger`
+
+The seal layer: pins become rows, or the seal is refused.
+
+- `rows` (property)
+  - Every sealed row, in seal order.
+- `row(seq: int)`
+  - The sealed row with 1-based ``seq``.
+- `seal(pin: GrantPin, *, outcome: str='executed', seq: int=0)`
+  - Seal one grant pin into a row.
+- `seal_into(pin: GrantPin, ledger: Any, *, intent: str='grant-dispatch', action: str='dispatch', subject: str='', outcome: str='executed', seq: int=0)`
+  - Seal a pin into this ledger *and* into a forward-seal ledger.
+#### `grant_pin_audit_event(kind: str, detail: Dict[str, Any], seq: int)`
+
+Shape an ``audit.ndjson/1`` record for the grant-pin seal layer.
+
+#### `stdlib_only()`
+
+AST check: this module imports stdlib modules only.
+
+#### `main()`
+
+Self-check: named pin seals, unnamed pin is refused, null counter lands as outcome_unknown.
 
 ### `grc`
 
