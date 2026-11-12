@@ -112,6 +112,70 @@ class ScannerTests(unittest.TestCase):
         findings = scan_server("wx", {"command": "npx", "args": ["@squawk/mcp@0.9.5"]})
         self.assertTrue(any(f.rule == "MCP_MALICIOUS_SERVER_PACKAGE" for f in findings))
 
+    def test_cve_listed_mcp_remote_releases_are_critical(self):
+        expected = {
+            "0.1.16": ("CVE-2026-51996", "CVE-2026-51997"),
+            "0.1.18": ("CVE-2026-51996", "CVE-2026-51997", "CVE-2026-52001"),
+            "0.1.32": (
+                "CVE-2026-51994",
+                "CVE-2026-51995",
+                "CVE-2026-51996",
+                "CVE-2026-51997",
+                "CVE-2026-52001",
+            ),
+            "0.1.38": (
+                "CVE-2026-51994",
+                "CVE-2026-51995",
+                "CVE-2026-51996",
+                "CVE-2026-51997",
+                "CVE-2026-52001",
+            ),
+        }
+        for version, cves in expected.items():
+            with self.subTest(version=version):
+                findings = scan_server(
+                    "remote",
+                    {"command": "npx", "args": ["-y", f"mcp-remote@{version}", "https://example.test/mcp"]},
+                )
+                hits = [f for f in findings if f.rule == "MCP_VULNERABLE_SERVER_PACKAGE"]
+                self.assertEqual(len(hits), 1)
+                self.assertEqual(hits[0].severity, "critical")
+                self.assertTrue(all(cve in hits[0].message for cve in cves))
+                self.assertNotIn("MCP_MALICIOUS_SERVER_PACKAGE", {f.rule for f in findings})
+
+    def test_mcp_remote_versions_outside_cve_ranges_are_not_mislabeled(self):
+        for version in ("0.1.15", "0.1.39", "0.15.1", "0.15.2"):
+            with self.subTest(version=version):
+                findings = scan_server(
+                    "remote",
+                    {"command": "npx", "args": ["-y", f"mcp-remote@{version}", "https://example.test/mcp"]},
+                )
+                self.assertNotIn("MCP_VULNERABLE_SERVER_PACKAGE", {f.rule for f in findings})
+
+    def test_later_mcp_remote_releases_get_nonblocking_review_warning(self):
+        for version in ("0.1.39", "0.14.3", "0.15.1"):
+            with self.subTest(version=version):
+                findings = scan_server(
+                    "remote",
+                    {"command": "npx", "args": ["-y", f"mcp-remote@{version}", "https://example.test/mcp"]},
+                )
+                hits = [f for f in findings if f.rule == "MCP_UNCONFIRMED_MCP_REMOTE_REMEDIATION"]
+                self.assertEqual(len(hits), 1)
+                self.assertEqual(hits[0].severity, "medium")
+                self.assertNotIn("MCP_VULNERABLE_SERVER_PACKAGE", {f.rule for f in findings})
+                self.assertTrue(all(f.severity not in ("critical", "high") for f in findings))
+
+        for version in ("0.1.15", "0.15.2"):
+            with self.subTest(version=version):
+                findings = scan_server(
+                    "remote",
+                    {"command": "npx", "args": ["-y", f"mcp-remote@{version}", "https://example.test/mcp"]},
+                )
+                self.assertNotIn(
+                    "MCP_UNCONFIRMED_MCP_REMOTE_REMEDIATION",
+                    {f.rule for f in findings},
+                )
+
     def test_unpinned_npx_is_low(self):
         findings = scan_server("srv", {"command": "npx", "args": ["-y", "some-benign-pkg"]})
         self.assertTrue(any(
