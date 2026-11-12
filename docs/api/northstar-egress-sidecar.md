@@ -116,3 +116,28 @@ Atomic JSON lease table. The on-disk table is the source of truth.
 - `mint(run_id: str, session_id: str, destination: str, *, now: float | None=None)`
 - `revoke(lease_id: str, revoked_by: str)`
 - `expire(lease_id: str)`
+### `retry_contract_egress`
+
+Source: `components/northstar-egress-sidecar/retry_contract_egress.py`
+
+The retry/idempotency contract, wired onto the egress sidecar's real call.
+
+#### `payload_digest(method: str, path: str, body: bytes)`
+
+The digest that pins "this is the same operation" across attempts.
+
+#### `operation_for_request(value: Mapping[str, Any], *, idempotency_key: str | None=None, config: RetryContractConfig | None=None)`
+
+Build the :class:`Operation` describing one wire request.
+
+#### `outcome_state(outcome: RetryOutcome)`
+
+The caller's actionable state after a governed call.
+
+#### `outcome_fields(outcome: RetryOutcome)`
+
+The wire fields describing a governed call's outcome.
+
+#### `governed_egress_call(operation: Operation, attempt: Callable[[Operation], Any], *, classify_result: Callable[[Any], Failure | None] | None=None, config: RetryContractConfig | None=None, sleep: Callable[[float], None] | None=None)`
+
+Run one upstream egress call under the retry/idempotency contract.

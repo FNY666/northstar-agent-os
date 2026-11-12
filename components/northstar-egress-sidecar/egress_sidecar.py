@@ -83,6 +83,19 @@ from audit_chain import (  # noqa: E402
 from canonical_json import jcs_canonical_json  # noqa: E402
 from ed25519 import public_key as ed25519_public_key  # noqa: E402
 from lease_table import LeaseTable, LeaseTableError  # noqa: E402
+from retry_contract import (  # noqa: E402
+    Failure,
+    IdempotencyKeyError,
+    IndeterminateError,
+    classify_http_result,
+    resolve_idempotency_key,
+)
+from retry_contract_egress import (  # noqa: E402
+    IDEMPOTENCY_HEADER,
+    governed_egress_call,
+    operation_for_request,
+    outcome_fields,
+)
 
 # Wire bounds. The engine caps bodies at 1 MiB; the transport caps the line.
 MAX_BODY_B64_CHARS = 1_800_000  # ~1.3 MiB of base64, headroom over the 1 MiB body cap.
@@ -520,6 +533,19 @@ def classify_request(value: Any) -> RequestValidation:
         if optional is not None and (not isinstance(optional, str) or not optional.strip() or len(optional) > 200):
             errors.append(f"{name} must be a non-empty bounded string when present")
 
+    # The idempotency key pins "this is the same operation" across retries.
+    # It is validated against E2B's pattern, so a malformed key is refused
+    # here rather than silently dropped downstream.
+    idempotency_key = value.get("idempotency_key")
+    if idempotency_key is not None:
+        if not isinstance(idempotency_key, str):
+            errors.append("idempotency_key must be a string when present")
+        else:
+            try:
+                resolve_idempotency_key(idempotency_key)
+            except IdempotencyKeyError as exc:
+                errors.append(str(exc))
+
     return RequestValidation(not errors, tuple(errors))
 
 
@@ -587,7 +613,18 @@ def _perform_http(
     body: bytes,
     timeout_s: float,
 ) -> tuple[int, dict[str, str], bytes, bool]:
-    """Execute the authorized request. Returns (status, headers, body, truncated)."""
+    """Execute the authorized request. Returns (status, headers, body, truncated).
+
+    The failure taxonomy is the one the retry contract consumes, so the
+    sidecar must say *when* a failure happened, not just *that* it did:
+
+    * a failure to **establish** the connection (refused, unresolvable) is
+      raised as-is -- nothing was written, so the call may be repeated;
+    * a failure **after** the request was written (read timeout, dropped
+      connection, malformed status line) is raised as
+      :class:`IndeterminateError` -- the peer may already have executed the
+      operation, so the call must not be repeated silently.
+    """
     if tls:
         context = ssl.create_default_context()
         conn: http.client.HTTPConnection = _PinnedHTTPSConnection(host, port, dial_ip, timeout_s, context)
@@ -595,6 +632,17 @@ def _perform_http(
         conn = _PinnedHTTPConnection(host, port, dial_ip, timeout_s)
     try:
         conn.request(method, path, body=body or None, headers=headers)
+    except (socket.timeout, TimeoutError) as exc:
+        # The connection was established and the request bytes were handed
+        # to it. Whether the peer received them is unknown.
+        raise IndeterminateError(
+            "the request may already have been received: the connection timed out"
+        ) from exc
+    except OSError:
+        # Connect-phase failures (refused, unresolvable) arrive here too;
+        # the contract classifies them by errno.
+        raise
+    try:
         response = conn.getresponse()
         status = response.status
         resp_headers = {k.lower(): v for k, v in response.getheaders()}
@@ -609,6 +657,18 @@ def _perform_http(
         raw_body = b"".join(chunks)
         truncated = len(raw_body) > MAX_RESPONSE_BYTES
         return status, resp_headers, raw_body[:MAX_RESPONSE_BYTES], truncated
+    except (socket.timeout, TimeoutError) as exc:
+        # The response started but did not finish. The operation ran; we
+        # simply did not see its whole answer. Not retryable.
+        raise IndeterminateError(
+            "the request may already have been received: the response was cut short"
+        ) from exc
+    except http.client.HTTPException as exc:
+        # A malformed status line or a truncated header block: the request
+        # was written, the answer is unusable. Not retryable.
+        raise IndeterminateError(
+            f"the request may already have been received: {type(exc).__name__}"
+        ) from exc
     finally:
         conn.close()
 
@@ -801,25 +861,55 @@ def _run_one_inner(value: dict[str, Any], ctx: SidecarContext) -> dict[str, Any]
     headers["connection"] = "close"
 
     timeout_s = min(max(int(value.get("timeout_ms", 30_000)) / 1000.0, 1.0), 120.0)
+
+    # The retry/idempotency contract governs this call. The operation and
+    # its payload digest are computed once, before the first attempt, so
+    # every attempt is provably the same operation.
+    idempotency_key = value.get("idempotency_key")
     try:
-        status, resp_headers, resp_body, truncated = _perform_http(
+        operation = operation_for_request(value, idempotency_key=idempotency_key)
+    except IdempotencyKeyError as exc:
+        return {
+            "request_id": request_id,
+            "status": "rejected",
+            "errors": [str(exc)],
+            "receipt": verdict.receipt,
+        }
+
+    def _attempt(_operation: Any) -> tuple[int, dict[str, str], bytes, bool]:
+        attempt_headers = dict(headers)
+        if _operation.idempotency_key:
+            # The same key on every attempt: the upstream service can
+            # collapse the duplicate instead of executing it twice.
+            attempt_headers[IDEMPOTENCY_HEADER] = _operation.idempotency_key
+        return _perform_http(
             host=request.host,
             dial_ip=verdict.dial_ips[0],
             port=request.port,
             tls=rule.tls,
             method=request.method.upper(),
             path=request.path,
-            headers=headers,
+            headers=attempt_headers,
             body=request.body,
             timeout_s=timeout_s,
         )
-    except (OSError, ssl.SSLError, http.client.HTTPException) as exc:
+
+    def _classify(result: tuple[int, dict[str, str], bytes, bool]) -> Failure | None:
+        status_code, result_headers, _result_body, _truncated = result
+        return classify_http_result(status_code, result_headers)
+
+    outcome = governed_egress_call(operation, _attempt, classify_result=_classify)
+    if not outcome.ok:
+        failure = outcome.failure
+        message = failure.reason if failure is not None else "upstream request failed"
         return {
             "request_id": request_id,
             "status": "error",
-            "error": f"upstream request failed: {type(exc).__name__}",
+            "error": f"upstream request failed: {message}",
             "receipt": verdict.receipt,
+            **outcome_fields(outcome),
         }
+    status, resp_headers, resp_body, truncated = outcome.value
 
     # Credential reflection guard: a malicious endpoint must not be able to
     # bounce the brokered credential back to the agent.
@@ -835,6 +925,7 @@ def _run_one_inner(value: dict[str, Any], ctx: SidecarContext) -> dict[str, Any]
         "truncated": truncated,
         "receipt": verdict.receipt,
         "lease_id": lease.get("lease_id", ""),
+        **outcome_fields(outcome),
     }
 
 

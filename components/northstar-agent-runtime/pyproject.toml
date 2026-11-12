@@ -1170,6 +1170,7 @@ py-modules = [
     "resource_tagging",
     "responsible_ai",
     "retail_agents",
+    "retry_contract",
     "retry_policy",
     "reverse_proxy",
     "reward_hacking",

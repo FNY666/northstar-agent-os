@@ -39043,7 +39043,7 @@ One completed sidecar round-trip. Never raises for expected conditions.
 One-connection-per-request Unix socket client for the egress sidecar.
 
 - `new_request_id()`
-- `request(*, agent_id: str, run_id: str, host: str, port: int, method: str, path: str, headers: dict[str, str] | None=None, body: bytes=b'', timeout_ms: int | None=None, call_id: str='', arguments: dict[str, Any] | None=None, card: dict[str, Any] | None=None, approval_receipt: dict[str, Any] | None=None, request_id: str | None=None, session_id: str | None=None)`
+- `request(*, agent_id: str, run_id: str, host: str, port: int, method: str, path: str, headers: dict[str, str] | None=None, body: bytes=b'', timeout_ms: int | None=None, call_id: str='', arguments: dict[str, Any] | None=None, card: dict[str, Any] | None=None, approval_receipt: dict[str, Any] | None=None, request_id: str | None=None, session_id: str | None=None, idempotency_key: str | None=None)`
   - Send one egress request through the sidecar. Never raises for an expected condition (denial, rejection, transport failure).
 - `probe()`
   - Health check: a deliberately invalid request; the sidecar must answer ``rejected`` (proving it is alive) rather than time out.
@@ -65205,6 +65205,8 @@ Token counts in the shape the Anthropic Messages API reports them.
 - `display_text()`
   - Return artifact text without the runtime-only model provenance label.
 - `to_api()`
+- `to_record()`
+  - The session-transcript shape of this result.
 - `render()`
 - `text()`
 #### `flatten_result_content(value: Any)`
@@ -68038,6 +68040,104 @@ Hash-chained log of wearable collection receipts.
 #### `wearable_surveillance_budget(collections: WearableCollectionRegistry, receipt_id: str, purposes_used: tuple[str, ...], now: int)`
 
 Delivery-wearable collection binds purpose/scope/retention.
+
+### `retry_contract`
+
+Source: `components/northstar-agent-runtime/retry_contract.py`
+
+Retry and idempotency contract for outbound calls.
+
+#### `FailurePhase`
+
+Where a failure happened relative to the request bytes.
+
+#### `FailureClass`
+
+E2B's retry decision, as three explicit outcomes.
+
+#### `RetryContractError`
+
+Base class for every failure this module raises.
+
+#### `IdempotencyKeyError`
+
+An idempotency key does not satisfy ``^[a-z0-9-]{1,255}$``.
+
+#### `IdempotencyMismatchError`
+
+A retry did not carry the same idempotency key and payload digest.
+
+#### `IndeterminateError`
+
+A failure that happened after the request may already have been written.
+
+#### `TargetGoneError`
+
+The target is confirmed absent: stopped, deleted, or never existed.
+
+#### `TargetUnreachableError`
+
+The target could not be reached and may still be running.
+
+#### `Failure`
+
+One classified failure: what happened, and what may be done about it.
+
+- `retryable` (property)
+#### `resolve_idempotency_key(value: str | None)`
+
+Validate a client-supplied idempotency key.
+
+#### `operation_replay_safe(method: str, idempotency_key: str | None)`
+
+Whether this call may be repeated without doubling a side effect.
+
+#### `RetryContractConfig`
+
+Declarative retry configuration. No constants at the call site.
+
+- `delay_ms(attempt: int, random: Callable[[], float])`
+  - Delay before the retry numbered ``attempt`` (1 = first retry).
+#### `classify_response(status: int, headers: Mapping[str, str] | None=None)`
+
+Classify an HTTP response.
+
+#### `classify_exception(error: BaseException)`
+
+Classify a transport failure.
+
+#### `Operation`
+
+One outbound call, described well enough to be replayed safely.
+
+- `replay_safe` (property)
+  - Whether a retry of this call cannot double a side effect.
+- `same_operation(other: 'Operation')`
+  - Whether ``other`` is the same operation as this one.
+#### `Attempt`
+
+One recorded attempt of a governed call.
+
+#### `RetryOutcome`
+
+The result of a governed call. Failures are data, never exceptions.
+
+- `attempts_made` (property)
+#### `classify_http_result(status: int, headers: Mapping[str, str] | None=None, *, ok_statuses: frozenset[int]=frozenset(range(200, 300)))`
+
+Classify an HTTP result. ``None`` means the call succeeded.
+
+#### `RetryContract`
+
+Governs one outbound call under the retry/idempotency contract.
+
+- `execute(operation: Operation, call: Callable[[Operation], Any], *, classify: Callable[[Any], Failure] | None=None)`
+  - Run ``call`` under the contract.
+- `execute_strict(operation: Operation, call: Callable[[Operation], Any], *, classify: Callable[[Any], Failure] | None=None)`
+  - Like :meth:`execute`, but raises the terminal error.
+#### `assert_same_operation(original: Operation, retry: Operation)`
+
+Refuse a retry that is not the same operation.
 
 ### `retry_policy`
 
@@ -73560,6 +73660,10 @@ Append-only JSONL session transcripts.
 
 Raised for corruption that is not explainable by a crash at the tail.
 
+#### `ResumeRefusedError`
+
+A resume was refused; the run must not continue as if the session were clean.
+
 #### `new_session_id(*, now: float | None=None)`
 
 Sortable, collision-resistant identifier: ``ns-<utc>-<entropy>``.
@@ -73582,6 +73686,9 @@ Writer/reader for one session's JSONL transcript.
 - `record_result(message: ResultMessage)`
 - `read(session_id: str | None=None, *, strict: bool=True)`
 - `transcript(session_id: str | None=None, *, require_integrity: bool=False)`
+  - The provider transcript rebuilt from this session's records.
+- `resume_transcript(session_id: str | None=None, *, require_integrity: bool=False)`
+  - The transcript a resumed run starts from, plus the unwind outcome.
 - `list_sessions()`
 #### `load_jsonl(path: str | os.PathLike[str], *, strict: bool=True)`
 

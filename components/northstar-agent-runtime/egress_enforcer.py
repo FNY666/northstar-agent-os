@@ -90,9 +90,13 @@ BROKERED_AUTH_HEADERS = frozenset({"authorization", "proxy-authorization"})
 
 # Let http.client generate request framing itself. Caller-controlled framing
 # and hop-by-hop headers can otherwise disagree with the body we authorize.
+# ``idempotency-key`` is managed by the sidecar: the agent names the key in
+# the wire field, and the sidecar is the only thing that writes the header.
+# An agent-supplied header could otherwise pin a *different* key than the
+# one the sidecar records, so the upstream would collapse the wrong call.
 FORBIDDEN_EGRESS_HEADERS = frozenset({
-    "connection", "content-length", "expect", "keep-alive", "proxy-connection",
-    "te", "trailer", "transfer-encoding", "upgrade",
+    "connection", "content-length", "expect", "idempotency-key", "keep-alive",
+    "proxy-connection", "te", "trailer", "transfer-encoding", "upgrade",
 })
 _HTTP_TOKEN_RE = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+\Z")
 _DNS_LABEL_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\Z")
