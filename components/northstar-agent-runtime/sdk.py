@@ -233,6 +233,13 @@ def _build(options: RunOptions, resume: str | None = None) -> tuple[Any, Any, li
             records, _dropped = parent_store.read(options.resume_from)
             checkpoint = select_checkpoint(records)
         except (CheckpointError, OSError, ValueError) as error:
+            # A store that refuses the parent history keeps its own name: the
+            # caller must be able to tell "the store would not resume this"
+            # from "the checkpoint was missing".
+            from sessions import ResumeRefusedError
+
+            if isinstance(error, ResumeRefusedError):
+                raise
             raise ValueError(f"cannot resume from {options.resume_from!r}: {error}") from error
         if checkpoint is None:
             raise ValueError(

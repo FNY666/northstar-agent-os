@@ -102,6 +102,7 @@ class Frame:
     label: str = ""
     tools: tuple[str, ...] = ()
     tool_errors: int = 0
+    interrupted_tools: int = 0
     denials: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
@@ -117,6 +118,7 @@ class Frame:
             "label": self.label,
             "tools": list(self.tools),
             "tool_errors": self.tool_errors,
+            "interrupted_tools": self.interrupted_tools,
             "denials": self.denials,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
@@ -136,6 +138,8 @@ class Frame:
             parts.append("calls: " + ", ".join(self.tools))
         if self.tool_errors:
             parts.append(f"{self.tool_errors} tool error(s)")
+        if self.interrupted_tools:
+            parts.append(f"{self.interrupted_tools} interrupted call(s)")
         if self.denials:
             parts.append(f"{self.denials} denial(s)")
         if self.input_tokens or self.output_tokens:
@@ -156,6 +160,7 @@ class _Turn:
     tools: list[str] = field(default_factory=list)
     text: list[str] = field(default_factory=list)
     tool_errors: int = 0
+    interrupted_tools: int = 0
     denials: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
@@ -164,10 +169,11 @@ class _Turn:
         index = int(record.get("index", -1) or -1)
         self.records.append(index)
         kind = str(record.get("type", ""))
-        names, errors, text = _content_blocks(record.get("content"))
+        names, errors, interrupted, text = _content_blocks(record.get("content"))
         self.tools.extend(names)
         self.text.extend(text)
         self.tool_errors += errors
+        self.interrupted_tools += interrupted
         if kind == "denial":
             self.denials += 1
 
@@ -182,6 +188,7 @@ class _Turn:
             label=label,
             tools=tuple(self.tools),
             tool_errors=self.tool_errors,
+            interrupted_tools=self.interrupted_tools,
             denials=self.denials,
             input_tokens=self.input_tokens,
             output_tokens=self.output_tokens,
@@ -215,6 +222,7 @@ class Replay:
             "turns": sum(1 for frame in self.frames if frame.kind == "turn"),
             "tool_calls": sum(len(frame.tools) for frame in self.frames),
             "tool_errors": sum(frame.tool_errors for frame in self.frames),
+            "interrupted_tools": sum(frame.interrupted_tools for frame in self.frames),
             "denials": sum(frame.denials for frame in self.frames),
             "records": sum(len(frame.records) for frame in self.frames),
         }
@@ -226,6 +234,7 @@ class Replay:
         )
         return (
             f"# {counts['turns']} turn(s), {counts['tool_calls']} tool call(s), {counts['tool_errors']} tool error(s), "
+            f"{counts['interrupted_tools']} interrupted call(s), "
             f"{counts['denials']} denial(s), {checkpoints}, result={self.result.get('subtype', '(no result)')}, "
             f"sealed={'yes' if self.sealed else 'NO'}, chain="
             f"{'verified' if self.chain_verified else 'BROKEN' if self.chain_verified is False else 'unsealed'}"
@@ -285,10 +294,17 @@ def _preview(value: Any, limit: int = CONTENT_PREVIEW) -> str:
     return text[:limit] + ("..." if len(text) > limit else "")
 
 
-def _content_blocks(content: Any) -> tuple[list[str], int, list[str]]:
-    """`(tool calls, error count, prose)` from API-shaped content blocks."""
+def _content_blocks(content: Any) -> tuple[list[str], int, int, list[str]]:
+    """`(tool calls, error count, interrupted count, prose)` from API-shaped content blocks.
+
+    A synthetic result - one the runtime synthesised because the turn was cut
+    short - is counted as neither a tool error nor a tool success. The call did
+    not fail; it never ran, and folding it into the error count would read as
+    "the tool broke".
+    """
     calls: list[str] = []
     errors = 0
+    interrupted = 0
     text: list[str] = []
     for block in content or ():
         if not isinstance(block, dict):
@@ -298,13 +314,16 @@ def _content_blocks(content: Any) -> tuple[list[str], int, list[str]]:
         if kind == "tool_use":
             calls.append(f"{block.get('name')} {_preview(block.get('input', {}), INPUT_PREVIEW)}")
         elif kind == "tool_result":
-            errors += 1 if block.get("is_error") else 0
+            if block.get("synthetic"):
+                interrupted += 1
+            else:
+                errors += 1 if block.get("is_error") else 0
             text.append(_preview(block.get("content", ""), INPUT_PREVIEW))
         elif kind == "text":
             text.append(str(block.get("text", "")))
         else:
             text.append(_preview(block, INPUT_PREVIEW))
-    return calls, errors, [piece for piece in text if piece.strip()]
+    return calls, errors, interrupted, [piece for piece in text if piece.strip()]
 
 
 def _usage_tokens(record: Mapping[str, Any]) -> tuple[int, int]:
@@ -468,7 +487,7 @@ def build_replay(
             continue
         if kind == "user_prompt":
             close_turn()
-            _calls, errors, text = _content_blocks(record.get("content"))
+            _calls, errors, interrupted, text = _content_blocks(record.get("content"))
             emit(
                 Frame(
                     index=len(frames) + 1,
@@ -476,6 +495,7 @@ def build_replay(
                     records=(index,),
                     label="prompt: " + (_preview(" ".join(text)) if text else "(empty)"),
                     tool_errors=errors,
+                    interrupted_tools=interrupted,
                 )
             )
             continue
@@ -483,10 +503,11 @@ def build_replay(
             close_turn()
             turn_number += 1
             current = _Turn(started_at=index, number=turn_number, agent=agent)
-            calls, errors, text = _content_blocks(record.get("content"))
+            calls, errors, interrupted, text = _content_blocks(record.get("content"))
             current.tools.extend(calls)
             current.text.extend(text)
             current.tool_errors += errors
+            current.interrupted_tools += interrupted
             current.input_tokens, current.output_tokens = _usage_tokens(record)
             continue
         if current is not None and kind in _TURN_ATTACHMENTS:

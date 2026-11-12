@@ -760,6 +760,10 @@ class _RunState:
     result: ResultMessage | None = None
     stop_blocks: int = 0
     resumed_from: dict[str, Any] | None = None
+    #: What the shutdown unwind pass did to the resumed history: the resume
+    #: classification (``clean`` / ``interrupted_turn``) and the synthetic
+    #: results it produced. None until a run resumes.
+    resume_unwind: Any = None
     session_end_fired: bool = False
     #: True when the run ended before it ever owned the session file. Nothing may be
     #: written to a transcript this run does not hold, and no SessionEnd may fire for a
@@ -1778,6 +1782,15 @@ class AgentRuntime:
                 "transcript_digest": checkpoint.transcript_digest[:12],
                 "forked": bool(self.config.parent_session),
             }
+        # The shutdown unwind pass runs last, on whatever history the resume
+        # kept: a tool_use that never got a tool_result is the signature of a
+        # turn that was killed mid-flight, and the provider would reject the
+        # next request over it. Every such call gets a synthesised, explicitly
+        # interrupted result - never a success, never a tool call that ran.
+        if resume:
+            from shutdown_unwind import unwind
+
+            state.transcript, state.resume_unwind = unwind(state.transcript)
         self._pending_state = state
         self._last_report = None
         # A subagent's run hangs off the span its parent opened for it, so the
@@ -1867,6 +1880,14 @@ class AgentRuntime:
         init = SystemMessage(subtype="init", content=f"runtime ready: {self.provider_name}/{config.model}", data=init_data)
         self.sessions.record_system(init, agent=config.agent)
         yield init
+
+        # The synthetic results are written to the transcript, not just held in
+        # memory: a reader of this file has to see that the parent's last turn
+        # was cut short and that the results it carries were synthesised. The
+        # record is a tool_result turn, marked ``synthetic``, and it is not a
+        # tool call - so it never appears in the run's tool-call reports.
+        if state.resume_unwind is not None and state.resume_unwind.count:
+            self._record_synthetic_results(state)
 
         if (yield from self._open_session(state, prompt)):
             return
@@ -2069,6 +2090,12 @@ class AgentRuntime:
             init_data["verification_checks"] = len(config.verification_commands)
         if state.resumed_from is not None:
             init_data["resumed_from"] = state.resumed_from
+        if state.resume_unwind is not None:
+            # The classification is a fact about the *parent's* last turn, not
+            # about this one: an auditor reading this transcript has to be able
+            # to tell "the parent finished its turn" from "the parent was
+            # killed mid-turn and its calls were unwound".
+            init_data["resume_unwind"] = state.resume_unwind.as_dict()
         if config.parent_session and state.resumed_from is None:
             init_data["resumed_from"] = {"parent_session": config.parent_session, "checkpoint_record": None, "forked": True}
         if config.checkpoint_turns:
@@ -4133,6 +4160,22 @@ class AgentRuntime:
             phases.complete_execution(effect_id, status="completed")
         return result
 
+    def _record_synthetic_results(self, state: _RunState) -> None:
+        """Write the unwind's synthetic results into this run's transcript.
+
+        They are ordinary ``tool_result`` records marked ``synthetic`` - the
+        same shape a real result has, so a reader does not need a second
+        vocabulary - but the marker is what tells them apart. Nothing here
+        counts as a tool call: the calls never ran.
+        """
+        from shutdown_unwind import synthetic_result_blocks
+
+        blocks = synthetic_result_blocks(state.transcript)
+        if not blocks:
+            return
+        message = UserMessage(content=blocks, is_meta=True, meta_reason="shutdown unwind")
+        self._record_tool_message(message)
+
     def _record_tool_message(self, message: UserMessage) -> None:
         """Write the tool_result turn, optionally without output bodies.
 
@@ -4145,7 +4188,22 @@ class AgentRuntime:
             text = block.text()
             if not self.config.record_tool_output_in_session:
                 text = f"[tool output omitted by configuration: {len(text)} chars]"
-            blocks.append({"type": "tool_result", "tool_use_id": block.tool_use_id, "content": text, "is_error": block.is_error})
+            record = {
+                "type": "tool_result",
+                "tool_use_id": block.tool_use_id,
+                "content": text,
+                "is_error": block.is_error,
+            }
+            # The transcript is the audit record, so it keeps the two runtime-only
+            # fields the wire payload drops: the denial kind (why this call has no
+            # output) and the synthetic marker (that the runtime produced this
+            # result rather than a tool). Without them a resumed transcript could
+            # not tell an interrupted call from a refusal.
+            if block.tool_denial_kind:
+                record["tool_denial_kind"] = block.tool_denial_kind
+            if block.synthetic:
+                record["synthetic"] = True
+            blocks.append(record)
         self.sessions.append(
             "tool_result",
             {"agent": self.config.agent, "role": "user", "content": blocks, "is_meta": message.is_meta},

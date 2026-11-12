@@ -1289,6 +1289,7 @@ py-modules = [
     "sessions",
     "shutdown",
     "shutdownability",
+    "shutdown_unwind",
     "sidecar_client",
     "siem",
     "signed_receipt_reflux",

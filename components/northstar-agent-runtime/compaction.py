@@ -165,7 +165,14 @@ def extractive_summary(messages: Sequence[Any], *, max_chars: int = 4000, snippe
             if text:
                 lines.append(f"- user: {_clip(text, snippet_chars)}")
             for result in message.tool_results:
-                flag = "error" if result.is_error else "ok"
+                # A synthetic result is not a success and not a tool failure: it
+                # is the record of a call that never ran. Summarising it as "ok"
+                # would tell the next turn the work happened, which is the one
+                # thing a synthesised result must never do.
+                if result.synthetic:
+                    flag = "interrupted"
+                else:
+                    flag = "error" if result.is_error else "ok"
                 lines.append(f"- tool_result[{flag}]: {_clip_tool_result(result.text(), snippet_chars, result.provenance)}")
             continue
         if isinstance(message, AssistantMessage):
