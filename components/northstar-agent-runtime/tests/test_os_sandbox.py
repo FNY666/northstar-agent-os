@@ -189,7 +189,7 @@ class OsSandboxProbeTests(unittest.TestCase):
     def test_bwrap_feature_capabilities_require_successful_child_probes(self):
         from tools import os_sandbox
 
-        ok = subprocess.CompletedProcess([], 0, "", "")
+        ok = subprocess.CompletedProcess([], 0, "bubblewrap 0.12.0\n", "")
         failed = subprocess.CompletedProcess([], 1, "", "kernel rejected filter")
         with patch.object(os_sandbox.subprocess, "run", return_value=ok), patch.object(
             os_sandbox, "_probe_bwrap_feature", side_effect=[ok, failed]
@@ -200,6 +200,37 @@ class OsSandboxProbeTests(unittest.TestCase):
         self.assertFalse(caps.bwrap_seccomp)
         self.assertIn("kernel rejected filter", caps.bwrap_seccomp_detail)
         self.assertEqual(feature_probe.call_count, 2)
+
+    def test_bwrap_versions_below_security_floor_are_not_usable(self):
+        from tools import os_sandbox
+
+        old_version = subprocess.CompletedProcess([], 0, "bubblewrap 0.11.2\n", "")
+        with patch.object(os_sandbox.subprocess, "run", return_value=old_version) as run, patch.object(
+            os_sandbox, "_probe_bwrap_feature"
+        ) as feature_probe:
+            caps = probe_capabilities(force=True, bwrap_bin="/fake/bwrap")
+        self.assertFalse(caps.bwrap_usable)
+        self.assertEqual(caps.preferred, "process")
+        self.assertIn("0.11.2", caps.bwrap_detail)
+        self.assertIn("0.12.0", caps.bwrap_detail)
+        self.assertIn("CVE-2026-87766", caps.bwrap_detail)
+        run.assert_called_once()
+        feature_probe.assert_not_called()
+
+    def test_bwrap_unknown_version_fails_closed(self):
+        from tools import os_sandbox
+
+        unknown = subprocess.CompletedProcess([], 0, "bubblewrap development build\n", "")
+        with patch.object(os_sandbox.subprocess, "run", return_value=unknown) as run, patch.object(
+            os_sandbox, "_probe_bwrap_feature"
+        ) as feature_probe:
+            caps = probe_capabilities(force=True, bwrap_bin="/fake/bwrap")
+        self.assertFalse(caps.bwrap_usable)
+        self.assertEqual(caps.preferred, "process")
+        self.assertIn("unrecognized version", caps.bwrap_detail)
+        self.assertIn("0.12.0", caps.bwrap_detail)
+        run.assert_called_once()
+        feature_probe.assert_not_called()
 
     def test_bwrap_capdrop_refuses_before_spawn_when_live_probe_failed(self):
         from tools import os_sandbox
