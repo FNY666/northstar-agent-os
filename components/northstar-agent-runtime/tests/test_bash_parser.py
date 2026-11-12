@@ -526,3 +526,188 @@ def test_determinism_across_fresh_instances():
 def test_parser_module_self_check():
     assert bp.stdlib_only() is True
     assert bp.BASH_PARSER_VERSION == "bash-parser.v1"
+
+
+# ---------------------------------------------------------------------------
+# Segment 7: wrapper unwrapping and the two caps
+# ---------------------------------------------------------------------------
+# A depth cap on its own is a sieve: a wide command slips under it, and a
+# semicolon chain never enters an unwrap loop at all.  The parser therefore
+# enforces two caps at the same time, and measures the argv budget *after*
+# unwrapping -- stripping a wrapper changes the count, so a budget measured
+# before the unwrap measures the wrong command.  Anything that cannot be
+# resolved is denied, never passed.
+
+# --- the core regression: `sudo rm $VAR` ---------------------------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "sudo rm $VAR",
+        "sudo rm ${VAR}",
+        "sudo rm x$VAR",
+        "sudo rm $A $B",
+        "sudo rm $VAR | cat",
+        "sudo -u root rm $VAR",
+        "sudo --user root rm $VAR",
+        "sudo -uroot rm $VAR",
+        "sudo -- rm $VAR",
+        "sudo env FOO=1 rm $VAR",
+        "sudo nohup rm $VAR",
+        "doas rm $VAR",
+        "nice rm $VAR",
+        "nice -n 10 rm $VAR",
+        "nohup rm $VAR",
+        "stdbuf -o0 rm $VAR",
+        "time rm $VAR",
+        "timeout 5 rm $VAR",
+        "env rm $VAR",
+        "env FOO=1 rm $VAR",
+    ],
+)
+def test_wrapped_dangerous_command_with_expansion_denied(command):
+    verdict = bp.check_command(command)
+    assert verdict.kind is DENY, (command, verdict)
+    assert verdict.node == "unquoted_expansion", (command, verdict)
+    assert verdict.reason
+
+
+def test_sudo_rm_variable_expansion_is_denied():
+    # The named regression from the brief, spelled out on its own.
+    verdict = bp.check_command("sudo rm $VAR")
+    assert verdict.kind is DENY
+    assert verdict.node == "unquoted_expansion"
+    assert "rm" in verdict.reason
+
+
+def test_wrapper_depth_cap_denies_over_nesting():
+    depth = bp.MAX_WRAPPER_DEPTH
+    command = "sudo " * (depth + 1) + "ls"
+    verdict = bp.check_command(command)
+    assert verdict.kind is DENY, (command, verdict)
+    assert verdict.node == "wrapper_depth", (command, verdict)
+    assert str(depth) in verdict.reason
+
+
+def test_wrapper_depth_at_cap_is_allowed():
+    command = "sudo " * bp.MAX_WRAPPER_DEPTH + "ls"
+    verdict = bp.check_command(command)
+    assert verdict.kind is ALLOW, (command, verdict)
+
+
+def test_argv_budget_cap_denies_wide_command():
+    command = "echo " + "a " * (bp.MAX_ARGV_BUDGET + 50)
+    verdict = bp.check_command(command)
+    assert verdict.kind is DENY, (command, verdict)
+    assert verdict.node == "argv_budget", (command, verdict)
+
+
+def test_argv_budget_cap_denies_wide_semicolon_chain():
+    # A semicolon chain never enters an unwrap loop, so the depth cap alone
+    # cannot catch it; the argv budget must.
+    command = "; ".join(["echo x"] * (bp.MAX_ARGV_BUDGET // 2 + 10))
+    verdict = bp.check_command(command)
+    assert verdict.kind is DENY, (command, verdict)
+    assert verdict.node == "argv_budget", (command, verdict)
+
+
+def test_argv_budget_is_measured_after_unwrap():
+    # Stripping the wrapper changes the count.  A budget measured before the
+    # unwrap would measure "sudo rm $VAR" (2 words) instead of the command
+    # that really runs; the resolved budget must be charged per resolved word.
+    verdict = bp.check_command("sudo " + "echo " + "a " * (bp.MAX_ARGV_BUDGET + 50))
+    assert verdict.kind is DENY, (command, verdict)
+    assert verdict.node == "argv_budget", (command, verdict)
+
+
+def test_argv_budget_charges_unresolved_word_at_max_width():
+    # One unquoted expansion can word-split into many runtime words, so it is
+    # charged the maximum width rather than one word.
+    command = "echo " + " $VAR" * (bp.MAX_ARGV_BUDGET // 10)
+    verdict = bp.check_command(command)
+    assert verdict.kind is DENY, (command, verdict)
+    assert verdict.node == "argv_budget", (command, verdict)
+
+
+def test_wide_command_under_budget_is_allowed():
+    command = "echo " + "a " * (bp.MAX_ARGV_BUDGET // 2)
+    verdict = bp.check_command(command)
+    assert verdict.kind is ALLOW, (command, verdict)
+
+
+# --- unresolvable expansions: deny, never pass ----------------------------
+
+
+@pytest.mark.parametrize(
+    "command,node",
+    [
+        ("sudo $CMD", "unresolved_command"),
+        ("sudo $CMD args", "unresolved_command"),
+        ("sudo ${CMD}", "unresolved_command"),
+        ("sudo -u $USER rm x", "unresolved_wrapper"),
+        ("sudo -$FLAG ls", "unresolved_wrapper"),
+        ("sudo -Z ls", "unresolved_wrapper"),
+        ("sudo --bogus ls", "unresolved_wrapper"),
+        ("sudo -u", "unresolved_wrapper"),
+        ("sudo", "unresolved_wrapper"),
+        ("timeout 5", "unresolved_wrapper"),
+        ("xargs rm", "unresolved_wrapper"),
+        ("env -S ls", "unresolved_wrapper"),
+    ],
+)
+def test_unresolvable_wrapper_is_denied(command, node):
+    verdict = bp.check_command(command)
+    assert verdict.kind is DENY, (command, verdict)
+    assert verdict.node == node, (command, verdict)
+    assert verdict.reason
+
+
+def test_unresolved_is_never_allowed():
+    # "Presume safe" is not an option: every unresolvable shape is a deny.
+    for command in ["sudo $CMD", "sudo -Z ls", "sudo", "xargs rm"]:
+        assert bp.check_command(command).kind is DENY, command
+
+
+# --- allowed side: legitimate commands are unaffected ---------------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "sudo ls",
+        "sudo ls -la",
+        "sudo apt-get install curl",
+        "sudo -u nobody ls",
+        "doas ls",
+        "env ls",
+        "env FOO=bar ls",
+        "nice ls",
+        "nice -n 10 ls",
+        "nohup ls",
+        "stdbuf -o0 ls",
+        "time ls",
+        "timeout 5 ls",
+        "echo hello",
+        "ls -la",
+        "git status --short",
+        "cat README.md",
+        "echo $HOME",
+        "rm \"$VAR\"",
+        "rm file.txt",
+    ],
+)
+def test_legitimate_commands_still_allowed(command):
+    verdict = bp.check_command(command)
+    assert verdict.kind is ALLOW, (command, verdict)
+
+
+def test_caps_are_declared_and_bounded():
+    assert bp.MAX_WRAPPER_DEPTH >= 1
+    assert bp.MAX_ARGV_BUDGET >= 64
+    assert bp.MAX_UNRESOLVED_WORDS >= 1
+
+
+def test_wrapper_table_covers_sudo_family():
+    for wrapper in ["sudo", "doas", "env", "nice", "nohup", "stdbuf", "timeout"]:
+        assert wrapper in bp.UNWRAP_WRAPPERS, wrapper

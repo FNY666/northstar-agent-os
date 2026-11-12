@@ -13,6 +13,8 @@ Design:
 - Pre-parse checks: control characters, Unicode whitespace attacks, zsh dynamic
   expansions, array-subscript arithmetic RCE
 - Resource limits: 50ms timeout, 50K AST node budget
+- Two caps: wrapper nesting depth and a resolved-argv budget, the latter
+  measured after the wrapper layers are stripped
 - Deterministic: same input always gives same verdict
 - Never raises on malformed input: malformed = TooComplex, not a crash
 
@@ -27,6 +29,9 @@ Implementation segments:
 - Segment 3: command lists/pipelines, substitution and subshell Deny (done)
 - Segment 4: loops, conditionals, function definitions, arithmetic, brace and
   zsh expansions, array-subscript arithmetic, variable indirection (done)
+- Segment 7: wrapper unwrapping (sudo and friends) and the two caps --
+  wrapper depth plus a resolved-argv budget measured after the unwrap;
+  anything unresolvable is denied, never passed
 """
 from __future__ import annotations
 
@@ -107,9 +112,14 @@ class _ParseBudget:
 
     deadline: float
     nodes: int = 0
+    argv_words: int = 0
 
     def add_node(self) -> None:
         self.nodes += 1
+
+    def charge_argv(self, words: int) -> None:
+        """Charge *words* against the resolved-argv budget."""
+        self.argv_words += words
 
 
 def _budget_exceeded(budget: _ParseBudget) -> bool:
@@ -175,6 +185,293 @@ _KEYWORD_NODES = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Segment 7: wrapper unwrapping and the two caps
+# ---------------------------------------------------------------------------
+# A depth cap on its own is a sieve: a wide command slips under it, and a
+# semicolon chain never enters an unwrap loop at all.  The parser therefore
+# enforces two caps at the same time:
+#
+#   * MAX_WRAPPER_DEPTH -- nesting depth of the wrapper layers
+#   * MAX_ARGV_BUDGET  -- charged argv words of the whole command
+#
+# The budget is computed *after* unwrapping, because stripping a wrapper
+# changes the count: a budget measured before the unwrap measures the wrong
+# command.  When the command cannot be resolved (unknown wrapper option,
+# unresolved command word, unbounded argument source) the verdict is DENY --
+# never ALLOW, and never a "presume safe" pass.
+
+#: Maximum nesting depth of wrapper layers around a command.
+MAX_WRAPPER_DEPTH = 4
+
+#: Maximum charged argv words for one command (all list elements summed).
+MAX_ARGV_BUDGET = 512
+
+#: Words charged for a word whose runtime shape is unknown: an unquoted
+#: expansion or a glob can turn one parsed word into many runtime words.
+MAX_UNRESOLVED_WORDS = 32
+
+#: Commands that only decorate another command.  They are stripped before any
+#: command-shape check, so the budget measures the command that really runs.
+#: "command" and "exec" are deliberately absent: both are denied builtins.
+#: The set mirrors permissions.py::_SHELL_COMMAND_WRAPPERS.
+UNWRAP_WRAPPERS = frozenset({
+    "sudo", "doas", "env", "nice", "nohup", "stdbuf", "time", "timeout",
+    "xargs",
+})
+
+#: Wrapper options that take no value.
+_WRAPPER_FLAGS = {
+    "sudo": frozenset({
+        "-n", "--non-interactive", "-H", "--set-home", "-b", "--background",
+        "-E", "--preserve-env", "-k", "--remove-timestamp", "-r", "--chroot",
+        "-s", "--shell", "-l", "--login", "-A", "--askpass", "-S", "--stdin",
+        "-v", "--validate", "-V", "--version", "--help",
+    }),
+    "doas": frozenset({
+        "-n", "--non-interactive", "-L", "--loose", "-s", "--shell",
+        "--help", "--version",
+    }),
+    "env": frozenset({
+        "-i", "--ignore-environment", "-0", "--null", "-v", "--debug",
+        "--help", "--version",
+    }),
+    "nice": frozenset({"--help", "--version"}),
+    "nohup": frozenset({"--help", "--version"}),
+    "stdbuf": frozenset({"--help", "--version"}),
+    "time": frozenset({
+        "-p", "--portability", "-q", "--quiet", "-v", "--verbose",
+        "--help", "--version",
+    }),
+    "timeout": frozenset({
+        "-f", "--foreground", "--preserve-status", "-v", "--verbose",
+        "--help", "--version",
+    }),
+    "xargs": frozenset({
+        "-0", "--null", "-r", "--no-run-if-empty", "-t", "--verbose",
+        "--help", "--version",
+    }),
+}
+
+#: Wrapper options that take a value (short letters and long names).
+_WRAPPER_VALUE_OPTIONS = {
+    "sudo": frozenset({
+        "-u", "-g", "-h", "-p", "-C", "-T", "-R", "-D",
+        "--user", "--group", "--host", "--prompt",
+    }),
+    "doas": frozenset({"-u", "--user"}),
+    "env": frozenset({"-u", "--unset", "-C", "--chdir"}),
+    "nice": frozenset({"-n", "--adjustment"}),
+    "nohup": frozenset(),
+    "stdbuf": frozenset({"-i", "-o", "-e"}),
+    "time": frozenset({"-o", "--output", "-f", "--format"}),
+    "timeout": frozenset({"-k", "--kill-after", "-s", "--signal"}),
+    "xargs": frozenset({
+        "-a", "-d", "-E", "-I", "-L", "-n", "-P", "-s", "--arg-file",
+        "--delimiter", "--eof", "--replace", "--max-lines", "--max-args",
+        "--max-procs", "--max-chars",
+    }),
+}
+
+#: Glob metacharacters: a word containing one may expand to many words.
+_GLOB_CHARS = "*?["
+
+#: Wrapper options that run shell source rather than a command; never resolvable.
+_WRAPPER_DENY_OPTIONS = {
+    "env": frozenset({"-S", "--split-string"}),
+}
+
+
+def _is_negative_number(word: str) -> bool:
+    """Return True for option-looking words that are really negative numbers."""
+    body = word[1:]
+    if not body:
+        return False
+    if body[0] in "0123456789":
+        return True
+    return body[0] == "." and body[1:].isdigit()
+
+
+def _classify_wrapper_option(wrapper: str, word: str) -> str:
+    """Classify a wrapper option as ``flag``, ``value`` or ``value-inline``.
+
+    ``value`` means the option consumes the following word, ``value-inline``
+    means the value is attached to the option (``--user=root``, ``-uroot``).
+    An option that is not in the wrapper's known tables is ``unknown``: we
+    cannot tell whether it takes a value, so the command word cannot be
+    resolved.
+    """
+    flags = _WRAPPER_FLAGS.get(wrapper, frozenset())
+    value_opts = _WRAPPER_VALUE_OPTIONS.get(wrapper, frozenset())
+    if word.startswith("--"):
+        name = word.split("=", 1)[0]
+        if name in value_opts:
+            return "value-inline" if "=" in word else "value"
+        if name in flags:
+            return "flag"
+        return "unknown"
+    body = word[1:]
+    for position, ch in enumerate(body):
+        option = "-" + ch
+        if option in value_opts:
+            return "value-inline" if position + 1 < len(body) else "value"
+        if option in flags:
+            continue
+        return "unknown"
+    return "flag"
+
+
+def _strip_wrapper(
+    wrapper: str, rest: list[tuple[str, _Token]]
+) -> Optional[list[tuple[str, _Token]]]:
+    """Return the words that follow *wrapper*'s own options and its command.
+
+    ``rest`` is the word list after the wrapper name.  Returns the words
+    that follow the wrapped command word, or None when the wrapper is
+    itself the command (``env`` with no target).  Raises _Deny when the
+    wrapper cannot be resolved to a single command word.
+    """
+    deny_opts = _WRAPPER_DENY_OPTIONS.get(wrapper, frozenset())
+    index = 0
+    total = len(rest)
+    while index < total:
+        word, token = rest[index]
+        if word == "--":
+            index += 1
+            break
+        if word.startswith("-") and len(word) > 1:
+            if wrapper == "nice" and _is_negative_number(word):
+                index += 1
+                continue
+            if not _is_negative_number(word):
+                if token.unquoted_expansion or "$" in word:
+                    raise _Deny(
+                        "unresolved_wrapper",
+                        f"unresolved option {word!r} in {wrapper}",
+                    )
+                if token.has_glob:
+                    raise _Deny(
+                        "unresolved_wrapper",
+                        f"unresolved option {word!r} in {wrapper}",
+                    )
+                if word in deny_opts or word.split("=", 1)[0] in deny_opts:
+                    raise _Deny(
+                        "unresolved_wrapper",
+                        f"option {word!r} in {wrapper} runs shell source",
+                    )
+                kind = _classify_wrapper_option(wrapper, word)
+                if kind == "unknown":
+                    raise _Deny(
+                        "unresolved_wrapper",
+                        f"unknown option {word!r} in {wrapper}",
+                    )
+                if kind == "value":
+                    index += 1
+                    if index >= total:
+                        raise _Deny(
+                            "unresolved_wrapper",
+                            f"option {word!r} in {wrapper} has no value",
+                        )
+                    value_word, value_token = rest[index]
+                    if value_token.unquoted_expansion or "$" in value_word:
+                        raise _Deny(
+                            "unresolved_wrapper",
+                            f"unresolved value {value_word!r} for option "
+                            f"{word!r} in {wrapper}",
+                        )
+                    if value_token.has_glob:
+                        raise _Deny(
+                            "unresolved_wrapper",
+                            f"unresolved value {value_word!r} for option "
+                            f"{word!r} in {wrapper}",
+                        )
+                index += 1
+                continue
+        break
+
+    # Leading assignments set environment variables, they are not the command.
+    while index < total and rest[index][1].assign_name is not None:
+        index += 1
+
+    if wrapper == "timeout":
+        # The first positional argument of timeout is always the duration.
+        if index >= total:
+            raise _Deny("unresolved_wrapper", "timeout without a command")
+        index += 1
+    if wrapper == "xargs":
+        # xargs appends an unbounded number of words read from stdin, so the
+        # final argv is not bounded by what the command text shows.
+        raise _Deny(
+            "unresolved_wrapper",
+            "xargs appends an unbounded number of words from stdin",
+        )
+    if index >= total:
+        if wrapper == "env":
+            # `env` with no target only prints the environment.
+            return None
+        raise _Deny("unresolved_wrapper", f"{wrapper} without a command")
+    return rest[index:]
+
+
+def _unwrap_command(
+    argv: list[str], argv_tokens: list[_Token]
+) -> tuple[list[str], list[_Token], int]:
+    """Strip wrapper layers and return the command that really runs.
+
+    Returns ``(argv, tokens, depth)`` for the resolved command.  Raises
+    _Deny when the wrapper stack is deeper than the cap or when the command
+    word cannot be resolved.
+    """
+    words = list(zip(argv, argv_tokens))
+    depth = 0
+    while words:
+        head_value, head_token = words[0]
+        if head_value not in UNWRAP_WRAPPERS:
+            break
+        depth += 1
+        if depth > MAX_WRAPPER_DEPTH:
+            raise _Deny(
+                "wrapper_depth",
+                f"wrapper nesting depth {depth} exceeds cap {MAX_WRAPPER_DEPTH}",
+            )
+        tail = _strip_wrapper(head_value, words[1:])
+        if tail is None:
+            words = [(head_value, head_token)]
+            break
+        words = tail
+    if not words:
+        raise _Deny("unresolved_command", "no command word after unwrapping")
+    command_value = words[0][0]
+    command_token = words[0][1]
+    if command_token.unquoted_expansion or "$" in command_value:
+        raise _Deny(
+            "unresolved_command",
+            f"command word {command_value!r} contains an expansion",
+        )
+    if command_token.has_glob:
+        raise _Deny(
+            "unresolved_command",
+            f"command word {command_value!r} contains a glob",
+        )
+    resolved_argv = [value for value, _ in words]
+    resolved_tokens = [token for _, token in words]
+    return resolved_argv, resolved_tokens, depth
+
+
+def _charge_word(token: _Token) -> int:
+    """Charge the argv budget for one resolved word.
+
+    A word whose runtime shape is unknown (an unquoted expansion or a glob)
+    is charged the maximum width it could expand to, so a wide command
+    hidden behind one expansion cannot slip under the cap.
+    """
+    if token.unquoted_expansion:
+        return MAX_UNRESOLVED_WORDS
+    if token.has_glob:
+        return MAX_UNRESOLVED_WORDS
+    return 1
+
+
 def _is_name(text: str) -> bool:
     """Return True when *text* is a plain ASCII shell identifier."""
     if not text:
@@ -221,6 +518,8 @@ class _Token:
     word, or None when the word is not in assignment form.
     ``unquoted_expansion`` is True when the word contains a variable expansion
     that was not inside quotes (word-splitting applies at runtime).
+    ``has_glob`` is True when the word contains an unquoted glob metacharacter,
+    so it may expand to many runtime words.
     """
 
     kind: str
@@ -228,6 +527,7 @@ class _Token:
     plain: bool = True
     assign_name: Optional[str] = None
     unquoted_expansion: bool = False
+    has_glob: bool = False
 
 
 def _scan_dollar(text: str, i: int, buf: list[str]) -> int:
@@ -444,6 +744,7 @@ def _tokenize(text: str, budget: _ParseBudget) -> list[_Token]:
         plain = True
         prefix_literal = True
         has_unquoted_expansion = False
+        has_glob = False
         eq_at: Optional[int] = None
         while i < n:
             ch = text[i]
@@ -487,6 +788,8 @@ def _tokenize(text: str, budget: _ParseBudget) -> list[_Token]:
                 has_unquoted_expansion = True
                 i = _scan_dollar(text, i, buf)
                 continue
+            if ch in _GLOB_CHARS:
+                has_glob = True
             if ch == "=" and eq_at is None and prefix_literal:
                 eq_at = len(buf)
             if ch == "{":
@@ -538,6 +841,7 @@ def _tokenize(text: str, budget: _ParseBudget) -> list[_Token]:
                 plain=plain,
                 assign_name=assign_name,
                 unquoted_expansion=has_unquoted_expansion,
+                has_glob=has_glob,
             )
         )
         budget.add_node()
@@ -601,17 +905,43 @@ def _parse_simple_command(tokens: list[_Token], budget: _ParseBudget) -> Verdict
             reason=f"dangerous builtin {argv[0]!r}",
         )
 
+    # Segment 7: unwrap wrapper layers *before* any command-shape check, so
+    # the budget measures the command that really runs.  `sudo rm $VAR` has
+    # argv[0] == "sudo", which no argv[0] check can see.
+    resolved_argv, resolved_tokens, _depth = _unwrap_command(argv, argv_tokens)
+
+    # A dangerous builtin hidden behind a wrapper is still a dangerous
+    # builtin: `sudo eval x` must not slip through the argv[0] check.
+    if resolved_argv and resolved_argv[0] in DANGEROUS_BUILTINS:
+        return Verdict(
+            VerdictKind.DENY,
+            node=resolved_argv[0],
+            reason=f"dangerous builtin {resolved_argv[0]!r}",
+        )
+
+    # Charge the resolved argv against the budget.  A word whose runtime
+    # shape is unknown is charged its maximum width, so a wide command
+    # hidden behind one expansion cannot slip under the cap.
+    charged = sum(_charge_word(token) for token in resolved_tokens)
+    budget.charge_argv(charged)
+    if budget.argv_words > MAX_ARGV_BUDGET:
+        raise _Deny(
+            "argv_budget",
+            f"resolved argv budget {budget.argv_words} exceeds cap "
+            f"{MAX_ARGV_BUDGET}",
+        )
+
     # Check for unquoted variable expansion in arguments to dangerous commands.
     # argv[0] is the command word; argv[1:] are the arguments.
-    if argv and argv[0] in DANGEROUS_COMMANDS:
-        for arg_tok in argv_tokens[1:]:
+    if resolved_argv and resolved_argv[0] in DANGEROUS_COMMANDS:
+        for arg_tok in resolved_tokens[1:]:
             if arg_tok.unquoted_expansion:
                 return Verdict(
                     VerdictKind.DENY,
                     node="unquoted_expansion",
                     reason=(
                         "unquoted variable expansion in argument to "
-                        f"{argv[0]!r}: {arg_tok.value!r}"
+                        f"{resolved_argv[0]!r}: {arg_tok.value!r}"
                     ),
                 )
 
