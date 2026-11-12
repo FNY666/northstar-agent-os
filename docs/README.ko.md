@@ -6,6 +6,8 @@
 
 **한 문장으로:** Northstar는 작고 아직 개발 중인 agent 런타임입니다 — 단일 진입점(`northstar agent`), 보이는 경계, 감사 가능성, 복구 가능한 실행. 커널은 명시적인 서브시스템(runtime, contract, host, durable, sidecar, interop)으로 구성됩니다. 완성된 멀티 에이전트 플랫폼이 **아닙니다**(호스티드 클라우드 없음, 병렬 플릿 없음). 오늘 제공되는 것은 에이전트를 안심하고 돌리기 위한 실용적인 기반입니다: **기본 거부 샌드박스 `Shell`**(가능하면 bubblewrap, 아니면 정직한 프로세스 폴백), 그리고 제한된 로컬 worker 어댑터인 Northstar Codex Sidecar.
 
+저장된 세션에서는 SHA-256 검증을 통과한 `SKILL.md`를 성공적으로 읽으면 감사 이벤트 `skill_loaded`로 기록합니다. 이 기록에는 경로와 다이제스트만 포함되고 지시문 본문은 포함되지 않습니다.
+
 > English is the canonical project entry. Translations mirror its scope and security claims; update them when the canonical README changes.
 
 ## 무엇인가요

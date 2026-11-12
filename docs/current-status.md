@@ -15,7 +15,7 @@
 
 ```text
 既有基线：Python 共收集 1,636 项（含文档测试），其中 runtime 跳过 5 项。
-本轮最终验证将在文档与实现更新后重新记录；收集数不等于通过数。
+2026-10-21 候选分支 `feat/audit-verified-skill-loads-2026-10-21` 的 GitHub Actions [`Northstar tests`](https://github.com/FNY666/northstar-agent-os/actions/runs/39695887976) 全部通过：runtime `python -m pytest -q tests` 为 28,464 passed、14 skipped、710 subtests passed；guard verification 为 18,707 passed、14 skipped；文档、sidecar、TypeScript、CLI、打包和 benchmark smoke 均通过。该结果来自 Ubuntu/Python 3.12 CI；本轮环境没有本地 shell runner。收集数不等于通过数。
 TypeScript SDK：57 项 Node 测试通过
 版本：0.1.0.dev0（五个 pip 组件与 runtime _version.py 对齐）
 本轮操作：仅本地开发，未创建 tag、Release 或上传包；这不是远端发布历史查询。

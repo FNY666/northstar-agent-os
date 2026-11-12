@@ -65,7 +65,13 @@ session under the `--session-dir` directory — `session_start`, `user_prompt`,
 `assistant`, `tool_result`, `hook`, `denial`, `compact_boundary`,
 `informational`, `subagent`, `result`, `session_end` — written before the run
 reports success, so a crash still leaves the decision trail. The CLI reads it
-back read-only:
+back read-only. Successful reads of a pinned root `SKILL.md` add an
+`informational` record with subtype `skill_loaded` after result screening.
+The record contains the skill name, relative path, SHA-256 digest, tool-call ID,
+turn index, and truncation/sanitization flags; it never copies skill instructions.
+It is audit-only and is omitted when a transcript is reconstructed for resume.
+Find these records with
+`python3 -m cli sessions search skill_loaded --type informational --session-dir DIR`.
 
 - `python3 -m cli sessions list --session-dir DIR` — sessions present;
 - `python3 -m cli sessions show <id> --session-dir DIR` — human timeline;

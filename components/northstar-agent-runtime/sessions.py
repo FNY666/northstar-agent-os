@@ -714,6 +714,10 @@ def transcript_from_records(records: Sequence[dict[str, Any]]) -> list[Any]:
             )
         elif kind == "informational":
             data = record.get("data") or {}
+            if record.get("subtype") == "skill_loaded":
+                # This is an audit-only event. Do not insert runtime metadata
+                # into the resumed provider context.
+                continue
             if isinstance(data, dict) and data.get("reason") == "session_lease_lost":
                 # This is an audit warning emitted outside the transcript; it was
                 # never part of the in-memory provider context.

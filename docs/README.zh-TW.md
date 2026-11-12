@@ -8,6 +8,8 @@
 
 **一句話說明：** Northstar 是一個小型的、還在打磨中的 agent 運行環境：統一入口 `northstar agent`、可見邊界、可審計、可恢復。內核由 runtime / contract / host / durable / sidecar / interop 等子系統組成。**不是**已經完成的多智能體平台（無託管雲、無並行艦隊）；今天交付的是實實在在能用的基礎件：**預設拒絕的沙箱 `Shell`**（有 bubblewrap 時 OS 隔離，否則誠實的 process 回退），以及 **Northstar Codex Sidecar**——一個受限的本地工作器適配器。
 
+保存的工作階段會將成功讀取且通過 SHA-256 驗證的 `SKILL.md` 記為 `skill_loaded` 稽核事件；記錄包含路徑和摘要，不包含技能指令本文。
+
 > English is the canonical project entry. Translations mirror its scope and security claims; update them when the canonical README changes.
 
 ## 它是什麼
