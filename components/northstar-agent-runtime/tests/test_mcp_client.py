@@ -469,11 +469,76 @@ class ClientTests(unittest.TestCase):
             client.connect()
             result = client.call_tool("echo", {"text": "x"})
             self.assertTrue(result.is_error)
-            self.assertIn("timed out", result.text())
+            self.assertIn("outcome is unknown", result.text())
+            self.assertTrue(client.quarantined)
+            self.assertTrue(client.distrusted)
+            self.assertFalse(client.connected, "an ambiguous call timeout must stop the server process")
         finally:
             os.environ.clear()
             os.environ.update(saved)
             client.close()
+
+    def test_committed_effect_timeout_blocks_replay_until_explicit_readmission(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            effect_file = root / "effects.log"
+            audit_records = []
+
+            def make_client(env):
+                return McpStdioClient(
+                    "demo",
+                    ["python3", str(FIXTURE)],
+                    timeout_ms=FAST_TIMEOUT_MS,
+                    protocol="legacy",
+                    audit=audit_records.append,
+                    workspace_root=str(root),
+                    env=env,
+                    seccomp="off",
+                    network="allowed",
+                )
+
+            client = make_client({
+                "MCP_EFFECT_FILE": str(effect_file),
+                "MCP_EFFECT_THEN_SLOW": "1",
+            })
+            client.connect()
+            try:
+                result = client.call_tool("echo", {"text": "mutate"})
+                self.assertTrue(result.is_error)
+                self.assertIn("external outcome is unknown", result.text())
+                self.assertIn("reconcile downstream state", result.text())
+                self.assertEqual(effect_file.read_text(encoding="utf-8").splitlines(), ["echo:mutate"])
+                self.assertTrue(client.quarantined)
+                self.assertTrue(client.distrusted)
+
+                retry = client.call_tool("echo", {"text": "mutate"})
+                self.assertTrue(retry.is_error)
+                self.assertIn("distrusted", retry.text())
+                self.assertEqual(effect_file.read_text(encoding="utf-8").splitlines(), ["echo:mutate"])
+
+                events = [event for event in audit_records if event.get("type") == "mcp.call_outcome_unknown"]
+                self.assertEqual(len(events), 1)
+                self.assertEqual(events[0]["tool"], "echo")
+                self.assertEqual(events[0]["outcome"], "unknown")
+                self.assertTrue(events[0]["distrusted"])
+            finally:
+                client.close()
+
+            restarted = make_client({"MCP_EFFECT_FILE": str(effect_file)})
+            restarted.connect()
+            try:
+                self.assertTrue(restarted.distrusted, "ambiguous effects must remain blocked across client restarts")
+                retry_after_restart = restarted.call_tool("echo", {"text": "mutate"})
+                self.assertTrue(retry_after_restart.is_error)
+                self.assertIn("distrusted", retry_after_restart.text())
+                self.assertEqual(effect_file.read_text(encoding="utf-8").splitlines(), ["echo:mutate"])
+
+                restarted.close()
+                restarted.re_admit()
+                restarted.connect()
+                self.assertFalse(restarted.distrusted)
+            finally:
+                restarted.close()
 
     def test_close_terminates_the_server_process_group(self):
         client = self.connect()
