@@ -210,7 +210,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "geocoder", "geofence_manager", "glba", "goal_misgeneralization",
         "gossip_announcer", "gossip_protocol", "governance", "governance_bench", "governed_action_runner",
         "govservices_agents", "gpai", "graceful_shutdown", "gradient_hacking",
-        "graph_database", "graph_db", "graphql_gateway", "grc",
+        "graph_database", "graph_db", "graphql_gateway", "grant_pin_ledger", "grc",
         "greenwash", "grid_agents", "grpc_gateway", "grpc_interface",
         "gset", "harness_binding", "hash_chain", "health_checker",
         "healthcare_agents", "helm_chart", "herd_gate", "hinted_handoff",

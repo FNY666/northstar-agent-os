@@ -100,6 +100,29 @@ except Exception:  # pragma: no cover - fallback when canonical_json is absent
         return json.dumps(obj, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
+def _load_grant_pin_ledger() -> Any:
+    """Load sibling ``grant_pin_ledger`` by path (component convention).
+
+    The pin rule lives in one place (``grant_pin_ledger``); the ledger
+    loads it lazily so the module keeps its stdlib-only import profile.
+    """
+    import importlib.util
+    import sys
+    from pathlib import Path
+
+    module = sys.modules.get("grant_pin_ledger")
+    if module is not None:
+        return module
+    path = Path(__file__).resolve().parent / "grant_pin_ledger.py"
+    spec = importlib.util.spec_from_file_location("grant_pin_ledger", str(path))
+    if spec is None or spec.loader is None:  # pragma: no cover - defensive
+        raise ImportError("grant_pin_ledger not loadable")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["grant_pin_ledger"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 #: Module version pin.
 FORWARD_SEAL_LEDGER_VERSION = "forward-seal-ledger.v1"
 
@@ -362,6 +385,62 @@ class ForwardSealLedger:
         with self._lock:
             return self._take_checkpoint_locked()
 
+    def append_grant(
+        self,
+        *,
+        grant_id: str,
+        version: Optional[str] = None,
+        counter: Optional[int] = None,
+        intent: str = "grant-dispatch",
+        action: str = "dispatch",
+        subject: str = "",
+        inputs_digest: str = "",
+        logic_digest: str = "",
+        execution_digest: str = "",
+        outcome: str = "executed",
+    ) -> SealedEvent:
+        """Seal one grant event, enforcing the conclusion-52 pin rule.
+
+        The grant id is NOT NULL here: an empty (or missing) grant id is
+        refused **before** the event is built, so the seal fails and no
+        record lands -- a refused seal must not leave an unnamed hole in
+        the chain.
+
+        The version and the counter are nullable: a grant that names its
+        grant but cannot be placed in the version/counter order still
+        lands, with its outcome recorded as ``outcome_unknown`` (the
+        dispatch happened, the grant could not be resolved) and the pin
+        preserved verbatim in the ``authorization`` field.
+
+        The three-field pin is rendered into ``authorization`` as
+        ``grant:<id>;version=<v|null>;counter=<n|null>``, so a sealed
+        record still says what it was asking about.
+        """
+        pins = _load_grant_pin_ledger()
+        try:
+            pin = pins.GrantPin(
+                grant_id=grant_id if isinstance(grant_id, str) else "",
+                version=version,
+                counter=counter,
+            )
+            sealed_outcome = pins.resolve_seal_outcome(pin, outcome)
+        except pins.MissingGrantIdError as error:
+            # Refuse the seal: no record lands.
+            raise ForwardSealError(str(error)) from error
+        except pins.GrantPinError as error:
+            raise ForwardSealError(f"grant pin is malformed: {error}") from error
+        null_pin = _sha256_hex(b"")
+        return self.append(
+            intent=intent,
+            action=action,
+            subject=subject or "unknown",
+            authorization=pin.render(),
+            inputs_digest=inputs_digest or null_pin,
+            logic_digest=logic_digest or null_pin,
+            execution_digest=execution_digest or null_pin,
+            outcome=sealed_outcome,
+        )
+
     def _take_checkpoint_locked(self) -> Checkpoint:
         if not self._records:
             raise ForwardSealError("cannot checkpoint an empty ledger")
@@ -528,9 +607,11 @@ def stdlib_only() -> bool:
         "dataclasses",
         "hashlib",
         "hmac",
+        "importlib",
         "json",
         "os",
         "pathlib",
+        "sys",
         "threading",
         "typing",
         "canonical_json",

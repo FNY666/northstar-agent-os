@@ -715,6 +715,7 @@ py-modules = [
     "graph_database",
     "graph_db",
     "graphql_gateway",
+    "grant_pin_ledger",
     "grc",
     "greenwash",
     "grid_agents",
