@@ -1179,6 +1179,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         return _run(args)
     except ValueError as error:
+        # A store that refuses a resume gets its own line: the command was
+        # well-formed, and the *stored history* is what cannot be trusted. It
+        # must not read as a typo, and it must never fall through to "run it
+        # anyway as if the session were clean".
+        from sessions import ResumeRefusedError
+
+        if isinstance(error, ResumeRefusedError):
+            print(f"resume refused: {error}", file=sys.stderr)
+            return USAGE_ERROR
         print(f"configuration error: {error}", file=sys.stderr)
         return USAGE_ERROR
     except FileNotFoundError as error:
@@ -1891,7 +1900,10 @@ def _print_event(event: Any, *, quiet: bool = False, stream_open: bool = False) 
     if kind == "UserMessage":
         for block in event.content:
             if type(block).__name__ == "ToolResultBlock":
-                marker = "error" if block.is_error else "ok"
+                if getattr(block, "synthetic", False):
+                    marker = "interrupted"
+                else:
+                    marker = "error" if block.is_error else "ok"
                 text = " ".join(block.display_text().split())
                 print(f"← {marker}: {text[:160]}" + ("..." if len(text) > 160 else ""))
         return

@@ -705,7 +705,7 @@ def _blocks_preview(content: Iterable[Any]) -> str:
                 _, separator, body = body.partition("]\n")
                 if not separator:
                     body = str(block.get("content", ""))
-            marker = "error" if block.get("is_error") else "ok"
+            marker = "interrupted" if block.get("synthetic") else ("error" if block.get("is_error") else "ok")
             pieces.append(f"\u2190 {marker}: {body}")
         else:
             pieces.append(json.dumps(block, ensure_ascii=False, sort_keys=True, default=str))

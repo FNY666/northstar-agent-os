@@ -241,6 +241,16 @@ class ToolResultBlock:
     is_error: bool = False
     # Runtime-only provenance. Deliberately omitted from provider API payloads.
     provenance: tuple[str, str, str] | None = None
+    #: Why the call produced no result, when the refusal is structural rather than
+    #: the tool's own failure: "interrupted" (the turn was cut short), and the
+    #: denial kinds a permission gate records. Empty means "the tool answered".
+    #: Carried to the provider so a resumed turn can say *why* a call has no
+    #: output, and never inferred from the absence of one.
+    tool_denial_kind: str = ""
+    #: True when the runtime synthesised this result rather than a tool producing
+    #: it (a shutdown unwind). A synthetic result is never a success and never a
+    #: tool call that ran: it is the record of a call that did not happen.
+    synthetic: bool = False
 
     def display_text(self) -> str:
         """Return artifact text without the runtime-only model provenance label."""
@@ -263,6 +273,23 @@ class ToolResultBlock:
             "content": _normalise_result_content(self.content),
             "is_error": bool(self.is_error),
         }
+
+    def to_record(self) -> dict[str, Any]:
+        """The session-transcript shape of this result.
+
+        The provider payload (``to_api``) deliberately omits the runtime-only
+        fields: a ``tool_result`` block on the wire carries a type, an id, some
+        content and an error flag, and nothing this runtime knows and the API
+        does not. The transcript is a different contract - it is the audit
+        record - so it keeps the denial kind and the synthetic marker, which is
+        how a reader tells "the tool refused" from "the tool never ran".
+        """
+        payload = self.to_api()
+        if self.tool_denial_kind:
+            payload["tool_denial_kind"] = self.tool_denial_kind
+        if self.synthetic:
+            payload["synthetic"] = True
+        return payload
 
     def render(self) -> str:
         return _flatten_result_content(self.content)
@@ -768,6 +795,11 @@ def coerce_blocks(values: Iterable[Any] | None) -> tuple[Any, ...]:
                         is_error=bool(value.get("is_error", False)),
                         # Serialized/provider-shaped data is not an authority for
                         # provenance. Only in-process ToolResult construction sets it.
+                        # The denial kind and the synthetic marker *are* read back:
+                        # they are what the transcript wrote, and a synthetic
+                        # result must stay synthetic across a resume.
+                        tool_denial_kind=str(value.get("tool_denial_kind", "") or ""),
+                        synthetic=bool(value.get("synthetic", False)),
                     )
                 )
             else:

@@ -176,7 +176,12 @@ _PAGE = r"""<!doctype html>
         let isError = false;
         if (kind === "text") { title = "Text"; value = block.text || ""; }
         else if (kind === "tool_use") { title = "Tool call · " + (block.name || "tool"); value = block.input || {}; }
-        else if (kind === "tool_result") { title = block.is_error ? "Tool result · error" : "Tool result · success"; value = toolResultText(block.content ?? ""); isError = Boolean(block.is_error); }
+        else if (kind === "tool_result") {
+          // A synthetic result is neither a success nor a tool error: the call
+          // never ran, because the turn was cut short.
+          if (block.synthetic) { title = "Tool result · interrupted"; value = toolResultText(block.content ?? ""); }
+          else { title = block.is_error ? "Tool result · error" : "Tool result · success"; value = toolResultText(block.content ?? ""); isError = Boolean(block.is_error); }
+        }
         addDetailBlock(title, value, isError);
       }
     }

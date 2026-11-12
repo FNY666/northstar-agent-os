@@ -109,6 +109,19 @@ class SessionIntegrityError(ValueError):
     """Raised for corruption that is not explainable by a crash at the tail."""
 
 
+class ResumeRefusedError(SessionIntegrityError):
+    """A resume was refused; the run must not continue as if the session were clean.
+
+    A store that cannot vouch for a transcript's history says so out loud. The
+    refusal is not a configuration mistake and not a crash: it is the store
+    declining to let a broken lineage continue under the name of a successful
+    run. It is a ``SessionIntegrityError`` because that is what it is - the
+    stored history cannot be trusted - but it has its own name because a caller
+    that resumes needs to tell "this transcript is damaged" from "this
+    transcript is a redacted one" and from "this transcript is fine".
+    """
+
+
 def _open_regular_nofollow(path: Path, flags: int, mode: int = 0o600) -> int:
     """Open one regular transcript file without following its final symlink."""
     nofollow = getattr(os, "O_NOFOLLOW", None)
@@ -263,7 +276,7 @@ class SessionStore:
         fd = _open_regular_nofollow(path, os.O_RDONLY)
         with os.fdopen(fd, "rb") as fh:
             if os.fstat(fh.fileno()).st_size > MAX_SESSION_FILE_BYTES:
-                raise SessionIntegrityError(
+                raise ResumeRefusedError(
                     f"{path.name}: transcript exceeds the {MAX_SESSION_FILE_BYTES}-byte resume limit"
                 )
             last: dict[str, Any] | None = None
@@ -289,7 +302,7 @@ class SessionStore:
                             f"{path.name}: transcript exceeds the {MAX_SESSION_FILE_BYTES}-byte resume limit"
                         )
                     if len(raw_line) > MAX_SESSION_LINE_BYTES:
-                        raise SessionIntegrityError(
+                        raise ResumeRefusedError(
                             f"{path.name}: record {record_count - 1} exceeds the {MAX_SESSION_LINE_BYTES}-byte resume line limit"
                         )
                     if not raw_line.strip():
@@ -319,16 +332,16 @@ class SessionStore:
             if last is None and record_count == 0:
                 return self._genesis_hash(), True, CHAIN_VERSION_V2, (0, 0)
             if not verification.ok or last is None or first_record is None:
-                raise SessionIntegrityError(
+                raise ResumeRefusedError(
                     f"{path.name}: refusing to resume; session chain verification failed: {verification.reason}"
                 )
             head = last.get("chain_hash")
             if not isinstance(head, str) or len(head) != 64:
-                raise SessionIntegrityError(f"{path.name}: last transcript record has no valid chain head")
+                raise ResumeRefusedError(f"{path.name}: last transcript record has no valid chain head")
             genesis = first_record.get("genesis")
             version = genesis.get("chain") if isinstance(genesis, dict) else CHAIN_VERSION
             if version not in {CHAIN_VERSION, CHAIN_VERSION_V2}:
-                raise SessionIntegrityError(f"{path.name}: unknown session chain version")
+                raise ResumeRefusedError(f"{path.name}: unknown session chain version")
             return head, False, version, hlc_state
 
     # -- shape ------------------------------------------------------------
@@ -538,7 +551,22 @@ class SessionStore:
         return load_jsonl(path, strict=strict)
 
     def transcript(self, session_id: str | None = None, *, require_integrity: bool = False) -> list[Any]:
-        records, _dropped = self.read(session_id)
+        """The provider transcript rebuilt from this session's records.
+
+        Every refusal here is a *resume* refusal - a redacted transcript, an
+        unsealed one, or one whose chain does not verify - so each raises
+        :class:`ResumeRefusedError`. That is a ``SessionIntegrityError`` (so a
+        caller that already catches that still catches this), but it has its own
+        name because a resumed run must be able to say "the store refused"
+        rather than "something went wrong reading a file".
+        """
+        try:
+            records, _dropped = self.read(session_id)
+        except SessionIntegrityError as error:
+            # The reader's refusals (a torn line, a transcript over a limit) are
+            # refusals to resume this history, so the caller that resumes sees
+            # the explicit name rather than a generic integrity error.
+            raise ResumeRefusedError(str(error)) from error
         redacted_mode = any(
             record.get("type") == "session_start"
             and isinstance(record.get("data"), dict)
@@ -546,12 +574,12 @@ class SessionStore:
             for record in records
         )
         if redacted_mode or any(record.get("content_redacted") is True for record in records):
-            raise SessionIntegrityError(
+            raise ResumeRefusedError(
                 f"{session_id or self.session_id}: transcript content was intentionally redacted and cannot be resumed"
             )
         has_chain = any(any(key in record for key in ("chain_hash", "prev_hash", "genesis")) for record in records)
         if require_integrity and records and not has_chain:
-            raise SessionIntegrityError(f"{session_id or self.session_id}: refusing to resume an unsealed transcript")
+            raise ResumeRefusedError(f"{session_id or self.session_id}: refusing to resume an unsealed transcript")
         if has_chain:
             from audit_chain import verify_lines
 
@@ -564,10 +592,32 @@ class SessionStore:
                 expect_session_id=session_id or self.session_id,
             )
             if not verification.ok:
-                raise SessionIntegrityError(
+                raise ResumeRefusedError(
                     f"{session_id or self.session_id}: session chain verification failed: {verification.reason}"
                 )
         return transcript_from_records(records)
+
+    def resume_transcript(
+        self,
+        session_id: str | None = None,
+        *,
+        require_integrity: bool = False,
+    ) -> tuple[list[Any], Any]:
+        """The transcript a resumed run starts from, plus the unwind outcome.
+
+        Reads the stored history and then runs the shutdown unwind pass: every
+        ``tool_use`` that never got a ``tool_result`` (the signature of a turn
+        that was killed mid-flight) gets a synthesised, explicitly interrupted
+        result, and the resume is classified ``interrupted_turn`` or ``clean``.
+
+        A store that refuses the transcript raises :class:`ResumeRefusedError`
+        rather than returning something the run would continue from as if it
+        were sound.
+        """
+        from shutdown_unwind import unwind
+
+        transcript = self.transcript(session_id, require_integrity=require_integrity)
+        return unwind(transcript)
 
     def list_sessions(self) -> tuple[str, ...]:
         if self.directory is None:
@@ -768,6 +818,7 @@ def resolve_session_id(session_id: str | None, store: SessionStore | None) -> st
 __all__ = [
     "RECORD_TYPES",
     "SESSION_FILE_SUFFIX",
+    "ResumeRefusedError",
     "SessionIntegrityError",
     "SessionStore",
     "load_jsonl",
