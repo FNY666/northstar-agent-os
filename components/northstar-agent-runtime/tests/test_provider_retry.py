@@ -298,7 +298,7 @@ class ScheduleTests(unittest.TestCase):
             assert isinstance(decision, AttemptRecord)
             delays.append(decision.delay_ms)
         self.assertEqual([100, 150, 150, 150], delays)
-        self.assertEqual(100 + 150 + 150 + 150, policy.planned_wait_ms())
+        self.assertEqual(4 * 150, policy.planned_wait_ms())
 
     def test_full_jitter_is_reproducible_per_run_and_bounded(self):
         policy = RetryPolicy(max_attempts=6, base_delay_ms=1, max_delay_ms=4000, jitter="full", seed=7)
@@ -365,6 +365,58 @@ class ScheduleTests(unittest.TestCase):
         self.assertIsNotNone(keep)
         assert isinstance(decision, AttemptRecord)
         self.assertEqual(1000, decision.waited_ms)
+
+    def test_planned_wait_covers_retry_after_actual_wait(self):
+        slept: list[float] = []
+        state = {"calls": 0}
+
+        def call():
+            state["calls"] += 1
+            if state["calls"] < 3:
+                raise _error("busy", status=429, retry_after_ms=1000)
+            return "ok"
+
+        policy = RetryPolicy(
+            max_attempts=3,
+            base_delay_ms=10,
+            max_delay_ms=1000,
+            deadline_ms=5000,
+            jitter="none",
+            respect_retry_after=True,
+        )
+        result, _summary = execute(call, policy=policy, sleep=slept.append)
+        self.assertEqual("ok", result)
+        self.assertEqual([1.0, 1.0], slept)
+        self.assertEqual(2000, policy.planned_wait_ms())
+        self.assertGreaterEqual(policy.planned_wait_ms(), sum(slept) * 1000)
+
+    def test_planned_wait_bound_honors_retry_switch_deadline_attempts_and_jitter(self):
+        strict = RetryPolicy(
+            max_attempts=4,
+            base_delay_ms=100,
+            multiplier=2,
+            max_delay_ms=1000,
+            deadline_ms=1500,
+            jitter="full",
+            seed=7,
+            respect_retry_after=True,
+        )
+        # retry-after can select the per-wait cap; the waiting deadline remains the bound.
+        self.assertEqual(1500, strict.planned_wait_ms())
+        self.assertIn("safe wait upper bound 1500 ms/turn", strict.describe())
+
+        schedule_only = RetryPolicy(
+            max_attempts=4,
+            base_delay_ms=100,
+            multiplier=2,
+            max_delay_ms=1000,
+            deadline_ms=1500,
+            jitter="full",
+            seed=7,
+            respect_retry_after=False,
+        )
+        # Without provider guidance, the seeded jitter schedule is bounded by its ceilings.
+        self.assertEqual(700, schedule_only.planned_wait_ms())
 
     def test_the_last_attempt_stops_on_the_budget_not_on_the_clock(self):
         policy = RetryPolicy(max_attempts=2, jitter="none")
@@ -792,7 +844,7 @@ class CliRetryTests(RuntimeTestCase):
         code, out, _err = self._invoke(["run", "--workspace", "{ws}", "--prompt", "go", "--dry-run"])
         self.assertEqual(0, code)
         self.assertIn("retry=2 additional attempt(s) on rate_limited, overloaded, network, timeout, server_error", out)
-        self.assertIn("worst case ", out)
+        self.assertIn("safe wait upper bound ", out)
 
     def test_no_retry_is_shown_as_off(self):
         _code, out, _err = self._invoke(["run", "--workspace", "{ws}", "--prompt", "go", "--dry-run", "--no-retry"])
