@@ -681,7 +681,7 @@ def _check_mcp_network(args: argparse.Namespace, findings: list[Finding]) -> Non
             Finding(
                 "mcp-network",
                 "warn",
-                "mode=allowed - MCP server processes run with full host network by operator choice",
+                "mode=allowed - MCP server processes have full host network by operator choice, including loopback/private destinations; stdio-to-HTTP OAuth bridges can follow server-supplied discovery URLs (SSRF risk)",
             )
         )
         return
