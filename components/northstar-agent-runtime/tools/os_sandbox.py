@@ -1010,6 +1010,9 @@ def run_sandboxed(
             try:
                 seccomp_file.write(build_default_filter())
                 seccomp_file.flush()
+                # bwrap reads the filter from the inherited descriptor's
+                # *current* offset; rewind or it sees 0 bytes and refuses to start.
+                seccomp_file.seek(0)
                 seccomp_fd = seccomp_file.fileno()
                 pass_fds.append(seccomp_fd)
                 detail += "; seccomp denies network socket creation and escape syscalls (EPERM)"
