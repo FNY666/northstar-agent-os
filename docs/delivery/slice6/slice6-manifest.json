@@ -1,0 +1,12 @@
+{
+  "delivery_commit": "a49d073f0b4039d4171676bb5af54df47ede68f4",
+  "delivery_seal": "slice6-seal.json",
+  "delivery_seal_ok": true,
+  "delivery_seal_sha256": "7689388937cd9f46f9ddb61c283fa00c88db26cf149010941fd1caf5d1c5165e",
+  "phases": "slice6-phases.json",
+  "phases_sha256": "4f09307bc8cda2e195c644af0f49bde53c632b622f92c13c34444d8656c956a2",
+  "run_id": "seal-a49d073f0b40",
+  "schema": "northstar.code-evidence.v1",
+  "start_commit": "38d175e9565c8ae46ee5ef7a8be8d874ea3038f0",
+  "status": "success"
+}

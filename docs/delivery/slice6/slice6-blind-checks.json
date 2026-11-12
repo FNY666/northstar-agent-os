@@ -1,0 +1,12 @@
+[
+  {
+    "id": "blind-sidecar-suite",
+    "description": "The sidecar tests cover lease withdrawal and live-connection termination.",
+    "command": "python3 -m pytest --collect-only -q components/northstar-egress-sidecar/tests"
+  },
+  {
+    "id": "blind-client-suite",
+    "description": "The client tests cover surfaced network failures.",
+    "command": "env PYTHONPATH=components/northstar-agent-runtime python3 -m pytest --collect-only -q components/northstar-agent-runtime/tests/test_egress_client.py"
+  }
+]

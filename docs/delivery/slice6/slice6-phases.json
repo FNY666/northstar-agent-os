@@ -1,0 +1,131 @@
+{
+  "check_input_pins": [
+    {
+      "baseline_blob_sha": "fc75665d247e0fd59951877cf83adefad5d0e8db",
+      "path": "components/northstar-egress-sidecar/transport.py"
+    },
+    {
+      "baseline_blob_sha": "c1ff580c84824dbd20961a400ac6ab13cc6add44",
+      "path": "components/northstar-agent-runtime/egress_enforcer.py"
+    },
+    {
+      "baseline_blob_sha": "55c3dc0527a1da995172055f4ffc86b6cf8ea498",
+      "path": "components/northstar-agent-runtime/audit_chain.py"
+    },
+    {
+      "baseline_blob_sha": "b57c3e0751f659d653362e75f8d6b5eaf3465182",
+      "path": "components/northstar-agent-runtime/canonical_json.py"
+    },
+    {
+      "baseline_blob_sha": "75e7d2686dbd958d8892cb97f76617ce58e21417",
+      "path": "components/northstar-agent-runtime/ed25519.py"
+    },
+    {
+      "baseline_blob_sha": "5e0894e53223ca06853390816f5bdf9b0681829b",
+      "path": "components/northstar-agent-runtime/defensive_agent.py"
+    },
+    {
+      "baseline_blob_sha": "c014a149861ea961efe1f67ecaed28b6763df7a0",
+      "path": "components/northstar-agent-runtime/action_card.py"
+    }
+  ],
+  "check_inputs": [
+    "components/northstar-egress-sidecar/transport.py",
+    "components/northstar-agent-runtime/egress_enforcer.py",
+    "components/northstar-agent-runtime/audit_chain.py",
+    "components/northstar-agent-runtime/canonical_json.py",
+    "components/northstar-agent-runtime/ed25519.py",
+    "components/northstar-agent-runtime/defensive_agent.py",
+    "components/northstar-agent-runtime/action_card.py"
+  ],
+  "effect_journal_version": 1,
+  "effects": [
+    {
+      "call_id": "verification-0",
+      "effect_id": "effect-1",
+      "error_class": "",
+      "finished_unix_ms": 1794513030003,
+      "phase": "verifying",
+      "sequence": 1,
+      "started_unix_ms": 1794513028254,
+      "status": "completed",
+      "tool": "HostCheck"
+    },
+    {
+      "call_id": "verification-1",
+      "effect_id": "effect-2",
+      "error_class": "",
+      "finished_unix_ms": 1794513030627,
+      "phase": "verifying",
+      "sequence": 2,
+      "started_unix_ms": 1794513030003,
+      "status": "completed",
+      "tool": "HostCheck"
+    }
+  ],
+  "outcome": "success",
+  "plan": {
+    "check_indices": [
+      0,
+      1
+    ],
+    "files": [
+      "components/northstar-agent-runtime/action_card.py",
+      "components/northstar-agent-runtime/audit_chain.py",
+      "components/northstar-agent-runtime/canonical_json.py",
+      "components/northstar-agent-runtime/defensive_agent.py",
+      "components/northstar-agent-runtime/ed25519.py",
+      "components/northstar-agent-runtime/egress_enforcer.py",
+      "components/northstar-egress-sidecar/transport.py"
+    ],
+    "risks": [],
+    "steps": [
+      "materialise the delivery patch",
+      "run the host checks"
+    ],
+    "summary": "sealed historical delivery"
+  },
+  "plan_only": false,
+  "run_id": "seal-a49d073f0b40",
+  "schema": "northstar.code-phases.v1",
+  "state": "success",
+  "transitions": [
+    {
+      "data": {},
+      "from": "created",
+      "reason": "repository snapshot recorded",
+      "sequence": 1,
+      "timestamp_unix_ms": 1794513028033,
+      "to": "understanding"
+    },
+    {
+      "data": {
+        "checks": 2,
+        "files": 7,
+        "risks": 0,
+        "steps": 2
+      },
+      "from": "understanding",
+      "reason": "model submitted a structured plan",
+      "sequence": 2,
+      "timestamp_unix_ms": 1794513028033,
+      "to": "planned"
+    },
+    {
+      "data": {},
+      "from": "planned",
+      "reason": "model stopped; host verification begins",
+      "sequence": 3,
+      "timestamp_unix_ms": 1794513028033,
+      "to": "verifying"
+    },
+    {
+      "data": {},
+      "from": "verifying",
+      "reason": "delivery sealed through the code-task pipeline",
+      "sequence": 4,
+      "timestamp_unix_ms": 1794513030698,
+      "to": "success"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "apply_exit_code": 0,
+  "diagnostic": "",
+  "empty": false,
+  "ok": true,
+  "patch_bytes": 48604,
+  "patch_sha256": "9e664dceb71c99520d1f0cee1a8dfe5db94990d3a7f568cfe306722057d3ed81",
+  "read_tree_exit_code": 0,
+  "schema": "northstar.patch-replay.v1",
+  "start_commit": "38d175e9565c8ae46ee5ef7a8be8d874ea3038f0"
+}

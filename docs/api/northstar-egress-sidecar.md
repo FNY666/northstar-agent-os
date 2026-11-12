@@ -96,3 +96,23 @@ Length-bounded JSONL primitives for the egress sidecar transport.
 #### `encode_response(value: dict[str, Any])`
 
 #### `decode_request(line: str)`
+
+### `lease_table`
+
+Source: `components/northstar-egress-sidecar/lease_table.py`
+
+Persistent, thread-safe network-session leases for the egress sidecar.
+
+#### `LeaseTableError`
+
+The lease source of truth could not be read or durably updated.
+
+#### `LeaseTable`
+
+Atomic JSON lease table. The on-disk table is the source of truth.
+
+- `key(run_id: str, session_id: str, destination: str)`
+- `read()`
+- `mint(run_id: str, session_id: str, destination: str, *, now: float | None=None)`
+- `revoke(lease_id: str, revoked_by: str)`
+- `expire(lease_id: str)`

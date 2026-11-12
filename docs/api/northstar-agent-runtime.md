@@ -23515,6 +23515,116 @@ Shape an ``audit.ndjson/1`` record for SIEM export activity.
 
 Self-check for the SIEM export section: ingest, filter, stream, render.
 
+### `audit_head_holder`
+
+Source: `components/northstar-agent-runtime/audit_head_holder.py`
+
+Independent audit-head holder: a second copy of the sealed head.
+
+#### `HeadHolderError`
+
+Fail-closed: an integrity or usage failure raises, never lies.
+
+#### `HeadPin`
+
+The head of a sealed chain: the pin every holder agrees on.
+
+- `seq_range` (property)
+  - The observed seq range ``[first..last]`` the seal commits to.
+- `as_dict()`
+#### `AnchorReceipt`
+
+The receipt an external anchor returns for a head.
+
+- `as_dict()`
+#### `HeadReceipt`
+
+One published head, as held by the independent store.
+
+- `as_dict()`
+#### `TailCheckReport`
+
+The result of the tail-sampling check (C51).
+
+- `as_dict()`
+#### `HeadHolder`
+
+Append-only store of sealed heads, outside the writer's store.
+
+- `path` (property)
+  - Where the independent heads are held.
+- `require_independent` (property)
+  - True when a publish with a non-independent anchor is refused.
+- `has_anchorer` (property)
+  - True when this holder can seal heads on its own.
+- `seal(pin: HeadPin, *, anchor_receipt: AnchorReceipt | None=None)`
+  - Anchor a head, then publish it. The write-path dependency.
+- `publish_head(pin: HeadPin, *, receipt: AnchorReceipt)`
+  - Publish a sealed head to the independent store.
+- `receipts()`
+  - Every published head, in publication order.
+- `latest()`
+  - The most recently published head, or None when none was.
+- `rows()`
+  - How many heads this store holds (its own row count).
+- `tail_check(writer_head: HeadPin, *, writer_rows: int, require_independent: Optional[bool]=None)`
+  - Sample the tail: does the latest held head match the writer's?
+- `fresh_start_head(previous: Optional[HeadPin], *, head_hash: str)`
+  - Carry the old head into a fresh start.
+- `verify_store()`
+  - Re-read the whole store and check every receipt's digests.
+#### `fresh_start_pin(previous: Optional[HeadPin], *, genesis: str, head_hash: str, seq: int=0, records_sealed: int=0)`
+
+Build the fresh-start head, carrying the old head's hash.
+
+#### `check_fresh_start(carried: Optional[HeadPin], independent_head: Optional[HeadPin])`
+
+Check a fresh start against the independently held head.
+
+#### `offline_anchor_receipt(*, anchor_id: str, manifest: Mapping[str, Any], independent: bool=False, head_hash: str | None=None, records_sealed: int | None=None, seq_range: Sequence[int] | None=None)`
+
+Build an :class:`AnchorReceipt` from an offline anchor manifest.
+
+#### `external_anchor_receipt(*, anchor_id: str, anchor: Mapping[str, Any], independent: bool=True, head_hash: str | None=None, records_sealed: int | None=None, seq_range: Sequence[int] | None=None)`
+
+Build an :class:`AnchorReceipt` from an external (Rekor) anchor.
+
+#### `seal_and_publish(holder: HeadHolder, pin: HeadPin, *, anchor_receipt: AnchorReceipt | None=None, anchorer: Any=None)`
+
+Seal a head and hand it to the independent holder.
+
+#### `ledger_head_pin(ledger: Any)`
+
+Build the :class:`HeadPin` for a forward-seal ledger's current head.
+
+#### `head_feed_bytes(pin: HeadPin)`
+
+The one-record NDJSON *head feed* that an anchor can pin.
+
+#### `write_head_feed(path: str | Path, pin: HeadPin)`
+
+Write the head feed for ``pin`` and return its path.
+
+#### `head_anchor_manifest(feed_path: str | Path, pin: HeadPin, *, anchored_at: str | None=None)`
+
+Build the offline head anchor manifest for a head feed.
+
+#### `offline_head_anchorer(manifest_path: str | Path, *, anchor_id: str, feed_path: str | Path | None=None, independent: bool=False)`
+
+Build an *anchorer* that anchors a head via an offline manifest.
+
+#### `rekor_head_anchorer(feed_path: str | Path, seed: bytes, *, anchor_id: str, rekor_url: str | None=None, timeout: float=60.0)`
+
+Build an *anchorer* that anchors a head in the Rekor log.
+
+#### `stdlib_only()`
+
+AST check: this module imports stdlib modules only.
+
+#### `main()`
+
+Self-check: publish, tail-check, shorten, and re-mint detection.
+
 ### `audit_management`
 
 Source: `components/northstar-agent-runtime/audit_management.py`

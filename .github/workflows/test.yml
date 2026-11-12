@@ -223,3 +223,15 @@ jobs:
         # Reject all 24 untouched fixtures, then replay every reference patch on
         # a clean initial commit. This proves fixtures, not real-model accuracy.
         run: python3 scripts/check-code-task-pack.py --write /tmp/northstar-code-task-controls.json
+      - name: Delivery seal tool
+        # The seal producer must compile, and the committed Slice 6 seal must
+        # still verify against this checkout's Git history. A shallow checkout
+        # does not carry the start commit, so the verification is skipped
+        # there rather than failing on a commit that is genuinely absent.
+        run: |
+          python3 -m py_compile scripts/seal-delivery.py
+          if git rev-parse --verify --quiet 38d175e9565c8ae46ee5ef7a8be8d874ea3038f0^{commit}; then
+            python3 scripts/seal-delivery.py verify --evidence-dir docs/delivery/slice6
+          else
+            echo "shallow checkout: the Slice 6 start commit is absent, skipping the seal verification"
+          fi

@@ -1,0 +1,62 @@
+{
+  "check_exclusions": [],
+  "check_input_pins": [
+    {
+      "baseline_blob_sha": "fc75665d247e0fd59951877cf83adefad5d0e8db",
+      "current_blob_sha": "fc75665d247e0fd59951877cf83adefad5d0e8db",
+      "path": "components/northstar-egress-sidecar/transport.py",
+      "unchanged": true
+    },
+    {
+      "baseline_blob_sha": "c1ff580c84824dbd20961a400ac6ab13cc6add44",
+      "current_blob_sha": "c1ff580c84824dbd20961a400ac6ab13cc6add44",
+      "path": "components/northstar-agent-runtime/egress_enforcer.py",
+      "unchanged": true
+    },
+    {
+      "baseline_blob_sha": "55c3dc0527a1da995172055f4ffc86b6cf8ea498",
+      "current_blob_sha": "55c3dc0527a1da995172055f4ffc86b6cf8ea498",
+      "path": "components/northstar-agent-runtime/audit_chain.py",
+      "unchanged": true
+    },
+    {
+      "baseline_blob_sha": "b57c3e0751f659d653362e75f8d6b5eaf3465182",
+      "current_blob_sha": "b57c3e0751f659d653362e75f8d6b5eaf3465182",
+      "path": "components/northstar-agent-runtime/canonical_json.py",
+      "unchanged": true
+    },
+    {
+      "baseline_blob_sha": "75e7d2686dbd958d8892cb97f76617ce58e21417",
+      "current_blob_sha": "75e7d2686dbd958d8892cb97f76617ce58e21417",
+      "path": "components/northstar-agent-runtime/ed25519.py",
+      "unchanged": true
+    },
+    {
+      "baseline_blob_sha": "5e0894e53223ca06853390816f5bdf9b0681829b",
+      "current_blob_sha": "5e0894e53223ca06853390816f5bdf9b0681829b",
+      "path": "components/northstar-agent-runtime/defensive_agent.py",
+      "unchanged": true
+    },
+    {
+      "baseline_blob_sha": "c014a149861ea961efe1f67ecaed28b6763df7a0",
+      "current_blob_sha": "c014a149861ea961efe1f67ecaed28b6763df7a0",
+      "path": "components/northstar-agent-runtime/action_card.py",
+      "unchanged": true
+    }
+  ],
+  "check_inputs_pinned": true,
+  "check_inputs_unchanged": true,
+  "dissents_pinned": [],
+  "ok": true,
+  "patch_audit_ok": true,
+  "patch_sha256": "9e664dceb71c99520d1f0cee1a8dfe5db94990d3a7f568cfe306722057d3ed81",
+  "precheck_patch_sha256": "9e664dceb71c99520d1f0cee1a8dfe5db94990d3a7f568cfe306722057d3ed81",
+  "schema": "northstar.delivery-seal.v2",
+  "start_commit": "38d175e9565c8ae46ee5ef7a8be8d874ea3038f0",
+  "start_tree_hash": "6bc4388db4064a4ef0abfbb045cfa4f6add0203f",
+  "unchanged_during_verification": true,
+  "verifier_rule": "the verifier set is the declared check_inputs manifest: every file the checks read, as declared by the host before verification; a path is a verifier iff it appears in check_input_pins.",
+  "verifier_rule_hash": "572ede2c338c6aa1fcf4f309bffb6b00cc4d4feaace91cea0d0d28fe0b183df4",
+  "verifier_rule_version": "v1",
+  "verifier_set": []
+}
