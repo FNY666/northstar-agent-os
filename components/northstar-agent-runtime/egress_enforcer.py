@@ -629,18 +629,36 @@ class EgressBudgetLedger:
             return True
 
 
+# These IPv6 ranges can conceal or route to internal destinations while
+# Python classifies the address as global. Keep the guard stable across the
+# Python versions Northstar supports; the NAT64 well-known prefix is global
+# under is_global on every supported version.
+_NON_GLOBAL_IPV6_SPECIAL_NETWORKS = tuple(
+    ipaddress.ip_network(prefix)
+    for prefix in (
+        "64:ff9b::/96",       # RFC 6052 well-known NAT64
+        "64:ff9b:1::/48",     # RFC 8215 local-use NAT64
+        "2002::/16",          # RFC 3056 6to4 (classification varies by Python)
+        "fec0::/10",          # RFC 3879 deprecated site-local
+    )
+)
+
+
 def _ip_permitted(ip_text: str, rule: DestinationRule) -> bool:
-    """SSRF guard: require an IANA globally reachable address by default."""
+    """SSRF guard: exclude known IPv6 translation and scoped ranges by default."""
     try:
         ip = ipaddress.ip_address(ip_text)
     except ValueError:
         return False
     if rule.allow_private_ips:
         return True
-    # Negative flags are not exhaustive: e.g. 100.64.0.0/10 is neither
-    # private nor reserved in ipaddress, but is shared carrier space and not
-    # globally reachable. Positive classification closes that gap and also
-    # handles IPv4-mapped IPv6 consistently.
+    if isinstance(ip, ipaddress.IPv6Address) and any(
+        ip in network for network in _NON_GLOBAL_IPV6_SPECIAL_NETWORKS
+    ):
+        return False
+    # Positive classification blocks ordinary private ranges and the shared
+    # carrier space; explicit transition checks close routes Python's
+    # ipaddress classification intentionally leaves globally reachable.
     return ip.is_global
 
 
