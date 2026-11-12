@@ -135,3 +135,46 @@ class EgressResponseBoundaryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class IdempotencyKeyBoundaryTests(unittest.TestCase):
+    """The agent may name the key; it may not smuggle the upstream header."""
+
+    def _client(self, response: str) -> EgressClient:
+        client = EgressClient("/var/run/northstar-egress/egress.sock")
+        client._round_trip = lambda _wire: response  # type: ignore[method-assign]
+        return client
+
+    def _request(self, client: EgressClient, **kwargs):
+        request_kwargs = {
+            "agent_id": "a", "run_id": "run", "host": "example.com", "port": 443,
+            "method": "POST", "path": "/", "request_id": "r",
+        }
+        request_kwargs.update(kwargs)
+        return client.request(**request_kwargs)
+
+    def test_a_valid_key_is_sent_as_a_wire_field(self):
+        sent: dict = {}
+        client = EgressClient("/var/run/northstar-egress/egress.sock")
+        client._round_trip = lambda wire: sent.update(wire) or json.dumps(  # type: ignore[method-assign]
+            {"request_id": "r", "status": "ok"}
+        )
+        self._request(client, idempotency_key="call-1")
+        self.assertEqual(sent.get("idempotency_key"), "call-1")
+
+    def test_a_malformed_key_is_rejected_before_transport(self):
+        client = self._client(json.dumps({"request_id": "r", "status": "ok"}))
+        for key in ("", "CALL-1", "call_1", "a" * 256):
+            with self.subTest(key=key[:16]):
+                result = self._request(client, idempotency_key=key)
+                self.assertEqual(result.status, "rejected")
+                self.assertIn("idempotency key", result.errors[0])
+
+    def test_no_key_means_no_wire_field(self):
+        sent: dict = {}
+        client = EgressClient("/var/run/northstar-egress/egress.sock")
+        client._round_trip = lambda wire: sent.update(wire) or json.dumps(  # type: ignore[method-assign]
+            {"request_id": "r", "status": "ok"}
+        )
+        self._request(client)
+        self.assertNotIn("idempotency_key", sent)

@@ -73,7 +73,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "remote_transport",
     ),
     "northstar-codex-sidecar": ("sidecar", "transport", "service", "sidecar_socket"),
-    "northstar-egress-sidecar": ("egress_sidecar", "egress_socket", "transport", "lease_table"),
+    "northstar-egress-sidecar": ("egress_sidecar", "egress_socket", "transport", "lease_table", "retry_contract_egress"),
     "northstar-agent-runtime": (
         "code_task", "verification", "memory_integrity", "ssrf_detect", "tool_input_schema",
         "runtime_evidence",
@@ -278,7 +278,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "red_team", "red_teaming", "redis_pubsub", "reflection",
         "refusal_monitor", "regulatory", "relational_db", "release_manager",
         "remote_attestation", "replica_manager", "resource_accumulation", "responsible_ai",
-        "retail_agents", "retry_policy", "reverse_proxy", "reward_hacking",
+        "retail_agents", "retry_contract", "retry_policy", "reverse_proxy", "reward_hacking",
         "reward_modeling", "richtext_ot", "ring_sig", "risk_assessment",
         "risk_management", "rlaif", "rlhf", "roboethics",
         "robust_watermark", "robustness_eval", "robustness_testing", "routing_engine",

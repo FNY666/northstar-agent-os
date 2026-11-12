@@ -34,6 +34,8 @@ from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Any
 
+from retry_contract import IdempotencyKeyError, resolve_idempotency_key
+
 #: The socket must live under the sidecar's private runtime directory.
 #: "Do not expose the socket over TCP" (same rule as the codex sidecar).
 SOCKET_ROOT = PurePosixPath("/var/run/northstar-egress")
@@ -180,6 +182,7 @@ class EgressClient:
         approval_receipt: dict[str, Any] | None = None,
         request_id: str | None = None,
         session_id: str | None = None,
+        idempotency_key: str | None = None,
     ) -> EgressResult:
         """Send one egress request through the sidecar. Never raises for an
         expected condition (denial, rejection, transport failure)."""
@@ -201,6 +204,7 @@ class EgressClient:
             card=card,
             approval_receipt=approval_receipt,
             session_id=session_id,
+            idempotency_key=idempotency_key,
         )
         if validation_errors:
             return self._failure(rid if isinstance(rid, str) else "", "rejected", "; ".join(validation_errors), started)
@@ -230,6 +234,11 @@ class EgressClient:
             wire["card"] = card
         if approval_receipt is not None:
             wire["approval_receipt"] = approval_receipt
+        if idempotency_key is not None:
+            # The key is validated here so a malformed one never reaches the
+            # socket, and it is sent as a wire field rather than a header:
+            # the sidecar owns the upstream header.
+            wire["idempotency_key"] = idempotency_key
         try:
             line = self._round_trip(wire)
         except FileNotFoundError as error:
@@ -312,6 +321,12 @@ class EgressClient:
         session_id = values.get("session_id")
         if session_id is not None and (not isinstance(session_id, str) or not session_id.strip()):
             errors.append("session_id must be a non-empty string")
+        idempotency_key = values.get("idempotency_key")
+        if idempotency_key is not None:
+            try:
+                resolve_idempotency_key(idempotency_key)
+            except IdempotencyKeyError as exc:
+                errors.append(str(exc))
         port = values["port"]
         if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65_535:
             errors.append("port must be an integer between 1 and 65535")
