@@ -177,13 +177,52 @@ class TestGatePaths(unittest.TestCase):
 
     def test_action_type_forced_to_tool_name(self):
         gate, chain, tools = _gate()
-        rid = gate.request_tool_approval("exec_shell", "ops", 5)
+        rid = gate.request_tool_approval(
+            "exec_shell", "ops", 5, action={"note": "x"}
+        )
         chain.approve(rid, "human:op", 5)
         receipt = chain.collect_receipt(rid)
-        # Caller-supplied action_type is overridden; binding uses the tool.
+        # Caller-supplied action_type is overridden; other fields stay bound.
         d = gate.check(
             tool_name="exec_shell", tools_list=tools, receipt=receipt,
             action={"action_type": "something-else", "note": "x"},
+            current_seq=5,
+        )
+        self.assertEqual(d.verdict, "allow")
+
+    def test_receipt_denies_changed_arguments_then_allows_approved_call(self):
+        gate, chain, tools = _gate()
+        rid = gate.request_tool_approval(
+            "exec_shell", "run reviewed command", 5,
+            action={"cmd": "printf approved"},
+        )
+        chain.approve(rid, "human:op", 5)
+        receipt = chain.collect_receipt(rid)
+
+        changed = gate.check(
+            tool_name="exec_shell", tools_list=tools, receipt=receipt,
+            action={"cmd": "cat /secrets"}, current_seq=5,
+        )
+        self.assertEqual(changed.verdict, "deny")
+        self.assertEqual(changed.reason, "action-payload-mismatch")
+
+        approved = gate.check(
+            tool_name="exec_shell", tools_list=tools, receipt=receipt,
+            action={"cmd": "printf approved"}, current_seq=5,
+        )
+        self.assertEqual(approved.verdict, "allow")
+
+    def test_argument_object_key_order_is_canonical(self):
+        gate, chain, tools = _gate()
+        approved_action = {"cmd": "printf ok", "env": {"B": "2", "A": "1"}}
+        rid = gate.request_tool_approval(
+            "exec_shell", "run reviewed command", 5, action=approved_action
+        )
+        chain.approve(rid, "human:op", 5)
+        receipt = chain.collect_receipt(rid)
+        d = gate.check(
+            tool_name="exec_shell", tools_list=tools, receipt=receipt,
+            action={"env": {"A": "1", "B": "2"}, "cmd": "printf ok"},
             current_seq=5,
         )
         self.assertEqual(d.verdict, "allow")
@@ -229,6 +268,29 @@ class TestInputValidation(unittest.TestCase):
         gate, _, tools = _gate()
         with self.assertRaises(ValueError):
             gate.check(tool_name="web_search", tools_list=tools, current_seq=-1)
+
+    def test_non_json_approval_payload_refuses_and_does_not_consume_receipt(self):
+        gate, chain, tools = _gate()
+        with self.assertRaises(ValueError):
+            gate.request_tool_approval(
+                "exec_shell", "bad payload", 5, action={"cmd": float("nan")}
+            )
+        rid = gate.request_tool_approval(
+            "exec_shell", "valid payload", 5, action={"cmd": "printf ok"}
+        )
+        chain.approve(rid, "human:op", 5)
+        receipt = chain.collect_receipt(rid)
+        bad = gate.check(
+            tool_name="exec_shell", tools_list=tools, receipt=receipt,
+            action={"cmd": float("nan")}, current_seq=5,
+        )
+        self.assertEqual(bad.verdict, "deny")
+        self.assertEqual(bad.reason, "action-not-canonical-json")
+        good = gate.check(
+            tool_name="exec_shell", tools_list=tools, receipt=receipt,
+            action={"cmd": "printf ok"}, current_seq=5,
+        )
+        self.assertEqual(good.verdict, "allow")
 
     def test_rejects_bad_action(self):
         gate, _, tools = _gate()
