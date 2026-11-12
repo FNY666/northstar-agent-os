@@ -27,10 +27,11 @@ from checkpoints import (
     build,
     digest_transcript,
     from_record,
+    _post_checkpoint_tool_call_count,
     prepare_resume,
     select,
 )
-from providers.base import AssistantMessage, TextBlock, UserMessage
+from providers.base import AssistantMessage, TextBlock, ToolUseBlock, UserMessage
 from sessions import SessionIntegrityError, SessionStore
 
 
@@ -153,6 +154,10 @@ class PrepareResumeTests(unittest.TestCase):
     def test_the_prefix_is_cut_at_the_boundary(self):
         self.assertEqual(len(prepare_resume(self.checkpoint, self.messages)), 2)
 
+    def test_counts_only_tool_calls_after_the_checkpoint(self):
+        tail = AssistantMessage(content=(ToolUseBlock(id="tail-1", name="Shell", input={"command": "touch x"}),), model="m")
+        self.assertEqual(_post_checkpoint_tool_call_count(self.checkpoint, [*self.messages, tail]), 1)
+
     def test_a_different_history_is_refused(self):
         tampered = [self.messages[0], AssistantMessage(content=(TextBlock(text="rewritten"),), model="m"), *self.messages[2:]]
         with self.assertRaises(CheckpointError) as caught:
@@ -260,6 +265,74 @@ class LoopCheckpointTests(RuntimeTestCase):
         self.assertTrue(report.tool_calls[0].denied)
         self.assertEqual(report.tool_calls[0].permission_source, "composition")
         self.assertFalse((root / "resumed-marker").exists())
+
+    def test_checkpoint_fork_requires_ack_for_post_checkpoint_tool_calls(self):
+        from budget import Budget
+        from loop import RuntimeConfigurationError
+        from tools import ToolRegistry, ToolResult, ToolSpec
+
+        root = self.workspace()
+        effects = []
+        registry = ToolRegistry()
+        registry.register(ToolSpec(
+            name="Effect",
+            description="test-only stateful effect",
+            input_schema={},
+            handler=lambda _payload, _context: effects.append("committed") or ToolResult.ok("committed"),
+            kind="edit",
+            is_mutating=True,
+        ))
+        parent = self.session_store()
+        self.drive(self.runtime(
+            [tool_turn("Effect", {}), tool_turn("Effect", {}), {"text": "after effect"}],
+            workspace=root,
+            sessions=parent,
+            tools=registry,
+            checkpoint_turns=1,
+            permission_mode="acceptEdits",
+            allowed_tools=("Effect",),
+            can_use_tool=lambda *_args: True,
+        ))
+        self.assertEqual(effects, ["committed", "committed"])
+        records = self._records(parent)
+        checkpoints = [from_record(record) for record in records if record.get("type") == CHECKPOINT_TYPE]
+        checkpoint = checkpoints[0]
+        transcript = parent.transcript(parent.session_id)
+
+        blocked = self.runtime(
+            [{"text": "should not be requested"}],
+            workspace=root,
+            tools=registry,
+            permission_mode="acceptEdits",
+            allowed_tools=("Effect",),
+            resume_from=checkpoint,
+            parent_session=parent.session_id,
+            budget=Budget(max_budget_usd=None, total_cost_usd=checkpoint.cost_usd),
+        )
+        with self.assertRaisesRegex(RuntimeConfigurationError, "post-checkpoint tool call"):
+            blocked.run_collect("continue", resume=transcript)
+        self.assertEqual(effects, ["committed", "committed"], "a refused fork must not dispatch or repeat the effect")
+
+        child = self.session_store()
+        accepted = self.runtime(
+            [{"text": "continued"}],
+            workspace=root,
+            sessions=child,
+            tools=registry,
+            permission_mode="acceptEdits",
+            allowed_tools=("Effect",),
+            resume_from=checkpoint,
+            parent_session=parent.session_id,
+            budget=Budget(max_budget_usd=None, total_cost_usd=checkpoint.cost_usd),
+            allow_checkpoint_tool_replay=True,
+        )
+        self.assertEqual(accepted.run_collect("continue", resume=transcript).subtype, "success")
+        child_records = child.read(child.session_id)[0]
+        init = next(record for record in child_records if record.get("type") == "session_start")
+        resumed_from = init["data"]["resumed_from"]
+        self.assertEqual(resumed_from["post_checkpoint_tool_calls"], 1)
+        self.assertTrue(resumed_from["replay_acknowledged"])
+        self.assertEqual(effects, ["committed", "committed"], "the acknowledgement alone does not repeat old tool calls")
 
     def test_no_checkpoint_records_by_default(self):
         store = self.session_store()
