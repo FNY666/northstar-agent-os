@@ -1747,6 +1747,13 @@ class AgentRuntime:
                 finished = True
                 state.events.append(state.result)
                 yield state.result
+        except GeneratorExit:
+            if state.result is None:
+                state.errors.append("stream closed before terminal result")
+                run_span.record_error("GeneratorExit: stream closed before terminal result")
+                state.result = self._result(state, "error_during_execution")
+                state.events.append(state.result)
+            raise
         except Exception as error:  # noqa: BLE001 - every expected failure is an event
             from defensive_agent import sanitize_for_model
 
