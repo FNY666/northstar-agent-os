@@ -73,7 +73,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "remote_transport",
     ),
     "northstar-codex-sidecar": ("sidecar", "transport", "service", "sidecar_socket"),
-    "northstar-egress-sidecar": ("egress_sidecar", "egress_socket", "transport"),
+    "northstar-egress-sidecar": ("egress_sidecar", "egress_socket", "transport", "lease_table"),
     "northstar-agent-runtime": (
         "code_task", "verification", "memory_integrity", "ssrf_detect", "tool_input_schema",
         "runtime_evidence",
@@ -144,7 +144,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "asi07_corpus", "asi08_probes", "asi09_probes", "assistance_game",
         "assurance", "attested_receipts", "attribution", "audio_processor",
         "audit_agents", "audit_archive", "audit_chain", "audit_cli",
-        "audit_committee", "audit_compaction", "audit_export", "audit_management",
+        "audit_committee", "audit_compaction", "audit_export", "audit_head_holder", "audit_management",
         "audit_merkle", "audit_rekor", "audit_scitt", "audit_shipper",
         "auth_dict", "automated_alignment", "backdoor", "backdoor_detection",
         "backdoor_detector", "backpressure", "backup_manager", "bandit_algorithm",

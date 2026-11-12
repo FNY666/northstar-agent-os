@@ -1,0 +1,21 @@
+{
+  "automatic_tool_replay": false,
+  "classification": "terminal",
+  "effect_counts": {
+    "completed": 2
+  },
+  "effect_journal_complete": true,
+  "integrity_errors": [],
+  "next_action": "use the sealed terminal evidence; no recovery action is required",
+  "outcome": "success",
+  "phase_resume_supported": false,
+  "phase_seal": "valid",
+  "phase_sha256": "4f09307bc8cda2e195c644af0f49bde53c632b622f92c13c34444d8656c956a2",
+  "run_id": "seal-a49d073f0b40",
+  "safe_restart_from_start_commit": false,
+  "schema": "northstar.code-reconcile.v1",
+  "state": "success",
+  "unknown_side_effects": [],
+  "worktree": null,
+  "worktree_exists": false
+}

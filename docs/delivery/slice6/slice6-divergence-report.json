@@ -1,0 +1,62 @@
+{
+  "auditor_available": true,
+  "auditor_only": [
+    {
+      "command": "test \"$(git rev-parse --verify '38d175e9565c8ae46ee5ef7a8be8d874ea3038f0^{tree}')\" = 6bc4388db4064a4ef0abfbb045cfa4f6add0203f",
+      "description": "Assert the start commit tree has the pinned Git tree id 6bc4388db4064a4ef0abfbb045cfa4f6add0203f.",
+      "id": "pinned-start-tree"
+    },
+    {
+      "command": "test \"$(git hash-object -- components/northstar-egress-sidecar/transport.py)\" = fc75665d247e0fd59951877cf83adefad5d0e8db",
+      "description": "Assert components/northstar-egress-sidecar/transport.py has the pinned baseline Git blob fc75665d247e0fd59951877cf83adefad5d0e8db.",
+      "id": "pinned-input-1:components/northstar-egress-sidecar/transport.py"
+    },
+    {
+      "command": "test \"$(git hash-object -- components/northstar-agent-runtime/egress_enforcer.py)\" = c1ff580c84824dbd20961a400ac6ab13cc6add44",
+      "description": "Assert components/northstar-agent-runtime/egress_enforcer.py has the pinned baseline Git blob c1ff580c84824dbd20961a400ac6ab13cc6add44.",
+      "id": "pinned-input-2:components/northstar-agent-runtime/egress_enforcer.py"
+    },
+    {
+      "command": "test \"$(git hash-object -- components/northstar-agent-runtime/audit_chain.py)\" = 55c3dc0527a1da995172055f4ffc86b6cf8ea498",
+      "description": "Assert components/northstar-agent-runtime/audit_chain.py has the pinned baseline Git blob 55c3dc0527a1da995172055f4ffc86b6cf8ea498.",
+      "id": "pinned-input-3:components/northstar-agent-runtime/audit_chain.py"
+    },
+    {
+      "command": "test \"$(git hash-object -- components/northstar-agent-runtime/canonical_json.py)\" = b57c3e0751f659d653362e75f8d6b5eaf3465182",
+      "description": "Assert components/northstar-agent-runtime/canonical_json.py has the pinned baseline Git blob b57c3e0751f659d653362e75f8d6b5eaf3465182.",
+      "id": "pinned-input-4:components/northstar-agent-runtime/canonical_json.py"
+    },
+    {
+      "command": "test \"$(git hash-object -- components/northstar-agent-runtime/ed25519.py)\" = 75e7d2686dbd958d8892cb97f76617ce58e21417",
+      "description": "Assert components/northstar-agent-runtime/ed25519.py has the pinned baseline Git blob 75e7d2686dbd958d8892cb97f76617ce58e21417.",
+      "id": "pinned-input-5:components/northstar-agent-runtime/ed25519.py"
+    },
+    {
+      "command": "test \"$(git hash-object -- components/northstar-agent-runtime/defensive_agent.py)\" = 5e0894e53223ca06853390816f5bdf9b0681829b",
+      "description": "Assert components/northstar-agent-runtime/defensive_agent.py has the pinned baseline Git blob 5e0894e53223ca06853390816f5bdf9b0681829b.",
+      "id": "pinned-input-6:components/northstar-agent-runtime/defensive_agent.py"
+    },
+    {
+      "command": "test \"$(git hash-object -- components/northstar-agent-runtime/action_card.py)\" = c014a149861ea961efe1f67ecaed28b6763df7a0",
+      "description": "Assert components/northstar-agent-runtime/action_card.py has the pinned baseline Git blob c014a149861ea961efe1f67ecaed28b6763df7a0.",
+      "id": "pinned-input-7:components/northstar-agent-runtime/action_card.py"
+    }
+  ],
+  "blind_only": [
+    {
+      "command": "python3 -m pytest --collect-only -q components/northstar-egress-sidecar/tests",
+      "description": "The sidecar tests cover lease withdrawal and live-connection termination.",
+      "id": "blind-sidecar-suite"
+    },
+    {
+      "command": "env PYTHONPATH=components/northstar-agent-runtime python3 -m pytest --collect-only -q components/northstar-agent-runtime/tests/test_egress_client.py",
+      "description": "The client tests cover surfaced network failures.",
+      "id": "blind-client-suite"
+    }
+  ],
+  "both": [],
+  "findings": [],
+  "judgment": "operator_review_required",
+  "schema": "northstar.blind-rerunner-divergence.v1",
+  "unassessed_blind": []
+}

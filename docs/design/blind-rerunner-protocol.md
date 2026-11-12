@@ -81,3 +81,63 @@ blind-only category empty, and records auditor checks unavailable; it does not
 mislabel unassessed checks as divergence. Synthetic known-answer tests do
 exercise shared checks and blind-only divergence. This absence is a finding:
 the real Slice 6 comparison cannot be completed from the available evidence.
+
+## Slice 6 sealed delivery (seal-slice6)
+
+Status: the gap above is now closed. The auditor set exists because the
+delivery has a seal, and the seal was produced by the repository's own
+pipeline rather than written by hand.
+
+### How the seal was produced
+
+`scripts/seal-delivery.py` drives the real `CodePhaseMachine`: it materialises
+the delivery commit as an actual patch on the delivery's start commit, replays
+the host-declared checks against that patched tree, and lets the phase machine
+write `delivery-seal.json`. Every field of the resulting seal — start commit,
+start tree hash, check-input pins, patch digests — is therefore produced by
+the same code that produces a live run's seal. The tool refuses a delivery
+whose patch does not apply to the start commit and refuses a seal when a host
+check fails; it does not fall back to writing a plausible-looking receipt.
+
+The pinned check inputs are the files the Slice 6 checks read that the
+delivery did not itself change: `egress_enforcer.py`, `audit_chain.py`,
+`canonical_json.py`, `ed25519.py`, `defensive_agent.py`, `action_card.py`, and
+the sidecar's `transport.py`. A pinned input must exist at the start commit,
+so `lease_table.py` — which the delivery *creates* — cannot be a pin; it is
+the delivered file, and the seal's patch digest covers it instead.
+
+### The real comparison
+
+`extract_auditor_checks` now returns eight checks from this seal: one for the
+start tree hash and one per pinned input. The comparison against Slice 5's
+blind set is real, and the divergence is the finding:
+
+| Category | Count | Meaning |
+| --- | --- | --- |
+| `auditor_only` | 8 | The auditor's integrity checks; no blind check covers them. |
+| `blind_only` | 2 | The two functional test-suite checks; the seal pins no test command. |
+| `both` | 0 | No check is stated identically by both sides. |
+
+`auditor_available` is `true` and `unassessed_blind` is empty. This is the
+honest shape of the result: the two sides check different things. The auditor
+proves the delivery's inputs were not tampered with; the blind re-runner
+proves the delivered suites still collect and cover the claimed behaviour.
+Neither side states the other's assertion, so an operator — not a threshold —
+judges whether that gap matters.
+
+The evidence lives under `docs/delivery/slice6/`. It is deliberately *not*
+under the reserved `delivery-evidence/` name: `build_blind_bundle` refuses a
+start commit that tracks any path under that directory, and the rule is
+blanket over the whole tree, so committing the seal there would make every
+future blind bundle fail — including the one for this delivery. The committed
+files therefore carry prefixed names (`slice6-seal.json` and friends) rather
+than the protocol's reserved artifact names.
+
+### What this does not claim
+
+The seal proves the delivery patch replays onto its start commit, that the
+host checks passed against the patched tree, and that the pinned check inputs
+were unchanged. It does not prove the Slice 6 implementation is correct, and
+it does not close the general question of how a functional check command
+manifest would be pinned: seal v2 still pins input *files*, not test
+*commands*, which is why the two check sets do not overlap.
