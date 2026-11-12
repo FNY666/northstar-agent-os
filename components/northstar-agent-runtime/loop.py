@@ -244,6 +244,14 @@ class RuntimeConfig:
     gossip_node_id: str = ""
     gossip_peers: tuple[str, ...] = ()
     gossip_fanout: int = 3
+    #: C54: the hot-path deny store.  When set, every dispatch consults the
+    #: sealed deny (one indexed read of the revocation counter) *before* the
+    #: gate decides, and the refusal row is written before that read, so a
+    #: revoked scope never reaches the gate and "no row" never reads as
+    #: "nothing was denied".  Off by default: it changes observable
+    #: behavior, so a host opts in.  The lookup fails closed -- a scope the
+    #: store cannot resolve is denied.
+    deny_store_path: str = ""
     #: Backend for the Shell tool (``auto`` | ``bwrap`` | ``process``). Does not
     #: grant Shell — the permission gate still denies it under ``default`` until
     #: ``--allow-tool Shell``. ``bwrap`` is refused at construction if unusable.
@@ -439,6 +447,8 @@ class RuntimeConfig:
                 fail(str(error))
         if not isinstance(self.gossip_enabled, bool):
             fail("gossip_enabled must be a boolean")
+        if not isinstance(self.deny_store_path, str):
+            fail("deny_store_path must be a string")
         if not isinstance(self.gossip_node_id, str):
             fail("gossip_node_id must be a string")
         if isinstance(self.gossip_peers, str) or not isinstance(self.gossip_peers, (tuple, list)):
@@ -491,6 +501,7 @@ class RuntimeConfig:
             "gossip_node_id": self.gossip_node_id,
             "gossip_peers": list(self.gossip_peers),
             "gossip_fanout": self.gossip_fanout,
+            "deny_store_path": self.deny_store_path,
             "evidence_dir": self.evidence_dir,
             "evidence_required": self.evidence_required,
         }
@@ -976,6 +987,26 @@ class AgentRuntime:
         for spec in self.tools.specs():
             if not self.permissions.knows(spec.name):
                 self.permissions.register_kind(spec.name, spec.kind)
+        # C54: the hot-path deny dispatcher.  Off unless the host opts in
+        # (``deny_store_path``): it changes observable behavior, so a host
+        # chooses it.  The lookup is a single indexed read of the
+        # revocation counter -- never a scan of the deny log -- and the
+        # refusal row is written before that read, so a revoked scope
+        # never reaches the gate and "no row" never reads as "nothing was
+        # denied".  A store that cannot be opened refuses the run: a
+        # dispatch without a deny check is worse than no dispatch.
+        self.deny_store: Any = None
+        self.deny_dispatcher: Any = None
+        if getattr(self.config, "deny_store_path", ""):
+            try:
+                from deny_hotpath import DenyDispatcher, DenyStore
+
+                self.deny_store = DenyStore(self.config.deny_store_path)
+                self.deny_dispatcher = DenyDispatcher(self.deny_store)
+            except Exception as error:  # noqa: BLE001 - refuse rather than run unchecked
+                raise RuntimeConfigurationError(
+                    f"deny store could not be opened: {error}"
+                ) from error
         # A: the production governed-action runner.  One per runtime; the
         # executor is passed per call in _dispatch/_run_handlers_concurrently.
         # The runner books the SAFR 4-gate trail (declare -> authorize ->
@@ -988,6 +1019,7 @@ class AgentRuntime:
             gate=self.permissions,
             observer=ObserverVerdictLedger(),
             ledger=self.sealed_ledger,
+            deny_dispatcher=self.deny_dispatcher,
         )
         # Gossip announce plane (see gossip_announcer): off unless the host
         # opts in via config. The announcer owns a GossipNode (seen-set)
@@ -2945,6 +2977,15 @@ class AgentRuntime:
                 execution_gate=execution_gate,
                 governance_seal_error=seal_error,
             )
+            if execution_gate == "deny":
+                # C54: a hot-path deny is a denial, not an execution
+                # failure -- same as the serial path.
+                report = replace(
+                    report,
+                    denied=True,
+                    permission_source="deny:hotpath",
+                    execution_status="blocked",
+                )
             results.append(block)
             state.tool_reports.append(report)
         return results, halted
@@ -4016,6 +4057,16 @@ class AgentRuntime:
             execution_gate=governed.gate,
             governance_seal_error=governed.audit_seal_error,
         )
+        if governed.gate == "deny":
+            # C54: a hot-path deny is a denial, not an execution failure.
+            # The report must say so, or a revoked scope would look like a
+            # tool that simply errored.
+            report = replace(
+                report,
+                denied=True,
+                permission_source="deny:hotpath",
+                execution_status="blocked",
+            )
         return block, report, None
 
     def _trace_refusal(self, turn_span: Any, tool_name: str, *, source: str, turn_index: int) -> None:
