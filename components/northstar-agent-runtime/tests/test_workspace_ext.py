@@ -62,6 +62,13 @@ class FrontmatterTests(unittest.TestCase):
         self.assertEqual(fields["tools"], ["Read", "Grep"])
         self.assertEqual(fields["deny"], ["Write", "Edit"])
 
+    def test_two_space_block_mappings_parse_skill_metadata(self):
+        fields, body = parse_frontmatter(
+            "---\nmetadata:\n  author: example-org\n  version: \"1.0\"\n---\n"
+        )
+        self.assertEqual(fields["metadata"], {"author": "example-org", "version": "1.0"})
+        self.assertEqual(body, "")
+
     def test_malformed_input_is_an_error(self):
         with self.assertRaises(FrontmatterError):
             parse_frontmatter("---\nname: demo\nnever closed\n")
@@ -98,6 +105,47 @@ class SkillTests(unittest.TestCase):
         self.assertEqual(len(found), 1)
         self.assertEqual(found[0].name, "demo")
         self.assertEqual(found[0].description, "Does demo things.")
+
+    def test_agent_skills_optional_metadata_is_accepted_without_granting_tools(self):
+        self.write_skill(
+            "demo",
+            "---\n"
+            "name: demo\n"
+            "description: Does demo things.\n"
+            "license: Apache-2.0\n"
+            "compatibility: Requires git and network access.\n"
+            "metadata:\n"
+            "  author: example-org\n"
+            "  version: \"1.0\"\n"
+            "allowed-tools: Bash(git:*) Read\n"
+            "---\nBody.\n",
+        )
+        found = discover_skills(self.ws)
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0].name, "demo")
+        listing = skill_listing(found, self.ws)
+        self.assertNotIn("Apache-2.0", listing)
+        self.assertNotIn("example-org", listing)
+        self.assertNotIn("Bash(git:*)", listing)
+
+    def test_agent_skills_optional_metadata_types_are_validated(self):
+        invalid_fields = (
+            ("license: [Apache-2.0]", "license must be a string"),
+            ("compatibility: 123", "compatibility must be a non-empty string"),
+            ("compatibility: " + "x" * 501, "compatibility must be a non-empty string"),
+            ("metadata:\n  version: 1.0", "metadata must be a mapping"),
+            ("allowed-tools: [Read]", "allowed-tools must be a string"),
+        )
+        for index, (field, message) in enumerate(invalid_fields):
+            with self.subTest(field=field[:32]):
+                path = self.write_skill(
+                    f"bad-{index}",
+                    f"---\nname: bad-{index}\ndescription: Invalid metadata.\n{field}\n---\nBody.\n",
+                )
+                with self.assertRaisesRegex(SkillError, message):
+                    discover_skills(self.ws)
+                path.unlink()
+                path.parent.rmdir()
 
     def test_absent_directory_means_no_skills(self):
         self.assertEqual(discover_skills(self.ws), ())
