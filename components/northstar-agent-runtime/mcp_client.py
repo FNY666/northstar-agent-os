@@ -86,6 +86,7 @@ MAX_JSON_DEPTH = 128                # bound recursive JSON containers from untru
 MAX_UNTRUSTED_NOTIFICATIONS = 64
 MAX_UNTRUSTED_NOTIFICATION_BYTES = 64 * 1024
 MAX_SCHEMA_CHARS = 30_000           # one inputSchema
+MAX_TOOL_ANNOTATIONS_BYTES = 8 * 1024
 MAX_TOOLS_PER_SERVER = 25
 MAX_DESCRIPTION_CHARS = 600
 MIN_TIMEOUT_MS = 100
@@ -176,19 +177,42 @@ class RemoteTool:
     annotations: dict[str, Any] = field(default_factory=dict)
 
 
+def _validated_tool_annotations(value: Any, *, server: str, tool_name: str) -> dict[str, Any]:
+    """Copy bounded MCP annotations as untrusted descriptive metadata."""
+    if not isinstance(value, dict):
+        raise McpError(f"mcp server {server!r}: tool {tool_name!r} annotations are not an object")
+    try:
+        encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+        encoded_bytes = encoded.encode("utf-8")
+    except (TypeError, ValueError, RecursionError) as error:
+        raise McpError(f"mcp server {server!r}: tool {tool_name!r} annotations are not valid JSON") from error
+    if len(encoded_bytes) > MAX_TOOL_ANNOTATIONS_BYTES:
+        raise McpError(
+            f"mcp server {server!r}: tool {tool_name!r} annotations exceed "
+            f"the {MAX_TOOL_ANNOTATIONS_BYTES}-byte limit"
+        )
+    for hint in ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"):
+        if hint in value and not isinstance(value[hint], bool):
+            raise McpError(f"mcp server {server!r}: tool {tool_name!r} annotation {hint} must be boolean")
+    if "title" in value and not isinstance(value["title"], str):
+        raise McpError(f"mcp server {server!r}: tool {tool_name!r} annotation title must be a string")
+    return json.loads(encoded)
+
+
 def tool_definition_digest(
     server: str,
     name: str,
     description: str,
     input_schema: Mapping[str, Any],
     output_schema: Mapping[str, Any] | None = None,
+    annotations: Mapping[str, Any] | None = None,
 ) -> str:
     """Canonical digest pinning one MCP tool's definition.
 
     Covers ``(server identity, tool name, description, input_schema,
-    output_schema)`` with
-    the JCS canonicalization, so any drift -- a renamed tool, a rewritten
-    description, a widened schema -- changes the digest. The admission
+    output_schema, and present annotations)`` with the JCS canonicalization,
+    so any drift -- a renamed tool, a rewritten description, a widened
+    schema, or changed behavior hints -- changes the digest. The admission
     baseline stores these digests; ``refresh_tools`` recomputes them and
     quarantines the server on mismatch.
     """
@@ -202,6 +226,10 @@ def tool_definition_digest(
     }
     if output_schema is not None:
         payload["output_schema"] = dict(output_schema)
+    # Omit an empty object so baselines written before annotation pinning remain
+    # byte-compatible for servers that do not publish annotations.
+    if annotations:
+        payload["annotations"] = dict(annotations)
     return hashlib.sha256(_jcs(payload)).hexdigest()
 
 
@@ -623,6 +651,9 @@ class McpStdioClient:
                         f"mcp server {self.name!r}: tools/list contains duplicate tool name {tool_name!r}"
                     )
                 description = str(raw.get("description", "") or "")[:MAX_DESCRIPTION_CHARS]
+                annotations = _validated_tool_annotations(
+                    raw.get("annotations", {}), server=self.name, tool_name=tool_name
+                )
                 schema = raw.get("inputSchema") or {}
                 if not isinstance(schema, dict):
                     raise McpError(f"mcp server {self.name!r}: tool {tool_name!r} inputSchema is not an object")
@@ -667,9 +698,10 @@ class McpStdioClient:
                     description=description,
                     input_schema=schema,
                     output_schema=output_schema,
+                    annotations=annotations,
                 )
                 self._tool_digests[tool_name] = tool_definition_digest(
-                    self.name, tool_name, description, schema, output_schema
+                    self.name, tool_name, description, schema, output_schema, annotations
                 )
                 # Admission coercion screen: flag descriptions that try to
                 # coerce tool selection (ToolHijacker family). Hits don't
@@ -1008,6 +1040,16 @@ class McpStdioClient:
             description = str(raw.get("description", "") or "")[:MAX_DESCRIPTION_CHARS]
             schema = raw.get("inputSchema") or {}
             output_schema = raw.get("outputSchema")
+            try:
+                annotations = _validated_tool_annotations(
+                    raw.get("annotations", {}), server=self.name, tool_name=tool_name
+                )
+            except McpError:
+                self._quarantine(
+                    f"tool {tool_name!r} published invalid annotations during refresh",
+                    at="refresh",
+                )
+                return ()
             from tool_input_schema import (
                 ToolInputSchemaError,
                 validate_json_schema_definition,
@@ -1032,7 +1074,7 @@ class McpStdioClient:
                 )
                 return ()
             observed[tool_name] = tool_definition_digest(
-                self.name, tool_name, description, schema, output_schema
+                self.name, tool_name, description, schema, output_schema, annotations
             )
         drifts: list[ToolDrift] = []
         for tool_name, expected in self._tool_digests.items():
