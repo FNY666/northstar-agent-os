@@ -672,6 +672,23 @@ class GenerationFlagTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("protocol=auto, elicit=off", out)
         self.assertIn("roots=off, sensitive_input=off, rounds=3", out)
+        self.assertIn("network=allowed, filesystem=unconfined", out)
+
+    def test_workspace_filesystem_scope_is_shown_in_dry_run_stance(self):
+        code, out, _ = run_cli(
+            "run", "--workspace", str(self.ws), "--prompt", "hi", "--scripted-text", "x",
+            "--mcp-server", self.server(), "--mcp-filesystem", "workspace", "--dry-run",
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("filesystem=workspace", out)
+
+    def test_mcp_filesystem_flag_rejects_unknown_modes(self):
+        with self.assertRaises(SystemExit) as exited:
+            run_cli(
+                "run", "--workspace", str(self.ws), "--prompt", "hi", "--scripted-text", "x",
+                "--mcp-server", self.server(), "--mcp-filesystem", "host",
+            )
+        self.assertEqual(exited.exception.code, 2)
 
     def test_unattended_a_remote_question_becomes_a_visible_tool_error(self):
         code, out, _ = self.run_with("--json")
@@ -1006,9 +1023,12 @@ class ToolPinningTests(unittest.TestCase):
             client2.connect()
             try:
                 self.assertTrue(client2.quarantined)
-                self.assertEqual(len(records), 1)
-                self.assertEqual(records[0]["type"], "mcp.tool_drift")
-                self.assertEqual(records[0]["at"], "connect")
+                self.assertEqual(
+                    [record["type"] for record in records],
+                    ["mcp.server_isolation", "mcp.tool_drift"],
+                )
+                self.assertEqual(records[0]["filesystem_scope"], "unconfined")
+                self.assertEqual(records[1]["at"], "connect")
             finally:
                 client2.close()
 
