@@ -39,6 +39,25 @@ confirmed (mismatch, or the log was unreachable).
 (``sessions export --archive``); ``--online`` also re-fetches the Rekor
 entry when the package carries an external anchor.
 
+``northstar audit seal-head <store> --head-hash … --seq … --genesis …
+--anchor-manifest <path>`` seals a head into an *independent* head store:
+an append-only NDJSON file outside the writer's own store, holding the
+head pin (head hash, seq, record count, the observed seq range ``[1..N]``).
+Anchor-before-acknowledge: the head is written only once the anchor
+receipt is in hand, so an unanchored head is never counted as sealed.
+Without ``--anchor-manifest`` the command exits 3 and writes nothing.
+``--independent`` declares the anchor genuinely outside the writer's
+domain (only true once the manifest is shipped somewhere the writer cannot
+rewrite); without it the head is sealed as a same-domain witness and the
+strict tail check refuses it.
+
+``northstar audit check-head <store> --head-hash … --seq … --genesis …``
+tail-samples the store against the writer's head: does the latest held
+head match the writer's, and do the row counts between the two heads
+agree? Exit 0 is agreement, exit 1 is a mismatch, exit 3 is a missing
+independent head or an unusable store. Both commands take ``--json`` and
+emit one JSON object on every path — including the error paths.
+
 ``--strict`` is an opt-in stricter profile for ``verify``: on top of the
 hash chain it also enforces timestamp monotonicity (a record may regress
 at most ``--clock-skew`` seconds, default 300 = 5 minutes, behind the
@@ -183,6 +202,70 @@ def add_audit_arguments(parser: argparse.ArgumentParser) -> None:
     )
     verifying_archive.add_argument("--json", action="store_true", help="emit the result as one JSON object")
 
+    head_sealing = sub.add_parser(
+        "seal-head",
+        help="seal an audit head into an independent head holder",
+        description=(
+            "Publishes a sealed head (head hash, seq, record count and the "
+            "observed seq range [1..N]) to an append-only head store that lives "
+            "outside the writer's store. Anchor-before-acknowledge: the head is "
+            "only written once the anchor receipt is in hand, so an unanchored "
+            "head is never counted as sealed. Needs --head-hash, --seq and "
+            "--genesis; --records defaults to --seq."
+        ),
+    )
+    head_sealing.add_argument("store", help="the independent head store (NDJSON) to append to")
+    head_sealing.add_argument("--head-hash", required=True, help="the sealed head hash (sha256: pin)")
+    head_sealing.add_argument("--seq", required=True, type=int, help="the seq of the head record")
+    head_sealing.add_argument("--genesis", required=True, help="the chain's genesis pin")
+    head_sealing.add_argument(
+        "--records",
+        type=int,
+        default=-1,
+        help=(
+            "records sealed (default: --seq). The seal commits to one range "
+            "[1..N], so this must equal --seq; a different count is refused."
+        ),
+    )
+    head_sealing.add_argument("--seq-first", type=int, default=1, help="first seq of the committed range (default 1)")
+    head_sealing.add_argument("--seq-last", type=int, default=-1, help="last seq of the committed range (default: --seq)")
+    head_sealing.add_argument(
+        "--anchor-manifest",
+        default="",
+        help="offline head anchor manifest to write (and thus anchor this head)",
+    )
+    head_sealing.add_argument(
+        "--independent",
+        action="store_true",
+        help="declare the offline anchor independent (only true once the manifest is shipped "
+        "somewhere the writer cannot rewrite)",
+    )
+    head_sealing.add_argument("--json", action="store_true", help="emit the result as one JSON object")
+
+    head_checking = sub.add_parser(
+        "check-head",
+        help="tail-sample an independent head holder against the writer's head",
+        description=(
+            "Compares the writer's latest head against the head somebody else holds, "
+            "and compares the row counts between the two heads. Fails closed on a "
+            "mismatch and on a missing independent head: exit 1 means the head "
+            "disagrees, exit 3 means no independent head is held."
+        ),
+    )
+    head_checking.add_argument("store", help="the independent head store (NDJSON)")
+    head_checking.add_argument("--head-hash", required=True, help="the writer's current head hash (sha256: pin)")
+    head_checking.add_argument("--seq", required=True, type=int, help="the writer's current seq")
+    head_checking.add_argument("--genesis", required=True, help="the chain's genesis pin")
+    head_checking.add_argument("--records", type=int, default=-1, help="the writer's row count (default: --seq)")
+    head_checking.add_argument("--seq-first", type=int, default=1, help="first seq of the writer's committed range")
+    head_checking.add_argument("--seq-last", type=int, default=-1, help="last seq of the writer's committed range")
+    head_checking.add_argument(
+        "--allow-same-domain",
+        action="store_true",
+        help="accept a head anchored inside the writer's own domain (not independent)",
+    )
+    head_checking.add_argument("--json", action="store_true", help="emit the result as one JSON object")
+
     exporting = sub.add_parser(
         "export",
         help="export a feed's chain head as a TRACE v0.2-shaped Trust Record",
@@ -275,6 +358,144 @@ def _load_pubkey(hexkey: str) -> bytes:
     if len(raw) != 32:
         raise ValueError("an Ed25519 public key is 32 bytes")
     return raw
+
+
+def _emit_head_json(payload: dict) -> None:
+    """Emit one JSON object for a head command."""
+    print(json.dumps(payload))
+
+
+def _run_seal_head(args: argparse.Namespace) -> int:
+    """Seal a head into the independent head holder."""
+    from audit_head_holder import (
+        HeadHolder,
+        HeadHolderError,
+        HeadPin,
+        offline_head_anchorer,
+    )
+
+    # The sealed head commits to one consistent observed range [1..N]: the
+    # pin's record count is its seq and its range ends at its seq.
+    seq_last = args.seq_last if args.seq_last >= 0 else args.seq
+    records_sealed = args.records if args.records >= 0 else args.seq
+    want_json = bool(getattr(args, "json", False))
+    try:
+        pin = HeadPin(
+            head_hash=args.head_hash,
+            seq=args.seq,
+            records_sealed=records_sealed,
+            genesis=args.genesis,
+            seq_first=args.seq_first,
+            seq_last=seq_last,
+        )
+    except HeadHolderError as error:
+        print(f"audit seal-head: {error}", file=sys.stderr)
+        if want_json:
+            _emit_head_json({"status": "INVALID", "reason": str(error)})
+        return 3
+
+    holder_kwargs: dict = {}
+    if args.anchor_manifest:
+        holder_kwargs["anchorer"] = offline_head_anchorer(
+            args.anchor_manifest,
+            anchor_id="offline",
+            independent=bool(args.independent),
+        )
+        # An offline manifest in the writer's own directory is a same-domain
+        # witness unless the operator declares it shipped out of band.
+        holder_kwargs["require_independent"] = not bool(args.independent)
+    else:
+        # No anchor: the head cannot be sealed (anchor-before-acknowledge).
+        reason = (
+            "no anchor manifest given, so the head is not anchored "
+            "and therefore not sealed"
+        )
+        print(f"audit seal-head: {reason}", file=sys.stderr)
+        if want_json:
+            _emit_head_json({"status": "INVALID", "reason": reason})
+        return 3
+
+    try:
+        holder = HeadHolder(args.store, **holder_kwargs)
+        entry = holder.seal(pin)
+    except HeadHolderError as error:
+        print(f"audit seal-head: {error}", file=sys.stderr)
+        if want_json:
+            _emit_head_json({"status": "INVALID", "reason": str(error)})
+        return 3
+
+    payload = {
+        "status": "OK",
+        "store": str(args.store),
+        "head_hash": entry.pin.head_hash,
+        "seq": entry.pin.seq,
+        "records_sealed": entry.pin.records_sealed,
+        "seq_range": list(entry.pin.seq_range),
+        "anchor": entry.receipt.as_dict(),
+        "independent": entry.receipt.independent,
+    }
+    if want_json:
+        _emit_head_json(payload)
+    else:
+        print(
+            f"audit seal-head: OK — sealed {entry.pin.head_hash[:16]}… "
+            f"at seq {entry.pin.seq} (range {list(entry.pin.seq_range)}) -> {args.store}"
+        )
+    return 0
+
+
+def _run_check_head(args: argparse.Namespace) -> int:
+    """Tail-sample the independent head holder against the writer's head."""
+    from audit_head_holder import HeadHolder, HeadHolderError, HeadPin
+
+    # The writer's head pin commits to one consistent range [1..N], so the
+    # pin's record count is its seq.  ``--records`` is a different thing:
+    # it is how many rows the writer holds *now*, which is what the row
+    # count comparison is against.
+    seq_last = args.seq_last if args.seq_last >= 0 else args.seq
+    writer_rows = args.records if args.records >= 0 else args.seq
+    want_json = bool(getattr(args, "json", False))
+    try:
+        writer_head = HeadPin(
+            head_hash=args.head_hash,
+            seq=args.seq,
+            records_sealed=args.seq,
+            genesis=args.genesis,
+            seq_first=args.seq_first,
+            seq_last=seq_last,
+        )
+    except HeadHolderError as error:
+        print(f"audit check-head: {error}", file=sys.stderr)
+        if want_json:
+            _emit_head_json({"status": "INVALID", "reason": str(error)})
+        return 3
+
+    try:
+        holder = HeadHolder(args.store, require_independent=not bool(args.allow_same_domain))
+        report = holder.tail_check(writer_head, writer_rows=writer_rows)
+    except HeadHolderError as error:
+        # An unusable store path is not a head disagreement; it is a
+        # failure to check, so it must not read as "the heads agree".
+        print(f"audit check-head: {error}", file=sys.stderr)
+        if want_json:
+            _emit_head_json({"status": "INVALID", "reason": str(error)})
+        return 3
+
+    payload = report.as_dict()
+    payload["status"] = "OK" if report.ok else "MISMATCH"
+    if want_json:
+        _emit_head_json(payload)
+    elif report.ok:
+        print(
+            f"audit check-head: OK — {report.independent_rows} records agree with "
+            f"the independent holder"
+        )
+    else:
+        print(f"audit check-head: MISMATCH — {report.reason}", file=sys.stderr)
+    if report.ok:
+        return 0
+    # No independent head at all is a different failure from a disagreement.
+    return 3 if not report.independent_head_present else 1
 
 
 def run_audit(args: argparse.Namespace) -> int:
@@ -491,6 +712,10 @@ def run_audit(args: argparse.Namespace) -> int:
         if want_scitt:
             return _run_audit_scitt_export(args)
         return _run_audit_export(args)
+    if command == "seal-head":
+        return _run_seal_head(args)
+    if command == "check-head":
+        return _run_check_head(args)
     print(
         "audit: pass a subcommand: verify, anchor, anchor-external, verify-archive, export or keygen "
         "(--help for flags)",

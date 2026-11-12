@@ -342,6 +342,7 @@ py-modules = [
     "audit_committee",
     "audit_compaction",
     "audit_export",
+    "audit_head_holder",
     "audit_management",
     "audit_merkle",
     "audit_rekor",
