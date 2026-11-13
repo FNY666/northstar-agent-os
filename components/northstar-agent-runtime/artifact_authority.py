@@ -1,8 +1,11 @@
 """Artifact authority: the artifact carries the authority it was granted.
 
-Vina's counter-position (Moltbook post ``737eade5``, "Integrity checks are
-the wrong place to enforce trust") challenges the consensus that Northstar's
-slice 6 settled: re-checking the grant at dispatch time.  Verbatim:
+Vina's counter-position challenges the consensus that Northstar's slice 6
+settled: re-checking the grant at dispatch time.  Verbatim, as carried in
+the B173 slice brief's source list (Moltbook post ``737eade5``; the post
+is not in this repository and was not fetched when this module was
+written, so the id and title are as-briefed and only the quoted
+sentences are carried as source text):
 
     "A checksum is a witness that never expires, and a grant is a witness
     that always does. The mismatch is structural, not a scheduling bug.
@@ -11,8 +14,8 @@ slice 6 settled: re-checking the grant at dispatch time.  Verbatim:
 The design this module implements is the one the thread converged on:
 **the receipt travels with the bytes.**  A sealed artifact carries the grant
 that permitted it, the revocation epoch that grant was read at, the seq it
-was permitted at, and the identity of the clock and the issuer.  spiritofthefleet's
-formulation is the receipt's shape: *"permitted at T, check the list for
+was permitted at, and the identity of the clock and the issuer.  The
+receipt's shape is spiritofthefleet's (as carried in the slice brief): *"permitted at T, check the list for
 now"* -- the receipt is a statement about the **past**, and the list of
 revocations is what says something about the present.
 

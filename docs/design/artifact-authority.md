@@ -1,15 +1,17 @@
 # Artifact authority: the artifact carries the authority it was granted
 
-Status: **implemented** (B173 vina slice, 2026-11-13). Implemented on
-`batch-173-moltbook-absorb`.
+Status: **module and tests implemented** (B173 vina slice, 2026-11-13);
+the read-time check is **not yet wired into the dispatch path** (see §7).
+Implemented on `batch-173-moltbook-absorb`.
 
 ## 1. The position this answers
 
-Slice 6 settled **epoch-CAS-at-dispatch**: re-check the grant when the
-write is dispatched, and pin the epoch with a compare-and-swap
-(`docs/design/live-socket-revocation.md`, `docs/design/grant-pin-integrity.md`).
-Vina's counter-position challenges exactly that shape. Verbatim from the
-post quoted in the slice brief (Moltbook post `737eade5`):
+The B173 log records slice 6 as having settled **epoch-CAS-at-dispatch**:
+re-check the grant when the write is dispatched, and pin the epoch with a
+compare-and-swap (conclusions 25, 31, 32, 37, as summarized in the slice
+brief). Vina's counter-position challenges exactly that shape. Verbatim
+from the post quoted in the slice brief (Moltbook post `737eade5`, the
+id and title as recorded in the brief's source list):
 
 > "A checksum is a witness that never expires, and a grant is a witness
 > that always does. The mismatch is structural, not a scheduling bug.
@@ -21,6 +23,29 @@ statement about **itself**: what permitted this, and when. Re-checking
 happens at one instant, in one place, and is then gone — the artifact
 that was produced carries no trace of it. The stamp-to-use gap is the
 hole.
+
+> The post's identifier and title (`737eade5`, "Integrity checks are the
+> wrong place to enforce trust") are reproduced **as recorded in the
+> slice brief's source list**. The post is not in this repository and
+> was not fetched during the slice, so the id and the title are not
+> independently verified here; only the quoted sentences below are
+> carried as source text.
+
+What the repo actually implements today, stated plainly so the framing
+is not mistaken for a mechanism that exists:
+
+* `grant_pin_ledger.py` refuses an unnamed grant at the seal layer and
+  preserves a null counter verbatim as `outcome_unknown`.
+* `forward_seal_ledger.py`'s `append_grant` performs a **CAS at commit**
+  against the *tombstone registry*: a grant covered by a live tombstone is
+  refused and no record lands, and a valid named lift lands the seal and
+  consumes the lift together.
+* There is **no grant-scoped revocation epoch** in the repo today, and no
+  epoch-CAS at dispatch. The only `revocation_epoch` in the tree is the
+  *lease* epoch of the egress sidecar's lease table, which fences an
+  admitted network session — a different list (§5, §7). This slice adds
+  the receipt and the epoch it binds; it does not rewire the dispatch
+  path.
 
 The design that came out of the thread (as recorded in the slice brief):
 **the receipt travels with the bytes.** The receipt reads
@@ -35,8 +60,10 @@ Both, and the receipt is explicitly past tense.
 * **Embed** (this slice): the artifact carries the grant that permitted
   it, the revocation epoch that grant was read at, the seq it was
   permitted at, the clock that produced the epoch, and the issuer.
-* **Re-check** (slice 6, unchanged): the dispatch path still re-checks
-  the grant and still pins the epoch at commit.
+* **Re-check** (the slice-6 direction the log records): the dispatch path
+  is to re-check the grant and pin the epoch at commit. **This slice
+  does not implement or rewire that path** — it is a library the
+  dispatch path can consult. The receipt's own §7 says so.
 * The receipt never claims to *be* the authorization. It is a witness
   about the past; the revocation list is what says something about the
   present. That is the whole of "permitted at T, check the list for now".
@@ -91,7 +118,7 @@ check. The verdicts:
 | `UNNAMED` | the receipt's grant was never named |
 | `UNBOUND` | the bytes no longer match the receipt's digest |
 | `REVOKED` | a live tombstone names the action the receipt permits |
-| `STALE` | the grant's revocation epoch has moved on, or the grant was re-issued (its counter advanced) |
+| `STALE` | the grant's revocation epoch has moved on, or the grant was re-issued (its counter advanced), or the receipt's unresolved pin has since become resolvable |
 | `VALID` | none of the above |
 
 Three properties the tests pin:
@@ -104,7 +131,12 @@ Three properties the tests pin:
   even though the epoch has not moved and the grant id is unchanged;
 * a `STALE` or `REVOKED` receipt never silently becomes `VALID` again —
   the verdict is re-derived from the receipt and the present on every
-  read, and the epoch only moves forward.
+  read. **The monotonicity of the epoch is a precondition on the
+  caller, not a property of this module**: `epoch_now` is a
+  caller-supplied integer and this module does not enforce that it only
+  moves forward. A caller that hands the verifier a *lower* epoch than
+  the receipt was sealed under gets `VALID` back, and that is the
+  caller's error, not a guarantee this module makes.
 
 ## 4. Honest scope
 
@@ -181,11 +213,17 @@ Northstar extensions (ours, not the source's):
 * **Who re-reads the receipt.** The read-time check is a library call;
   the dispatch path is not yet wired to it (this slice does not modify
   `forward_seal_ledger` or the host). Until it is, the receipt is a
-  witness that can be consulted, not a gate that fires.
+  witness that can be consulted, not a gate that fires. The module is
+  imported only by its own test file today.
 * **Which list is "the list".** The receipt says "check the list for
   now" but does not name a list. The tombstone set is the list consulted
   here; the lease table's `revocation_epoch` is a different one, and the
   two are not yet unified.
+* **The epoch's monotonicity is the caller's.** The module compares
+  `epoch_now > receipt.revocation_epoch`; it does not enforce that the
+  epoch only advances. A source of epochs that cannot go backwards is a
+  precondition on the caller, and no component in this repo provides one
+  for a grant yet (the lease table has one for leases).
 * **Verbatim source text.** The post is not in this repository and was
   not fetched during the slice; the quotes above are the ones the slice
   brief carries and are marked as verbatim-as-briefed, not

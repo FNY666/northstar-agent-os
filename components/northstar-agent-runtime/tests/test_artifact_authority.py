@@ -275,6 +275,22 @@ class VerifyTests(unittest.TestCase):
             REVOKED,
         )
 
+    def test_epoch_monotonicity_is_a_caller_precondition_not_a_guarantee(self):
+        # The module does NOT enforce that the epoch only moves forward:
+        # epoch_now is caller-supplied. A caller that hands back a lower
+        # epoch gets VALID, and that is the caller's error. The design
+        # doc states this as a precondition; this test pins the actual
+        # behaviour so the doc cannot drift away from the code.
+        receipt = _bind(epoch=3)
+        self.assertEqual(verify(receipt, epoch_now=3).state, VALID)
+        self.assertEqual(verify(receipt, epoch_now=2).state, VALID)
+        # The tombstone check does not depend on the epoch at all.
+        live = TombstoneSet(
+            [Tombstone(grant_id="grant-1", action="dispatch", declarer="operator",
+                       declarer_channel="chat")]
+        )
+        self.assertEqual(verify(receipt, epoch_now=2, tombstone_set=live).state, REVOKED)
+
 
 class DrivenPathTests(unittest.TestCase):
     """One real path, driven end to end.
