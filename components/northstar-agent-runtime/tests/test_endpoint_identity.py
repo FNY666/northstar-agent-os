@@ -23,6 +23,7 @@ from endpoint_identity import (  # noqa: E402
     SCHEMA_PIN,
     AcceptanceLedger,
     DestinationIdentity,
+    EndpointIdentityError,
     UnprovenIdentityError,
     bind_key,
     classify_replay,
@@ -88,6 +89,15 @@ class TestDestinationIdentityConstruction(unittest.TestCase):
         back = DestinationIdentity.from_dict(d.to_dict())
         self.assertEqual(back, d)
         self.assertEqual(back.address, "https://api.example")
+
+    def test_is_proven_reports_whether_an_epoch_is_present(self):
+        self.assertTrue(DestinationIdentity(epoch=EPOCH_A).is_proven())
+        with self.assertRaises(UnprovenIdentityError):
+            DestinationIdentity(epoch="")
+
+    def test_the_error_taxonomy_is_rooted_in_endpoint_identity_error(self):
+        self.assertTrue(issubclass(UnprovenIdentityError, EndpointIdentityError))
+        self.assertTrue(issubclass(UnprovenIdentityError, ValueError))
 
     def test_an_unproven_identity_is_not_provable(self):
         with self.assertRaises(UnprovenIdentityError):
