@@ -33,6 +33,35 @@ from the same checkpoint are two files, comparable after the fact.
 Checkpoints are opt-in (``checkpoint_turns`` / ``--checkpoint-turns``) because they
 add one record per boundary to every transcript, and a default-on audit change is a
 format change, not a feature flag.
+
+Lineage, not position
+---------------------
+A transcript records checkpoints in the order they were *appended*.  That order is
+not the order they *descend from*.  A run that pauses for a human answer and
+writes a second checkpoint at the same boundary has two checkpoints with the same
+turn count; the second supersedes the first, and the only thing that says so is
+the link between them.  So every checkpoint carries two new fields:
+
+* ``previous_checkpoint_id`` - the checkpoint this one continues from.  A
+  checkpoint with no previous id is a **genesis**: the start of a lineage.
+* ``graph_signature_hash`` - the hash of the *run graph* the checkpoint was taken
+  under (see :func:`run_graph_hash`).  A checkpoint taken under one graph must
+  not be resumed under a different one.
+
+**Ordering rule (do not change this):** checkpoints are ordered by their
+``previous_checkpoint_id`` lineage chain, and by nothing else.  ``turns`` and
+``record_index`` are *positions in a transcript*, not lineage: two checkpoints
+can share a turn count, and a fork can put a later record index on an earlier
+branch.  ``select()`` walks the chain; it never sorts by turn count or record
+index.
+
+**Resume rule (fail closed):** a resume is refused when the checkpoint's
+``graph_signature_hash`` is present and disagrees with the current run graph's
+hash, and when the checkpoint's ``previous_checkpoint_id`` names a checkpoint
+that is not in the record set (a dangling lineage).  The first means "this
+checkpoint is from a different run"; the second means "this checkpoint's
+history is missing", and a checkpoint whose history is missing cannot vouch for
+its own counters.
 """
 from __future__ import annotations
 
@@ -43,6 +72,46 @@ from typing import Any, Mapping, Sequence
 
 #: The transcript record type this module writes (and the 13th ``RECORD_TYPES``).
 CHECKPOINT_TYPE = "checkpoint"
+
+#: Length of a SHA-256 digest in lowercase hex.
+_SHA256_HEX_LEN = 64
+
+
+def _is_sha256_hex(value: Any) -> bool:
+    """True when ``value`` is a lowercase 64-character SHA-256 hex digest."""
+    return (
+        isinstance(value, str)
+        and len(value) == _SHA256_HEX_LEN
+        and all(ch in "0123456789abcdef" for ch in value)
+    )
+
+
+def run_graph_hash(
+    *,
+    steps: Sequence[Any] = (),
+    permission_mode: str = "",
+    policy_revision: str | None = None,
+) -> str:
+    """The hash of the *run graph* a checkpoint is taken under.
+
+    The run graph is the shape of the run: its ordered steps (or loop
+    configuration), the permission mode it runs under, and the policy revision
+    in force.  It is deliberately **not** the model name and **not** the
+    transcript digest: two runs of the same graph with different prompts are the
+    same graph, and a checkpoint must survive a resumed run whose prompt was
+    rewritten.  What must not change is the *shape* - the steps, the authority
+    ceiling, and the policy.
+
+    The description is canonicalised (JSON, sorted keys) before hashing, so the
+    same graph spelled two ways hashes the same.
+    """
+    description = {
+        "steps": [dict(item) if isinstance(item, Mapping) else str(item) for item in steps],
+        "permission_mode": str(permission_mode or ""),
+        "policy_revision": None if policy_revision is None else str(policy_revision),
+    }
+    canonical = json.dumps(description, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _canonical(transcript: Sequence[Any]) -> str:
@@ -88,6 +157,10 @@ class Checkpoint:
     tool_limit_prefix: tuple[str, ...] = ()
     composition_history: tuple[str, ...] | None = None
     composition_policy_digest: str | None = None
+    #: The checkpoint this one continues from.  ``None`` is a genesis.
+    previous_checkpoint_id: str | None = None
+    #: Hash of the run graph the checkpoint was taken under.
+    graph_signature_hash: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         payload = {
@@ -105,6 +178,8 @@ class Checkpoint:
             "run_id": self.run_id,
             "policy_revision": self.policy_revision,
             "denials": self.denials,
+            "previous_checkpoint_id": self.previous_checkpoint_id,
+            "graph_signature_hash": self.graph_signature_hash,
         }
         if self.composition_history is not None:
             payload["composition_history"] = list(self.composition_history)
@@ -138,6 +213,8 @@ def build(
     denials: int = 0,
     composition_history: Sequence[str] | None = None,
     composition_policy_digest: str | None = None,
+    previous_checkpoint_id: str | None = None,
+    graph_signature_hash: str | None = None,
 ) -> dict[str, Any]:
     """The record payload appended at a boundary. Read-only: nothing here mutates."""
     if composition_history is not None and (
@@ -151,6 +228,12 @@ def build(
         or any(ch not in "0123456789abcdef" for ch in composition_policy_digest)
     ):
         raise CheckpointError("composition_policy_digest must be a lowercase SHA-256 hex digest")
+    if graph_signature_hash is not None and not _is_sha256_hex(graph_signature_hash):
+        raise CheckpointError("graph_signature_hash must be a lowercase SHA-256 hex digest")
+    if previous_checkpoint_id is not None and (
+        not isinstance(previous_checkpoint_id, str) or not previous_checkpoint_id
+    ):
+        raise CheckpointError("previous_checkpoint_id must be a non-empty string when present")
     payload = Checkpoint(
         session_id=session_id,
         record_index=record_index,
@@ -173,6 +256,8 @@ def build(
         denials=denials,
         composition_history=tuple(composition_history) if composition_history is not None else None,
         composition_policy_digest=composition_policy_digest,
+        previous_checkpoint_id=previous_checkpoint_id,
+        graph_signature_hash=graph_signature_hash,
     )
     return {"agent": "main", **payload.as_dict()}
 
@@ -205,6 +290,12 @@ def from_record(record: Mapping[str, Any]) -> Checkpoint | None:
         or any(ch not in "0123456789abcdef" for ch in policy_digest)
     ):
         raise CheckpointError("checkpoint composition_policy_digest is malformed")
+    graph_hash = record.get("graph_signature_hash")
+    if graph_hash is not None and not _is_sha256_hex(graph_hash):
+        raise CheckpointError("checkpoint graph_signature_hash is malformed")
+    previous_id = record.get("previous_checkpoint_id")
+    if previous_id is not None and (not isinstance(previous_id, str) or not previous_id):
+        raise CheckpointError("checkpoint previous_checkpoint_id is malformed")
     return Checkpoint(
         session_id=str(record.get("session_id", "") or ""),
         record_index=int(record.get("index", -1)),
@@ -222,7 +313,132 @@ def from_record(record: Mapping[str, Any]) -> Checkpoint | None:
         denials=int(record.get("denials", 0) or 0),
         composition_history=tuple(history_raw) if history_raw is not None else None,
         composition_policy_digest=policy_digest,
+        previous_checkpoint_id=previous_id,
+        graph_signature_hash=graph_hash,
     )
+
+
+def _checkpoint_key(checkpoint: Checkpoint) -> str:
+    """The stable identity of a checkpoint inside a lineage."""
+    if checkpoint.run_id:
+        return f"{checkpoint.run_id}:{checkpoint.record_index}"
+    return f"record:{checkpoint.record_index}"
+
+
+def _lineage_ids(checkpoint: Checkpoint) -> tuple[str, ...]:
+    """The identities a checkpoint's ``previous_checkpoint_id`` may name.
+
+    A previous id is recorded by the writer, and the writer's own naming
+    convention is not fixed: it may be the store's checkpoint id (``ck-2``)
+    or the lineage key this module uses (``record:2``).  Both are accepted, and
+    both resolve to the same ancestor, so a checkpoint written by one tool is
+    still readable by another.
+    """
+    previous = checkpoint.previous_checkpoint_id
+    if not previous:
+        return ()
+    candidates = [previous]
+    if not previous.startswith("record:"):
+        candidates.append(f"record:{previous}")
+    return tuple(candidates)
+
+
+def _find_ancestor(
+    by_key: Mapping[str, Checkpoint],
+    checkpoint: Checkpoint,
+) -> Checkpoint | None:
+    """The ancestor a checkpoint names, if the record set holds it.
+
+    The previous id is matched against the ids the record set knows: the
+    lineage key of every checkpoint, and the raw previous id as written.  A
+    store names its checkpoints its own way (``ck-1``, ``ck-000001``), so an
+    id whose trailing number is a record index in this session resolves to
+    that record.  The ancestor is therefore found by *identity*, not by a
+    naming convention the writer chose.
+    """
+    for candidate in _lineage_ids(checkpoint):
+        found = by_key.get(candidate)
+        if found is not None and found is not checkpoint:
+            return found
+    suffix = _trailing_index(checkpoint.previous_checkpoint_id)
+    if suffix is not None:
+        for candidate in by_key.values():
+            if candidate is checkpoint:
+                continue
+            if candidate.record_index == suffix and (
+                not checkpoint.session_id or candidate.session_id == checkpoint.session_id
+            ):
+                return candidate
+    return None
+
+
+def _trailing_index(checkpoint_id: str | None) -> int | None:
+    """The record index a store-style checkpoint id names, if any.
+
+    ``ck-1`` names record 1, ``ck-000007`` names record 7, ``record:3`` names
+    record 3.  An id that ends in no number names nothing.
+    """
+    if not checkpoint_id:
+        return None
+    tail = ""
+    for char in reversed(checkpoint_id):
+        if char.isdigit():
+            tail = char + tail
+        else:
+            break
+    if not tail:
+        return None
+    return int(tail)
+
+
+def _lineage_depth(
+    checkpoint: Checkpoint,
+    by_key: Mapping[str, Checkpoint],
+) -> tuple[int, bool]:
+    """``(depth, intact)`` for a checkpoint's lineage.
+
+    ``depth`` is the number of ancestors reachable through
+    ``previous_checkpoint_id``.  ``intact`` is False when the chain is
+    **dangling**: some ancestor is named but not present in the record set.  A
+    dangling lineage means the checkpoint's history is missing, so the chain
+    cannot vouch for it - the resume is refused (fail closed).
+    """
+    depth = 0
+    seen: set[str] = set()
+    current = checkpoint
+    while current.previous_checkpoint_id:
+        depth += 1
+        if depth > len(by_key) + 1:
+            # A cycle in the chain: treat it as dangling rather than looping.
+            return depth, False
+        parent = _find_ancestor(by_key, current)
+        if parent is None:
+            # The ancestor is named but absent from the record set: dangling.
+            return depth, False
+        if parent is current or current.previous_checkpoint_id in seen:
+            return depth, False
+        seen.add(current.previous_checkpoint_id)
+        current = parent
+    return depth, True
+
+
+def _latest_by_lineage(checkpoints: Sequence[Checkpoint]) -> Checkpoint:
+    """The checkpoint at the head of the deepest intact lineage."""
+    by_key: dict[str, Checkpoint] = {}
+    for checkpoint in checkpoints:
+        by_key.setdefault(_checkpoint_key(checkpoint), checkpoint)
+    best: Checkpoint | None = None
+    best_key: tuple[int, bool, int, int] = (-1, False, -1, -1)
+    for position, checkpoint in enumerate(checkpoints):
+        depth, intact = _lineage_depth(checkpoint, by_key)
+        # Intact lineages beat dangling ones; then the depth of the lineage;
+        # then the record index as a stability tiebreak only.
+        key = (1 if intact else 0, depth, checkpoint.record_index, position)
+        if best is None or key > best_key:
+            best = checkpoint
+            best_key = key
+    assert best is not None
+    return best
 
 
 def select(records: Sequence[Mapping[str, Any]], *, record_index: int | None = None) -> Checkpoint | None:
@@ -230,10 +446,23 @@ def select(records: Sequence[Mapping[str, Any]], *, record_index: int | None = N
 
     The latest is the default because it is the only one that preserves the run's
     own accounting; an earlier one is a deliberate rewind and must be named.
+
+    Ordering is by the **lineage chain**, not by ``turns`` and not by
+    ``record_index``: a checkpoint's position in the transcript says where it was
+    written, not what it descends from.  Two checkpoints can share a turn count
+    (a run that pauses for a human answer writes a second checkpoint at the same
+    boundary), and a fork puts a later record index on an earlier branch.  So
+    the chain is walked backwards from the deepest checkpoint, following
+    ``previous_checkpoint_id``; a checkpoint no other checkpoint names as its
+    predecessor is a leaf, and among leaves the one whose lineage is longest
+    wins.  Ties fall back to ``record_index`` only to make the choice stable -
+    never as the primary ordering.
     """
     found = [checkpoint for record in records if (checkpoint := from_record(record)) is not None]
     if record_index is None:
-        return found[-1] if found else None
+        if not found:
+            return None
+        return _latest_by_lineage(found)
     for checkpoint in found:
         if checkpoint.record_index == record_index:
             return checkpoint
@@ -241,22 +470,81 @@ def select(records: Sequence[Mapping[str, Any]], *, record_index: int | None = N
     raise CheckpointError(f"no checkpoint at record #{record_index}; this session has {available}")
 
 
+def _require_intact_lineage(checkpoint: Checkpoint, siblings: Sequence[Checkpoint]) -> None:
+    """Refuse a checkpoint whose lineage chain is broken or cyclic.
+
+    A genesis (no previous id) passes.  A checkpoint that names a previous
+    checkpoint must find it in ``siblings``; a missing ancestor is a dangling
+    lineage and fails closed.
+    """
+    if checkpoint.previous_checkpoint_id is None:
+        return
+    by_key: dict[str, Checkpoint] = {}
+    for item in siblings:
+        by_key.setdefault(_checkpoint_key(item), item)
+    current = checkpoint
+    seen: set[str] = set()
+    while current.previous_checkpoint_id:
+        parent = _find_ancestor(by_key, current)
+        if parent is None:
+            raise CheckpointError(
+                f"checkpoint lineage is dangling: previous checkpoint {current.previous_checkpoint_id!r} "
+                "is not in the record set, so this checkpoint's history cannot be verified"
+            )
+        if parent is current or current.previous_checkpoint_id in seen:
+            raise CheckpointError(
+                f"checkpoint lineage is cyclic at {current.previous_checkpoint_id!r}: the chain cannot be verified"
+            )
+        seen.add(current.previous_checkpoint_id)
+        current = parent
+    # The chain walked down to a checkpoint that names no predecessor: a genesis.
+
+
 def prepare_resume(
     checkpoint: Checkpoint,
     transcript: Sequence[Any],
     *,
     expected_session_id: str | None = None,
+    expected_graph_hash: str | None = None,
+    records: Sequence[Mapping[str, Any]] | None = None,
 ) -> list[Any]:
     """The prefix a resumed run should start from, verified against the digest.
 
     Refuses, rather than degrading, when the transcript no longer matches what the
     checkpoint recorded: the run would otherwise inherit counters describing a
     different history, which is exactly the trust this module exists to provide.
+
+    Two further refusals belong here, because both are the same failure - a
+    checkpoint vouching for a history it cannot prove:
+
+    * **Graph mismatch.** When the checkpoint carries a ``graph_signature_hash``
+      and the caller knows the current run graph's hash
+      (``expected_graph_hash``), the two must agree.  A checkpoint taken under a
+      different graph is refused.  When the caller does not know the hash, the
+      check cannot be made and the resume proceeds - the checkpoint is not
+      *contradicted*, only unverifiable.
+    * **Dangling lineage.** When ``records`` is supplied, the checkpoint's
+      ``previous_checkpoint_id`` must name a checkpoint present in that set.  A
+      missing ancestor means the lineage is broken, and a broken lineage cannot
+      vouch for the counters.  A checkpoint with no previous id is a genesis
+      and is always allowed.
     """
     if expected_session_id is not None and checkpoint.session_id and checkpoint.session_id != expected_session_id:
         raise CheckpointError(
             f"checkpoint belongs to session {checkpoint.session_id!r}, not {expected_session_id!r}"
         )
+    if checkpoint.graph_signature_hash is not None and expected_graph_hash is not None:
+        if not _is_sha256_hex(expected_graph_hash):
+            raise CheckpointError("expected_graph_hash must be a lowercase SHA-256 hex digest")
+        if checkpoint.graph_signature_hash != expected_graph_hash:
+            raise CheckpointError(
+                "checkpoint was taken under a different run graph "
+                f"(checkpoint {checkpoint.graph_signature_hash[:12]}, current {expected_graph_hash[:12]}): "
+                "the run this checkpoint describes is not the run being resumed"
+            )
+    if records is not None:
+        siblings = [item for item in (from_record(record) for record in records) if item is not None]
+        _require_intact_lineage(checkpoint, siblings)
     if checkpoint.transcript_len > len(transcript):
         raise CheckpointError(
             f"checkpoint records {checkpoint.transcript_len} messages but the transcript holds {len(transcript)}: "
