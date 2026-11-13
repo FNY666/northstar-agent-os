@@ -285,7 +285,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "risk_management", "rlaif", "rlhf", "roboethics",
         "robust_watermark", "robustness_eval", "robustness_testing", "routing_engine",
         "rsa_accumulator", "rule_engine", "rule_of_two_probe", "rum_monitor",
-        "run_setup", "sae_interface", "safe_ai", "safety_case",
+        "planted_fault", "run_setup", "sae_interface", "safe_ai", "safety_case",
         "safety_envelope", "safety_eval", "safr_checkpoint", "saga_pattern",
         "saml_provider", "sandbagging", "sast_scanner", "sat_solver",
         "savepoint_manager", "sbom_generator", "scaffold", "scalable_oversight",

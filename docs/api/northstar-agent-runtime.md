@@ -28329,6 +28329,10 @@ Source: `components/northstar-agent-runtime/checkpoints.py`
 
 Turn-boundary checkpoints: resume without resetting the counters, fork without rewriting.
 
+#### `run_graph_hash(*, steps: Sequence[Any]=(), permission_mode: str='', policy_revision: str | None=None)`
+
+The hash of the *run graph* a checkpoint is taken under.
+
 #### `digest_transcript(transcript: Sequence[Any])`
 
 #### `Checkpoint`
@@ -28341,7 +28345,7 @@ A resumable boundary: how far the transcript had got, and what it cost.
 
 A checkpoint that cannot be trusted as a fork point.
 
-#### `build(*, session_id: str, record_index: int, transcript: Sequence[Any], turns: int, tool_calls: int, cost_usd: float, usage: Mapping[str, Any], model: str, provider: str, permission_mode: str, run_id: str | None=None, policy_revision: str | None=None, denials: int=0, composition_history: Sequence[str] | None=None, composition_policy_digest: str | None=None)`
+#### `build(*, session_id: str, record_index: int, transcript: Sequence[Any], turns: int, tool_calls: int, cost_usd: float, usage: Mapping[str, Any], model: str, provider: str, permission_mode: str, run_id: str | None=None, policy_revision: str | None=None, denials: int=0, composition_history: Sequence[str] | None=None, composition_policy_digest: str | None=None, previous_checkpoint_id: str | None=None, graph_signature_hash: str | None=None)`
 
 The record payload appended at a boundary. Read-only: nothing here mutates.
 
@@ -28353,9 +28357,13 @@ Read one checkpoint, or ``None`` when the record is not one.
 
 The newest checkpoint, or the one at ``record_index``.
 
-#### `prepare_resume(checkpoint: Checkpoint, transcript: Sequence[Any], *, expected_session_id: str | None=None)`
+#### `prepare_resume(checkpoint: Checkpoint, transcript: Sequence[Any], *, expected_session_id: str | None=None, expected_graph_hash: str | None=None, records: Sequence[Mapping[str, Any]] | None=None)`
 
 The prefix a resumed run should start from, verified against the digest.
+
+#### `durable_state(checkpoint: Checkpoint, *, extra: Mapping[str, Any] | None=None)`
+
+The state a durable checkpoint holds for this turn boundary.
 
 ### `ci_pipeline`
 
@@ -29354,6 +29362,20 @@ Context compaction that only ever cuts at a safe boundary.
 What compaction did, or exactly why it refused to.
 
 - `as_dict()`
+#### `Span`
+
+One atomic group of messages: it is summarised whole or not at all.
+
+- `contains(cut: int)`
+  - True when a cut at ``cut`` lands strictly inside this span.
+#### `group_messages(messages: Sequence[Any])`
+
+The atomic spans of a transcript.
+
+#### `spans_crossing(spans: Sequence[Span], cut: int)`
+
+The spans a cut at ``cut`` would split.
+
 #### `tool_use_ids(messages: Sequence[Any])`
 
 #### `tool_result_ids(messages: Sequence[Any])`
@@ -29366,7 +29388,7 @@ What compaction did, or exactly why it refused to.
 
 ``tool_result`` ids whose matching ``tool_use`` lives in ``answered_by``.
 
-#### `is_safe_cut(transcript: Sequence[Any], cut: int)`
+#### `is_safe_cut(transcript: Sequence[Any], cut: int, *, spans: Sequence[Span] | None=None)`
 
 True when ``transcript[:cut]`` can be replaced by a summary.
 
@@ -43436,6 +43458,10 @@ A sealed checkpoint over the chain head (immutable).
 
 Single-writer forward-secure sealed ledger.
 
+- `tombstones` (property)
+  - The tombstone registry this ledger consults (may be ``None``).
+- `set_tombstones(registry: Any)`
+  - Install (or clear) the tombstone registry.
 - `genesis` (property)
 - `record(seq: int)`
   - Return the sealed record with 1-based ``seq`` (pure read).
@@ -43444,7 +43470,7 @@ Single-writer forward-secure sealed ledger.
   - Seal one 8-field event with triple fingerprints.
 - `checkpoint()`
   - Seal the current chain head (manual checkpoint).
-- `append_grant(*, grant_id: str, version: Optional[str]=None, counter: Optional[int]=None, intent: str='grant-dispatch', action: str='dispatch', subject: str='', inputs_digest: str='', logic_digest: str='', execution_digest: str='', outcome: str='executed')`
+- `append_grant(*, grant_id: str, version: Optional[str]=None, counter: Optional[int]=None, intent: str='grant-dispatch', action: str='dispatch', subject: str='', inputs_digest: str='', logic_digest: str='', execution_digest: str='', outcome: str='executed', lift: Any=None, now: Optional[float]=None)`
   - Seal one grant event, enforcing the conclusion-52 pin rule.
 - `verify(initial_key: bytes, checkpoint_key: bytes)`
   - Verify the full chain from the initial key (pure read).
@@ -65402,6 +65428,10 @@ How many times, how long apart, and until when.
 The decision not to retry, with the reason a caller can put in an event.
 
 - `as_dict()`
+#### `fault_to_failure(fault: ProviderFault, *, provider: str='', tool_name: str='', tool_use_id: str='')`
+
+Map a provider fault onto a typed tool failure.
+
 #### `classify(error: BaseException, *, already_streamed: bool=False)`
 
 Name a provider failure, from whatever the transport could tell us.
@@ -70238,6 +70268,120 @@ Append-only ledger of page sessions and web-vital samples.
   - Append-only audit events in seq order.
 #### `main()`
 
+### `planted_fault`
+
+Source: `components/northstar-agent-runtime/planted_fault.py`
+
+Planted fault under seal: a check earns trust only after it is watched failing.
+
+#### `PlantedFaultError`
+
+Base class for planted-fault errors.
+
+#### `PlantTargetError`
+
+The plant target is not an input record (shared state is refused).
+
+#### `SeparationError`
+
+The planter and the checker are the same subject.
+
+#### `CommitmentError`
+
+The commitment, the note and the posted order do not line up.
+
+#### `PlantNote`
+
+The sealed note: which run, which field, the wrong value, the truth.
+
+- `payload()`
+  - The canonical payload the commitment is computed over.
+#### `post_commitment(note: PlantNote, ledger: Optional['EvidenceLedger']=None)`
+
+Print the note's ``sha256:`` commitment and (optionally) post it.
+
+#### `FaultedInput`
+
+The faulted input record: a copy, plus the plant metadata.
+
+- `record` (property)
+  - A copy of the faulted input fields.
+#### `CheckOutcome`
+
+What the blind check said about the faulted input.
+
+#### `RevealResult`
+
+The outcome of unsealing a note against the posted commitment.
+
+#### `EvidenceRow`
+
+One row of the evidence ledger.
+
+#### `plant(input_record: Mapping[str, Any], note: PlantNote, planter_id: str)`
+
+Write the wrong value into a **copy** of the input record.
+
+#### `run_check(check_fn: Callable[[Mapping[str, Any]], Any], faulted_input: FaultedInput, checker_id: str, ledger: Optional['EvidenceLedger']=None, seq: Optional[int]=None)`
+
+Run the check blind against the faulted input and book the result.
+
+#### `reveal(note: PlantNote, commitment: str, ledger: Optional['EvidenceLedger']=None)`
+
+Unseal the note against the commitment that was posted beforehand.
+
+#### `EvidenceLedger`
+
+The evidence ledger: passes, catches, misses, and the void rule.
+
+- `post_commitment(plant_id: str, commitment: str, check_scope: str='')`
+  - Record that a commitment was published for ``plant_id``.
+- `commitment_for(plant_id: str)`
+  - The commitment posted for ``plant_id`` (``None`` if never posted).
+- `record_check_run(outcome: CheckOutcome)`
+  - Remember a blind check run (not yet evidence -- not yet revealed).
+- `check_run_for(plant_id: str)`
+  - The check run booked for ``plant_id`` (``None`` if none).
+- `plant_is_dead(plant_id: str)`
+  - True once the plant was voided (mismatch, or revealed too early).
+- `retire_run(plant_id: str)`
+  - Forget a plant's check run once it has been revealed.
+- `allocate_seq()`
+  - Allocate the next sequence number (caller-supplied ints win).
+- `record_pass(check_scope: str, run_index: int, seq: Optional[int]=None)`
+  - Book a PASS: the check ran and did not fire on this run.
+- `record_catch(plant_id: str, run_index: int, seq: Optional[int]=None)`
+  - Book a CATCH: the check fired on the fault it was not told about.
+- `record_miss(plant_id: str, run_index: int, seq: Optional[int]=None)`
+  - Book a MISS and void the passes back to the last observed catch.
+- `record_void_plant(plant_id: str, detail: str='')`
+  - Book a plant that died (commitment mismatch, or revealed too early).
+- `last_catch_seq()`
+  - The seq of the most recent observed CATCH (``None`` if none).
+- `void_back_to_last_catch()`
+  - Void every PASS after the last observed catch.
+- `rows` (property)
+  - Every row, in booking order.
+- `rows_of_kind(kind: str)`
+  - Every row of one kind.
+- `passes()`
+  - Every PASS row (voided ones included, with their status).
+- `valid_passes()`
+  - Only the PASS rows that still count as evidence.
+- `voided_passes()`
+  - Only the PASS rows that were voided by a miss.
+- `catches()`
+  - Every observed catch.
+- `misses()`
+  - Every observed miss.
+#### `stdlib_only()`
+
+AST check: this module imports stdlib modules only.
+
+#### `main()`
+
+Self-check: plant, blind check, reveal, catch, then a miss.
+
 ### `run_setup`
 
 Source: `components/northstar-agent-runtime/run_setup.py`
@@ -73967,11 +74111,19 @@ Writer/reader for one session's JSONL transcript.
 - `record_user(message: UserMessage, *, agent: str='main')`
 - `record_system(message: SystemMessage, *, agent: str='main')`
 - `record_result(message: ResultMessage)`
+- `record_cancellation(tombstone: Any)`
+  - Record one cancellation tombstone in this session's transcript.
+- `tombstones(session_id: str | None=None)`
+  - The live tombstones of this session, in declaration order.
+- `record_cancellation_lift(tombstone: Any, lift: Any)`
+  - Record a named lift of a tombstone.
 - `read(session_id: str | None=None, *, strict: bool=True)`
 - `transcript(session_id: str | None=None, *, require_integrity: bool=False)`
   - The provider transcript rebuilt from this session's records.
 - `resume_transcript(session_id: str | None=None, *, require_integrity: bool=False)`
   - The transcript a resumed run starts from, plus the unwind outcome.
+- `unwound_calls(session_id: str | None=None)`
+  - The calls the shutdown unwind pass says never ran.
 - `list_sessions()`
 #### `load_jsonl(path: str | os.PathLike[str], *, strict: bool=True)`
 
@@ -81490,6 +81642,10 @@ Raised when an audit event kind is unknown or leaks banned keys.
 
 Build one ``audit.ndjson/1`` audit row for the tool-use ledger.
 
+#### `tool_use_failure_detail(failure: ToolFailure)`
+
+The audit detail for one typed failure.
+
 #### `ToolRecord`
 
 Frozen record of a registered tool.
@@ -81506,6 +81662,16 @@ Frozen record of one booked invocation decision.
 
 Pure read view of a registered parameter schema (no seq consumed).
 
+#### `ToolResult`
+
+What the dispatch boundary returns: a booking, or a typed failure.
+
+- `ok` (property)
+  - True when the call was booked.
+- `is_error` (property)
+  - True when the call failed (mirrors the tool_result field).
+- `to_tool_result()`
+  - The tool_result block for this result.
 #### `ToolStats`
 
 Ledger counts as data (not a record).
@@ -81518,6 +81684,10 @@ Deterministic tool registration and invocation-booking ledger.
   - Register a tool with a parameter schema; duplicates refused.
 - `invoke(tool_id: object, arguments: object, seq: object)`
   - Book one invocation decision; arguments validated fail-closed.
+- `invoke_result(tool_id: object, arguments: object, seq: object, *, tool_use_id: str='')`
+  - Invoke, and return a typed result instead of raising.
+- `invoke_denial(tool_id: object, denial_kind: str, seq: object, *, ends_turn: bool=False, summary: str='', remedy: Optional[ToolResultRemedy]=None, tool_use_id: str='')`
+  - Book a denial the host decided on, as a typed result.
 - `schema(tool_id: object, seq: object)`
   - Pure read view of a tool's parameter schema (no seq consumed).
 - `tool_record(tool_id: str)`

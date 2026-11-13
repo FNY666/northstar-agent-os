@@ -1073,6 +1073,7 @@ py-modules = [
     "pii_vault",
     "plan_defense",
     "plan_injection_probes",
+    "planted_fault",
     "planner_budget_combo",
     "planner_executor_seam_probes",
     "planner_gates",
