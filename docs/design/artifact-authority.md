@@ -171,7 +171,13 @@ otherwise, and the design does not claim to.
   that stands on its own.
 * **`docs/design/live-socket-revocation.md`** — the lease table fences
   an admitted *network session*; the receipt fences the *artifact*. They
-  answer different questions and both are kept.
+  answer different questions and both are kept. The lease table's
+  `revocation_epoch` is a lease epoch, not a grant epoch, and this slice
+  does not unify the two.
+* **`docs/design/grant-pin-integrity.md`** — the conclusion-52 pin rule
+  the receipt reuses (NOT NULL grant id at the seal layer; nullable
+  version and counter; nulls preserved verbatim). It is about the pin,
+  not about an epoch.
 * **`docs/design/cancellation-tombstone.md`** — the tombstone survives
   compaction; the receipt survives the artifact.
 
