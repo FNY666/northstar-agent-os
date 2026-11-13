@@ -240,6 +240,15 @@ Northstar extensions (ours, not the source's):
   This slice does not wire the receipt into the sealed chain, so a
   forged receipt is detectable only where it disagrees with the grant's
   current state or with a tombstone.
+* **The module is not declared in `pyproject.toml`.** The runtime
+  component's `test_module_layout` test asserts that every module on
+  disk appears in `[tool.setuptools] py-modules`. That test already
+  fails at this slice's parent commit (with `cancellation_tombstone`
+  undeclared) and `artifact_authority` joins the same list — so no new
+  test failure appears, but the declaration is still owed. This slice's
+  writable-file set covers only the module, its tests and this design
+  doc, so the declaration is left to the slice that owns the packaging
+  metadata.
 * **Verbatim source text.** The post is not in this repository and was
   not fetched during the slice; the quotes above are the ones the slice
   brief carries and are marked as verbatim-as-briefed, not
