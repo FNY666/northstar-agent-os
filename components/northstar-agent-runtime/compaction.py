@@ -5,17 +5,36 @@ A cut is **safe** when neither side of it is left dangling:
 * the retained prefix must not end with a ``tool_use`` whose ``tool_result`` is
   being summarized away;
 * the kept suffix must not start with a ``tool_result`` whose ``tool_use`` was
-  summarized away.
+  summarized away;
+* the cut must not fall **inside an atomic span** - a group of messages that
+  only make sense together.
 
 Cut anywhere else and the next request carries an orphaned block, which the
 Messages API rejects outright - the run dies with a 400 that looks like a provider
 bug and is really a compaction bug. When no safe cut exists in the searchable
 window, compaction is skipped and reported, never forced.
+
+Atomic spans
+------------
+The orphan rules above catch the *common* case: a ``tool_use`` in the prefix
+whose result is in the suffix.  They do not express the rule itself.  A tool
+call and its result are one exchange; summarising half of it says something
+false about what the run did.  So the transcript is grouped into **atomic
+spans** (:func:`group_messages`) and a cut that lands inside a span is refused
+even when the orphan rules would have allowed it.
+
+The spans are built from *unambiguous pairs* - a call and its result pair only
+when the transcript names them exactly once, because a transcript that names a
+call twice cannot say which occurrence the result belongs to.  This is the
+shape of Microsoft Agent Framework's ``group_messages``
+(``python/packages/core/agent_framework/_compaction.py``), which pairs through
+``_unambiguous_tool_call_output_pairs`` and ``_unambiguous_approval_pairs`` so
+a pair is never split by a summary boundary.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from providers.base import (
     AssistantMessage,
@@ -72,6 +91,135 @@ class CompactionOutcome:
 
 
 # ---------------------------------------------------------------------------
+# Atomic spans
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Span:
+    """One atomic group of messages: it is summarised whole or not at all."""
+
+    start: int
+    end: int
+    kind: str = "message"
+
+    def contains(self, cut: int) -> bool:
+        """True when a cut at ``cut`` lands strictly inside this span.
+
+        The cut positions are *message boundaries*: a cut at ``k`` means the
+        prefix is messages ``0..k-1`` and the suffix is messages ``k..n``.  So
+        the cut at ``k`` splits a span that starts before ``k`` and ends at or
+        after ``k`` - the pair's two messages land on opposite sides.
+        """
+        return self.start < cut <= self.end
+
+
+def _unambiguous_tool_call_output_pairs(
+    messages: Sequence[Any],
+) -> tuple[tuple[int, int], ...]:
+    """The (declaration, result) message pairs a transcript names exactly once.
+
+    A ``tool_use`` id that appears twice is **not** paired: the transcript
+    cannot say which occurrence the result belongs to, and guessing would
+    silently merge two exchanges.  Those ids are left unpaired, and the
+    existing orphan rules still apply to them.
+    """
+    declarations: dict[str, list[int]] = {}
+    for index, message in enumerate(messages):
+        if not isinstance(message, AssistantMessage):
+            continue
+        for call in message.tool_uses:
+            declarations.setdefault(call.id, []).append(index)
+    pairs: list[tuple[int, int]] = []
+    for index, message in enumerate(messages):
+        if not isinstance(message, UserMessage):
+            continue
+        for result in message.tool_results:
+            candidates = declarations.get(result.tool_use_id)
+            if candidates is None or len(candidates) != 1:
+                continue
+            pairs.append((candidates[0], index))
+    return tuple(pairs)
+
+
+def _unambiguous_approval_pairs(
+    messages: Sequence[Any],
+) -> tuple[tuple[int, int], ...]:
+    """The (request, response) message pairs a transcript names exactly once.
+
+    Northstar's transcript message types carry **no approval request/response
+    block** today: the approval path lives in ``permissions.py`` /
+    ``approval_chain.py`` and never becomes a transcript message.  So there is
+    no approval shape to pair here, and inventing one would be a shape nobody
+    writes.  The helper is kept, and it is honest about the absence: when a
+    future message type does carry an approval pair, this is where the pairing
+    rule goes.  It reads the pair off the message ``data`` mapping, under the
+    ``approval_request`` / ``approval_response`` keys with a shared
+    ``approval_id`` - the shape :mod:`approval_rules` serialises.
+    """
+    requests: dict[str, list[int]] = {}
+    pairs: list[tuple[int, int]] = []
+    for index, message in enumerate(messages):
+        data = getattr(message, "data", None)
+        if not isinstance(data, Mapping):
+            continue
+        request_id = data.get("approval_id")
+        if not isinstance(request_id, str) or not request_id:
+            continue
+        if data.get("approval_request"):
+            requests.setdefault(request_id, []).append(index)
+        elif data.get("approval_response"):
+            candidates = requests.get(request_id)
+            if candidates and len(candidates) == 1:
+                pairs.append((candidates[0], index))
+    return tuple(pairs)
+
+
+def group_messages(messages: Sequence[Any]) -> tuple[Span, ...]:
+    """The atomic spans of a transcript.
+
+    A span is a maximal run of messages that must be summarised together.  A
+    tool call and its result are one span; an approval request and its response
+    are one span; anything else is a span of its own.
+    """
+    count = len(messages)
+    parent = list(range(count))
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    def union(left: int, right: int) -> None:
+        left_root = find(left)
+        right_root = find(right)
+        if left_root != right_root:
+            parent[max(left_root, right_root)] = min(left_root, right_root)
+
+    pairs = (*_unambiguous_tool_call_output_pairs(messages), *_unambiguous_approval_pairs(messages))
+    for declaration, result in pairs:
+        if declaration < result:
+            union(declaration, result)
+
+    groups: dict[int, list[int]] = {}
+    for index in range(count):
+        groups.setdefault(find(index), []).append(index)
+    spans: list[Span] = []
+    for root in sorted(groups):
+        members = groups[root]
+        start, end = members[0], members[-1]
+        kind = "pair" if end > start else "message"
+        spans.append(Span(start=start, end=end, kind=kind))
+    return tuple(spans)
+
+
+def spans_crossing(spans: Sequence[Span], cut: int) -> tuple[Span, ...]:
+    """The spans a cut at ``cut`` would split."""
+    return tuple(span for span in spans if span.contains(cut))
+
+
+# ---------------------------------------------------------------------------
 # Boundary analysis
 # ---------------------------------------------------------------------------
 
@@ -110,8 +258,15 @@ def orphaned_tool_results(messages: Sequence[Any], *, answered_by: Sequence[Any]
     return tuple(result_id for result_id in tool_result_ids(messages) if result_id in asked)
 
 
-def is_safe_cut(transcript: Sequence[Any], cut: int) -> bool:
-    """True when ``transcript[:cut]`` can be replaced by a summary."""
+def is_safe_cut(transcript: Sequence[Any], cut: int, *, spans: Sequence[Span] | None = None) -> bool:
+    """True when ``transcript[:cut]`` can be replaced by a summary.
+
+    A cut is safe when the orphan rules hold **and** it does not land inside an
+    atomic span.  The orphan rules are necessary but not sufficient: a tool call
+    and its result can both sit on the same side of a cut while still belonging
+    to one exchange - summarising the call alone says the tool ran when it did
+    not, so the span rule refuses it.
+    """
     if not isinstance(cut, int) or cut < 0 or cut > len(transcript):
         return False
     prefix = transcript[:cut]
@@ -120,11 +275,16 @@ def is_safe_cut(transcript: Sequence[Any], cut: int) -> bool:
         return False
     if orphaned_tool_results(suffix, answered_by=prefix):
         return False
+    if spans is None:
+        spans = group_messages(transcript)
+    if spans_crossing(spans, cut):
+        return False
     return True
 
 
 def safe_cuts(transcript: Sequence[Any]) -> tuple[int, ...]:
-    return tuple(index for index in range(len(transcript) + 1) if is_safe_cut(transcript, index))
+    spans = group_messages(transcript)
+    return tuple(index for index in range(len(transcript) + 1) if is_safe_cut(transcript, index, spans=spans))
 
 
 def latest_safe_cut(
@@ -135,8 +295,9 @@ def latest_safe_cut(
 ) -> int | None:
     """Greatest legal cut no later than ``max_cut``. ``None`` when there is none."""
     high = len(transcript) if max_cut is None else min(max_cut, len(transcript))
+    spans = group_messages(transcript)
     for index in range(high, min_cut - 1, -1):
-        if is_safe_cut(transcript, index):
+        if is_safe_cut(transcript, index, spans=spans):
             return index
     return None
 
@@ -291,10 +452,7 @@ def compact(
     if cut is None:
         return CompactionOutcome(
             performed=False,
-            reason=(
-                "no safe compaction boundary: the transcript is mid tool exchange, "
-                "so cutting here would orphan a tool_use or a tool_result"
-            ),
+            reason=_no_safe_cut_reason(original, max_cut=max_cut),
             transcript=original,
             tokens_before=tokens_before,
             tokens_after=tokens_before,
@@ -355,6 +513,45 @@ def compact(
     )
 
 
+def _no_safe_cut_reason(transcript: Sequence[Any], *, max_cut: int) -> str:
+    """Why no cut was legal - the orphan rule, the span rule, or both.
+
+    The reason matters: "the transcript is mid tool exchange" sends an
+    operator looking for a running tool, while "every candidate cut would split
+    a tool call from its result" describes a transcript whose pairs sit
+    exactly across the boundary.
+    """
+    spans = group_messages(transcript)
+    orphan_only = [
+        index
+        for index in range(max_cut + 1)
+        if index >= 0
+        and not pending_tool_uses(transcript[:index])
+        and not orphaned_tool_results(transcript[index:], answered_by=transcript[:index])
+    ]
+    if orphan_only and not any(
+        is_safe_cut(transcript, index, spans=spans) for index in orphan_only
+    ):
+        return (
+            "no safe compaction boundary: every candidate cut would split a tool call "
+            "from its result, so summarising here would report work that never completed"
+        )
+    split_pairs = [
+        span
+        for span in spans
+        if span.kind == "pair" and span.start < max_cut <= span.end
+    ]
+    if split_pairs:
+        return (
+            "no safe compaction boundary: every candidate cut would split a tool call "
+            "from its result, so summarising here would report work that never completed"
+        )
+    return (
+        "no safe compaction boundary: the transcript is mid tool exchange, "
+        "so cutting here would orphan a tool_use or a tool_result"
+    )
+
+
 def summary_block(outcome: CompactionOutcome) -> dict[str, Any]:
     payload = outcome.as_dict()
     payload["header"] = COMPACT_HEADER.strip()
@@ -365,14 +562,17 @@ __all__ = [
     "DEFAULT_KEEP_MESSAGES",
     "SUMMARY_HEADER",
     "CompactionOutcome",
+    "Span",
     "compact",
     "extractive_summary",
+    "group_messages",
     "is_safe_cut",
     "latest_safe_cut",
     "orphaned_tool_results",
     "pending_tool_uses",
     "safe_cuts",
     "should_compact",
+    "spans_crossing",
     "summary_block",
     "tool_result_ids",
     "tool_use_ids",
