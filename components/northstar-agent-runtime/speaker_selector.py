@@ -118,7 +118,7 @@ class ModelSelectionError(SpeakerSelectionError):
 
 
 def _check_name(value: Any) -> str:
-    if isinstance(value, bool) or not isinstance(value, str):
+    if not isinstance(value, str) or isinstance(value, bool):
         raise BadParticipantError(
             f"participant name must be a string, got {type(value).__name__}"
         )
@@ -131,7 +131,7 @@ def _check_name(value: Any) -> str:
 
 
 def _check_description(value: Any) -> str:
-    if isinstance(value, bool) or not isinstance(value, str):
+    if not isinstance(value, str) or isinstance(value, bool):
         raise BadParticipantError(
             f"participant description must be a string, got {type(value).__name__}"
         )
