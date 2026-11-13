@@ -234,6 +234,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "leader_election", "ledger", "legal_agents", "legal_hold",
         "license_checker", "licensing", "linter", "load_balancer",
         "load_generator", "load_tester", "location_tracker", "log_aggregator",
+        "long_horizon",
         "loop", "lsm_tree", "lww_register", "machine_ethics",
         "machine_unlearning", "mandate_credentials", "manufacturing_agents", "markdown_renderer",
         "masdrift_corpus", "materialized_view", "mcp_admission", "mcp_approval_combo",

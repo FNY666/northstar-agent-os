@@ -53646,6 +53646,131 @@ Shape one ``audit.ndjson/1`` record for this module.
 
 #### `main()`
 
+### `long_horizon`
+
+Source: `components/northstar-agent-runtime/long_horizon.py`
+
+Long-horizon loop harness: Manager rebuilds, Executor does one bounded step, Auditor verifies the real artifacts.
+
+#### `LongHorizonError`
+
+Fail-closed: a malformed or misused long-horizon input raises.
+
+#### `verified_head_hash(progress: Sequence['VerifiedProgress'])`
+
+The chain head of the verified progress: a hash over the verified rows.
+
+#### `EvidencePointer`
+
+Where a verdict was read from: a file, a line, a command's output.
+
+- `as_dict()`
+- `from_dict(value: Mapping[str, Any])`
+#### `FailureEvidence`
+
+Why a step did not become progress. Carried into the next round.
+
+- `as_dict()`
+- `from_dict(value: Mapping[str, Any])`
+#### `VerifiedProgress`
+
+Progress that an Auditor passed. The only shape trusted state takes.
+
+- `as_dict()`
+- `from_dict(value: Mapping[str, Any])`
+#### `StepOutcome`
+
+The executor's report for one step.
+
+- `is_failure` (property)
+- `as_dict()`
+#### `AuditVerdict`
+
+The independent verdict: pass/fail plus the pointers it was read from.
+
+- `as_dict()`
+#### `RoundState`
+
+The rebuilt round state: structured, never prose, never a claim.
+
+- `verified_step_ids` (property)
+- `as_dict()`
+#### `StepPlan`
+
+What the host wants this round to do.
+
+- `as_dict()`
+#### `AuditCheck`
+
+One host-declared, independently runnable check.
+
+- `as_dict()`
+#### `RoleConfig`
+
+The identity of a role. Two roles may not share an identity. The identity is what the isolation rule is enforced on: the Auditor's ``backend_id`` must differ from the Manager's and the Executor's, and the Auditor's checks must differ from the Executor backend's checks. Sharing one identity means on…
+
+- `as_dict()`
+#### `ManagerBackend`
+
+Rebuilds the round state. The base implementation is deterministic.
+
+- `rebuild(*, objective: str, verified_progress: Sequence[VerifiedProgress], failures: Sequence[FailureEvidence], round_index: int)`
+- `build_context(*, objective: str, verified_progress: Sequence[VerifiedProgress], failures: Sequence[FailureEvidence], round_index: int)`
+  - The fresh working context for the round.
+#### `ExecutorBackend`
+
+Runs ONE bounded step. The base implementation runs one command.
+
+- `run_step(*, state: RoundState, plan: Callable[[RoundState], Sequence[str]], step_id: str)`
+  - Run the round's single bounded action.
+#### `AuditorBackend`
+
+Verifies the real artifacts. The base implementation runs host-declared commands and reads the files they name.
+
+- `audit(*, state: RoundState, declared_artifacts: Sequence[str], checks: Sequence['AuditCheck'])`
+  - Verify the round's real artifacts.
+#### `VerifiedCheckpoint`
+
+A checkpoint of *verified* progress.
+
+- `as_dict()`
+#### `VerifiedProgressStore`
+
+Append-only store of verified checkpoints.
+
+- `record(checkpoint: VerifiedCheckpoint)`
+- `checkpoints()`
+- `latest()`
+#### `RoundRecord`
+
+One round's structured record. A record, not a narrative.
+
+- `as_dict()`
+#### `LoopResult`
+
+The loop's outcome. ``outcome_unknown`` is a real, named outcome.
+
+- `passed` (property)
+- `as_dict()`
+#### `LongHorizonLoop`
+
+The Manager / Executor / Auditor loop.
+
+- `run()`
+  - Run the loop to a verdict.
+#### `FreshStart`
+
+A fresh start of a long-horizon loop, carrying the old head.
+
+- `as_dict()`
+#### `resume_from_checkpoint(checkpoint: VerifiedCheckpoint, *, new_head_hash: str, genesis: str='northstar.long-horizon.v1')`
+
+Rebuild a loop's starting state from its last *verified* checkpoint.
+
+#### `check_fresh_start_head(fresh: FreshStart, independent_head: Any | None)`
+
+Check the fresh start against an independently held head.
+
 ### `loop`
 
 Source: `components/northstar-agent-runtime/loop.py`
