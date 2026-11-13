@@ -375,3 +375,12 @@ class ModuleHygieneTests(unittest.TestCase):
 
         self.assertTrue(planted_fault.PLANTED_FAULT_VERSION)
         self.assertTrue(planted_fault.SCHEMA_PIN)
+
+    def test_a_plant_with_no_posted_commitment_is_void(self):
+        # Nothing was ever promised, so nothing here can be evidence.
+        ledger = EvidenceLedger()
+        note = _note()
+        commitment = post_commitment(note)  # not posted to the ledger
+        result = reveal(note, commitment, ledger)
+        self.assertEqual(result.outcome, VOID_PLANT)
+        self.assertEqual(len(ledger.catches()), 0)

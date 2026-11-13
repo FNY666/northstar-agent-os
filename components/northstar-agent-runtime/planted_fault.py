@@ -387,7 +387,13 @@ def reveal(
         return RevealResult(note.plant_id, VOID_PLANT, "commitment mismatch")
     if ledger is not None:
         posted = ledger.commitment_for(note.plant_id)
-        if posted is not None and posted != commitment:
+        if posted is None:
+            # No commitment was ever posted for this plant: the checker
+            # was never shown the promise, so nothing here can be
+            # evidence. Fail closed.
+            ledger.record_void_plant(note.plant_id, "no commitment was posted")
+            return RevealResult(note.plant_id, VOID_PLANT, "no commitment was posted")
+        if posted != commitment:
             ledger.record_void_plant(note.plant_id, "commitment mismatch")
             return RevealResult(note.plant_id, VOID_PLANT, "commitment mismatch")
         if ledger.plant_is_dead(note.plant_id):
