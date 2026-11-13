@@ -662,6 +662,7 @@ py-modules = [
     "events",
     "evidence_aging_probes",
     "evidence_compaction_probes",
+    "evidence_independence",
     "evidence_tiers",
     "exactly_once",
     "excel_handler",
