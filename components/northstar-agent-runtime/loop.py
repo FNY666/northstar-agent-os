@@ -27,6 +27,7 @@ import math
 import time
 import copy
 import json
+from pathlib import Path
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Generator, Iterable, Iterator, Mapping, Sequence
 
@@ -81,6 +82,7 @@ from providers.base import (
     ToolResultBlock,
     ThinkingBlock,
     ToolUseBlock,
+    TextBlock,
     Usage,
     UserMessage,
     estimate_transcript_tokens,
@@ -224,6 +226,13 @@ class RuntimeConfig:
     #: no retry rather than "somebody else's default".
     retry: Any = None
     compaction_keep_messages: int = 4
+    #: Context-engineering thresholds (see context_budget.py): the offload
+    #: size, the window-pressure fraction, the post-compaction re-read rules,
+    #: the skill/memory caps and the subagent budgets.  ``None`` means the
+    #: host did not opt in, and the runtime behaves exactly as it did before
+    #: the rules existed -- these rules change what the model sees, and
+    #: Northstar does not change observable behaviour without a host asking.
+    context_thresholds: Any = None
     tool_limits: ToolLimits = field(default_factory=ToolLimits)
     sidecar_socket: str | None = None
     sidecar_timeout_ms: int = 30_000
@@ -350,6 +359,11 @@ class RuntimeConfig:
                 fail("compaction_threshold_tokens must be >= 512 or None to disable")
         if self.compaction_keep_messages < 1:
             fail("compaction_keep_messages must keep at least one message")
+        if self.context_thresholds is not None:
+            from context_budget import ContextThresholds
+
+            if not isinstance(self.context_thresholds, ContextThresholds):
+                fail("context_thresholds must be a ContextThresholds or None")
         for field_name in ("run_id", "policy_revision"):
             value = getattr(self, field_name)
             if value is None:
@@ -506,6 +520,9 @@ class RuntimeConfig:
             "shell_landlock": self.shell_landlock,
             "shell_aggregate_resource_scope": self.shell_aggregate_resource_scope,
             "compaction_threshold_tokens": self.compaction_threshold_tokens,
+            "context_thresholds": (
+                self.context_thresholds.as_dict() if self.context_thresholds is not None else None
+            ),
             "stream": self.stream,
             "verification_commands": len(self.verification_commands),
             "require_verification": self.require_verification,
@@ -791,6 +808,9 @@ class RunReport:
     spans: tuple[str, ...] = ()
     #: Digests, paths, and capture errors for this run's optional evidence bundle.
     evidence: Any = None
+    #: What the context-engineering rules did (offloads, truncations, the
+    #: memory tax).  ``None`` when the host did not enable them.
+    context: Any = None
 
     @property
     def ok(self) -> bool:
@@ -850,6 +870,7 @@ class RunReport:
             "unverified_cost_usd": result.unverified_cost_usd if result else 0.0,
             "pricing_estimated": result.pricing_estimated if result else False,
             "evidence": self.evidence.as_dict() if self.evidence is not None else None,
+            "context": self.context,
         }
 
     _trace: str = ""
@@ -868,6 +889,14 @@ class _RunState:
     subagents: list[SubagentReport] = field(default_factory=list)
     tool_reports: list[ToolCallReport] = field(default_factory=list)
     compactions: list[dict[str, Any]] = field(default_factory=list)
+    #: The largest provider input this run sent, in tokens.
+    input_tokens: int = 0
+    #: Every provider input this run sent, summed.  This is the denominator
+    #: of the memory tax: the share of a run's *total* input that was
+    #: persistent context rather than work.  The peak alone is the wrong
+    #: denominator -- the rules exist to keep the peak down, so measuring
+    #: the tax against the peak can make a tax look larger than the run.
+    total_input_tokens: int = 0
     hook_fires: list[dict[str, Any]] = field(default_factory=list)
     final_text: str = ""
     started: float = field(default_factory=time.monotonic)
@@ -1002,6 +1031,18 @@ class AgentRuntime:
         except PostConditionError as error:
             raise RuntimeConfigurationError(f"postconditions: {error}") from error
         self.limits = self.config.tool_limits
+        # B173 fable: the context-engineering rules.  Off unless the host set
+        # ``context_thresholds``; when on, they offload oversized tool results,
+        # reduce old write/edit calls to pointers under window pressure, and
+        # book the cost of persistent memory.
+        self.context_controller: Any = None
+        if self.config.context_thresholds is not None:
+            from context_controller import ContextController
+
+            self.context_controller = ContextController(
+                self.config.context_thresholds,
+                workspace=self.config.workspace,
+            )
         self.budget = budget if isinstance(budget, Budget) else Budget(max_budget_usd=self.config.max_budget_usd)
         self.tools = tools if isinstance(tools, ToolRegistry) else build_default_registry(include_describe=self.config.include_describe_tool)
         # The sidecar is the only execution path this runtime knows about, and it
@@ -2071,6 +2112,12 @@ class AgentRuntime:
                         {"agent": config.agent, "subtype": "compact_boundary", "content": outcome.summary, "data": outcome.as_dict()},
                     )
                     yield outcome.boundary
+                    # B173 fable: after a compaction the workspace goes back
+                    # into the context under the re-read budgets -- at most
+                    # five files, a path instead of content for a file over
+                    # 5,000 tokens, and skill bodies capped per skill and in
+                    # total.  Every injected block is booked as memory tax.
+                    self._reinject_context(state, turn_index=turn_index)
 
             state.cost_at_turn_start = self.budget.total_cost_usd
             # The waiting budget is per turn (see _retry_step): "no turn may stall for more
@@ -2394,8 +2441,25 @@ class AgentRuntime:
         stream_withheld)``. ``generation`` or ``breakdown`` is None when the turn failed.
         """
         config = self.config
+        # B173 fable: the context-engineering rules act on the provider
+        # payload, after the durable record.  The transcript keeps the full
+        # tool result and the full call arguments; only what the model reads
+        # is reduced, and every reduction leaves a recoverable pointer.
+        #
+        # The rules run *before* the screening checkpoint, and that order is
+        # not an optimisation: an offloaded result is replaced by a short
+        # pointer, so the 120,000-character body never reaches the defensive
+        # scanner -- which is quadratic on long unbroken lines.  The bytes
+        # are still screened, once, at the moment they are written to disk
+        # (see ``ContextController.offload_result``), so nothing unscreened
+        # ever leaves the process.
+        provider_messages = transcript_to_api(state.transcript)
+        if self.context_controller is not None:
+            provider_messages = self.context_controller.apply_provider_rules(
+                provider_messages
+            )
         provider_messages = self._screen_provider_messages(
-            transcript_to_api(state.transcript), state, turn_index=turn_index
+            provider_messages, state, turn_index=turn_index
         )
         request = GenerationRequest(
             system=config.system_prompt,
@@ -2412,6 +2476,10 @@ class AgentRuntime:
         streamed: list[str] = []
         stream_withheld = 0
         reservation: BudgetReservation | None = None
+        # The input this request carries.  Counted once per attempt below:
+        # a retry really does send the input again, so the run's total
+        # input is the sum of what it actually sent.
+        request_input_tokens = estimate_transcript_tokens(provider_messages)
         with turn_span.child("generation") as generation_span:
             generation_span.set_attributes(
                 {"provider.name": self.provider_name, "model": config.model, "turn.index": turn_index, "stream": config.stream}
@@ -2420,6 +2488,9 @@ class AgentRuntime:
                 attempt = 1
                 while True:
                     estimate = estimate_request_cost(request, config.model)
+                    # The run's peak provider input, in tokens.
+                    state.input_tokens = max(state.input_tokens, request_input_tokens)
+                    state.total_input_tokens += request_input_tokens
                     reservation = self.budget.reserve(estimate)
                     if reservation is None:
                         state.budget_reservation_failed = True
@@ -4853,6 +4924,23 @@ class AgentRuntime:
                 f"{stop_verdict.block_reason}]"
             )
         body = "\n".join(body_parts)
+        # B173 fable: a subagent's return is budgeted.  A research subagent
+        # hands back ~420 tokens; a general one a 1,000-2,000 token summary.
+        # A cut return is marked, so the parent is never told a false story
+        # about what the child found.
+        if self.context_controller is not None:
+            body, truncated = self.context_controller.cap_subagent(
+                body, research=bool(getattr(definition, "tags", ()) and "research" in definition.tags)
+            )
+            if truncated:
+                # The marker goes onto the *capped* body.  Rebuilding from
+                # ``body_parts`` would put the uncapped text back and undo
+                # the very cap that was just applied.
+                body = (
+                    f"{body}\n"
+                    "[northstar: this subagent result was truncated to the subagent return budget; "
+                    "the full report is in the run's subagent record]"
+                )
         result = ToolResult(
             content=body,
             is_error=subagent_report.subtype != "success" or not accepted,
@@ -4908,6 +4996,109 @@ class AgentRuntime:
             return False
         return self._delegation_allowed(self.config.depth + 1)
 
+    # -- context re-injection ---------------------------------------------
+    def _reinject_context(self, state: _RunState, *, turn_index: int) -> None:
+        """Put the workspace back into the context after a compaction.
+
+        The re-read budgets live in the context controller; this method is
+        the seam between them and the transcript.  What comes back is added
+        to the transcript as host context, so it is part of the durable
+        record and not a per-request ghost.
+        """
+        controller = self.context_controller
+        if controller is None or not controller.compacted:
+            return
+        records = controller.reinject_after_compaction(
+            workspace=self.config.workspace,
+            skill_bodies=self._skill_bodies(),
+            memory_text=self._auto_memory_text(),
+        )
+        if not records:
+            return
+        blocks = []
+        for record in records:
+            if not record.text:
+                continue
+            blocks.append(TextBlock(text=record.text))
+        if not blocks:
+            return
+        message = UserMessage(content=tuple(blocks), is_meta=True, meta_reason="post-compaction re-read")
+        state.transcript.append(message)
+        # The re-read is host context, so it is recorded as a user turn: a
+        # resumed run replays it and keeps the same context the original run
+        # had.  The injection ledger rides along as ``data`` so the memory
+        # tax is auditable without a second record type.
+        self.sessions.append(
+            "user_prompt",
+            {
+                "agent": self.config.agent,
+                "role": "user",
+                "content": [block.to_api() for block in message.content],
+                "is_meta": True,
+                "meta_reason": "post-compaction re-read",
+                "data": {
+                    "turn_index": turn_index,
+                    "injected": [record.as_dict() for record in records],
+                    "memory_tax": controller.memory_tax.as_dict(),
+                },
+            },
+        )
+
+    def _skill_bodies(self) -> list[tuple[str, str]]:
+        """The workspace skill bodies, for the re-injection budget.
+
+        The skill *listing* is already in the system prompt; the body is
+        what the model reads with ``Read`` when a task matches.  A
+        post-compaction re-read may put the body back into the context
+        directly, and that is the moment the per-skill and total skill
+        caps apply.
+
+        The bytes are read here, but the *digest pin* is what the Read
+        tool enforces; a body whose bytes changed after run setup is
+        refused by that tool and is not re-injected here either.
+        """
+        workspace = self.config.workspace
+        if not workspace:
+            return []
+        try:
+            from skills import discover_skills
+
+            skills = discover_skills(
+                workspace, reviewed_digests=self.config.skill_digests or None
+            )
+        except Exception:
+            # A skill that cannot be discovered cannot be re-injected.  The
+            # run's own discovery already reported the problem; the
+            # re-injection must not fail the run over it.
+            return []
+        bodies: list[tuple[str, str]] = []
+        for skill in skills:
+            try:
+                bodies.append((skill.name, Path(skill.path).read_text(encoding="utf-8", errors="replace")))
+            except OSError:
+                continue
+        return bodies
+
+    def _auto_memory_text(self) -> str:
+        """The workspace auto-memory body, for the auto-memory cap.
+
+        Memory is injected as host context, so the cap applies to it the
+        same way it applies to any other persistent context: the first 200
+        lines or 25KB, whichever comes first.
+        """
+        workspace = self.config.workspace
+        if not workspace:
+            return ""
+        try:
+            from memory import discover_memory
+
+            memory = discover_memory(workspace)
+        except Exception:
+            return ""
+        if memory is None:
+            return ""
+        return getattr(memory, "text", "") or ""
+
     # -- compaction --------------------------------------------------------
     def _compact(self, state: _RunState, *, turn_index: int) -> CompactionOutcome:
         pre = self._fire(
@@ -4938,8 +5129,16 @@ class AgentRuntime:
             state.compactions.append(outcome.as_dict())
             return outcome
         instructions = "\n".join(pre.additional_context)
+        # B173 fable: offload before summarize.  The compactor sees a copy of
+        # the transcript whose oversized tool results are pointers; the
+        # durable transcript still holds the bytes.  A summary is therefore
+        # only ever written over content that offloading could not free.
+        source_transcript = state.transcript
+        raw_tokens = estimate_transcript_tokens(state.transcript)
+        if self.context_controller is not None:
+            source_transcript = self.context_controller.offload_transcript(state.transcript)
         outcome = compact(
-            state.transcript,
+            source_transcript,
             # The loop already applied the threshold to decide whether to compact
             # at all; force=True keeps the two checks from disagreeing.
             force=True,
@@ -4947,7 +5146,22 @@ class AgentRuntime:
             summarizer=self.summarizer,
             instructions=instructions,
         )
-        state.compactions.append(outcome.as_dict())
+        row = outcome.as_dict()
+        if self.context_controller is not None:
+            # The offload saving is recorded on the compaction row, so
+            # "offload before summarize" is a measured number rather than an
+            # assertion: this is how much of the transcript the offload
+            # removed *before* the summary was written.
+            offloaded_tokens = estimate_transcript_tokens(source_transcript)
+            row["tokens_before_offload"] = raw_tokens
+            row["tokens_after_offload"] = offloaded_tokens
+            row["offload_tokens_saved"] = max(0, raw_tokens - offloaded_tokens)
+        state.compactions.append(row)
+        if outcome.performed and self.context_controller is not None:
+            # B173 fable: after a compaction the re-read rules apply -- a file
+            # over 5,000 tokens comes back as a path, and at most five of the
+            # most recently modified files are re-read at all.
+            self.context_controller.note_compaction()
         return outcome
 
     # -- shared helpers ----------------------------------------------------
@@ -5181,6 +5395,11 @@ class AgentRuntime:
             spans=tuple(self.tracer.names()),
             evidence=state.evidence_report,
             _trace=self.tracer.tree(),
+            context=(
+                self.context_controller.as_dict(total_input_tokens=state.total_input_tokens)
+                if self.context_controller is not None
+                else None
+            ),
         )
 
     # -- resume ------------------------------------------------------------
