@@ -105,6 +105,30 @@ class ScopeRenderingTests(unittest.TestCase):
         block = svc.verbatim_scope_block(scope)
         self.assertEqual(svc.parse_scope_block(block), scope)
 
+    def test_extract_scope_block_finds_the_block_in_a_carried_text(self):
+        scope = _scope()
+        block = svc.verbatim_scope_block(scope)
+        carried = "preamble\n" + block + "epilogue"
+        found = svc.extract_scope_block(carried)
+        self.assertIsNotNone(found)
+        self.assertEqual(found, block.rstrip("\n"))
+        self.assertEqual(svc.parse_scope_block(found + "\n"), scope)
+
+    def test_extract_scope_block_reports_a_missing_block(self):
+        self.assertIsNone(svc.extract_scope_block("no scope here"))
+        self.assertIsNone(svc.extract_scope_block(""))
+        self.assertIsNone(svc.extract_scope_block(None))
+
+    def test_a_malformed_block_is_refused_not_guessed(self):
+        with self.assertRaises(svc.MalformedScopeError):
+            svc.parse_scope_block("not a scope block")
+        with self.assertRaises(svc.MalformedScopeError):
+            svc.parse_scope_block("")
+        # A block whose begin marker is gone is refused too.
+        good = svc.verbatim_scope_block(_scope())
+        with self.assertRaises(svc.MalformedScopeError):
+            svc.parse_scope_block(good.replace(svc.BLOCK_BEGIN, "<<OTHER>>"))
+
 
 class ScopeHashTests(unittest.TestCase):
     """The hash is canonical: field order is irrelevant, content is not."""
