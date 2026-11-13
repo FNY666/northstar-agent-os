@@ -18,12 +18,15 @@ The rules under test:
 
 from __future__ import annotations
 
+import contextlib
 import sys
 import unittest
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import artifact_authority
 from artifact_authority import (
     CHECK_THE_LIST_FOR_NOW,
     FORBIDDEN_NOW_TENSE,
@@ -446,6 +449,107 @@ class DrivenPathTests(unittest.TestCase):
         self.assertTrue(data["reason"])
         stale = verify(receipt, epoch_now=4, tombstone_set=None)
         self.assertEqual(stale.to_dict()["state"], STALE)
+
+
+@contextlib.contextmanager
+def _ledger_not_in_sys_modules():
+    """Run with ``grant_pin_ledger`` absent from ``sys.modules``.
+
+    ``_load_grant_pin_ledger`` short-circuits on a cached module, so the
+    loader path can only be reached when the cache entry is removed.
+    """
+    saved = sys.modules.pop("grant_pin_ledger", None)
+    try:
+        yield
+    finally:
+        sys.modules.pop("grant_pin_ledger", None)
+        if saved is not None:
+            sys.modules["grant_pin_ledger"] = saved
+
+
+class MutantOrAt150LoaderTests(unittest.TestCase):
+    """Kills the ``or@150`` mutant in ``_load_grant_pin_ledger``.
+
+    The guard is ``if spec is None or spec.loader is None:``.  Mutating
+    ``or`` to ``and`` makes the guard fire only when *both* halves are
+    ``None``, so a ``None`` spec or a loader-less spec slips past the
+    ``ImportError`` and fails later (or loads a broken spec).
+    """
+
+    def test_or150_a_none_spec_is_refused_with_an_import_error(self):
+        with _ledger_not_in_sys_modules():
+            with mock.patch.object(
+                artifact_authority.importlib.util,
+                "spec_from_file_location",
+                return_value=None,
+            ):
+                with self.assertRaises(ImportError):
+                    artifact_authority._load_grant_pin_ledger()
+
+    def test_or150_a_spec_without_a_loader_is_refused_with_an_import_error(self):
+        spec = mock.MagicMock()
+        spec.loader = None
+        with _ledger_not_in_sys_modules():
+            with mock.patch.object(
+                artifact_authority.importlib.util,
+                "spec_from_file_location",
+                return_value=spec,
+            ):
+                with self.assertRaises(ImportError):
+                    artifact_authority._load_grant_pin_ledger()
+
+    def test_or150_a_loadable_spec_still_loads_the_module(self):
+        """Control for the two cases above: the happy path must survive."""
+        with _ledger_not_in_sys_modules():
+            module = artifact_authority._load_grant_pin_ledger()
+        self.assertTrue(hasattr(module, "GrantPin"))
+        self.assertTrue(hasattr(module, "resolve_seal_outcome"))
+
+
+class MutantOrAt184RequireTextTests(unittest.TestCase):
+    """Kills the ``or@184`` mutant in ``_require_text``.
+
+    The guard is ``if not isinstance(value, str) or not value.strip():``.
+    Mutating ``or`` to ``and`` lets an empty (or whitespace-only) string
+    through, and turns a non-string into an ``AttributeError`` instead of
+    the module's own ``ArtifactAuthorityError``.
+    """
+
+    def test_or184_an_empty_string_is_refused(self):
+        with self.assertRaises(ArtifactAuthorityError):
+            artifact_authority._require_text("", "grant_id")
+
+    def test_or184_a_whitespace_only_string_is_refused(self):
+        with self.assertRaises(ArtifactAuthorityError):
+            artifact_authority._require_text("   ", "grant_id")
+
+    def test_or184_a_non_string_is_refused_with_the_module_error(self):
+        for bad in (123, None, ["x"]):
+            with self.subTest(value=bad):
+                with self.assertRaises(ArtifactAuthorityError):
+                    artifact_authority._require_text(bad, "grant_id")
+
+
+class MutantGtAt186RequireTextTests(unittest.TestCase):
+    """Kills the ``gt@186`` mutant in ``_require_text``.
+
+    The guard is ``if len(value) > limit:`` with ``limit`` defaulting to
+    ``_MAX_ID_CHARS`` (256).  Mutating ``>`` to ``>=`` rejects a value of
+    exactly the limit, which the rule allows.
+    """
+
+    def test_gt186_a_value_of_exactly_the_limit_is_accepted(self):
+        value = "a" * artifact_authority._MAX_ID_CHARS
+        self.assertEqual(artifact_authority._require_text(value, "grant_id"), value)
+
+    def test_gt186_a_value_one_over_the_limit_is_refused(self):
+        value = "a" * (artifact_authority._MAX_ID_CHARS + 1)
+        with self.assertRaises(ArtifactAuthorityError):
+            artifact_authority._require_text(value, "grant_id")
+
+    def test_gt186_a_value_one_under_the_limit_is_accepted(self):
+        value = "a" * (artifact_authority._MAX_ID_CHARS - 1)
+        self.assertEqual(artifact_authority._require_text(value, "grant_id"), value)
 
 
 
