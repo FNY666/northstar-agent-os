@@ -595,12 +595,21 @@ def verify(
       the seal still catches the receipt.
     * ``STALE`` -- the grant's revocation epoch has moved on (the epoch
       the receipt was sealed under is behind ``epoch_now``), or the grant
-      itself has been re-issued (its counter advanced).
+      itself has been re-issued (its counter advanced), or the receipt's
+      unresolved pin has since become resolvable.
     * ``VALID`` -- none of the above.
 
     A ``STALE`` or ``REVOKED`` receipt never silently becomes ``VALID``:
-    the epoch only moves forward, and a tombstone is checked on every
-    read, not only at seal time.
+    the verdict is re-derived from the receipt and the present on every
+    read, and a tombstone is checked on every read, not only at seal time.
+
+    **The epoch's monotonicity is a precondition on the caller, not a
+    property of this module.**  ``epoch_now`` is a caller-supplied
+    integer; this module compares magnitudes and does not enforce that
+    the epoch only advances.  A caller that hands back a *lower* epoch
+    than the receipt was sealed under will get ``VALID``, and that is the
+    caller's error.  The same applies to ``current_grant``: it is the
+    caller's job to pass the grant's *current* state.
     """
     if not isinstance(receipt, ArtifactReceipt):
         raise ArtifactAuthorityError("verify is given a receipt")
@@ -728,8 +737,17 @@ class ArtifactAuthorityLedger:
         seq: int,
         epoch_now: int,
         tombstone_set: Any = None,
+        *,
+        current_grant: Any = None,
     ) -> Verdict:
-        """Read one sealed artifact back and check it against the present."""
+        """Read one sealed artifact back and check it against the present.
+
+        ``current_grant`` is the grant's *current* state; when it is
+        given, a grant that has been re-issued since the receipt was
+        written makes the receipt ``STALE`` even if the epoch has not
+        moved.  Passing it is the caller's job: the ledger does not
+        hold a grant registry.
+        """
         artifact = self.artifact(seq)
         payload, receipt = open_sealed(artifact.container)
         return verify(
@@ -737,6 +755,7 @@ class ArtifactAuthorityLedger:
             epoch_now,
             tombstone_set,
             artifact_bytes=payload,
+            current_grant=current_grant,
         )
 
 

@@ -233,6 +233,24 @@ class VerifyTests(unittest.TestCase):
         verdict = verify(receipt, 3, None, current_grant=reissued)
         self.assertEqual(verdict.state, STALE)
 
+    def test_the_ledger_verify_consults_the_current_grant(self):
+        ledger = ArtifactAuthorityLedger()
+        ledger.bind_and_seal(
+            b"artifact-bytes",
+            _pin(counter=5),
+            permitted_at_seq=3,
+            epoch=3,
+            clock_id="host-clock",
+            issuer_id="issuer-a",
+        )
+        self.assertEqual(ledger.verify(1, epoch_now=3).state, VALID)
+        # A re-issued grant makes the sealed artifact stale even though
+        # the epoch has not moved.
+        verdict = ledger.verify(
+            1, epoch_now=3, current_grant=GrantPin("grant-1", "v2", 6)
+        )
+        self.assertEqual(verdict.state, STALE)
+
     def test_an_unnamed_receipt_verifies_as_unnamed(self):
         # bind() refuses an unnamed grant, so the receipt is built
         # directly here: an unnamed receipt must never verify as valid.
