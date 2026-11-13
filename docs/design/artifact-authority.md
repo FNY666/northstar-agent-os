@@ -230,6 +230,16 @@ Northstar extensions (ours, not the source's):
   epoch only advances. A source of epochs that cannot go backwards is a
   precondition on the caller, and no component in this repo provides one
   for a grant yet (the lease table has one for leases).
+* **The receipt is not a signature.** The receipt binds the *bytes* by
+  digest, but its own text is not authenticated by this module: a
+  container whose receipt line has been rewritten (a higher epoch, a
+  different `permitted at` clause, a different action or counter) still
+  opens and parses. The receipt is meant to travel inside the
+  forward-sealed chain — whose records are HMAC-sealed and hash-chained
+  — and that binding is what would make a forged receipt detectable.
+  This slice does not wire the receipt into the sealed chain, so a
+  forged receipt is detectable only where it disagrees with the grant's
+  current state or with a tombstone.
 * **Verbatim source text.** The post is not in this repository and was
   not fetched during the slice; the quotes above are the ones the slice
   brief carries and are marked as verbatim-as-briefed, not
