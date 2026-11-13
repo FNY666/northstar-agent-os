@@ -249,7 +249,7 @@ The tests do not only assert the parts:
   raises a non-throttle: the hook says "do not retry", the attempt counter
   stays at zero, and the provider is called once.
 
-29 new test methods in total.
+32 new test methods in total.
 
 ---
 

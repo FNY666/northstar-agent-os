@@ -33,7 +33,7 @@ brief - the upstream repository was not cloned during this slice):
   ``schema_version`` does not match.
 * The module docstring of that file: "It captures the position (which
   boundary fired) and the cycle index. It does not capture conversation state
-  - pair with a SessionManager for cross-process state continuity."
+  — pair with a SessionManager for cross-process state continuity."
 * ``strands-py/src/strands/event_loop/_retry.py:21`` -
   ``ModelRetryStrategy`` is a ``HookProvider`` that registers callbacks for
   ``AfterModelCallEvent`` / ``AfterInvocationEvent``; it retries only

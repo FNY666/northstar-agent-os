@@ -119,6 +119,27 @@ class PrecedenceTests(RuntimeTestCase):
     def test_no_claims_at_all_resolve_to_none(self):
         self.assertEqual(resolve_outcome(), sc.OUTCOME_NONE)
 
+    def test_a_pending_cancel_is_not_in_force_and_a_plain_one_is(self):
+        self.assertFalse(sc.cancel_is_in_force(None))
+        self.assertFalse(sc.cancel_is_in_force(Cancel("requested", applied=False)))
+        self.assertTrue(sc.cancel_is_in_force(Cancel("revoked", applied=True)))
+        self.assertTrue(sc.cancel_is_in_force("revoked"))
+
+    def test_the_resume_outcome_reads_the_same_way(self):
+        marker = Checkpoint("after_model", 1)
+        self.assertEqual(
+            sc.resume_outcome(checkpoint=marker), sc.OUTCOME_CHECKPOINT
+        )
+        self.assertEqual(
+            sc.resume_outcome(checkpoint=marker, cancel="revoked"),
+            sc.OUTCOME_CANCELLED,
+        )
+
+    def test_the_checkpoint_error_alias_is_the_same_exception(self):
+        self.assertTrue(issubclass(sc.CheckpointError, sc.CheckpointException))
+        with self.assertRaises(sc.CheckpointException):
+            raise sc.CheckpointError("refused")
+
 
 class RetryHookTests(RuntimeTestCase):
     """Retry as a hook: the strategy decides, the loop only emits."""
