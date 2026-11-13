@@ -178,7 +178,16 @@ typo in a retry table looks exactly like a working retry table.
   declares "anywhere up to the nominal".
 
 With the defaults the nominal waits are `2.0, 4.0, 8.0, 16.0, 32.0` — five
-windows for five retries. The nominal is already capped at `max_wait_seconds`,
+windows for five retries.
+
+One semantic difference from upstream is worth stating plainly, because the
+number is copied but the counting is not: upstream feeds `max_retries` to
+tenacity's `stop_after_attempt`, which counts *attempts* (so `5` means five
+attempts and four waits), while here `max_retries` means extra attempts
+*after* the first one (so `5` means five waits and up to six attempts) — the
+same meaning `retry_contract.RetryContractConfig` already gives the same
+field name. The default value is Dynamiq's; the counting convention is
+Northstar's. The nominal is already capped at `max_wait_seconds`,
 so no window can promise more than the configured ceiling.
 
 No RNG, no wall-clock: the same configuration always yields the same
