@@ -22,6 +22,7 @@ The properties this file exists to pin down:
 """
 from __future__ import annotations
 
+import json
 import sys
 import unittest
 
@@ -33,6 +34,7 @@ from durable_resume import (
     DurableCheckpoint,
     DurableRunner,
     DurableStore,
+    DurableStoreError,
     GraphInterrupt,
     Interrupt,
     InterruptRequiresCheckpointError,
@@ -123,6 +125,15 @@ class DurableCheckpointTests(RuntimeTestCase):
             store.latest_checkpoint("")
         with self.assertRaises(MissingRunIdError):
             DurableCheckpoint(run_id="", checkpoint_id="ck-1", seq=1, state={})
+
+    def test_a_checkpoint_of_another_run_cannot_be_read_back(self) -> None:
+        store = DurableStore()
+        checkpoint = store.put_checkpoint(run_id="run-A", state={"turns": 1})
+        # The run id is the primary key: the same checkpoint id under another
+        # run is not the same checkpoint.
+        self.assertIsNone(store.get_checkpoint("run-B", checkpoint.checkpoint_id))
+        self.assertEqual(store.list_checkpoints("run-B"), ())
+        self.assertEqual(len(store.list_checkpoints("run-A")), 1)
 
     def test_a_checkpoint_whose_state_was_edited_fails_closed(self) -> None:
         store = DurableStore()
@@ -299,6 +310,7 @@ class InterruptAndResumeTests(RuntimeTestCase):
         runner = DurableRunner(store=store)
 
         def step() -> str:
+            runner.declare(_write("t1", 0, "tool:interrupted"))
             answer = runner.interrupt("what now?")
             return f"got {answer}"
 
@@ -316,6 +328,23 @@ class InterruptAndResumeTests(RuntimeTestCase):
             )
         with self.assertRaises(ResumeRequiresCommandError):
             runner.resume(None, task_id="t1", step=step, state={}, run_id="run-1")
+
+        # And the refusal is real: the run did not continue. The step is still
+        # paused, the pending writes are still pending, and no effect landed.
+        checkpoint = store.latest_checkpoint("run-1")
+        self.assertEqual(len(store.pending_writes(checkpoint.checkpoint_id)), 1)
+        self.assertEqual(store.committed_writes(checkpoint.checkpoint_id), ())
+        self.assertEqual(store.cleared_writes(checkpoint.checkpoint_id), ())
+
+        # Only the explicit command lets it through.
+        result = runner.resume(
+            Command(resume="green light"),
+            task_id="t1",
+            step=step,
+            state={},
+            run_id="run-1",
+        )
+        self.assertEqual(result.value, "got green light")
 
     def test_a_resume_re_enters_the_step_from_its_start(self) -> None:
         store = DurableStore()
@@ -419,6 +448,61 @@ class InterruptAndResumeTests(RuntimeTestCase):
                 state={},
                 run_id="run-1",
             )
+
+    def test_a_resume_of_a_tampered_checkpoint_fails_closed(self) -> None:
+        store = DurableStore()
+        runner = DurableRunner(store=store)
+
+        def step() -> str:
+            answer = runner.interrupt("what now?")
+            return f"got {answer}"
+
+        with self.assertRaises(GraphInterrupt):
+            runner.run(task_id="t1", step=step, state={}, run_id="run-1")
+
+        # The checkpoint's state is edited under it.
+        checkpoint = store.latest_checkpoint("run-1")
+        object.__setattr__(checkpoint, "state", {"turns": 999})
+
+        with self.assertRaises(CheckpointIntegrityError):
+            runner.resume(
+                Command(resume="go"),
+                task_id="t1",
+                step=step,
+                state={},
+                run_id="run-1",
+            )
+
+    def test_a_resume_clears_the_interrupted_attempts_writes_before_re_entering(self) -> None:
+        store = DurableStore()
+        runner = DurableRunner(store=store)
+
+        def step() -> str:
+            runner.declare(_write("t1", 0, "tool:interrupted"))
+            answer = runner.interrupt("what now?")
+            return f"got {answer}"
+
+        with self.assertRaises(GraphInterrupt):
+            runner.run(task_id="t1", step=step, state={}, run_id="run-1")
+        checkpoint = store.latest_checkpoint("run-1")
+        self.assertEqual(len(store.pending_writes(checkpoint.checkpoint_id)), 1)
+
+        runner.resume(
+            Command(resume="go"),
+            task_id="t1",
+            step=step,
+            state={},
+            run_id="run-1",
+        )
+
+        # The interrupted attempt's declaration was dropped, and the re-run's
+        # declaration is what is pending now -- the clear happened before the
+        # re-entry, not after it.
+        self.assertEqual(len(store.cleared_writes(checkpoint.checkpoint_id)), 1)
+        self.assertEqual(
+            [write.effect_key for write in store.cleared_writes(checkpoint.checkpoint_id)],
+            ["tool:interrupted"],
+        )
 
 
 class UnwoundWritesTests(RuntimeTestCase):
@@ -614,7 +698,7 @@ class LongHorizonDurableCheckpointTests(RuntimeTestCase):
         self.assertTrue(verify_verified_checkpoint(durable, checkpoints[0], expected_round_index=0))
 
     def test_a_checkpoint_state_built_from_verified_progress_needs_verified_progress(self) -> None:
-        with self.assertRaises(Exception):
+        with self.assertRaises(DurableStoreError):
             checkpoint_from_verified(
                 run_id="run-1",
                 round_index=0,
@@ -622,6 +706,42 @@ class LongHorizonDurableCheckpointTests(RuntimeTestCase):
                 verified_progress=(),
                 context_digest="sha256:x",
             )
+
+    def test_an_executors_claim_cannot_reach_the_durable_checkpoint(self) -> None:
+        from long_horizon import (
+            AuditorBackend,
+            ExecutorBackend,
+            LongHorizonLoop,
+            ManagerBackend,
+            StepPlan,
+        )
+
+        workspace = self.workspace({"result.txt": "verified\n"})
+        durable = DurableStore()
+        # The executor's summary is a word it chose; the auditor's is the
+        # wording of what was verified.
+        loop = LongHorizonLoop(
+            objective="produce result.txt",
+            manager=ManagerBackend(),
+            executor=ExecutorBackend(workspace=workspace),
+            auditor=AuditorBackend(workspace=workspace),
+            plan=lambda state: StepPlan(commands=["true"], artifacts=("result.txt",)),
+            checks=(),
+            max_rounds=1,
+            session_id="horizon-2",
+            durable_store=durable,
+        )
+        loop.run()
+
+        checkpoint = durable.list_checkpoints("horizon-2")[0]
+        state = checkpoint.state
+        # The state's progress entries carry the auditor's wording, and there
+        # is nowhere in the state for the executor's own claim.
+        self.assertNotIn("executor_summary", state)
+        self.assertNotIn("executor_claim", state)
+        for entry in state["verified_progress"]:
+            self.assertIn("summary", entry)
+            self.assertIn("evidence", entry)
 
 
 class DurableStateSeamTests(RuntimeTestCase):
@@ -657,3 +777,34 @@ class DurableStateSeamTests(RuntimeTestCase):
         digest = state_digest({"turns": 1})
         self.assertTrue(digest.startswith("sha256:"))
         self.assertEqual(len(digest), len("sha256:") + 64)
+
+    def test_the_store_writes_its_records_to_disk(self) -> None:
+        root = self.temp_dir()
+        log = root / "durable.jsonl"
+        store = DurableStore(path=log)
+        checkpoint = store.put_checkpoint(run_id="run-1", state={"turns": 1})
+        store.put_writes(checkpoint.checkpoint_id, [_write("t1", 0, "tool:a")])
+        store.commit_writes(checkpoint.checkpoint_id)
+
+        # The records are on disk, one JSON object per line, in order.
+        lines = [line for line in log.read_text(encoding="utf-8").splitlines() if line.strip()]
+        kinds = [json.loads(line)["kind"] for line in lines]
+        self.assertEqual(kinds, ["checkpoint", "pending_writes", "committed_writes"])
+
+    def test_two_runs_in_one_store_may_use_the_same_effect_key(self) -> None:
+        store = DurableStore()
+        effects: list[tuple[str, str]] = []
+        for run in ("run-A", "run-B"):
+            checkpoint = store.put_checkpoint(run_id=run, state={})
+            store.put_writes(checkpoint.checkpoint_id, [_write("t1", 0, "tool:1")])
+            store.commit_writes(
+                checkpoint.checkpoint_id,
+                applier=lambda write: effects.append((run, write.effect_key or "")),
+            )
+
+        # The exactly-once guard is scoped per run: run-B's effect is not
+        # silently dropped because run-A committed an effect with the same
+        # key.
+        self.assertEqual(effects, [("run-A", "tool:1"), ("run-B", "tool:1")])
+        run_b = store.list_checkpoints("run-B")[0]
+        self.assertEqual(len(store.committed_writes(run_b.checkpoint_id)), 1)
