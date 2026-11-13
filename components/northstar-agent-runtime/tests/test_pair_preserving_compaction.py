@@ -3,8 +3,9 @@
 The rules under test:
 
 * a tool call and its result are one atomic span;
-* a cut inside a span is refused even when the older orphan rules would have
-  allowed it;
+* a cut inside a span is refused - for a tool pair the older orphan rule
+  already refuses it, for an approval pair the span rule is the only thing
+  that refuses it;
 * ``compact()`` moves the cut to the span boundary, or refuses to compact and
   says why;
 * an approval request/response pair is one atomic span too - today the
@@ -25,6 +26,8 @@ from compaction import (  # noqa: E402
     group_messages,
     is_safe_cut,
     latest_safe_cut,
+    orphaned_tool_results,
+    pending_tool_uses,
     safe_cuts,
     spans_crossing,
 )
@@ -144,40 +147,99 @@ class ApprovalSpanTests(unittest.TestCase):
         self.assertTrue(is_safe_cut(transcript, 3))
 
 
+class SpanIsolationTests(unittest.TestCase):
+    """Which rule actually refuses the cut.
+
+    Honest result of reading the two rules side by side:
+
+    * For a **tool** pair the span rule is *subsumed* by the older orphan
+      rules.  Any cut that separates a ``tool_use`` from its ``tool_result``
+      leaves the call unanswered in the prefix, so ``pending_tool_uses``
+      already refuses it.  There is no transcript shape where the span rule
+      binds alone for a tool pair - the tool span is a restatement, not an
+      addition.
+    * For an **approval** pair the span rule binds *alone*: the orphan rules
+      know nothing about approvals, so both are empty and only the span rule
+      refuses the cut.
+    """
+
+    def test_the_orphan_rules_already_refuse_a_tool_pair_split(self):
+        # A parallel call: two tool_uses in one assistant turn, two results in
+        # one user turn.  The pair is one span (1, 2), so the cut that would
+        # split it is 2.
+        transcript = [
+            UserMessage.text_block("go"),
+            AssistantMessage(
+                content=(
+                    ToolUseBlock(id="t1", name="Read", input={"path": "a"}),
+                    ToolUseBlock(id="t2", name="Read", input={"path": "b"}),
+                )
+            ),
+            UserMessage(
+                content=(
+                    ToolResultBlock(tool_use_id="t1", content="r1"),
+                    ToolResultBlock(tool_use_id="t2", content="r2"),
+                )
+            ),
+            UserMessage.text_block("done"),
+        ]
+        spans = group_messages(transcript)
+        self.assertEqual([(s.start, s.end) for s in spans if s.kind == "pair"], [(1, 2)])
+        # The older orphan rule is already enough: the prefix still holds two
+        # unanswered calls.
+        self.assertEqual(pending_tool_uses(transcript[:2]), ("t1", "t2"))
+        self.assertFalse(is_safe_cut(transcript, 2), "the pair must not be split")
+        self.assertTrue(is_safe_cut(transcript, 1), "cutting before the exchange is legal")
+        self.assertTrue(is_safe_cut(transcript, 3), "cutting after the exchange is legal")
+
+    def test_the_span_rule_binds_alone_for_an_approval_pair(self):
+        # The same shape, but an approval request/response pair.  Neither
+        # orphan rule has anything to say about approvals - both are empty at
+        # the split cut - so the refusal is the span rule's alone.
+        transcript = [
+            UserMessage.text_block("go"),
+            SystemMessage(
+                subtype="informational",
+                content="approval requested",
+                data={"approval_id": "a-1", "approval_request": True},
+            ),
+            SystemMessage(
+                subtype="informational",
+                content="approval answered",
+                data={"approval_id": "a-1", "approval_response": True},
+            ),
+            UserMessage.text_block("done"),
+        ]
+        self.assertEqual(pending_tool_uses(transcript[:2]), ())
+        self.assertEqual(orphaned_tool_results(transcript[2:], answered_by=transcript[:2]), ())
+        # The span rule refuses the cut that would split the approval pair.
+        self.assertFalse(is_safe_cut(transcript, 2), "the approval pair must not be split")
+        self.assertTrue(is_safe_cut(transcript, 1))
+        self.assertTrue(is_safe_cut(transcript, 3))
+
+
 class CompactPathTests(unittest.TestCase):
     """The real path: a pair straddling the cut moves the cut or stops it."""
 
     def test_a_pair_straddling_the_cut_moves_the_cut_to_the_span_boundary(self):
+        # Three messages: a question, a call, and its result.  The retained
+        # tail is one message, so the newest candidate cut is 2 - which lands
+        # between the call and its result.  The cut must move down to 1, the
+        # boundary before the pair.
         transcript = [
             UserMessage.text_block("question"),
             assistant_with_call("t1"),
             user_with_result("t1"),
-            UserMessage.text_block("answer"),
         ]
-        # keep_messages=1 leaves max_cut=3, which lands inside the pair
-        # (messages 1 and 2).  The cut must move to 1 (before the pair) or 3.
         outcome = compact(transcript, force=True, keep_messages=1)
         self.assertTrue(outcome.performed, outcome.reason)
-        self.assertNotIn(outcome.cut, (2,), "the cut must not land inside the tool pair")
-        kept = outcome.transcript[1:]
-        call_ids = [
-            call.id
-            for message in kept
-            if isinstance(message, AssistantMessage)
-            for call in message.tool_uses
-        ]
-        result_ids = [
-            result.tool_use_id
-            for message in kept
-            if isinstance(message, UserMessage)
-            for result in message.tool_results
-        ]
         self.assertEqual(
-            [cid for cid in call_ids if cid in result_ids],
-            [cid for cid in call_ids if cid in result_ids],
+            outcome.cut,
+            1,
+            "the cut moved off the split position to the span boundary",
         )
-        # Whatever survived kept every pair whole.
-        self.assertEqual(len(call_ids), len(result_ids))
+        # One boundary summary plus the two kept messages.
+        self.assertEqual(len(outcome.transcript), 3)
 
     def test_a_pair_is_never_split_across_the_boundary(self):
         transcript = [
@@ -188,14 +250,25 @@ class CompactPathTests(unittest.TestCase):
         ]
         outcome = compact(transcript, force=True, keep_messages=1)
         self.assertTrue(outcome.performed)
-        prefix = outcome.transcript[0]
+        # The summary carries no tool call at all: the whole exchange was
+        # summarised, so neither half of the pair survives.
+        self.assertEqual(outcome.summary.count("tool_use"), 0)
+        # And the kept tail holds the call and its result together, or
+        # neither.
         suffix = outcome.transcript[1:]
-        calls_in_prefix = [
+        call_ids = [
             call.id
-            for message in prefix.content
-            if isinstance(message, ToolUseBlock)
+            for message in suffix
+            if isinstance(message, AssistantMessage)
+            for call in message.tool_uses
         ]
-        self.assertEqual(calls_in_prefix, [], "the summary must not carry half a call")
+        result_ids = [
+            result.tool_use_id
+            for message in suffix
+            if isinstance(message, UserMessage)
+            for result in message.tool_results
+        ]
+        self.assertEqual(len(call_ids), len(result_ids), "a pair was split across the boundary")
 
     def test_compaction_refuses_when_every_cut_would_split_a_pair(self):
         # Three messages: a call, its result, and a trailing question.  The

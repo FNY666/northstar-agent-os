@@ -193,6 +193,26 @@ class AllowlistTests(unittest.TestCase):
         self.assertGreater(len(after), len(before))
         self.assertIn(f"{Allowed.__module__}:{Allowed.__qualname__}", after)
 
+    def test_a_per_instance_allowlist_extends_the_loader(self):
+        root = Path(tempfile.mkdtemp(prefix="b173-store-"))
+        store = FileCheckpointStorage(root, allowed_checkpoint_types=["mypkg.models:Widget"])
+        (root / "ck-1.json").write_text(
+            json.dumps({"turns": 1, "obj": {"__type__": "mypkg.models:Widget"}}),
+            encoding="utf-8",
+        )
+        payload = store.load("ck-1")
+        self.assertEqual(payload["turns"], 1)
+
+    def test_a_type_outside_the_instance_allowlist_is_refused(self):
+        root = Path(tempfile.mkdtemp(prefix="b173-store-"))
+        store = FileCheckpointStorage(root, allowed_checkpoint_types=["mypkg.models:Widget"])
+        (root / "ck-1.json").write_text(
+            json.dumps({"turns": 1, "obj": {"__type__": "other.models:Gadget"}}),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(CheckpointStoreError, "unregistered type"):
+            store.load("ck-1")
+
     def test_a_missing_checkpoint_is_refused(self):
         store = FileCheckpointStorage(tempfile.mkdtemp(prefix="b173-store-"))
         with self.assertRaises(CheckpointStoreError):

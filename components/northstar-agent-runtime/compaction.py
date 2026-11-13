@@ -123,6 +123,9 @@ def _unambiguous_tool_call_output_pairs(
     cannot say which occurrence the result belongs to, and guessing would
     silently merge two exchanges.  Those ids are left unpaired, and the
     existing orphan rules still apply to them.
+
+    The pairing is per *call id*, not per message: two calls in one assistant
+    turn are two pairs, and both land on the same result message.
     """
     declarations: dict[str, list[int]] = {}
     for index, message in enumerate(messages):

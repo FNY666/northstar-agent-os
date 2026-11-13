@@ -203,6 +203,17 @@ spans. A span is a maximal run of messages that must be summarised together.
 top of the two orphan rules. `safe_cuts()` and `latest_safe_cut()` compute the
 spans once and share them.
 
+**Which rule refuses a tool-pair split - honestly.** Read side by side, the
+span rule is *subsumed* by the older orphan rule for **tool** pairs: any cut
+that separates a `tool_use` from its `tool_result` leaves the call
+unanswered in the prefix, so `pending_tool_uses` already refuses it. There is
+no transcript shape where the span rule binds alone for a tool pair - the tool
+span restates the orphan rule rather than widening it. For **approval** pairs
+the span rule binds *alone*: neither orphan rule knows anything about
+approvals, so both are empty and only the span rule refuses the cut. Both
+facts are pinned by tests
+(`tests/test_pair_preserving_compaction.py::SpanIsolationTests`).
+
 **`compact()`.** Keeps every existing rule. When the cut it would have taken
 splits a span, the cut moves to the nearest legal boundary (the span's start
 or end). When no legal cut exists, compaction is refused and the reason says
