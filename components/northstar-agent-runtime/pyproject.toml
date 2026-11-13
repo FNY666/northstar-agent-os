@@ -480,6 +480,8 @@ py-modules = [
     "content_authenticity",
     "content_filter",
     "content_moderator",
+    "context_budget",
+    "context_controller",
     "context_window",
     "contract_bridge",
     "contract_tester",
