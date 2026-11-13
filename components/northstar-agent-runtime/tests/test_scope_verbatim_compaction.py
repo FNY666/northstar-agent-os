@@ -129,6 +129,47 @@ class ScopeRenderingTests(unittest.TestCase):
         with self.assertRaises(svc.MalformedScopeError):
             svc.parse_scope_block(good.replace(svc.BLOCK_BEGIN, "<<OTHER>>"))
 
+    def test_a_block_with_a_malformed_header_is_refused(self):
+        # A header whose key bracket is missing must be refused, not guessed
+        # at: the reader may not fall back on "whatever looks closest".
+        good = svc.verbatim_scope_block(_scope())
+        broken = good.replace("scope_id[7]:", "scope_id]:")
+        self.assertNotEqual(broken, good)
+        with self.assertRaises(svc.MalformedScopeError):
+            svc.parse_scope_block(broken)
+
+    def test_a_block_with_a_blank_line_after_the_begin_marker_is_refused(self):
+        # A stray blank line inside the block is malformed input; it must not
+        # be silently absorbed into the next header.
+        good = svc.verbatim_scope_block(_scope())
+        broken = good.replace(svc.BLOCK_BEGIN + "\n", svc.BLOCK_BEGIN + "\n\n", 1)
+        self.assertNotEqual(broken, good)
+        with self.assertRaises(svc.MalformedScopeError):
+            svc.parse_scope_block(broken)
+
+    def test_a_partly_filled_scope_is_not_empty(self):
+        # "Empty" means *nothing* was declared. A scope with one instruction
+        # is not empty, and its block must keep that instruction -- a scope
+        # that was declared must never render as the empty-scope marker.
+        partial = svc.Scope(instructions=("do not modify main",))
+        self.assertFalse(partial.is_empty())
+        block = svc.verbatim_scope_block(partial)
+        self.assertNotIn(svc.EMPTY_SCOPE_MARKER, block)
+        self.assertIn("do not modify main", block)
+        self.assertEqual(svc.parse_scope_block(block), partial)
+        # Each field on its own is enough to make the scope non-empty.
+        for partial_scope in (
+            svc.Scope(instructions=("x",)),
+            svc.Scope(grants=("Bash",)),
+            svc.Scope(goal="g"),
+            svc.Scope(scope_id="s1"),
+        ):
+            self.assertFalse(partial_scope.is_empty(), partial_scope)
+            self.assertNotIn(
+                svc.EMPTY_SCOPE_MARKER, svc.verbatim_scope_block(partial_scope)
+            )
+        self.assertTrue(svc.Scope().is_empty())
+
 
 class ScopeHashTests(unittest.TestCase):
     """The hash is canonical: field order is irrelevant, content is not."""
