@@ -172,6 +172,8 @@ class GovernedActionRunner:
         executor: Optional[Callable[[str, Dict[str, Any]], Any]] = None,
         observer_id: str = "observer-1",
         deny_dispatcher: Any = None,
+        scope_registry: Any = None,
+        scope_clock: Optional[Callable[[], int]] = None,
     ) -> None:
         for name, comp in (
             ("safr", safr),
@@ -195,6 +197,18 @@ class GovernedActionRunner:
         # so "no row" never reads as "nothing was denied".  The dispatcher
         # fails closed: a scope it cannot resolve is denied.
         self._deny_dispatcher = deny_dispatcher
+        # The scope-qualifier check (B173 diviner).  Optional, like the
+        # deny dispatcher: when a host wires a registry, every dispatch
+        # re-derives the grant's scope from its source line before the
+        # gate decides, and a dropped fence BLOCKS the action.
+        self._scope_registry = scope_registry
+        # The clock the scope-qualifier fallback is measured against.  It
+        # is injectable so the expiry can be tested without a wall-clock
+        # wait; the default is the host's wall clock.  The *module* stays
+        # clock-free -- the runner supplies the time.
+        if scope_clock is not None and not callable(scope_clock):
+            raise GovernedRunnerError("scope_clock must be callable")
+        self._scope_clock = scope_clock
         self._seq = 0
         self._observer_seq = 0
         # RLock: run() holds it across the gate phase; _next_seq() also
@@ -251,6 +265,78 @@ class GovernedActionRunner:
         action the process ever takes).
         """
         return f"{subject}/{tool}"
+
+    def _check_scope(
+        self, subject: str, tool: str, seq: int, decl_id: str
+    ) -> Optional[GovernedOutcome]:
+        """Re-derive the grant scope from its source; block on mismatch.
+
+        Returns ``None`` when the dispatch may proceed, or a blocked
+        :class:`GovernedOutcome` when it may not.
+
+        The grants that authorize this dispatch are the ones the
+        registry has presented for this verb.  Every one of them is
+        checked against its source line:
+
+        * a grant whose scope matches its source stands;
+        * a grant whose scope was dropped or widened is **blocked**;
+        * a grant whose scope is narrower falls back to the narrower
+          scope under an expiry clock;
+        * a grant whose source cannot be retrieved is blocked as
+          ``outcome_unknown`` -- a missing source is a structured state,
+          never a clean read.
+
+        If *any* presented grant for the verb is blocked, the dispatch
+        is blocked: the gate does not get to pick the friendly grant.
+        """
+        registry = self._scope_registry
+        grants = registry.presented_for(tool)
+        if not grants:
+            return None
+        now = int(self._scope_clock()) if self._scope_clock is not None else 0
+        blocked_reason = ""
+        for grant in grants:
+            try:
+                check = registry.gate.check(grant, now=now)
+            except Exception as error:  # noqa: BLE001 - fail closed
+                blocked_reason = (
+                    f"the scope-qualifier check could not complete: "
+                    f"{type(error).__name__}"
+                )
+                break
+            if check.blocked:
+                blocked_reason = check.reason or "the scope check blocked"
+                break
+        if not blocked_reason:
+            return None
+        seal_error = self._seal(
+            tool=tool,
+            subject=subject,
+            declaration_id=decl_id,
+            criteria_digest=self.pin({"scope": "scope-qualifier"}),
+            inputs_digest=self.pin({"tool": tool, "subject": subject}),
+            gate_decision="deny",
+            observer_verdict="-",
+            outcome="denied:scope",
+            reason=blocked_reason,
+        )
+        outcome = GovernedOutcome(
+            declaration_id=decl_id,
+            executed=False,
+            gate="scope",
+            decision="deny",
+            reason=blocked_reason,
+        )
+        if seal_error:
+            outcome = GovernedOutcome(
+                decl_id,
+                False,
+                "scope",
+                "deny",
+                blocked_reason + f" [seal_failed:{seal_error}]",
+                audit_seal_error=seal_error,
+            )
+        return outcome
 
     def _seal(
         self,
@@ -390,6 +476,22 @@ class GovernedActionRunner:
                             audit_seal_error=seal_error,
                         )
                     return deny_outcome
+
+            # The scope-qualifier check is the second hot-path
+            # precondition, and it sits in the same place the deny
+            # lookup sits: BEFORE the gate decides, so a grant whose
+            # scope no longer matches its source never reaches the
+            # authorization step at all.
+            #
+            # The check is fail-closed on purpose.  A grant that lost
+            # its fence ("folder X only" -> no fence) is BLOCKED, not
+            # logged and not silently re-scoped: a dropped qualifier
+            # turns a restriction into an apparent entitlement, and the
+            # only thing that closes that path is refusing the action.
+            if self._scope_registry is not None:
+                scope_outcome = self._check_scope(subject, tool, seq, decl_id)
+                if scope_outcome is not None:
+                    return scope_outcome
 
             # Observer pre-commits criteria BEFORE authorization (Hubinger).
             obs_seq = self._next_observer_seq()
