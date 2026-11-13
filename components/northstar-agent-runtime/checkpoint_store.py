@@ -61,6 +61,11 @@ def register_checkpoint_type(cls: type[Any]) -> None:
     The type is named by ``"module:qualname"`` - the same spelling Microsoft
     Agent Framework uses - and the name is what the loader checks.  Registering
     a type is an explicit statement that restoring it is safe.
+
+    The registration applies **process-wide**, including to stores that were
+    constructed before the registration: the loader consults the registry at
+    decode time, not the snapshot the store took at construction.  (MSAF
+    guarantees the same thing for its backends.)
     """
     if not isinstance(cls, type):
         raise TypeError("checkpoint types must be classes")
@@ -122,7 +127,11 @@ class FileCheckpointStorage:
     def __init__(self, storage_path: str | Path, *, allowed_checkpoint_types: Iterable[str] = ()) -> None:
         self.storage_path = Path(storage_path)
         self.storage_path.mkdir(parents=True, exist_ok=True)
-        self._allowed_types = frozenset(allowed_checkpoint_types) | allowed_types()
+        # The per-instance allowlist is fixed at construction; the process-wide
+        # registry is NOT snapshotted here, so a type registered later is still
+        # accepted by this store (MSAF's guarantee).  The loader unions the two
+        # at decode time.
+        self._extra_types = frozenset(allowed_checkpoint_types)
         self._queues: dict[Path, _WriteQueue] = {}
         self._queues_guard = threading.Lock()
 
@@ -246,7 +255,10 @@ class FileCheckpointStorage:
         if isinstance(value, dict):
             marker = value.get("__type__")
             if marker is not None:
-                if not isinstance(marker, str) or marker not in self._allowed_types:
+                # The registry is read at decode time, so a type registered
+                # after this store was constructed is still accepted.
+                permitted = self._extra_types | allowed_types()
+                if not isinstance(marker, str) or marker not in permitted:
                     raise CheckpointStoreError(
                         f"checkpoint {checkpoint_id!r} carries an unregistered type {marker!r}: "
                         "register it with register_checkpoint_type before restoring it"

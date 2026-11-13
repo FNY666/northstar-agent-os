@@ -158,10 +158,16 @@ def _unambiguous_approval_pairs(
     future message type does carry an approval pair, this is where the pairing
     rule goes.  It reads the pair off the message ``data`` mapping, under the
     ``approval_request`` / ``approval_response`` keys with a shared
-    ``approval_id`` - the shape :mod:`approval_rules` serialises.
+    ``approval_id``.
+
+    The rule is the same as the tool side: the id must be **unambiguous on
+    both sides**.  One request and one response pair.  Two requests sharing an
+    id pair with nothing, and one request with two responses sharing an id
+    pairs with nothing - the transcript cannot say which response answers
+    which request, so guessing would merge two exchanges.
     """
     requests: dict[str, list[int]] = {}
-    pairs: list[tuple[int, int]] = []
+    responses: dict[str, list[int]] = {}
     for index, message in enumerate(messages):
         data = getattr(message, "data", None)
         if not isinstance(data, Mapping):
@@ -172,9 +178,13 @@ def _unambiguous_approval_pairs(
         if data.get("approval_request"):
             requests.setdefault(request_id, []).append(index)
         elif data.get("approval_response"):
-            candidates = requests.get(request_id)
-            if candidates and len(candidates) == 1:
-                pairs.append((candidates[0], index))
+            responses.setdefault(request_id, []).append(index)
+    pairs: list[tuple[int, int]] = []
+    for request_id, request_indices in requests.items():
+        response_indices = responses.get(request_id, ())
+        if len(request_indices) != 1 or len(response_indices) != 1:
+            continue
+        pairs.append((request_indices[0], response_indices[0]))
     return tuple(pairs)
 
 
@@ -202,8 +212,17 @@ def group_messages(messages: Sequence[Any]) -> tuple[Span, ...]:
 
     pairs = (*_unambiguous_tool_call_output_pairs(messages), *_unambiguous_approval_pairs(messages))
     for declaration, result in pairs:
-        if declaration < result:
-            union(declaration, result)
+        if declaration >= result:
+            continue
+        union(declaration, result)
+        # Everything between the two ends travels with them: a cut that lands
+        # between the call and the result would split the exchange, and a cut
+        # between the pair and the messages inside it would too.  Merging the
+        # whole run keeps the spans CONTIGUOUS and non-overlapping - without
+        # this the pair span would be the min..max hull of its members while
+        # the messages inside it were also emitted as spans of their own.
+        for index in range(declaration + 1, result):
+            union(declaration, index)
 
     groups: dict[int, list[int]] = {}
     for index in range(count):
@@ -220,6 +239,21 @@ def group_messages(messages: Sequence[Any]) -> tuple[Span, ...]:
 def spans_crossing(spans: Sequence[Span], cut: int) -> tuple[Span, ...]:
     """The spans a cut at ``cut`` would split."""
     return tuple(span for span in spans if span.contains(cut))
+
+
+def _pair_span_is_approval(transcript: Sequence[Any], span: Span) -> bool:
+    """True when the span holds an approval request/response pair.
+
+    A span can hold both a tool exchange and an approval exchange (the two
+    pair rules merge into one span when the messages interleave), so the
+    answer is "does the span carry an approval pair" - not "does it carry only
+    one".
+    """
+    for index in range(span.start, min(span.end, len(transcript) - 1) + 1):
+        data = getattr(transcript[index], "data", None)
+        if isinstance(data, Mapping) and data.get("approval_request"):
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -545,6 +579,15 @@ def _no_safe_cut_reason(transcript: Sequence[Any], *, max_cut: int) -> str:
         if span.kind == "pair" and span.start < max_cut <= span.end
     ]
     if split_pairs:
+        # Say WHICH kind of pair blocks the cut.  An approval pair is not a
+        # tool call, and "work that never completed" describes a tool exchange,
+        # not an approval exchange.
+        if _pair_span_is_approval(transcript, split_pairs[0]):
+            return (
+                "no safe compaction boundary: every candidate cut would split an "
+                "approval request from its response, so summarising here would "
+                "report an approval that was never answered"
+            )
         return (
             "no safe compaction boundary: every candidate cut would split a tool call "
             "from its result, so summarising here would report work that never completed"

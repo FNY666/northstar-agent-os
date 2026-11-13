@@ -47,7 +47,7 @@ from artifact_authority import (
     verify,
 )
 from cancellation_tombstone import Tombstone, TombstoneSet
-from grant_pin_ledger import GrantPin
+from grant_pin_ledger import OUTCOME_UNKNOWN, GrantPin, resolve_seal_outcome
 
 
 def _pin(grant_id: str = "grant-1", version: str = "v2", counter: int = 7) -> GrantPin:
@@ -150,9 +150,13 @@ class BindRuleTests(unittest.TestCase):
         self.assertEqual(len(ledger), 0)
 
     def test_unresolved_pin_is_carried_verbatim_nulls_included(self):
+        pin = GrantPin("grant-9", "v1", None)
+        # This pin is exactly the one the seal layer records as
+        # outcome_unknown: the grant is named but not resolvable.
+        self.assertEqual(resolve_seal_outcome(pin, "executed"), OUTCOME_UNKNOWN)
         receipt = bind(
             b"artifact-bytes",
-            GrantPin("grant-9", "v1", None),
+            pin,
             permitted_at_seq=3,
             epoch=3,
             clock_id="host-clock",
@@ -326,9 +330,13 @@ class DrivenPathTests(unittest.TestCase):
         tampered[-1] = tampered[-1] ^ 0x01
         with self.assertRaises(MalformedReceiptError):
             open_sealed(bytes(tampered))
-        # ... and the unbound verdict names the same cause.
-        verdict = verify(receipt, 3, None, artifact_bytes=b"the artifact that was permittdd")
+        # ... and the UNBOUND verdict is driven off the tampered container
+        # itself, not off a separately typed payload: the payload the
+        # container carries is what the receipt no longer describes.
+        tampered_payload = bytes(tampered)[len(bytes(tampered)) - len(payload):]
+        verdict = verify(receipt, 3, None, artifact_bytes=tampered_payload)
         self.assertEqual(verdict.state, UNBOUND)
+        self.assertNotEqual(verdict.state, VALID)
 
     def test_sealing_bytes_with_a_foreign_receipt_is_refused(self):
         receipt = _bind(b"artifact-bytes")

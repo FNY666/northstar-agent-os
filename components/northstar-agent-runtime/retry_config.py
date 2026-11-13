@@ -12,7 +12,7 @@ rules that make a retry safe *in code*, where a call site cannot forget them:
 
 The source of the rule is Dynamiq (commit ``acc30e5``), read verbatim. The
 crispest statement of it is a code comment in
-``dynamiq/connections/agentcore.py`` (lines 105-108), reproduced here:
+``dynamiq/connections/agentcore.py`` (lines 104-108), reproduced here:
 
     # Disable botocore's built-in retries: the default legacy mode silently
     # re-sends failed requests up to 5 times, which for the non-idempotent

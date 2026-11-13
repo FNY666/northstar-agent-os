@@ -21,11 +21,12 @@ classifies failures (`FailureClass`) and describes a single call's replay
 safety (`Operation.body_replayable`), and `retry_policy.py` already computes a
 bounded backoff. What was missing was the thing between them:
 
-1. **The call itself was never classified.** Nothing in the code said "this
-   particular call may be repeated" or "this one may not". The information
-   existed in `Operation`, per call site, but the *kind* of call — session
-   lifecycle versus code execution — was nowhere in the code, so it lived in
-   the head of whoever wrote the call site.
+1. **The call itself was never classified by *kind*.** `Operation` already
+   carries a per-call replay signal (`replayable`, `replay_safe`), so "may
+   this particular call be repeated" was answerable at a call site. What was
+   nowhere in the code was the *kind* of call — session lifecycle versus code
+   execution — so the rule that a throttle may be retried for one and never
+   for the other lived in the head of whoever wrote the call site.
 2. **The retry parameters were constants spread across modules.**
    `provider_retry.py` alone carries `DEFAULT_MAX_ATTEMPTS = 3`,
    `DEFAULT_BASE_DELAY_MS = 250`, `DEFAULT_MULTIPLIER = 2.0`,
@@ -36,7 +37,7 @@ bounded backoff. What was missing was the thing between them:
 
 ## 2. The source rule (verbatim from Dynamiq)
 
-From `dynamiq/connections/agentcore.py`, lines 105–108 (commit `acc30e5`):
+From `dynamiq/connections/agentcore.py`, lines 104–108 (commit `acc30e5`):
 
 > ```
 > # Disable botocore's built-in retries: the default legacy mode silently re-sends
@@ -52,9 +53,11 @@ Two sentences in that comment carry the whole rule:
   and **even when the transport's own retry is "only" five attempts**;
 - the throttle retry applies to the **idempotent session-lifecycle calls**.
 
-The same file's `_translate_error` maps the provider's throttling error onto a
-typed `AgentCoreThrottlingError` — "so callers can retry on a typed exception"
-— and `dynamiq/sandboxes/bedrock_agentcore.py` retries **only** that type:
+The same file's class docstring says the client "translation of AWS
+throttling errors so callers can retry on a typed exception", and its
+`_translate_error` maps the provider's throttling error onto a typed
+`AgentCoreThrottlingError`. `dynamiq/sandboxes/bedrock_agentcore.py` retries
+**only** that type:
 
 > ```python
 > @retry(
@@ -103,6 +106,15 @@ and the order is load-bearing:
 The failure vocabulary is not copied: `classify_call` accepts a
 `retry_contract.Failure`, a bare `retry_contract.FailureClass`, or an
 exception, and an exception is classified by `retry_contract.classify_exception`.
+
+One honest caveat: the *predicate* for an indeterminate outcome is restated
+here (`may_have_executed or phase is POST_WRITE`) rather than delegated to
+`retry_contract._terminal_error`, which is a private helper. The two agree on
+the post-write case; on a `FailureClass.UNKNOWN` failure with no
+`may_have_executed` flag they differ — `retry_contract` treats it as
+indeterminate, this module treats it as an ordinary non-retryable failure. The
+fail-closed outcome is the same (never retried, never a success), but the
+label differs.
 
 ### Decisions
 
@@ -216,7 +228,7 @@ event — no subprocess is spawned.
 
 | Module | Relationship | Change |
 | --- | --- | --- |
-| `retry_contract.py` | Supplies the failure vocabulary (`FailureClass`, `Failure`, `classify_exception`, `classify_response`) and the indeterminate rule. Imported read-only. | **none** |
+| `retry_contract.py` | Supplies the failure vocabulary (`FailureClass`, `Failure`, `FailurePhase`, `classify_exception`, `classify_response`) and the indeterminate rule. Imported read-only. | **none** |
 | `retry_policy.py` | The scheduling *shape* this module mirrors: bounded attempts, deterministic schedule, injectable sleeper, no wall-clock in the policy. Imported read-only in spirit; no code dependency. | **none** |
 | `provider_retry.py` | The provider-side fault vocabulary (`rate_limited`, `overloaded`, …). This module does not extend it; it reuses `retry_contract`'s classification so there is exactly one vocabulary. Read-only. | **none** |
 | `idempotency_manager.py` | The payload-bound idempotency ledger. A call carrying an idempotency key can be replayed as the same operation; a call carrying none cannot — which is why `EXECUTION` is never retried. Read-only. | **none** |
@@ -238,9 +250,9 @@ in the table above.
 
 ## 9. The driven path
 
-One end-to-end test (`EndToEndPathTests`) drives all three cases through the
-gate, because the parts having their own tests is not the same as the *gate*
-being proven:
+`EndToEndPathTests` drives all three cases through the gate in a single test
+(`test_the_gate_runs_the_three_cases_in_one_go`), because the parts having
+their own tests is not the same as the *gate* being proven:
 
 1. a throttled **idempotent** session create is retried, and the waits follow
    the declared schedule;
