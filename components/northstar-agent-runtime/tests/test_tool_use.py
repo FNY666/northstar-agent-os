@@ -46,7 +46,7 @@ def test_stdlib_only():
     tree = ast.parse(open(_module_path(), encoding="utf-8").read())
     allowed = {
         "hashlib", "json", "math", "threading", "dataclasses", "typing",
-        "__future__", "canonical_json",
+        "__future__", "canonical_json", "tool_failure",
     }
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -153,8 +153,11 @@ def test_invoke_unknown_tool_and_bad_args_consume_seq():
         t.invoke("search", {"limit": 5}, 3)  # missing required
     with pytest.raises(tu.BadArgumentsError):
         t.invoke("search", {"query": 123}, 4)  # wrong type
-    with pytest.raises(tu.BadArgumentsError):
-        t.invoke("search", {"query": "x", "bogus": 1}, 5)  # unknown key
+    # An unknown (extra) key is *tolerated*: the schema side is fail-closed
+    # on unknown keys, the argument side is not. The call succeeds and the
+    # extra key is dropped from the booked record.
+    tolerated = t.invoke("search", {"query": "x", "bogus": 1}, 5)
+    assert tolerated.arguments == {"query": "x"}
     with pytest.raises(tu.BadArgumentsError):
         t.invoke("search", ["not-a-dict"], 6)
     with pytest.raises(tu.BadArgumentsError):
@@ -165,9 +168,15 @@ def test_invoke_unknown_tool_and_bad_args_consume_seq():
         t.invoke("", {"query": "x"}, 9)
     # Failed mutations consumed their seqs: next valid seq is 10.
     inv = t.invoke("search", {"query": "ok"}, 10)
-    assert inv.invocation_id == "invoke-1"
+    assert inv.invocation_id == "invoke-2"
+    # The failed invocations are booked as "failed" rows (they carry the
+    # typed error code and denial kind); a registration failure stays
+    # "rejected".
+    failed = [r for r in t.audit_log() if r["kind"] == "failed"]
+    assert len(failed) == 7
+    assert all(r["detail"]["error_code"] for r in failed)
     rejected = [r for r in t.audit_log() if r["kind"] == "rejected"]
-    assert len(rejected) == 8
+    assert rejected == []
 
 
 def test_type_vocabulary_roundtrip():

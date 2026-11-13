@@ -40,6 +40,11 @@ from typing import Any, Callable, Iterable, Mapping
 #: habit: a table shape we may refuse is better than one we silently misread.
 RETRY_SCHEMA_VERSION = "northstar.retry.v1"
 
+try:  # the typed-failure vocabulary lives in one module and is never copied
+    from tool_failure import from_provider_fault as _from_provider_fault
+except Exception:  # pragma: no cover - module must stay importable standalone
+    _from_provider_fault = None
+
 #: Ceilings on the policy itself, not on the workspace. ``MAX_ATTEMPTS`` exists because a
 #: "retry forever" knob has no honest use; the delay and deadline caps exist because a run
 #: that sleeps for an hour inside turn 2 is not the run anybody approved.
@@ -521,6 +526,29 @@ def _retry_after_ms(error: BaseException) -> int | None:
     return None
 
 
+def fault_to_failure(fault: ProviderFault, *, provider: str = "",
+                     tool_name: str = "", tool_use_id: str = "") -> Any:
+    """Map a provider fault onto a typed tool failure.
+
+    The vocabulary lives in :mod:`tool_failure` and is imported, never
+    copied: a remedy kind that is not Claude Code's five is not this
+    module's to invent. The retry budget is untouched by this function --
+    it says what the fault *is* and what to do about it, nothing about how
+    many times to try.
+
+    ``auth`` becomes the remedy ``auth_expired`` (with the provider), a
+    throttled or 5xx fault becomes ``retryable=True`` with the suggested
+    wait and **no** remedy kind, and an interrupted stream becomes the
+    denial kind ``interrupted``.
+    """
+    if _from_provider_fault is None:  # pragma: no cover - standalone import
+        from tool_failure import from_provider_fault as _imported
+        return _imported(fault, provider=provider, tool_name=tool_name,
+                         tool_use_id=tool_use_id)
+    return _from_provider_fault(fault, provider=provider, tool_name=tool_name,
+                                 tool_use_id=tool_use_id)
+
+
 def classify(error: BaseException, *, already_streamed: bool = False) -> ProviderFault:
     """Name a provider failure, from whatever the transport could tell us.
 
@@ -714,5 +742,6 @@ __all__ = [
     "StopRetry",
     "classify",
     "execute",
+    "fault_to_failure",
     "merge_cli",
 ]
