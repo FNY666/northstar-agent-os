@@ -31657,6 +31657,164 @@ Policy-enforcement bookkeeping: submit -> review -> action -> appeal.
 - `audit_log()`
 #### `main()`
 
+### `context_budget`
+
+Source: `components/northstar-agent-runtime/context_budget.py`
+
+Context-engineering thresholds for Northstar's own context path.
+
+#### `estimate_text_tokens(text: str)`
+
+Deterministic token estimate for a piece of text.
+
+#### `ContextThresholds`
+
+Every context-engineering number Northstar enforces, in one place.
+
+- `window_pressure_tokens()`
+  - Input size at which old write/edit calls become pointers.
+- `summary_trigger_tokens()`
+  - Input size at which a summary is produced.
+- `as_dict()`
+#### `OffloadError`
+
+The offload store could not take the bytes.
+
+#### `OffloadPointer`
+
+A recoverable reference to bytes that live on disk.
+
+- `as_dict()`
+- `render(*, preview: str='')`
+  - The context-facing text: a path, a preview, and the way back.
+#### `OffloadStore`
+
+Where offloaded tool results go.
+
+- `path_for(*, name: str='tool-result')`
+- `offload(text: str, *, name: str='tool-result')`
+  - Write ``text`` to disk; return the pointer and the preview text.
+#### `should_offload_tool_result(text: str, limits: ContextThresholds)`
+
+True when a single tool result is too big to keep in context.
+
+#### `offload_tool_result(text: str, store: OffloadStore, *, name: str='tool-result', force: bool=False)`
+
+Replace an oversized tool result with a recoverable pointer.
+
+#### `is_write_like(tool_name: str)`
+
+#### `window_pressure_reached(input_tokens: int, limits: ContextThresholds)`
+
+True when the input has reached the configured fraction of the window.
+
+#### `TruncatedCall`
+
+One write/edit call reduced to a pointer.
+
+- `as_dict()`
+- `render()`
+#### `truncate_write_like_calls(calls: Sequence[Any], *, input_tokens: int, limits: ContextThresholds)`
+
+Reduce old write/edit calls to pointers when the window is under pressure.
+
+#### `dataclasses_replace(obj: Any, **changes: Any)`
+
+#### `RereadDecision`
+
+What a re-read of one file may put in the context.
+
+- `as_dict()`
+- `render()`
+#### `plan_rereads(files: Sequence[tuple[str, str]], *, limits: ContextThresholds)`
+
+Decide what a post-compaction re-read may keep.
+
+#### `apply_reread_decisions(files: Sequence[tuple[str, str]], decisions: Sequence[RereadDecision])`
+
+Apply the decisions: a path-only file yields its pointer text.
+
+#### `cap_skill_bodies(bodies: Sequence[tuple[str, str]], *, limits: ContextThresholds)`
+
+Cap re-injected skill bodies per skill and in total.
+
+#### `cap_auto_memory(text: str, *, limits: ContextThresholds)`
+
+Cap auto-memory at the first N lines or M bytes, whichever comes first.
+
+#### `SubagentBudget`
+
+What a subagent may read, and what it may hand back.
+
+- `research_variant(limits: ContextThresholds)`
+- `general_variant(limits: ContextThresholds)`
+- `budget_for_result()`
+  - The ceiling on what this subagent hands back to its parent.
+#### `cap_subagent_result(text: str, budget: SubagentBudget)`
+
+Cap a subagent's return value; report whether it was cut.
+
+#### `read_budget_exceeded(tokens: int, budget: SubagentBudget)`
+
+True when a subagent has read more than its read budget allows.
+
+#### `MemoryTaxLedger`
+
+What persistent memory costs this run, measured rather than guessed.
+
+- `record(*, source: str, tokens: int, kind: str='memory')`
+- `injected_tokens` (property)
+  - Total tokens injected by persistent context files.
+- `tax_ratio(total_input_tokens: int)`
+  - The share of a run's input that was memory tax.
+- `as_dict(*, total_input_tokens: int=0)`
+#### `todo_state_enabled(limits: ContextThresholds)`
+
+Whether todo-state recitation is on.
+
+### `context_controller`
+
+Source: `components/northstar-agent-runtime/context_controller.py`
+
+The stateful half of the context-engineering rules.
+
+#### `InjectedContext`
+
+One block of model-visible context the runtime put back after a cut.
+
+- `as_dict()`
+#### `ContextController`
+
+The runtime's context policy, with the state the rules need.
+
+- `reinject_after_compaction(*, workspace: str | os.PathLike[str] | None=None, skill_bodies: Sequence[tuple[str, str]]=(), memory_text: str='')`
+  - Put the workspace back into the context after a compaction.
+- `apply_provider_rules(messages: Sequence[Mapping[str, Any]])`
+  - Apply the offload and window-pressure rules to a provider payload.
+- `offload_transcript(transcript: Sequence[Any])`
+  - Offload oversized tool results *in a copy of* the transcript.
+- `offload_result(text: str, *, name: str='tool-result')`
+  - Offload an oversized tool result; return the pointer text.
+- `apply_window_pressure(transcript: Sequence[Any])`
+  - Reduce old write/edit calls to pointers when the window is tight.
+- `note_compaction()`
+  - Record that a compaction happened, so the re-read rules apply.
+- `plan_recent_files(workspace: str | os.PathLike[str] | None=None)`
+  - The most recently modified workspace files, at most ``reread_max_files``.
+- `reread_decision(path: str, content: str)`
+  - Whether a re-read of one file keeps its content or returns a path.
+- `reread_text(path: str, content: str)`
+  - The context text a re-read may contribute, and whether it is path-only.
+- `inject(path: str, content: str, *, kind: str='reread', path_only: bool | None=None)`
+  - Book one injected context block, and the memory tax it carries.
+- `cap_memory(text: str)`
+  - Cap auto-memory at the first N lines or M bytes.
+- `cap_skills(bodies: Sequence[tuple[str, str]])`
+  - Cap re-injected skill bodies per skill and in total.
+- `cap_subagent(text: str, *, research: bool=False)`
+  - Cap what a subagent hands back to its parent.
+- `as_dict(*, total_input_tokens: int=0)`
+  - Everything this run's context policy did, for the run report.
 ### `context_window`
 
 Source: `components/northstar-agent-runtime/context_window.py`
