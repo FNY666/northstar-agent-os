@@ -387,7 +387,12 @@ class DurableStore:
         self._pending: dict[str, list[PendingWrite]] = {}
         self._cleared: dict[str, list[PendingWrite]] = {}
         self._committed: dict[str, list[PendingWrite]] = {}
-        self._committed_effects: set[str] = set()
+        # The effect keys already committed, **scoped per run**.  A store-wide
+        # set would be wrong: two runs in one store may legitimately use the
+        # same effect key ("tool:1" is not a globally unique name), and the
+        # second run's effect must not be silently dropped because the first
+        # run committed one.
+        self._committed_effects: dict[str, set[str]] = {}
 
     # -- writing ----------------------------------------------------------
 
@@ -400,11 +405,16 @@ class DurableStore:
         interrupted_task: str | None = None,
         interrupt_value: Any = None,
         task_path: str = "",
+        interrupt_answers: Mapping[str, Any] | None = None,
     ) -> DurableCheckpoint:
         """Store the committed state of a run at a boundary.
 
         A run id is mandatory: without one the record cannot be found again,
         and a checkpoint nobody can find is not a checkpoint.
+
+        Every call allocates a **fresh** checkpoint id.  Ids are the key the
+        writes hang under and the key a resume looks up, so two checkpoints
+        sharing one id would make the second one unreachable.
         """
         _require_run_id(run_id)
         if not isinstance(state, Mapping):
@@ -420,6 +430,7 @@ class DurableStore:
             interrupted_task=interrupted_task,
             interrupt_value=interrupt_value,
             task_path=task_path,
+            interrupt_answers=dict(interrupt_answers or {}),
         )
         self._checkpoints.append(checkpoint)
         self._append({"kind": RECORD_CHECKPOINT, **checkpoint.as_dict()})
@@ -445,6 +456,30 @@ class DurableStore:
             }
         )
         return tuple(ordered)
+
+    def move_writes(self, from_checkpoint_id: str, to_checkpoint_id: str) -> tuple[PendingWrite, ...]:
+        """Re-parent the pending writes of one checkpoint onto another.
+
+        Used when a step interrupts: the boundary the run actually paused at
+        is the *interrupt* checkpoint, so the writes that were in flight when
+        it paused hang under that one.  The move is an append (the writes are
+        written again under the new id), so the log still shows both: what
+        was pending when the step started, and what was pending when it
+        paused.
+        """
+        bucket = list(self._pending.get(from_checkpoint_id, []))
+        if not bucket:
+            return ()
+        self._pending[from_checkpoint_id] = []
+        self._pending.setdefault(to_checkpoint_id, []).extend(bucket)
+        self._append(
+            {
+                "kind": RECORD_PENDING_WRITES,
+                "checkpoint_id": to_checkpoint_id,
+                "writes": [write.as_dict() for write in bucket],
+            }
+        )
+        return tuple(bucket)
 
     def clear_writes(
         self,
@@ -496,21 +531,23 @@ class DurableStore:
     ) -> tuple[PendingWrite, ...]:
         """Apply and commit the pending writes under a checkpoint.
 
-        A write whose ``effect_key`` was already committed is *not* applied
-        again: the effect happened once, and this is where that is enforced
-        rather than hoped for.
+        A write whose ``effect_key`` was already committed *in this run* is
+        **not** applied again: the effect happened once, and this is where
+        that is enforced rather than hoped for.
         """
         bucket = list(self._pending.get(checkpoint_id, []))
+        run_id = self._run_of(checkpoint_id)
+        committed_keys = self._committed_effects.setdefault(run_id, set())
         applied: list[PendingWrite] = []
         for write in bucket:
             key = write.effect_key
-            if key is not None and key in self._committed_effects:
+            if key is not None and key in committed_keys:
                 continue
             if applier is not None:
                 applier(write)
             applied.append(write)
             if key is not None:
-                self._committed_effects.add(key)
+                committed_keys.add(key)
         self._pending[checkpoint_id] = []
         if applied:
             self._committed.setdefault(checkpoint_id, []).extend(applied)
@@ -523,6 +560,13 @@ class DurableStore:
             )
         return tuple(applied)
 
+    def _run_of(self, checkpoint_id: str) -> str:
+        """The run a checkpoint belongs to, or the empty string if unknown."""
+        for item in self._checkpoints:
+            if item.checkpoint_id == checkpoint_id:
+                return item.run_id
+        return ""
+
     def delete_thread(self, run_id: str) -> None:
         """Forget every checkpoint and write of a run."""
         _require_run_id(run_id)
@@ -534,6 +578,7 @@ class DurableStore:
         for mapping in (self._pending, self._cleared, self._committed):
             for key in dropped:
                 mapping.pop(key, None)
+        self._committed_effects.pop(run_id, None)
         self._append({"kind": "delete_thread", "run_id": run_id})
 
     # -- reading ----------------------------------------------------------
@@ -983,20 +1028,20 @@ class DurableRunner:
         if self.store is None:  # pragma: no cover - interrupt() already refused
             raise InterruptRequiresCheckpointError("an interrupt needs a checkpointer")
         record = paused.interrupts[0] if paused.interrupts else Interrupt(value=None, task_id=self._task_id, index=0)
-        answers = dict(self._answers)
-        checkpoint = DurableCheckpoint(
+        parent = self._checkpoint_id
+        checkpoint = self.store.put_checkpoint(
             run_id=run_id or self._task_id,
-            checkpoint_id=self._checkpoint_id or f"ck-int-{len(self.store.list_checkpoints(run_id or self._task_id)) + 1:06d}",
-            seq=len(self.store.list_checkpoints(run_id or self._task_id)) + 1,
             state=dict(state or {}),
-            parent_checkpoint_id=self._checkpoint_id,
+            parent_checkpoint_id=parent,
             interrupted_task=record.task_id,
             interrupt_value=record.value,
             task_path=self._task_id,
-            interrupt_answers=answers,
+            interrupt_answers=self._answers,
         )
-        self.store._checkpoints.append(checkpoint)
-        self.store._append({"kind": RECORD_CHECKPOINT, **checkpoint.as_dict()})
+        # The writes that were in flight when the step paused hang under the
+        # boundary it paused at.
+        if parent is not None:
+            self.store.move_writes(parent, checkpoint.checkpoint_id)
         self._checkpoint_id = checkpoint.checkpoint_id
         return checkpoint
 
