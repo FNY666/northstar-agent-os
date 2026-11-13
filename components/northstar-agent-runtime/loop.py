@@ -252,6 +252,19 @@ class RuntimeConfig:
     #: behavior, so a host opts in.  The lookup fails closed -- a scope the
     #: store cannot resolve is denied.
     deny_store_path: str = ""
+    #: B173 diviner: the scope-qualifier registry path.  When set, the
+    #: runtime loads the structured grant registry from this JSON file
+    #: (source lines, presented grants, denial rows) and every dispatch
+    #: re-derives the grant's scope from its source line before the
+    #: gate decides.  A dropped fence blocks the action; a narrower
+    #: grant falls back to the narrower scope under an expiry clock.
+    #: Off by default: it changes observable behavior, so a host opts in.
+    scope_registry_path: str = ""
+    #: The clock the scope-qualifier fallback is measured against: an
+    #: optional callable returning an int (seconds).  Injectable so the
+    #: fallback's expiry is testable without a wall-clock wait.  When
+    #: unset the runtime uses the host's wall clock.
+    scope_clock: Any = None
     #: Backend for the Shell tool (``auto`` | ``bwrap`` | ``process``). Does not
     #: grant Shell — the permission gate still denies it under ``default`` until
     #: ``--allow-tool Shell``. ``bwrap`` is refused at construction if unusable.
@@ -449,6 +462,10 @@ class RuntimeConfig:
             fail("gossip_enabled must be a boolean")
         if not isinstance(self.deny_store_path, str):
             fail("deny_store_path must be a string")
+        if not isinstance(self.scope_registry_path, str):
+            fail("scope_registry_path must be a string")
+        if self.scope_clock is not None and not callable(self.scope_clock):
+            fail("scope_clock must be callable")
         if not isinstance(self.gossip_node_id, str):
             fail("gossip_node_id must be a string")
         if isinstance(self.gossip_peers, str) or not isinstance(self.gossip_peers, (tuple, list)):
@@ -502,6 +519,7 @@ class RuntimeConfig:
             "gossip_peers": list(self.gossip_peers),
             "gossip_fanout": self.gossip_fanout,
             "deny_store_path": self.deny_store_path,
+            "scope_registry_path": self.scope_registry_path,
             "evidence_dir": self.evidence_dir,
             "evidence_required": self.evidence_required,
         }
@@ -606,6 +624,102 @@ class ToolCallReport:
         if self.permission_details:
             payload["permission_details"] = dict(self.permission_details)
         return payload
+
+
+def _load_scope_registry(path: str) -> Any:
+    """Load the structured grant registry from a JSON file.
+
+    The file is the host's sidecar: the source lines (the authority),
+    the presented grants (the grants as reissued into the context), and
+    the denial rows.  It is a **structured** record on purpose -- the
+    summarizer never sees this file, so it cannot drop a qualifier from
+    it.
+
+    The shape is::
+
+        {
+          "sources":  [{"source_ref": ..., "grant_id": ...,
+                        "qualifiers": [{"kind": "only", "resource": "folder X"}]}],
+          "presented": [{"grant_id": ..., "verb": ...,
+                         "qualifiers": [...], "source_ref": ...}],
+          "rows":     [{"scope": ..., "kind": "clear", "signature": ...}]
+        }
+
+    A missing file, or a file that is not valid JSON, refuses the run:
+    a registry that cannot be read must not silently become "no
+    registry".
+    """
+    import json as _json
+
+    from scope_qualifier import (
+        DenialRow,
+        GrantRecord,
+        ScopeFallback,
+        ScopeGrantRegistry,
+        SourceLine,
+    )
+
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            raw = handle.read()
+    except OSError as error:
+        raise RuntimeConfigurationError(
+            f"scope registry could not be read: {error}"
+        ) from error
+    try:
+        payload = _json.loads(raw)
+    except ValueError as error:
+        raise RuntimeConfigurationError(
+            f"scope registry is not valid JSON: {error}"
+        ) from error
+    if not isinstance(payload, dict):
+        raise RuntimeConfigurationError("scope registry must be a mapping")
+    sources = [SourceLine.from_dict(item) for item in payload.get("sources") or ()]
+    presented = [GrantRecord.from_dict(item) for item in payload.get("presented") or ()]
+    rows = [DenialRow(**item) for item in payload.get("rows") or ()]
+    registry = ScopeGrantRegistry(
+        sources=sources,
+        presented=presented,
+        rows=rows,
+        fallback_ttl_seconds=int(payload.get("fallback_ttl_seconds") or 900),
+    )
+    # A fallback issued before a restart keeps its original clock: a
+    # process that restarts must not hand itself a fresh deadline.
+    for item in payload.get("fallbacks") or ():
+        registry.gate.seed_fallback(ScopeFallback.from_dict(item))
+    return registry
+
+
+def _persist_scope_fallback(path: str, fallback: Any) -> None:
+    """Write an issued scope fallback back to the host's registry file.
+
+    The fallback's clock is the whole point of the fallback, so it has
+    to outlive the process: a reloaded fallback keeps its original
+    expiry.  A file that cannot be written is reported through the
+    run's own error path -- the fallback itself is already recorded in
+    the gate's ledger, so a write failure does not unblock anything.
+    """
+    import json as _json
+
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            payload = _json.load(handle)
+    except (OSError, ValueError):
+        return
+    if not isinstance(payload, dict):
+        return
+    entries = [
+        item
+        for item in payload.get("fallbacks") or ()
+        if isinstance(item, dict) and item.get("grant_id") != fallback.grant_id
+    ]
+    entries.append(fallback.to_dict())
+    payload["fallbacks"] = entries
+    try:
+        with open(path, "w", encoding="utf-8") as handle:
+            _json.dump(payload, handle, indent=2, sort_keys=True)
+    except OSError:
+        return
 
 
 def _public_permission_details(decision: Any) -> dict[str, Any]:
@@ -1011,6 +1125,34 @@ class AgentRuntime:
                 raise RuntimeConfigurationError(
                     f"deny store could not be opened: {error}"
                 ) from error
+        # B173 diviner: the scope-qualifier registry.  Off unless the host
+        # opts in (``scope_registry_path``): it changes observable
+        # behavior, so a host chooses it.  The registry holds the source
+        # lines (the authority, in a sidecar the summarizer never
+        # touches) and the presented grants (the grants as reissued into
+        # the context).  Every dispatch re-derives the scope from the
+        # source before the gate decides, and a dropped fence blocks the
+        # action.
+        self.scope_registry: Any = None
+        if getattr(self.config, "scope_registry_path", ""):
+            try:
+                from scope_qualifier import ScopeGrantRegistry
+
+                self.scope_registry = _load_scope_registry(
+                    self.config.scope_registry_path
+                )
+                # Persist an issued fallback back to the host's file, so
+                # the clock survives a restart: a reloaded fallback keeps
+                # its original expiry instead of being re-issued.
+                self.scope_registry.gate.on_fallback = (
+                    lambda fallback: _persist_scope_fallback(
+                        self.config.scope_registry_path, fallback
+                    )
+                )
+            except Exception as error:  # noqa: BLE001 - refuse rather than run unchecked
+                raise RuntimeConfigurationError(
+                    f"scope registry could not be loaded: {error}"
+                ) from error
         # A: the production governed-action runner.  One per runtime; the
         # executor is passed per call in _dispatch/_run_handlers_concurrently.
         # The runner books the SAFR 4-gate trail (declare -> authorize ->
@@ -1024,6 +1166,8 @@ class AgentRuntime:
             observer=ObserverVerdictLedger(),
             ledger=self.sealed_ledger,
             deny_dispatcher=self.deny_dispatcher,
+            scope_registry=self.scope_registry,
+            scope_clock=self.config.scope_clock,
         )
         # Gossip announce plane (see gossip_announcer): off unless the host
         # opts in via config. The announcer owns a GossipNode (seen-set)
@@ -4084,14 +4228,18 @@ class AgentRuntime:
             execution_gate=governed.gate,
             governance_seal_error=governed.audit_seal_error,
         )
-        if governed.gate == "deny":
+        if governed.gate in ("deny", "scope"):
             # C54: a hot-path deny is a denial, not an execution failure.
             # The report must say so, or a revoked scope would look like a
-            # tool that simply errored.
+            # tool that simply errored.  The same holds for the
+            # scope-qualifier block (B173 diviner): a grant whose fence
+            # was dropped is a *denial*, and the report has to say that.
             report = replace(
                 report,
                 denied=True,
-                permission_source="deny:hotpath",
+                permission_source=(
+                    "deny:hotpath" if governed.gate == "deny" else "deny:scope"
+                ),
                 execution_status="blocked",
             )
         return block, report, None

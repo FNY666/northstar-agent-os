@@ -1257,6 +1257,7 @@ py-modules = [
     "scheming",
     "science_agents",
     "scim_provisioning",
+    "scope_qualifier",
     "script_mix",
     "sdk",
     "sdk_generation",
