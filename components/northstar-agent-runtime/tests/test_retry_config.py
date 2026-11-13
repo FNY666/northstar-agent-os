@@ -243,6 +243,43 @@ class CallKindClassificationTests(unittest.TestCase):
         self.assertIs(verdict.decision, RetryDecision.RETRY)
 
 
+class VocabularyIsNotDuplicatedTests(unittest.TestCase):
+    """The failure vocabulary is read from ``retry_contract``, not re-declared."""
+
+    def test_the_failure_class_is_the_one_from_retry_contract(self):
+        import retry_config
+        import retry_contract
+
+        self.assertIs(retry_config.FailureClass, retry_contract.FailureClass)
+        self.assertIs(retry_config.Failure, retry_contract.Failure)
+
+    def test_retry_config_declares_no_failure_class_of_its_own(self):
+        import retry_config
+
+        # A second vocabulary is how two halves of the runtime drift apart:
+        # one half learns about a fault the other has never heard of.
+        for name in dir(retry_config):
+            if name.endswith("Class") and name != "FailureClass":
+                value = getattr(retry_config, name)
+                self.assertFalse(
+                    isinstance(value, type) and issubclass(value, __import__("enum").Enum)
+                    and name != "CallKind",
+                    f"retry_config declares its own enum {name}",
+                )
+
+    def test_the_protected_modules_are_not_patched_by_this_module(self):
+        import retry_config
+
+        # This module must not monkeypatch the modules it reads.
+        for name in ("retry_contract", "retry_policy", "provider_retry"):
+            module = __import__(name)
+            self.assertFalse(
+                getattr(module, "_northstar_patched_by_retry_config", False),
+                f"{name} was patched by retry_config",
+            )
+        self.assertFalse(hasattr(retry_config, "_patched_modules"))
+
+
 class PublicVocabularyTests(unittest.TestCase):
     """The public names are the ones the module promises."""
 
