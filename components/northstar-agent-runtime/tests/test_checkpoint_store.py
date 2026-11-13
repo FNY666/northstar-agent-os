@@ -193,6 +193,24 @@ class AllowlistTests(unittest.TestCase):
         self.assertGreater(len(after), len(before))
         self.assertIn(f"{Allowed.__module__}:{Allowed.__qualname__}", after)
 
+    def test_a_registration_reaches_a_store_built_before_it(self):
+        # MSAF's guarantee: the registration is process-wide, including for
+        # backends that existed before the registration.
+        root = Path(tempfile.mkdtemp(prefix="b173-store-"))
+        store = FileCheckpointStorage(root)
+
+        class Later:
+            pass
+
+        register_checkpoint_type(Later)
+        marker = f"{Later.__module__}:{Later.__qualname__}"
+        (root / "ck-1.json").write_text(
+            json.dumps({"turns": 1, "obj": {"__type__": marker}}),
+            encoding="utf-8",
+        )
+        payload = store.load("ck-1")
+        self.assertEqual(payload["turns"], 1)
+
     def test_a_per_instance_allowlist_extends_the_loader(self):
         root = Path(tempfile.mkdtemp(prefix="b173-store-"))
         store = FileCheckpointStorage(root, allowed_checkpoint_types=["mypkg.models:Widget"])
