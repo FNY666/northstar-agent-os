@@ -65,9 +65,11 @@ another.
 A checkpoint with no previous id is a genesis and always passes the lineage
 check. A checkpoint with no `graph_signature_hash` is not contradicted - only
 unverifiable - so a resume proceeds when the caller does not know the current
-graph hash. Both refusals are `CheckpointError`, the type every existing
-caller already handles (`loop.py`, `run_setup.py`, `sdk.py`,
-`session_replay.py`).
+graph hash. Both refusals are `CheckpointError`. The two `prepare_resume()`
+call sites in the runtime are `loop.py:1927` (which catches `CheckpointError`)
+and `durable_bridge.py:426` (which does **not** catch it - see §7, open item 8).
+`run_setup.py` and `sdk.py` call `select_checkpoint()`, not `prepare_resume()`,
+and `session_replay.py` never calls `prepare_resume()` at all.
 
 **Durable state.** `durable_state()` keeps its meaning unchanged: only
 *committed* state travels in a checkpoint. The durable layer's pending writes
@@ -100,8 +102,8 @@ must not change is the *shape*.
 | --- | --- |
 | `WorkflowCheckpoint.graph_signature_hash` | `Checkpoint.graph_signature_hash` |
 | `WorkflowCheckpoint.previous_checkpoint_id` | `Checkpoint.previous_checkpoint_id` |
-| "ordering is defined by the `previous_checkpoint_id` lineage chain ... do not use `iteration_count`" (`_workflows/_checkpoint.py`, docstring of `iteration_count`) | the ordering rule in `checkpoints.py`'s module docstring; `select()` walks the chain |
-| `_select_latest_checkpoint` (resolves timestamp ties through the lineage) | `_latest_by_lineage` (resolves depth ties through the lineage) |
+| "Checkpoint ordering is defined by the ``previous_checkpoint_id`` lineage chain (and ``timestamp``), not by ``iteration_count``" (`_workflows/_checkpoint.py`, docstring of `iteration_count`) | the ordering rule in `checkpoints.py`'s module docstring; `select()` walks the chain. **The two orderings are not the same**: MSAF takes the newest `timestamp` first and uses the lineage only to discard superseded checkpoints; Northstar uses the lineage *depth* as its primary key and has no timestamp at all in the comparison. See §7, open item 2. |
+| `_select_latest_checkpoint` (newest timestamp, then lineage, then checkpoint id) | `_latest_by_lineage` (lineage depth first, then `record_index`, then position) - a different primary key, deliberately, because Northstar's ordering rule is "the lineage chain and nothing else" |
 | "only committed state; pending state changes are not included in checkpoints" | `durable_state()`'s existing contract, unchanged |
 
 MSAF's checkpoint also carries `pending_request_info_events` so a resumed run
@@ -146,7 +148,12 @@ writers cannot interleave. Different ids do not contend.
 **Restricted loading.** A payload is JSON. A value carrying a `__type__`
 marker is only accepted when the type name (`"module:qualname"`) is on the
 allowlist; otherwise the load is refused. `register_checkpoint_type(cls)`
-extends the allowlist process-wide, and `allowed_types()` reports it.
+extends the allowlist **process-wide, including for stores that were built
+before the registration** - the loader consults the registry at decode time,
+not the snapshot a store took at construction. `allowed_types()` reports the
+registry. A store may also be given a per-instance allowlist
+(`allowed_checkpoint_types=[...]`), which is added to the registry at decode
+time.
 
 **API.** `save(checkpoint_id, payload) -> str`, `load(checkpoint_id) -> dict`,
 `list_ids() -> tuple[str, ...]`. The payload is the shape of
@@ -164,7 +171,9 @@ extends the allowlist process-wide, and `allowed_types()` reports it.
 The difference in the loader is deliberate: MSAF's payload is JSON with a
 pickled blob inside it, and it restricts *unpickling*. Northstar's payload is
 plain JSON, so the restriction is on the type marker - an unregistered type is
-refused rather than reconstructed.
+refused rather than reconstructed. The *registration* semantics are the same
+as MSAF's: a registration applies process-wide, including to stores that
+existed before it.
 
 ---
 
@@ -188,6 +197,11 @@ spans. A span is a maximal run of messages that must be summarised together.
   `"message"` for a lone message.
 * `Span.contains(cut)` - true when the cut at position `k` (prefix
   `0..k-1`, suffix `k..n`) splits the span: `start < k <= end`.
+* The spans are **contiguous and non-overlapping**: every message belongs to
+  exactly one span. When a call and its result are separated by other
+  messages, the messages between them travel with the pair, so the pair span
+  covers the whole run and the inner messages are not also emitted as spans of
+  their own.
 
 **Pairing helpers.**
 
@@ -197,7 +211,10 @@ spans. A span is a maximal run of messages that must be summarised together.
   result belongs to, so no pair is claimed and the orphan rules still apply to
   it.
 * `_unambiguous_approval_pairs(messages)` - pairs an approval request with its
-  response by a shared `approval_id`, again only when the id appears once.
+  response by a shared `approval_id`, **only when the id is unambiguous on
+  both sides**: one request and one response. Two requests sharing an id pair
+  with nothing, and one request with two responses sharing an id pairs with
+  nothing - the transcript cannot say which response answers which request.
 
 **Cut rules.** `is_safe_cut()` now refuses a cut that lands inside a span, on
 top of the two orphan rules. `safe_cuts()` and `latest_safe_cut()` compute the
@@ -217,8 +234,10 @@ facts are pinned by tests
 **`compact()`.** Keeps every existing rule. When the cut it would have taken
 splits a span, the cut moves to the nearest legal boundary (the span's start
 or end). When no legal cut exists, compaction is refused and the reason says
-*which* rule refused it: "every candidate cut would split a tool call from its
-result" versus "the transcript is mid tool exchange".
+*which* pair blocks it: "every candidate cut would split a tool call from its
+result" for a tool pair, "every candidate cut would split an approval request
+from its response" for an approval pair, and "the transcript is mid tool
+exchange" for the generic case.
 
 ### 3.3 The approval pair, honestly
 
@@ -230,24 +249,34 @@ would be a shape nobody writes.
 
 The pair rule is therefore implemented against the `data` mapping that
 `SystemMessage` already carries, under the keys `approval_request` /
-`approval_response` with a shared `approval_id` - the shape
-`approval_rules.ToolApprovalState` serialises. No new message type is
-introduced, and the tests exercise exactly that mapping. Wiring the approval
-pair into a real transcript message shape is an open item (§7).
+`approval_response` with a shared `approval_id`. No new message type is
+introduced, and the tests exercise exactly that mapping.
+
+**That vocabulary is not `approval_rules`' vocabulary.**
+`ToolApprovalState.as_dict()` emits `version`, `rules`,
+`queued_approval_requests` and `collected_approval_responses`, and nothing in
+`approval_rules.py` reads or writes `approval_request` / `approval_response` /
+`approval_id`. The two shapes are *adjacent*, not the same: the compaction
+rule needs a marker that says "this message is one half of an approval
+exchange", and `approval_rules` needs a record of which approvals are open.
+Wiring the approval pair into a real transcript message shape - and giving the
+two modules one vocabulary - is an open item (§7).
 
 ### 3.4 MSAF mapping
 
 | MSAF (`_compaction.py`) | Northstar (`compaction.py`) |
 | --- | --- |
-| `group_messages()` - groups messages into spans, links non-contiguous call/result spans to one group | `group_messages()` - groups into `Span`s, links a call and its result into one span |
+| `group_messages()` - groups messages into spans, links non-contiguous call/result spans to one group | `group_messages()` - groups into contiguous `Span`s, links a call and its result (and everything between them) into one span |
 | `_unambiguous_tool_call_output_pairs()` | `_unambiguous_tool_call_output_pairs()` |
 | `_unambiguous_approval_pairs()` | `_unambiguous_approval_pairs()` |
-| a summary boundary never splits a linked group | a cut inside a span is refused; `compact()` moves the cut or refuses |
+| linked spans share a `group_id` (`_compaction.py:304`) and the compaction strategies exclude a whole group (`exclude_group_ids`, `_compaction.py:1171-1178`) | a cut inside a span is refused; `compact()` moves the cut or refuses. (The phrase "a summary boundary never splits a linked group" is *not* an MSAF rule - it appears nowhere in MSAF's `_compaction.py`; it is a paraphrase of the group-id exclusion mechanism, and it is stated here as Northstar's rule, not as a citation.) |
 
 MSAF links *non-contiguous* spans (a declaration in one group, a result in
-another) by union-find over group ids. Northstar's spans are contiguous runs,
-so the union is a direct merge of the two messages' spans - the same rule, a
-simpler shape.
+another) by a union-find over **span indices** (`parents = list(range(len(spans)))`,
+`_compaction.py:270`); the `group_id` is the *output* of that union
+(`_compaction.py:304`), not its operand. Northstar's spans are contiguous runs
+- the messages between a call and its result travel with the pair - so the
+union is a direct merge of the message indices, and no span overlaps another.
 
 ---
 
@@ -316,7 +345,8 @@ tool, so the state never carries two contradictory rules for one tool.
 | `sessions.py` | A checkpoint record is appended to the transcript (`RECORD_TYPES` holds `"checkpoint"`). The lineage fields ride along in that record; `sessions.py` was **not** changed. The atomic store in §2 is a *separate* destination - a checkpoint file - not a replacement for the transcript record. |
 | `durable_resume.py` | `durable_state()` is the join between the two checkpoint layers: the turn boundary (how far the transcript got, what it cost) and the durable layer (a state it can hash, a run id it can be found under). The durable layer's pending writes stay out of it. `durable_resume.py` was **not** changed. |
 | `forward_seal_ledger.py` | Its `Checkpoint` is a **different type with the same name**: a sealed checkpoint over a chain head (`seq`, `head_hash`, `records_sealed`, `seal`). The two are not interchangeable and are never mixed. The seal ledger was **not** changed. |
-| `loop.py`, `run_setup.py`, `sdk.py`, `session_replay.py` | The existing resume call sites. They call `prepare_resume()` without the new keyword arguments, so their behaviour is unchanged: with no `expected_graph_hash` and no `records`, the new checks cannot fire. The new rules are opt-in at the call site. |
+| `loop.py`, `durable_bridge.py` | The two `prepare_resume()` call sites in the runtime. `loop.py:1927` calls `prepare_resume()` without the new keyword arguments, so its behaviour is unchanged: with no `expected_graph_hash` and no `records`, the new checks cannot fire. The new rules are opt-in at the call site. |
+| `run_setup.py`, `sdk.py`, `session_replay.py` | Resume *entry points* that call `select_checkpoint()` / `from_record()` rather than `prepare_resume()`. Their behaviour is unchanged; they are not `prepare_resume()` callers. |
 
 ---
 
@@ -332,19 +362,27 @@ changed graph, one with the ancestor removed from the record set.
 **Path 2 - a pair straddling the cut**
 (`tests/test_pair_preserving_compaction.py::CompactPathTests`): a transcript
 whose tool call and result straddle the position the old rules would have cut
-at. The cut moves to the span boundary, or compaction is refused with the
-reason that a pair would be split. The pair is never split.
+at. The cut moves to the span boundary - the test asserts the exact moved
+cut, not merely that a cut exists. A second test asserts the pair is never
+split across the boundary and that the summary carries no tool call. Two more
+drive the refusal branch: compaction is refused, the transcript comes back
+unchanged, and the reason names the *kind* of pair that blocked the cut (a
+tool pair reads as a tool call, an approval pair reads as an approval
+request). The pair is never split.
 
 ---
 
 ## 7. Open items
 
-1. **The resume call sites do not pass the new arguments.** `loop.py`,
-   `run_setup.py` and `sdk.py` call `prepare_resume()` without
-   `expected_graph_hash` or `records`, so the graph-mismatch and dangling-lineage
-   rules cannot fire from the CLI today. They were left alone on purpose (they
-   are outside this slice's writable file set), and the rules are available for
-   the next slice that owns those files.
+1. **The resume call sites do not pass the new arguments.** `loop.py:1927` and
+   `durable_bridge.py:426` call `prepare_resume()` without
+   `expected_graph_hash` or `records`, so the graph-mismatch and
+   dangling-lineage rules cannot fire from the CLI today. They were left
+   alone on purpose (they are outside this slice's writable file set), and the
+   rules are available for the next slice that owns those files. `run_setup.py`
+   and `sdk.py` call `select_checkpoint()`, not `prepare_resume()`, and
+   `session_replay.py` never calls it - so neither of them needs the arguments
+   at all.
 2. **`select()`'s tie-break.** Two checkpoints at the same lineage depth are
    ordered by `record_index`, for stability only. MSAF breaks the same tie by
    timestamp and then by checkpoint id. Northstar's checkpoint records carry an
@@ -363,3 +401,31 @@ reason that a pair would be split. The pair is never split.
    in §2 is an additional, atomic destination; making the transcript's
    checkpoint record itself atomic (or storing it *only* in the store) needs a
    decision about the audit chain in `sessions.py`.
+
+6. **The atomic store has no runtime caller at all.** `FileCheckpointStorage`
+   is imported by no runtime module - only by the tests. It is a module with
+   no runtime user today, not merely a module that is not the transcript's
+   checkpoint path. Wiring it needs a decision about which writer owns the
+   checkpoint file and what happens to the transcript record.
+
+7. **`durable_bridge.py:426` does not translate a `CheckpointError`.** It
+   calls `prepare_resume()` and lets the refusal escape raw, where the rest of
+   that module reports through `BridgeError`. The refusal cannot fire today
+   (the call site passes neither `expected_graph_hash` nor `records`), but it
+   is exactly the seam a future wiring would hit. `durable_bridge.py` is
+   outside this slice's writable file set, so it was left alone.
+
+8. **The span rule is subsumed by the orphan rules for tool pairs.** Read side
+   by side, any cut that separates a `tool_use` from its `tool_result` leaves
+   the call unanswered in the prefix, so `pending_tool_uses` already refuses
+   it. There is no transcript shape where the span rule binds alone for a tool
+   pair - the tool span restates the orphan rule rather than widening it. The
+   span rule binds *alone* for approval pairs, where neither orphan rule has
+   anything to say. Both facts are pinned by tests and recorded in §3.2; this
+   is a property of the design, not a defect.
+
+9. Out of scope, flagged: the sibling tombstone commit ships
+   `cancellation_tombstone` without a `py-modules` entry in `pyproject.toml`,
+   so `test_every_module_is_installed` fails in the baseline and after alike.
+   This slice did not touch `pyproject.toml`, and the file belongs to another
+   slice.
