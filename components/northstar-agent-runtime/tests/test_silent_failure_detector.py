@@ -26,6 +26,7 @@ from silent_failure_detector import (
     compaction_count,
     died_on_compaction_seam,
     ended_on_tool_result,
+    ended_with_no_prose,
     final_event_type,
     has_prose,
     is_silent_failure,
@@ -169,6 +170,16 @@ class ProseRuleTests(unittest.TestCase):
         events = [assistant("said it early"), tool_use_only(), tool_result()]
         self.assertTrue(has_prose(events))
         self.assertFalse(is_silent_failure(events))
+
+    def test_the_tail_measurement_reports_the_final_record_type(self):
+        """The source's cheap metric: the event type of the final record."""
+        self.assertTrue(ended_with_no_prose([assistant("said it"), tool_result()]))
+        self.assertFalse(ended_with_no_prose([assistant("said it")]))
+        self.assertTrue(ended_on_tool_result([assistant("said it"), tool_result()]))
+        self.assertFalse(ended_on_tool_result([assistant("said it")]))
+        self.assertEqual(final_event_type([assistant("x"), tool_result()]), "tool_result")
+        self.assertEqual(final_event_type([assistant("x")]), "assistant")
+        self.assertIsNone(final_event_type([]))
 
 
 class CompactionCountTests(unittest.TestCase):
