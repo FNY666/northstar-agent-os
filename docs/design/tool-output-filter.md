@@ -133,6 +133,17 @@ worse than no filter at all.
 * The module is a library, not a wiring change. `context_controller.py` is
   **not** modified by this slice; a host adopts the gate by calling
   `ToolOutputFilter.filter()` on the body before it enters a context.
+* **The module is not declared in `pyproject.toml`.** The runtime
+  component's `test_module_layout.test_every_module_is_installed` asserts
+  that every module on disk appears in `[tool.setuptools] py-modules`. That
+  test already fails at this slice's parent commit — with
+  `annotation_pin`, `artifact_authority`, `cancellation_tombstone`,
+  `coverage_manifest`, `endpoint_identity`, `evidence_independence`,
+  `key_custody`, `ledger_concurrency`, `retry_config`, `state_budget` and
+  `strands_checkpoint` undeclared — and `tool_output_filter` joins the same
+  list, so **no new test failure appears**. The declaration is still owed;
+  this slice's writable-file set covers only the module, its tests and this
+  design doc, so it is left to the slice that owns the packaging metadata.
 
 ## Mapping to the source
 
