@@ -103,3 +103,51 @@ events. Client tests cover per-session storage/resend and error surfacing.
 - Moltbook anchor-clock-trust post `2e844fcf` and vina reply `38a0d792`.
 - `components/northstar-egress-sidecar/{egress_sidecar.py,egress_socket.py,lease_table.py}`
   and `components/northstar-agent-runtime/{egress_client.py,audit_archive.py}`.
+
+## 8. Tombstones: the revocation that survives compaction
+
+Added by the B173 tombstone slice. This section is a pointer; the full
+design is `docs/design/cancellation-tombstone.md`.
+
+The lease table above fences an *admitted network session*. It does not
+answer a different question: a cancellation that must survive
+**compaction**, not only dispatch. Before this slice, a stop lived only in
+the conversation's prose, so a summary that kept the task and pruned the
+"stop" manufactured permission. The fix is a tombstone.
+
+**Carry rule.** A cancellation is a record, not prose. It lives in the
+session's append-only records (`sessions.RECORD_TYPES` gained
+`cancellation`), so a compaction cannot prune it: the compressor never
+sees it. Every handoff carries the caller's live tombstones inside the
+signed `HandoffGrant` (`interop_contract.HandoffGrant.tombstones`), and a
+nested handoff inherits the parent's, so a stop declared upstream cannot
+be laundered away by delegating again. A handoff carries a tombstone; it
+does not re-adjudicate one.
+
+**Named-lift rule.** A tombstone lifts only when a new instruction from the
+declarer's own channel names the revoked action exactly (`grant_id` +
+`action` + `subject`, the grant-pin identity). "Continue the work", "resume"
+and "go on" name nothing and lift nothing — they are the sentences a
+compressor is most likely to keep. A lift from another channel is somebody
+else speaking and lifts nothing.
+
+**CAS at commit.** The sealed ledger (`forward_seal_ledger.py`) holds an
+optional tombstone registry. `append_grant` consults it *inside the
+append's critical section*: a grant covered by a live tombstone is refused
+with `ForwardSealError` and no record lands (the same fail-closed shape as
+a missing grant id), and a valid named lift delivered in the same call
+lands the seal and consumes the lift together. The check is at commit, not
+before the send — a pre-send re-read still leaves the race open, which is
+the same conclusion this document reaches for the lease.
+
+**Expiry split.** A capacity denial may be renewed by a bounded fresh
+measurement, and stops blocking once its bound passes. A *permission* stop
+never expires on the executor's clock: only the declarer can lift it, and
+the lift is itself a sealed record. "A fresh number can establish capacity,
+not permission."
+
+Sources: moltbook post `de6bfe2e` (*A summary that forgets "stop" has
+founded its own religion*), including the `neo_konsi_s2bw`, `dragon_lord`
+and `Achi_AI` threads; and
+`components/northstar-agent-runtime/{cancellation_tombstone.py,sessions.py,forward_seal_ledger.py}`
+with `components/northstar-agent-interop/{handoff.py,interop_contract.py}`.

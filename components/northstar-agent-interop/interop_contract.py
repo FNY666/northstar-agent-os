@@ -16,6 +16,7 @@ MAX_ID_CHARS = 128
 MAX_VERSION_CHARS = 64
 MAX_CAPABILITIES = 32
 MAX_POSTCONDITIONS = 32
+MAX_TOMBSTONES = 64
 MAX_SCOPE_CHARS = 128
 MAX_TIME = 9_223_372_036_854_775_807
 _ID_RE = re.compile(r"^[^\s/\\]+$")
@@ -33,8 +34,16 @@ def _object(value: Any, label: str) -> dict[str, Any]:
     return value
 
 
-def _exact(data: Mapping[str, Any], fields: set[str], label: str) -> None:
-    missing = sorted(fields - set(data))
+def _exact(data: Mapping[str, Any], fields: set[str], label: str, *, optional: set[str] | None = None) -> None:
+    """Every field must be present, and nothing unknown may be.
+
+    ``optional`` names fields that may be absent -- a field that was added
+    later, and that a peer on the older schema does not send.  An absent
+    optional field reads as its empty value; an *unknown* field is still
+    refused, because an unknown field is a claim this contract cannot
+    check.
+    """
+    missing = sorted(fields - set(data) - set(optional or ()))
     unknown = sorted(set(data) - fields)
     if missing:
         raise ValueError(f"{label} missing fields: {', '.join(missing)}")
@@ -110,6 +119,49 @@ def _postconditions(value: Any) -> tuple[str, ...]:
             raise ValueError("expected_postconditions contains a duplicate")
         seen.add(normalized)
         result.append(normalized)
+    return tuple(result)
+
+
+#: The fields a carried cancellation tombstone must name.  The interop
+#: contract validates the *shape* only: the runtime's
+#: ``cancellation_tombstone`` module owns the meaning, and the interop
+#: component must not depend on the runtime component (the dependency runs
+#: the other way).  What matters here is that a tombstone names the action
+#: it revokes -- a carried stop that names nothing would be exactly the
+#: prose this mechanism exists to replace.
+TOMBSTONE_FIELDS = frozenset({
+    "schema_version", "grant_id", "action", "subject", "declarer", "declarer_channel",
+    "declared_at", "kind", "expires_at", "measurement", "reason",
+})
+
+
+def _tombstones(value: Any) -> tuple[dict[str, Any], ...]:
+    """Validate the tombstones a handoff grant carries.
+
+    The list is bounded, every entry names the action it revokes, and the
+    entries keep their order -- the order the source session declared them
+    in, which is the order a reader needs to see.
+    """
+    if value is None:
+        return ()
+    if not isinstance(value, list) or len(value) > MAX_TOMBSTONES:
+        raise ValueError("tombstones must be a bounded list")
+    result: list[dict[str, Any]] = []
+    for entry in value:
+        if not isinstance(entry, dict):
+            raise ValueError("a carried tombstone must be an object")
+        unknown = sorted(set(entry) - TOMBSTONE_FIELDS)
+        if unknown:
+            raise ValueError("a carried tombstone has unknown fields: " + ", ".join(unknown))
+        for field in ("grant_id", "action", "declarer", "declarer_channel"):
+            _id(entry.get(field), f"tombstone {field}")
+        kind = entry.get("kind", "permission")
+        if kind not in ("permission", "capacity"):
+            raise ValueError("a carried tombstone has an invalid kind")
+        expires_at = entry.get("expires_at")
+        if expires_at is not None and (not isinstance(expires_at, (int, float)) or isinstance(expires_at, bool)):
+            raise ValueError("a carried tombstone has an invalid expires_at")
+        result.append(dict(entry))
     return tuple(result)
 
 
@@ -347,18 +399,25 @@ class HandoffGrant:
     delegation_depth: int
     expires_at: int
     idempotency_key: str
+    #: The cancellation tombstones that travel with this handoff.  A handoff
+    #: carries them; it does not re-adjudicate them.  Each entry is the
+    #: canonical form of a tombstone (see ``cancellation_tombstone.py``),
+    #: so a receiving worker can refuse a cancelled action without
+    #: re-reading any prose -- and without the summary having had a chance
+    #: to prune it.
+    tombstones: tuple[dict[str, Any], ...] = ()
 
     _fields: ClassVar[set[str]] = {
         "schema_version", "handoff_id", "task_id", "thread_id", "run_id", "actor_id",
         "workspace_id", "policy_revision", "source_agent_id", "target_agent_id", "step_id",
         "trace_id", "input_digest", "capabilities", "expected_postconditions", "delegation_depth",
-        "expires_at", "idempotency_key",
+        "expires_at", "idempotency_key", "tombstones",
     }
 
     @classmethod
     def from_dict(cls, value: Any) -> "HandoffGrant":
         data = _object(value, "handoff grant")
-        _exact(data, cls._fields, "handoff grant")
+        _exact(data, cls._fields, "handoff grant", optional={"tombstones"})
         if data["schema_version"] != GRANT_SCHEMA_VERSION:
             raise ValueError("handoff grant schema_version is invalid")
         return cls(
@@ -380,10 +439,11 @@ class HandoffGrant:
             delegation_depth=_positive(data["delegation_depth"], "delegation_depth"),
             expires_at=_positive(data["expires_at"], "expires_at"),
             idempotency_key=_id(data["idempotency_key"], "idempotency_key"),
+            tombstones=_tombstones(data.get("tombstones")),
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        value = {
             "schema_version": self.schema_version,
             "handoff_id": self.handoff_id,
             "task_id": self.task_id,
@@ -403,6 +463,12 @@ class HandoffGrant:
             "expires_at": self.expires_at,
             "idempotency_key": self.idempotency_key,
         }
+        if self.tombstones:
+            # An empty carry is omitted rather than written as an empty list,
+            # so a grant signed by a peer that does not know the field keeps
+            # the shape it had.
+            value["tombstones"] = [dict(entry) for entry in self.tombstones]
+        return value
 
     def canonical_json(self) -> bytes:
         return _canonical(self.to_dict())
