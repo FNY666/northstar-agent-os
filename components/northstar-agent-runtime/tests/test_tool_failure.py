@@ -282,6 +282,22 @@ def test_the_telemetry_event_names_the_tool_the_code_and_the_denial_kind():
     assert event["isMcp"] is False
 
 
+def test_the_boundary_is_the_only_way_a_tool_failure_leaves_the_ledger():
+    # Two ways to book a call, one way for a caller to get a result:
+    # ``invoke`` still raises (its contract is unchanged), ``invoke_result``
+    # never raises a tool-use error. A caller that wants typed results must
+    # not have to catch anything to get them.
+    import tool_use as tu
+
+    ledger = ToolUse()
+    ledger.register("search", _schema(), 1)
+    with pytest.raises(tu.UnknownToolError):
+        ledger.invoke("nope", {}, 2)
+    result = ledger.invoke_result("nope", {}, 3)
+    assert result.is_error is True
+    assert isinstance(result.to_tool_result()["content"], str)
+
+
 def test_a_provider_fault_classifies_and_normalizes_end_to_end():
     class Boom(Exception):
         status_code = 401
