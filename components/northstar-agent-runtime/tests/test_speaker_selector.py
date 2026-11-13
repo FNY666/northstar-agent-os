@@ -393,6 +393,13 @@ class ValidationTests(unittest.TestCase):
         RoundRobinSelector([long_name])  # exactly at the limit is fine
         with self.assertRaises(BadParticipantError):
             RoundRobinSelector(["y" * 129])
+        with self.assertRaises(BadParticipantError):
+            Participant("z" * 129)
+
+    def test_participant_description_length_boundary(self):
+        Participant("Planner", "d" * 4096)  # exactly at the limit is fine
+        with self.assertRaises(BadParticipantError):
+            Participant("Planner", "d" * 4097)
 
     def test_version_and_schema_pins(self):
         self.assertEqual(SPEAKER_SELECTOR_VERSION, "speaker-selector.v1")

@@ -118,10 +118,7 @@ class ModelSelectionError(SpeakerSelectionError):
 
 
 def _check_name(value: Any) -> str:
-    if not isinstance(value, str) or isinstance(value, bool):
-        raise BadParticipantError(
-            f"participant name must be a string, got {type(value).__name__}"
-        )
+    _check_text(value, "participant name")
     value = value.strip()
     if not value:
         raise BadParticipantError("participant name must be non-empty")
@@ -131,15 +128,20 @@ def _check_name(value: Any) -> str:
 
 
 def _check_description(value: Any) -> str:
-    if not isinstance(value, str) or isinstance(value, bool):
-        raise BadParticipantError(
-            f"participant description must be a string, got {type(value).__name__}"
-        )
+    _check_text(value, "participant description")
     if len(value) > _MAX_DESCRIPTION_LEN:
         raise BadParticipantError(
             f"participant description exceeds {_MAX_DESCRIPTION_LEN} chars"
         )
     return value
+
+
+def _check_text(value: Any, label: str) -> None:
+    """Refuse a non-string payload (booleans are not strings here)."""
+    if isinstance(value, bool) or not isinstance(value, str):
+        raise BadParticipantError(
+            f"{label} must be a string, got {type(value).__name__}"
+        )
 
 
 def _canonical(obj: Any) -> bytes:
