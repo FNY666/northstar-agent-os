@@ -961,6 +961,7 @@ class LongHorizonLoop:
         session_id: str = "long-horizon",
         checkpoint_store: VerifiedProgressStore | None = None,
         session: Any | None = None,
+        durable_store: Any | None = None,
         initial_progress: Sequence[VerifiedProgress] = (),
         initial_failures: Sequence[FailureEvidence] = (),
         is_complete: Callable[[RoundState, VerifiedProgress], bool] | None = None,
@@ -981,6 +982,10 @@ class LongHorizonLoop:
         self.session_id = session_id
         self.checkpoint_store = checkpoint_store
         self.session = session
+        #: The durable store (:mod:`durable_resume`) the loop writes its
+        #: durable checkpoints into.  Optional: a loop without one still runs,
+        #: it just has no resumable durable boundary.
+        self.durable_store = durable_store
         # A resumed loop starts from the *verified* state its last verified
         # checkpoint carried -- never from an executor's claim.
         self.initial_progress = tuple(initial_progress)
@@ -1098,6 +1103,7 @@ class LongHorizonLoop:
                     )
                 )
             self._write_session_checkpoint(state, verified)
+            self._write_durable_checkpoint(state, verified)
             if self._is_complete(state, progress):
                 return LoopResult(
                     outcome=LOOP_PASSED,
@@ -1160,6 +1166,40 @@ class LongHorizonLoop:
         multi-step objective passes ``is_complete``.
         """
         return bool(self.is_complete(state, progress))
+
+    def _write_durable_checkpoint(
+        self,
+        state: RoundState,
+        verified: Sequence[VerifiedProgress],
+    ) -> Any:
+        """Write the round's *durable* checkpoint.
+
+        Only auditor-verified progress reaches this record.  The state is
+        built by :func:`durable_resume.checkpoint_from_verified`, which takes
+        the verified progress and has no parameter for the executor's
+        summary -- so an executor's self-report cannot reach a durable
+        checkpoint even by accident.  The write happens only on the pass
+        path, which is the same rule the session checkpoint follows.
+
+        Returns the durable checkpoint, or ``None`` when no durable store was
+        configured.
+        """
+        if self.durable_store is None:
+            return None
+        from durable_resume import checkpoint_from_verified
+
+        durable_state = checkpoint_from_verified(
+            run_id=self.session_id,
+            round_index=state.round_index,
+            objective=self.objective,
+            verified_progress=tuple(verified),
+            context_digest=state.context_digest,
+        )
+        return self.durable_store.put_checkpoint(
+            run_id=self.session_id,
+            state=durable_state,
+            task_path=self.session_id,
+        )
 
 
 # ---------------------------------------------------------------------------
