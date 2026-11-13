@@ -386,7 +386,7 @@ def checkpoint_from_event(
     rule inside the payload) and unprefixed in a checkpoint record, so the prefix is
     stripped on the way back; forgetting that would make every digest comparison fail.
     """
-    from checkpoints import from_record, prepare_resume
+    from checkpoints import CheckpointError, from_record, prepare_resume
 
     if event.get("event_type") != CHECKPOINT_EVENT_TYPE:
         raise BridgeError(f"event is not a {CHECKPOINT_EVENT_TYPE}")
@@ -423,7 +423,13 @@ def checkpoint_from_event(
         raise BridgeError("event payload could not be read as a checkpoint")
     # One gate for every boundary, whoever wrote it: prepare_resume refuses on a digest
     # mismatch, a short transcript, or a checkpoint from another session.
-    prepare_resume(checkpoint, list(transcript), expected_session_id=expected_session_id)
+    try:
+        prepare_resume(checkpoint, list(transcript), expected_session_id=expected_session_id)
+    except CheckpointError as error:
+        # A refusal must leave this module through its own error type: a raw
+        # CheckpointError would escape the bridge and break the mirror's
+        # contract with its caller.
+        raise BridgeError(f"checkpoint did not pass the resume gate: {error}") from error
     return checkpoint
 
 

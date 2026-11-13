@@ -97,6 +97,35 @@ class SpanTests(unittest.TestCase):
         spans = group_messages(transcript)
         self.assertEqual([span for span in spans if span.kind == "pair"], [])
 
+    def test_the_spans_are_contiguous_and_do_not_overlap(self):
+        # A call and its result separated by other messages: the pair span is
+        # the hull of the exchange, and the messages inside it travel with it
+        # rather than forming spans that overlap it.
+        transcript = [
+            UserMessage.text_block("go"),
+            assistant_with_call("t1"),
+            UserMessage.text_block("between"),
+            UserMessage.text_block("also between"),
+            user_with_result("t1"),
+        ]
+        spans = group_messages(transcript)
+        self.assertEqual([(span.start, span.end) for span in spans], [(0, 0), (1, 4)])
+        # No message belongs to two spans.
+        covered = [index for span in spans for index in range(span.start, span.end + 1)]
+        self.assertEqual(len(covered), len(set(covered)), "spans overlap")
+
+    def test_a_cut_inside_a_non_contiguous_pair_is_refused(self):
+        transcript = [
+            UserMessage.text_block("go"),
+            assistant_with_call("t1"),
+            UserMessage.text_block("between"),
+            UserMessage.text_block("also between"),
+            user_with_result("t1"),
+        ]
+        for cut in (2, 3, 4):
+            with self.subTest(cut=cut):
+                self.assertFalse(is_safe_cut(transcript, cut), "the pair must not be split")
+
 
 class ApprovalSpanTests(unittest.TestCase):
     """The approval pair rule, exercised through the message ``data`` mapping.
@@ -145,6 +174,25 @@ class ApprovalSpanTests(unittest.TestCase):
         ]
         self.assertFalse(is_safe_cut(transcript, 2))
         self.assertTrue(is_safe_cut(transcript, 3))
+
+    def test_an_ambiguous_approval_id_is_not_paired(self):
+        # One request and TWO responses sharing an id: the transcript cannot
+        # say which response answers the request, so no pair is claimed.
+        transcript = [
+            self._approval_request("a-1"),
+            self._approval_response("a-1"),
+            self._approval_response("a-1"),
+        ]
+        spans = group_messages(transcript)
+        self.assertEqual([span for span in spans if span.kind == "pair"], [])
+        # Two requests sharing an id pair with nothing either.
+        transcript = [
+            self._approval_request("a-1"),
+            self._approval_request("a-1"),
+            self._approval_response("a-1"),
+        ]
+        spans = group_messages(transcript)
+        self.assertEqual([span for span in spans if span.kind == "pair"], [])
 
 
 class SpanIsolationTests(unittest.TestCase):
@@ -283,6 +331,41 @@ class CompactPathTests(unittest.TestCase):
         outcome = compact(transcript, force=True, keep_messages=2)
         self.assertFalse(outcome.performed, "the pair must not be split")
         self.assertIn("split", outcome.reason)
+        self.assertEqual(outcome.transcript, tuple(transcript))
+
+    def test_the_refusal_reason_names_the_tool_pair(self):
+        # The refusal must say WHICH rule refused it: a tool pair reads as a
+        # tool call, not as an approval.
+        transcript = [
+            assistant_with_call("t1"),
+            user_with_result("t1"),
+            UserMessage.text_block("still going"),
+        ]
+        outcome = compact(transcript, force=True, keep_messages=2)
+        self.assertFalse(outcome.performed)
+        self.assertIn("split a tool call from its result", outcome.reason)
+        self.assertNotIn("approval", outcome.reason)
+
+    def test_the_refusal_reason_names_the_approval_pair(self):
+        # The same shape with an approval pair: the reason must not call it a
+        # tool call, because no tool was involved.
+        transcript = [
+            SystemMessage(
+                subtype="informational",
+                content="approval requested",
+                data={"approval_id": "a-1", "approval_request": True},
+            ),
+            SystemMessage(
+                subtype="informational",
+                content="approval answered",
+                data={"approval_id": "a-1", "approval_response": True},
+            ),
+            UserMessage.text_block("still going"),
+        ]
+        outcome = compact(transcript, force=True, keep_messages=2)
+        self.assertFalse(outcome.performed, "the approval pair must not be split")
+        self.assertIn("split an approval request from its response", outcome.reason)
+        self.assertNotIn("tool call", outcome.reason)
         self.assertEqual(outcome.transcript, tuple(transcript))
 
     def test_latest_safe_cut_never_returns_a_cut_inside_a_span(self):

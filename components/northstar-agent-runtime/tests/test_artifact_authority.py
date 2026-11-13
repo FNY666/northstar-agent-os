@@ -367,6 +367,52 @@ class DrivenPathTests(unittest.TestCase):
             data["grant"], {"grant_id": "grant-9", "version": "v1", "counter": None}
         )
 
+    def test_is_superseded_by_reports_a_re_issued_grant(self):
+        old = _bind()
+        newer = bind(
+            b"artifact-bytes",
+            _pin(counter=8),
+            permitted_at_seq=4,
+            epoch=4,
+            clock_id="host-clock",
+            issuer_id="issuer-a",
+        )
+        self.assertTrue(old.is_superseded_by(newer))
+        self.assertFalse(newer.is_superseded_by(old))
+        # A different grant is not a supersession of this one.
+        other = bind(
+            b"artifact-bytes",
+            _pin(grant_id="grant-2", counter=9),
+            permitted_at_seq=4,
+            epoch=4,
+            clock_id="host-clock",
+            issuer_id="issuer-a",
+        )
+        self.assertFalse(old.is_superseded_by(other))
+
+    def test_the_sealed_artifact_opens_to_its_own_bytes(self):
+        ledger = ArtifactAuthorityLedger()
+        payload = b"the artifact that was permitted"
+        artifact = ledger.bind_and_seal(
+            payload,
+            _pin(),
+            permitted_at_seq=3,
+            epoch=3,
+            clock_id="host-clock",
+            issuer_id="issuer-a",
+        )
+        self.assertEqual(artifact.open(), payload)
+        self.assertIs(ledger.artifact(1), artifact)
+
+    def test_the_verdict_dict_carries_its_state_and_reason(self):
+        receipt = _bind()
+        verdict = verify(receipt, epoch_now=3, tombstone_set=None)
+        data = verdict.to_dict()
+        self.assertEqual(data["state"], VALID)
+        self.assertTrue(data["reason"])
+        stale = verify(receipt, epoch_now=4, tombstone_set=None)
+        self.assertEqual(stale.to_dict()["state"], STALE)
+
 
 
 
