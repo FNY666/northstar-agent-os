@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from coverage_manifest import (
     AUDIT_SCHEMA_PIN,
     COVERAGE_MANIFEST_VERSION,
+    COVERAGE_NOT_ESTABLISHED,
     SCHEMA_PIN,
     AuditInputError,
     CoverageManifest,
@@ -190,6 +191,8 @@ class TestSyntheticGap:
         # The pipeline layer exposes no coverage verdict at all.
         assert not hasattr(pipeline, "coverage_ok")
         assert not hasattr(pipeline, "missing_event_ids")
+        # Its honest result is that coverage cannot be established here.
+        assert COVERAGE_NOT_ESTABLISHED == "coverage cannot be established from this log alone"
 
         report = audit_intake(manifest, gapped)
         assert report.missing_event_ids == ("tool.write",)

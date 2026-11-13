@@ -104,6 +104,10 @@ SESSION_END_REASON_MARKER = "session.end_reason"
 #: Marker reserved for the session end-reason absence record.
 SESSION_UNOBSERVED_MARKER = "session.unobserved"
 
+#: The honest result of a pipeline-only audit: coverage cannot be
+#: established from a log alone, because the expectation is not in the log.
+COVERAGE_NOT_ESTABLISHED = "coverage cannot be established from this log alone"
+
 _ID_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 
 
@@ -489,9 +493,6 @@ def audit_pipeline_only(log: SessionLog) -> StructureReport:
     result, and the boundary the intake audit crosses.
     """
     return audit_structure(log)
-
-
-COVERAGE_NOT_ESTABLISHED = "coverage cannot be established from this log alone"
 
 
 # ---------------------------------------------------------------------------
