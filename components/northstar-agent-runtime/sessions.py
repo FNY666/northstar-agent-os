@@ -54,6 +54,12 @@ RECORD_TYPES: tuple[str, ...] = (
     "subagent",
     "result",
     "session_end",
+    # A cancellation tombstone (cancellation_tombstone.py): the sticky
+    # revocation state that must outlive compaction.  It is a record of its
+    # own type because a tombstone is never prose -- it lives beside the
+    # transcript, so a summary that drops the words "stop, don't publish"
+    # cannot drop the stop itself.
+    "cancellation",
 )
 
 SESSION_FILE_SUFFIX = ".jsonl"
@@ -541,6 +547,93 @@ class SessionStore:
         self.append("session_end", {"subtype": message.subtype})
         return record
 
+    # -- cancellation tombstones ------------------------------------------
+    def record_cancellation(self, tombstone: Any) -> dict[str, Any] | None:
+        """Record one cancellation tombstone in this session's transcript.
+
+        The tombstone is a record, not prose: it is written beside the
+        conversation, so the compressed summary can drop every word of the
+        original "stop, don't publish" and the stop still survives.  This is
+        the whole survival mechanism -- there is nothing clever about it.
+
+        The record carries the tombstone's canonical form (so a reader can
+        reconstruct the exact state) plus its digest (so a handoff can carry
+        a pin instead of a blob).
+        """
+        from cancellation_tombstone import Tombstone, TombstoneError
+
+        if not isinstance(tombstone, Tombstone):
+            raise TombstoneError("only a Tombstone can be recorded as a cancellation")
+        return self.append(
+            "cancellation",
+            {
+                "tombstone": tombstone.to_dict(),
+                "digest": tombstone.digest(),
+                "kind": tombstone.kind,
+            },
+        )
+
+    def tombstones(self, session_id: str | None = None) -> tuple[Any, ...]:
+        """The live tombstones of this session, in declaration order.
+
+        A tombstone that was lifted is not live: the lift is a record too,
+        and it is ordered against the tombstone in the *store* rather than
+        by comparing timestamps -- a later timestamp is a clock claim, and
+        clocks lie.  So the live set is the set of tombstones whose
+        declaration is not followed by a valid named lift.
+
+        The result is a ``TombstoneSet``, so the caller can ask it
+        ``is_blocked(grant_id, action, subject)`` and get the same answer
+        the sealed ledger gets at commit.
+        """
+        from cancellation_tombstone import Tombstone, TombstoneSet
+
+        records, _dropped = self.read(session_id)
+        live = TombstoneSet()
+        for record in records:
+            if record.get("type") != "cancellation":
+                continue
+            payload = record.get("tombstone")
+            if not isinstance(payload, dict):
+                continue
+            try:
+                tombstone = Tombstone.from_dict(payload)
+            except Exception:
+                continue
+            live.add(tombstone)
+            lift = record.get("lift")
+            if isinstance(lift, dict):
+                from cancellation_tombstone import Lift
+
+                try:
+                    live.lift(Lift.from_dict(lift))
+                except Exception:
+                    # A lift that does not hold leaves the tombstone standing.
+                    pass
+        return live
+
+    def record_cancellation_lift(self, tombstone: Any, lift: Any) -> dict[str, Any] | None:
+        """Record a named lift of a tombstone.
+
+        The lift is written as its own record, carrying the tombstone it
+        lifts and the instruction that authorized it, so the sealed record
+        and the session record agree about what was lifted and why.
+        """
+        from cancellation_tombstone import Lift, Tombstone, TombstoneError, check_lift
+
+        if not isinstance(tombstone, Tombstone) or not isinstance(lift, Lift):
+            raise TombstoneError("a lift is recorded against a tombstone")
+        check_lift(tombstone, lift)
+        return self.append(
+            "cancellation",
+            {
+                "tombstone": tombstone.to_dict(),
+                "digest": tombstone.digest(),
+                "kind": tombstone.kind,
+                "lift": lift.to_dict(),
+            },
+        )
+
     # -- reading ----------------------------------------------------------
     def read(self, session_id: str | None = None, *, strict: bool = True) -> tuple[list[dict[str, Any]], int]:
         if session_id is not None:
@@ -609,6 +702,11 @@ class SessionStore:
         ``tool_use`` that never got a ``tool_result`` (the signature of a turn
         that was killed mid-flight) gets a synthesised, explicitly interrupted
         result, and the resume is classified ``interrupted_turn`` or ``clean``.
+
+        The transcript is the *prose*.  The live cancellation tombstones are
+        not in it and must not be: they are state, and they travel in the
+        session's records, so a resume (or a fork) inherits them without
+        anyone re-reading a summary.  Use :meth:`tombstones` for them.
 
         A store that refuses the transcript raises :class:`ResumeRefusedError`
         rather than returning something the run would continue from as if it

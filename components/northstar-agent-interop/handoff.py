@@ -161,7 +161,22 @@ def authorize_handoff(
     current_policy_revision: str | None = None,
     secret: bytes,
     grant_ttl_seconds: int = 300,
+    tombstones: Any = None,
 ) -> str:
+    """Issue the signed handoff grant for ``request``.
+
+    ``tombstones`` is the caller's *live* cancellation tombstones.  They
+    ride inside the signed grant, so every worker the handoff reaches
+    receives the cancelled actions as structure -- not as prose, and not
+    as something the compressor may prune.  A handoff carries a
+    tombstone; it does not re-adjudicate one.  The execution point (the
+    sealed ledger's CAS, and the runner's ``is_blocked`` check) decides
+    whether the action is allowed.
+
+    A parent handoff's tombstones are inherited as well: the chain of
+    handoffs carries every cancellation the chain has seen, so a stop
+    declared upstream cannot be laundered away by delegating again.
+    """
     if not isinstance(request, HandoffRequest):
         raise ValueError("handoff request is invalid")
     if not isinstance(source_attestation, HandoffValidation) or not source_attestation.ok or source_attestation.attestation is None:
@@ -226,7 +241,50 @@ def authorize_handoff(
             "delegation_depth": request.delegation_depth,
             "expires_at": expires_at,
             "idempotency_key": request.idempotency_key,
+            "tombstones": _carried_tombstones(tombstones, parent_handoff),
         }
     )
     assert_grant_identity(request, grant)
     return sign_handoff_grant(grant, secret)
+
+
+def _carried_tombstones(tombstones: Any, parent_handoff: HandoffValidation | None) -> list[dict[str, Any]]:
+    """The tombstones one handoff carries: the caller's plus the parent's.
+
+    The parent's come first: a cancellation that was declared upstream is
+    older than anything declared here, and the order a reader sees should
+    say so.  A tombstone declared in both places appears once -- the
+    newest declaration of the same identity wins, because a re-declaration
+    is a new fact about the same action, not a second revocation.
+    """
+    carried: list[dict[str, Any]] = []
+
+    def _add(entry: Any) -> None:
+        if not isinstance(entry, dict):
+            raise ValueError("a carried tombstone must be an object")
+        key = (
+            str(entry.get("grant_id", "")),
+            str(entry.get("action", "")),
+            str(entry.get("subject", "") or ""),
+        )
+        carried[:] = [item for item in carried if (
+            str(item.get("grant_id", "")),
+            str(item.get("action", "")),
+            str(item.get("subject", "") or ""),
+        ) != key]
+        carried.append(dict(entry))
+
+    if parent_handoff is not None:
+        if not isinstance(parent_handoff, HandoffValidation) or not parent_handoff.ok or parent_handoff.grant is None:
+            raise ValueError("verified parent handoff is required")
+        for entry in parent_handoff.grant.tombstones:
+            _add(entry)
+    if tombstones is None:
+        return carried
+    if isinstance(tombstones, dict):
+        tombstones = [tombstones]
+    if not isinstance(tombstones, (list, tuple)):
+        raise ValueError("tombstones must be a list of tombstone objects")
+    for entry in tombstones:
+        _add(entry)
+    return carried

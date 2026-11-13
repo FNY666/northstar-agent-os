@@ -111,8 +111,11 @@ class SessionIdTests(unittest.TestCase):
         # 13 since the fourteenth batch: "checkpoint" (checkpoints.py) joins: "postconditions" is the independent
         # "postconditions" (the end-of-run verdict) and "checkpoint" (a resumable
         # turn boundary), each with its own record type rather than hiding inside
-        # "informational". Add a type here only with a test for it.
-        self.assertEqual(len(RECORD_TYPES), 14)
+        # "informational".  15 since the B173 tombstone slice: "cancellation"
+        # (cancellation_tombstone.py) joins, so a cancellation is a record beside
+        # the transcript rather than prose inside it.  Add a type here only with a
+        # test for it.
+        self.assertEqual(len(RECORD_TYPES), 15)
 
 
 class WriteTests(RuntimeTestCase):

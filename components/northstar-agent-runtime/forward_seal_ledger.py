@@ -232,7 +232,13 @@ class ForwardSealLedger:
     ``sha256:`` pins.  Raw material never enters the ledger.
     """
 
-    def __init__(self, initial_key: bytes, checkpoint_key: bytes) -> None:
+    def __init__(
+        self,
+        initial_key: bytes,
+        checkpoint_key: bytes,
+        *,
+        tombstones: Any = None,
+    ) -> None:
         if not isinstance(initial_key, bytes) or len(initial_key) < 16:
             raise ForwardSealError("initial_key must be bytes of >= 16 bytes")
         if not isinstance(checkpoint_key, bytes) or len(checkpoint_key) < 16:
@@ -244,6 +250,27 @@ class ForwardSealLedger:
         self._checkpoints: List[Checkpoint] = []
         # Genesis pin: fixed, public, identifies the (empty) chain start.
         self._genesis = _sha256_hex(b"northstar-forward-seal:v1:genesis")
+        # The optional tombstone registry.  It is injected, and it is empty
+        # by default: a ledger with no tombstones behaves exactly as before.
+        # The registry is consulted *inside* the append's critical section,
+        # which is the whole point -- a check performed before the send
+        # still leaves the race open.
+        self._tombstones = tombstones
+
+    @property
+    def tombstones(self) -> Any:
+        """The tombstone registry this ledger consults (may be ``None``)."""
+        return self._tombstones
+
+    def set_tombstones(self, registry: Any) -> None:
+        """Install (or clear) the tombstone registry.
+
+        The registry is read under the ledger's lock at commit time, so it
+        may be swapped between appends without a window in which a check
+        sees a stale registry.
+        """
+        with self._lock:
+            self._tombstones = registry
 
     def __getstate__(self) -> dict:
         """Support pickle for checkpoint/resume (excludes the lock)."""
@@ -298,6 +325,13 @@ class ForwardSealLedger:
         All three digests must be ``sha256:`` pins; raw material is
         refused (fail-closed).  All 8 fields must be non-empty strings.
         Returns the frozen sealed record.
+
+        The tombstone check does not live here: this method seals whatever
+        it is given, and the *grant* seal (:meth:`append_grant`) is the one
+        that carries an action identity, so that is where the check and the
+        consumption of a lift happen -- inside this method's critical
+        section, because ``append_grant`` holds the same lock when it calls
+        in.
         """
         fields = {
             "intent": intent,
@@ -398,6 +432,8 @@ class ForwardSealLedger:
         logic_digest: str = "",
         execution_digest: str = "",
         outcome: str = "executed",
+        lift: Any = None,
+        now: Optional[float] = None,
     ) -> SealedEvent:
         """Seal one grant event, enforcing the conclusion-52 pin rule.
 
@@ -415,6 +451,26 @@ class ForwardSealLedger:
         The three-field pin is rendered into ``authorization`` as
         ``grant:<id>;version=<v|null>;counter=<n|null>``, so a sealed
         record still says what it was asking about.
+
+        **Cancellation tombstones (CAS at commit).**  When the ledger holds
+        a tombstone registry, a grant whose action identity is covered by a
+        live tombstone is refused: :class:`ForwardSealError` is raised and
+        *no record lands*, exactly like a missing grant id.  The check and
+        the consumption of a lift happen inside the append's critical
+        section -- the same lock that serializes the chain -- so a
+        cancellation that lands before the commit wins, and a re-read
+        before the send (which would still leave the race open) is never
+        the mechanism.
+
+        ``lift`` is a ``cancellation_tombstone.Lift``: a new instruction
+        from the declarer's own channel that names the revoked action
+        exactly.  It is consumed by this very append -- the seal and the
+        lift land together -- and a second attempt with the same lift is
+        refused, because the tombstone it would lift is no longer live.
+
+        ``now`` is the executor's clock, used only to decide whether a
+        *capacity* denial's bound has passed.  A permission stop has no
+        bound, so no clock retires it.
         """
         pins = _load_grant_pin_ledger()
         try:
@@ -429,17 +485,71 @@ class ForwardSealLedger:
             raise ForwardSealError(str(error)) from error
         except pins.GrantPinError as error:
             raise ForwardSealError(f"grant pin is malformed: {error}") from error
-        null_pin = _sha256_hex(b"")
-        return self.append(
-            intent=intent,
-            action=action,
-            subject=subject or "unknown",
-            authorization=pin.render(),
-            inputs_digest=inputs_digest or null_pin,
-            logic_digest=logic_digest or null_pin,
-            execution_digest=execution_digest or null_pin,
-            outcome=sealed_outcome,
-        )
+        with self._lock:
+            # The tombstone check and the consumption of a named lift are one
+            # indivisible step at the commit: the check reads the registry
+            # under this lock, and the lift is applied under the same lock,
+            # so no instant exists in which a tombstone is live and the
+            # commit has not seen it.
+            authorization = self._authorize_under_tombstone_locked(
+                pin=pin,
+                action=action,
+                subject=subject,
+                lift=lift,
+                now=now,
+            )
+            null_pin = _sha256_hex(b"")
+            return self.append(
+                intent=intent,
+                action=action,
+                subject=subject or "unknown",
+                authorization=authorization,
+                inputs_digest=inputs_digest or null_pin,
+                logic_digest=logic_digest or null_pin,
+                execution_digest=execution_digest or null_pin,
+                outcome=sealed_outcome,
+            )
+
+    def _authorize_under_tombstone_locked(
+        self, *, pin: Any, action: str, subject: str, lift: Any, now: Optional[float] = None
+    ) -> str:
+        """The authorization string for one grant seal, under the ledger lock.
+
+        Returns the rendered grant pin when no tombstone covers the action.
+        When a tombstone covers it, the seal is refused unless this same
+        call carries a valid named lift -- and then the authorization
+        records both the pin and the lift, so the sealed row says which
+        tombstone was lifted and on whose authority.
+        """
+        rendered = pin.render()
+        registry = self._tombstones
+        if registry is None:
+            if lift is not None:
+                raise ForwardSealError(
+                    "a lift was offered but this ledger holds no tombstone registry, so nothing can be lifted"
+                )
+            return rendered
+        subject_value = subject or ""
+        tombstone = registry.blocked(pin.grant_id, action, subject_value, now=now)
+        if tombstone is None:
+            if lift is not None:
+                # A lift that names nothing live is refused: a lift is
+                # consumed once, and a second lift of the same tombstone has
+                # nothing left to lift.
+                raise ForwardSealError(
+                    f"the offered lift does not name a live tombstone for {pin.grant_id!r}/{action!r}"
+                )
+            return rendered
+        if lift is None:
+            raise ForwardSealError(
+                f"action {pin.grant_id!r}/{action!r} is cancelled by a live tombstone: "
+                "the seal is refused and no record lands"
+            )
+        try:
+            registry.lift(lift)
+        except Exception as error:
+            raise ForwardSealError(f"the offered lift is not valid: {error}") from error
+        return f"{rendered};lift={lift.declarer}:{lift.declarer_channel}:{lift.grant_id}/{lift.action}"
 
     def _take_checkpoint_locked(self) -> Checkpoint:
         if not self._records:
