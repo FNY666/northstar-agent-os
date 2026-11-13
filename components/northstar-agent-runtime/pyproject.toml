@@ -873,6 +873,7 @@ py-modules = [
     "location_tracker",
     "log_aggregation",
     "log_aggregator",
+    "long_horizon",
     "loop",
     "lsm_tree",
     "lww_register",
