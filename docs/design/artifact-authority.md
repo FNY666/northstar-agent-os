@@ -190,3 +190,10 @@ Northstar extensions (ours, not the source's):
   not fetched during the slice; the quotes above are the ones the slice
   brief carries and are marked as verbatim-as-briefed, not
   independently re-verified against the live post.
+* **Identifier text is checked too.** The present-tense refusal scans the
+  whole receipt text, including the grant id, the clock id, the issuer id
+  and the subject. The tokens are matched on word boundaries, so an
+  identifier that merely contains a word (`validation-clock`) is not
+  mistaken for a claim, while a word that stands on its own (`valid`,
+  `authorized`) is refused. The scan covers the whole text on purpose: a
+  claim smuggled into a free-text field is still a claim.

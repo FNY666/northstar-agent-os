@@ -17,6 +17,7 @@ on an event rather than a subprocess.
 """
 from __future__ import annotations
 
+import dataclasses
 import sys
 import threading
 import unittest
@@ -27,8 +28,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from retry_config import (  # noqa: E402
+    EXIT_CODE_ERROR,
     EXIT_CODE_TIMEOUT,
     CallKind,
+    GateOutcome,
     RetryConfig,
     RetryConfigError,
     RetryDecision,
@@ -36,6 +39,7 @@ from retry_config import (  # noqa: E402
     RetryVerdict,
     SessionGuard,
     TimeoutResult,
+    WaitWindow,
     classify_call,
     run_with_timeout,
 )
@@ -56,6 +60,38 @@ def post_write() -> Failure:
         reason="connection dropped after the request was written",
         may_have_executed=True,
     )
+
+
+class RetryConfigShapeTests(unittest.TestCase):
+    """The configuration is frozen data with exactly the declared fields."""
+
+    def test_the_config_is_frozen(self):
+        config = RetryConfig()
+        with self.assertRaises(dataclasses.FrozenInstanceError):
+            config.max_retries = 9  # type: ignore[misc]
+
+    def test_the_field_set_is_exactly_the_declared_one(self):
+        names = [f.name for f in dataclasses.fields(RetryConfig)]
+        self.assertEqual(
+            names,
+            [
+                "max_retries",
+                "initial_wait_seconds",
+                "max_wait_seconds",
+                "exponential_base",
+                "jitter",
+            ],
+        )
+
+    def test_max_retries_must_be_an_integer(self):
+        with self.assertRaises(RetryConfigError):
+            RetryConfig(max_retries=2.5)  # type: ignore[arg-type]
+        with self.assertRaises(RetryConfigError):
+            RetryConfig(max_retries=True)  # type: ignore[arg-type]
+
+    def test_max_wait_seconds_must_be_positive(self):
+        with self.assertRaises(RetryConfigError):
+            RetryConfig(initial_wait_seconds=1.0, max_wait_seconds=0.0)
 
 
 class RetryConfigValidationTests(unittest.TestCase):
@@ -207,6 +243,52 @@ class CallKindClassificationTests(unittest.TestCase):
         self.assertIs(verdict.decision, RetryDecision.RETRY)
 
 
+class PublicVocabularyTests(unittest.TestCase):
+    """The public names are the ones the module promises."""
+
+    def test_the_exit_codes_are_the_documented_ones(self):
+        self.assertEqual(EXIT_CODE_TIMEOUT, 124)
+        self.assertEqual(EXIT_CODE_ERROR, 1)
+
+    def test_the_wait_window_is_a_public_named_type(self):
+        window = RetryConfig().schedule()[0]
+        self.assertIsInstance(window, WaitWindow)
+        self.assertEqual(window.nominal, 2.0)
+
+    def test_the_gate_outcome_is_a_public_named_type(self):
+        gate = RetryGate(RetryConfig(), sleep=lambda _s: None)
+        outcome = gate.execute(CallKind.SESSION_LIFECYCLE, lambda: "ok")
+        self.assertIsInstance(outcome, GateOutcome)
+        self.assertTrue(outcome.ok)
+
+
+class RecordShapeTests(unittest.TestCase):
+    """The auditable records carry no wall-clock time."""
+
+    def test_the_timeout_record_carries_no_timestamp(self):
+        result = TimeoutResult(ok=False, exit_code=EXIT_CODE_TIMEOUT, timed_out=True)
+        record = result.as_dict()
+        self.assertEqual(record["exit_code"], 124)
+        self.assertTrue(record["timed_out"])
+        # A wall-clock field would make the record unreplayable: the same
+        # timeout would produce a different record every run.
+        for banned in ("timestamp", "time", "at", "when", "started", "duration", "elapsed"):
+            self.assertNotIn(banned, record)
+
+    def test_the_config_record_carries_no_timestamp(self):
+        record = RetryConfig().as_dict()
+        for banned in ("timestamp", "time", "at", "when", "started", "duration", "elapsed"):
+            self.assertNotIn(banned, record)
+
+    def test_the_verdict_record_names_the_schema_and_the_decision(self):
+        verdict = classify_call(CallKind.SESSION_LIFECYCLE, throttle())
+        self.assertIsInstance(verdict, RetryVerdict)
+        record = verdict.as_dict()
+        self.assertEqual(record["schema"], "northstar.retry-config.v1")
+        self.assertEqual(record["decision"], "retry")
+        self.assertIn("window", record)
+
+
 class SessionGuardTests(unittest.TestCase):
     """Dynamiq's double-checked locking, in code."""
 
@@ -295,10 +377,6 @@ class TimeoutTests(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertEqual(result.exit_code, 1)
         self.assertIn("provider exploded", result.error or "")
-
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 class EndToEndPathTests(unittest.TestCase):

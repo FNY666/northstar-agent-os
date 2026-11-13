@@ -61,6 +61,7 @@ import ast
 import hashlib
 import importlib.util
 import json
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -198,10 +199,16 @@ def _require_seq(value: Any, name: str) -> int:
 
 
 def _check_past_tense(text: str) -> str:
-    """Refuse a receipt text that claims present-tense authorization."""
+    """Refuse a receipt text that claims present-tense authorization.
+
+    The tokens are matched on word boundaries, so an *identifier* that
+    merely contains a word (``validation-clock``) is not mistaken for a
+    claim.  A word that stands on its own (``authorized``, ``valid``,
+    ``permitted now``) is a claim, and is refused.
+    """
     lowered = text.lower()
     for token in FORBIDDEN_NOW_TENSE:
-        if token in lowered:
+        if re.search(r"(?<![a-z0-9])" + re.escape(token) + r"(?![a-z0-9])", lowered):
             raise PresentTenseClaimError(
                 f"the receipt claims present-tense authorization ({token!r}): "
                 "a receipt says what was permitted, not what is permitted now"
@@ -739,6 +746,7 @@ def stdlib_only() -> bool:
         "importlib",
         "json",
         "pathlib",
+        "re",
         "sys",
         "typing",
     }

@@ -104,6 +104,13 @@ class ReceiptTextTests(unittest.TestCase):
         with self.assertRaises(PresentTenseClaimError):
             ArtifactReceipt.parse(tampered)
 
+    def test_an_identifier_containing_a_word_is_not_mistaken_for_a_claim(self):
+        # The refusal matches on word boundaries: "validation-clock" is an
+        # identifier, not a present-tense authorization claim.
+        receipt = _bind(clock_id="validation-clock")
+        self.assertIn("clock=validation-clock", receipt.render())
+        self.assertEqual(ArtifactReceipt.parse(receipt.render()), receipt)
+
     def test_receipt_parse_refuses_a_text_without_the_check_clause(self):
         text = _bind().render()
         with self.assertRaises(MalformedReceiptError):
