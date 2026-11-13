@@ -619,6 +619,20 @@ class SessionStore:
         transcript = self.transcript(session_id, require_integrity=require_integrity)
         return unwind(transcript)
 
+    def unwound_calls(self, session_id: str | None = None) -> tuple[tuple[str, str], ...]:
+        """The calls the shutdown unwind pass says never ran.
+
+        The unwind pass is the runtime's own verdict on which calls were cut
+        short, so the durable layer reads it from here rather than
+        re-deriving it: a call that never ran has no committed effect, and a
+        resume must not replay it as a success.  Returns ``(tool_use_id,
+        tool_name)`` in the order the calls were asked.
+        """
+        from shutdown_unwind import pending_tool_uses
+
+        transcript = self.transcript(session_id)
+        return pending_tool_uses(transcript)
+
     def list_sessions(self) -> tuple[str, ...]:
         if self.directory is None:
             return ()

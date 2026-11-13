@@ -626,6 +626,7 @@ py-modules = [
     "drift_probe",
     "dual_use",
     "durable_bridge",
+    "durable_resume",
     "ed25519",
     "edge_compute",
     "edge_gate",

@@ -270,3 +270,41 @@ def prepare_resume(
             f"got {actual[:12]}): the history this checkpoint describes is not the history in the file"
         )
     return prefix
+
+
+def durable_state(
+    checkpoint: Checkpoint,
+    *,
+    extra: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """The state a durable checkpoint holds for this turn boundary.
+
+    The join between the two checkpoint layers.  ``checkpoints.Checkpoint`` is
+    a turn boundary: how far the transcript got and what it cost.  The durable
+    layer (:mod:`durable_resume`) needs a *state* it can hash and a run id it
+    can be found under -- and it needs the pending writes kept **out** of that
+    state, so a write that has not landed cannot travel inside the state as if
+    it had.
+
+    So this function returns the committed part only: the boundary's counters,
+    its transcript digest, and whatever the caller adds.  The pending writes
+    are a separate record under the same checkpoint, written by the durable
+    layer's ``put_writes``.
+    """
+    payload: dict[str, Any] = {
+        "transcript_len": checkpoint.transcript_len,
+        "transcript_digest": checkpoint.transcript_digest,
+        "turns": checkpoint.turns,
+        "tool_calls": checkpoint.tool_calls,
+        "cost_usd": checkpoint.cost_usd,
+        "usage": dict(checkpoint.usage),
+        "model": checkpoint.model,
+        "provider": checkpoint.provider,
+        "permission_mode": checkpoint.permission_mode,
+        "run_id": checkpoint.run_id,
+        "policy_revision": checkpoint.policy_revision,
+        "denials": checkpoint.denials,
+    }
+    if extra:
+        payload.update(dict(extra))
+    return payload
