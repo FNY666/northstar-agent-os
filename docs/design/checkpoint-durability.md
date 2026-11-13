@@ -43,6 +43,16 @@ A **durability mode** — a per-run write policy — with three values, plus:
 | `async` | in the background while the next step runs | the last checkpoint may be lost |
 | `sync` | before the next step starts; the run waits for pending writes before returning | at most the in-flight step is lost |
 
+The `sync` row follows the packetgeek article ("`sync` writes before the next
+step starts, so it cannot" lose the last checkpoint) and is what this module
+implements and measures. The official docs are more conservative — they say
+of `sync` that "a process crash mid-run can still lose recent checkpoints",
+because intermediate steps may run before the writes finish. Both statements
+are consistent with each other: the module's `sync` *awaits* each step's
+write before the next step starts, which is the stricter of the two
+readings, so the measured loss window (only the in-flight step) is what this
+implementation actually achieves.
+
 ## Mapping to the source
 
 Values attributed to the source are quoted verbatim. Northstar extensions are
@@ -67,10 +77,11 @@ https://docs.langchain.com/oss/javascript/langgraph/checkpointers :
   executes" — good performance and durability, but "there is a small risk that
   LangGraph does not write checkpoints if the process crashes during
   execution".
-* **sync**: "LangGraph persists checkpoint writes throughout the run and
-  awaits outstanding checkpointer promises" when the run finishes; "a process
-  crash mid-run can still lose recent checkpoints" — its edge over `async` is
-  that "the run does not return until pending writes have settled".
+* **sync**: "LangGraph persists checkpoint writes throughout the run and awaits
+  outstanding checkpointer promises when the run finishes." Intermediate steps
+  may run before the writes finish, so "a process crash mid-run can still
+  lose recent checkpoints" — "durability is higher than `\"async\"` only in
+  that the run does not return until pending writes have settled".
 * The first durable checkpoint of a new thread: "The internal `__start__`
   superstep runs first; step `0` is the loop checkpoint written after that
   superstep." Per mode:
@@ -85,10 +96,13 @@ https://docs.langchain.com/oss/javascript/langgraph/checkpointers :
     `async`.
 * A crash before the first durable checkpoint leaves the thread
   "indistinguishable from a thread that was never invoked"; the source's
-  mitigation is to "record admission outside the checkpointer".
-* Selection guidance: use `sync` when "you cannot afford to lose a step"
-  (paying, sending mail); use `exit` for a batch job "that you would restart
-  from the beginning anyway"; default to `async`.
+  mitigation is to "record admission outside the checkpointer", e.g.
+  "committing an outbox row to your own store before you call `invoke`".
+
+**The official docs page carries no selection guidance.** The modes are
+presented "from least to most durable", with each mode's trade-off described
+but no rule of thumb for choosing between them. The selection advice below is
+the packetgeek article's, not the docs'.
 
 packetgeek, "LangGraph Checkpoints Part 2: Storage with SQLite",
 https://www.packetgeek.net/2026/09/02/langgraph-checkpoints-part-2-storage-with-sqlite/
@@ -114,6 +128,10 @@ five runs, varying only in the third decimal":
 * "I could not measure a time difference between `async` and `sync` here" —
   the author attributes this to local SQLite writes being quick and warns to
   "measure it on your own backend rather than trusting this row."
+* **Selection guidance (the article's, not the docs').** Pick `sync` when
+  "you cannot afford to lose a step" (paying, sending mail); pick `exit` for a
+  batch job "that you would restart from the beginning anyway". The docs page
+  itself offers no such rule of thumb.
 
 ### Northstar extension (this module, not the source)
 
@@ -136,15 +154,22 @@ five runs, varying only in the third decimal":
   window be exercised without killing the process. The source's crash
   behaviour is observed, never injected.
 * **The cost grading.** `StepCost.SIDE_EFFECTING` vs `StepCost.RECOMPUTABLE`
-  → `DurabilityPolicy.recommend()`. The source's guidance asks the question
+  → `DurabilityPolicy.recommend()`. The packetgeek article asks the question
   ("you cannot afford to lose a step"); the enum makes it answerable in code.
+  Northstar's `recommend()` maps `SIDE_EFFECTING` → `sync` and
+  `RECOMPUTABLE` → `exit`, and `None` → `async` (the default).
 * **The interrupt as an awaited barrier.** Under `async` the interrupt
-  checkpoint is awaited rather than left in flight. The source says
-  interrupts work in all three modes because the checkpoint is saved when the
-  run pauses; Northstar additionally guarantees the write has *landed* before
-  the run waits for the human, because the run is going nowhere until the
-  human answers and a resume that could not find the interrupt would be a
-  worse failure than the one it avoids.
+  checkpoint is awaited rather than left in flight. The official docs imply
+  the interrupt behaviour only through the `exit` bullet — persistence
+  happens "successfully, with an error, or due to a human-in-the-loop
+  interrupt" — and say nothing about how `async` or `sync` treat a mid-run
+  interrupt. The cross-mode guarantee (that all three save a checkpoint when
+  the run pauses) comes from the slice's own brief and the dev.to article
+  it cites, *not* from the docs page. Northstar goes one step further: it
+  guarantees the interrupt write has *landed* before the run waits for the
+  human, because the run is going nowhere until the human answers and a
+  resume that could not find the interrupt would be a worse failure than the
+  one it avoids.
 * **Fail-closed mode validation.** An unknown mode raises
   `InvalidDurabilityModeError` rather than defaulting. The source takes the
   mode as given.

@@ -837,3 +837,82 @@ class RealPathDrillTests(unittest.TestCase):
         self.assertGreater(measured["async"], 0)
         self.assertLess(measured["async"], measured["sync"])
         self.assertEqual(measured["sync"], 28)
+
+
+class PublicSurfaceTests(unittest.TestCase):
+    """The rest of the public surface, covered directly."""
+
+    def test_landed_ids_names_the_checkpoints_that_reached_the_sink(self):
+        sink = MemorySink()
+        controller = DurabilityController(sink=sink, mode=DurabilityMode.SYNC)
+        controller.run(_steps(3), initial_state={"n": 0})
+        # input + start + one per step.
+        self.assertEqual(len(controller.landed_ids), 5)
+        self.assertEqual(controller.landed_ids, sink.ids())
+
+    def test_await_pending_lands_the_outstanding_writes(self):
+        sink = MemorySink()
+        controller = DurabilityController(sink=sink, mode=DurabilityMode.ASYNC)
+        controller.start({"n": 0})
+        self.assertGreater(controller.outstanding, 0)
+        receipts = controller.await_pending()
+        self.assertEqual(len(receipts), controller.receipts.__len__())
+        self.assertEqual(controller.outstanding, 0)
+        for receipt in receipts:
+            self.assertTrue(receipt.settled)
+
+    def test_crash_at_fires_the_hook_directly(self):
+        seen: list[tuple[str, int]] = []
+
+        def hook(point, index):
+            seen.append((point, index))
+
+        controller = DurabilityController(
+            sink=MemorySink(), mode=DurabilityMode.SYNC, crash_hook=hook
+        )
+        controller.crash_at("before_step", 3)
+        self.assertEqual(seen, [("before_step", 3)])
+
+    def test_the_durable_store_sink_reports_the_store_s_own_id(self):
+        from durable_resume import DurableStore
+
+        store = DurableStore()
+        sink = DurableStoreSink(store, run_id="run-1")
+        controller = DurabilityController(sink=sink, mode=DurabilityMode.SYNC)
+        controller.run(_steps(2), initial_state={"n": 0})
+        first = controller.receipts[0]
+        self.assertIsNotNone(sink.external_id(first.checkpoint_id))
+        self.assertEqual(sink.external_id(first.checkpoint_id), first.external_checkpoint_id)
+        self.assertTrue(sink.exists(first.checkpoint_id))
+
+    def test_a_receipt_is_a_dataclass_with_the_four_named_fields(self):
+        receipt = DurabilityReceipt(
+            mode=DurabilityMode.SYNC,
+            checkpoint_id="ck-000001",
+            timing=WriteTiming.AWAITED,
+            settled=True,
+        )
+        self.assertIs(receipt.mode, DurabilityMode.SYNC)
+        self.assertEqual(receipt.checkpoint_id, "ck-000001")
+        self.assertIs(receipt.timing, WriteTiming.AWAITED)
+        self.assertTrue(receipt.settled)
+
+    def test_the_crash_window_dataclass_carries_its_facts(self):
+        window = CrashWindow(
+            mode=DurabilityMode.ASYNC,
+            loses_all_progress=False,
+            may_lose_last_checkpoint=True,
+            preserves_completed_steps=False,
+            summary="a crash may lose the last checkpoint",
+        )
+        self.assertIs(window.mode, DurabilityMode.ASYNC)
+        self.assertTrue(window.may_lose_last_checkpoint)
+        self.assertIn("last checkpoint", window.summary)
+
+    def test_a_run_outcome_reports_its_checkpoint_count(self):
+        sink = MemorySink()
+        controller = DurabilityController(sink=sink, mode=DurabilityMode.EXIT)
+        outcome = controller.run(_steps(2), initial_state={"n": 0})
+        self.assertIsInstance(outcome, RunOutcome)
+        self.assertEqual(outcome.checkpoint_count, 1)
+        self.assertIsNone(outcome.receipt_for("ck-999999"))

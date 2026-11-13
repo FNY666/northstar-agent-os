@@ -67,9 +67,10 @@ Northstar extensions (this module, not the source)
   :class:`DurableStoreSink` over ``durable_resume.DurableStore``;
 * the **crash-window model** and the **cost grading** (:class:`StepCost`);
 * the fact that an *interrupted* run saves its checkpoint in every mode --
-  the source says interrupts work in all three modes because "the checkpoint
-  is saved when the run pauses", and Northstar makes that an awaited barrier
-  rather than a race.
+  the official docs imply the interrupt case only through the ``exit``
+  bullet (persistence happens "successfully, with an error, or due to a
+  human-in-the-loop interrupt"); the cross-mode guarantee is this slice's own
+  reading, and Northstar makes it an awaited barrier rather than a race.
 """
 from __future__ import annotations
 
