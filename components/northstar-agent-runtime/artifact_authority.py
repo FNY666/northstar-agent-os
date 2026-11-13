@@ -636,7 +636,11 @@ def verify(
             f"the revocation epoch moved on: the receipt was sealed under epoch "
             f"{receipt.revocation_epoch}, the world is at {epoch_now}",
         )
-    return Verdict(VALID, "the receipt's grant is still live at this epoch")
+    return Verdict(
+        VALID,
+        "no revocation applies to this receipt at the epoch given: the "
+        "grant was permitted at its own epoch and nothing has moved on it",
+    )
 
 
 # ---------------------------------------------------------------------------
