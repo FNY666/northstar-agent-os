@@ -59,6 +59,7 @@ NEW_DESTINATION = "NEW_DESTINATION"
 
 ACCEPTED = "accepted"
 PENDING = "pending"
+OUTCOME_UNKNOWN = "outcome_unknown"
 
 _MAX_LABEL_LEN = 1024
 
@@ -362,13 +363,33 @@ class AcceptanceLedger:
 
     def record_pending(
         self, operation_key: str, destination: DestinationIdentity
-    ) -> None:
-        """Record that an operation was dispatched to a destination, outcome unknown."""
+    ) -> str:
+        """Record that an operation was dispatched, outcome unknown.
+
+        The outcome is the repo's own ``outcome_unknown``: dispatched, but
+        the destination has not ratified the result.  A pending operation
+        is *not* an acceptance -- no destination has taken responsibility
+        for it.
+        """
         if not isinstance(operation_key, str) or not operation_key:
             raise ValueError("operation_key must be a non-empty str")
         if not isinstance(destination, DestinationIdentity):
             raise TypeError("destination must be a DestinationIdentity")
         self._pending[operation_key] = destination
+        return OUTCOME_UNKNOWN
+
+    def outcome_of(self, operation_key: str) -> Optional[str]:
+        """The outcome recorded for ``operation_key``, or None.
+
+        ``outcome_unknown`` while the operation is pending, the acceptance
+        outcome once a destination has accepted it.
+        """
+        acceptance = self.accepted_by(operation_key)
+        if acceptance is not None:
+            return acceptance.outcome
+        if self.pending_at(operation_key) is not None:
+            return OUTCOME_UNKNOWN
+        return None
 
     def accepted_by(self, operation_key: str) -> Optional[Acceptance]:
         """The acceptance for ``operation_key``, or None if nobody accepted it."""

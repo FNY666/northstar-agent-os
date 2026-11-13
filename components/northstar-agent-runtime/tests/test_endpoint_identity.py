@@ -18,7 +18,7 @@ from endpoint_identity import (  # noqa: E402
     CONFLICT,
     ENDPOINT_IDENTITY_VERSION,
     NEW_DESTINATION,
-    PENDING,
+    OUTCOME_UNKNOWN,
     REPLAY,
     SCHEMA_PIN,
     AcceptanceLedger,
@@ -269,6 +269,9 @@ class TestEndToEndPaths(unittest.TestCase):
         # The operation is still pending at A and was not accepted anywhere.
         self.assertIsNone(self.ledger.accepted_by("op-1"))
         self.assertEqual(self.ledger.pending_at("op-1"), self.b)
+        # Fail closed: the outcome stays outcome_unknown, awaiting
+        # reconciliation.  It is never silently upgraded to "done".
+        self.assertEqual(self.ledger.outcome_of("op-1"), OUTCOME_UNKNOWN)
 
     def test_the_same_key_with_a_different_payload_is_a_conflict(self):
         bound, fingerprint = self._send("op-1", self.a, {"amount": 10})
@@ -291,6 +294,7 @@ class TestEndToEndPaths(unittest.TestCase):
         # op-1 landed at A; op-2 was accepted by nobody.
         self.assertEqual(self.ledger.accepted_by("op-1").destination, self.a)
         self.assertIsNone(self.ledger.accepted_by("op-2"))
+        self.assertEqual(self.ledger.outcome_of("op-2"), OUTCOME_UNKNOWN)
         self.assertEqual(len(self.effects), 1)
 
     def test_the_effect_time_proof_requires_the_attested_epoch(self):
