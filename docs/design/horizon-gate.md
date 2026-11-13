@@ -160,13 +160,13 @@ METR Time Horizon 1.1 of January 2026). Verbatim from the task book:
 `components/northstar-agent-runtime/tests/test_horizon_gate.py` — 38 test
 methods in five classes:
 
-* `DeclarationTests` (11) — the three mandatory inputs, the 50% refusal, the
+* `DeclarationTests` (12) — the three mandatory inputs, the 50% refusal, the
   960-minute refusal, the interval shape, the task-count shape.
-* `AdmissionTests` (15) — admit / refuse / flag, the overage, the
+* `AdmissionTests` (13) — admit / refuse / flag, the overage, the
   three-state verdict, the caller-supplied margin, bad task durations.
 * `ReportTests` (6) — the report's contents and the pinning ladder's exact
   boundaries (29/30, 149/150, 999/1000).
-* `FullPathTests` (6) — the three real paths driven end to end on a live
+* `FullPathTests` (5) — the three real paths driven end to end on a live
   gate: an admitted task taken in, an over-horizon task **not** taken in
   with the overage and the "decompose or route to a human" recommendation, a
   near-the-top task taken in with a flag and an enhanced-monitoring
