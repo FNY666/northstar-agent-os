@@ -26,6 +26,7 @@ from deterministic_gate_score import (
     OUTCOME_UNSCORED,
     NO_VERDICT,
     CaseOutcome,
+    CaseSpec,
     DuplicateCaseError,
     DuplicateGateError,
     EmptyGateSetError,
@@ -451,3 +452,32 @@ class BookkeepingEdgeTests(unittest.TestCase):
         gates = [Gate("explodes", exploding_gate, "artifacts/out.txt")]
         with self.assertRaises(GateExecutionError):
             run_gates(gates, good_artifact())
+
+
+class PublicSurfaceTests(unittest.TestCase):
+    """Every public record type has a test that names it."""
+
+    def test_case_spec_validates_its_pin(self):
+        spec = CaseSpec(case_id="c-1", artifact_digest=DIGEST_A)
+        self.assertEqual(spec.case_id, "c-1")
+        self.assertEqual(spec.as_dict()["artifact_digest"], DIGEST_A)
+        with self.assertRaises(BadCaseError):
+            CaseSpec(case_id="c-1", artifact_digest="not-a-pin")
+        with self.assertRaises(BadCaseError):
+            CaseSpec(case_id="", artifact_digest=DIGEST_A)
+
+    def test_case_booking_records_the_attempts_and_the_outcome(self):
+        ledger = GateScoreLedger()
+        ledger.score("c-1", DIGEST_A, three_gates(), good_artifact(), 0)
+        booking = ledger.booking("c-1")
+        self.assertEqual(booking.attempts, 1)
+        self.assertEqual(booking.artifact_digest, DIGEST_A)
+        self.assertEqual(booking.as_dict()["outcome"]["outcome"], OUTCOME_SCORED)
+        self.assertEqual(len(ledger.outcomes()), 1)
+
+    def test_ledger_outcomes_are_ordered_by_case_id(self):
+        ledger = GateScoreLedger()
+        ledger.score("b-case", DIGEST_A, three_gates(), good_artifact(), 0)
+        ledger.score("a-case", DIGEST_B, three_gates(), good_artifact(), 1)
+        self.assertEqual([o.case_id for o in ledger.outcomes()],
+                         ["a-case", "b-case"])
