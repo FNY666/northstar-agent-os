@@ -205,7 +205,11 @@ class FieldSpec:
                     raise InvalidSchemaError(
                         f"field {name!r} {bound_name} must be a finite number"
                     )
-                if bound == float("inf") or bound == float("-inf"):
+                if bound == float("inf"):
+                    raise InvalidSchemaError(
+                        f"field {name!r} {bound_name} must be a finite number"
+                    )
+                if bound == float("-inf"):
                     raise InvalidSchemaError(
                         f"field {name!r} {bound_name} must be a finite number"
                     )
