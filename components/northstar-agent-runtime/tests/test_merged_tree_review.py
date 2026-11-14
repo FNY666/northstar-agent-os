@@ -121,6 +121,53 @@ class DanglingSymbolTests(_TreeCase):
         doc = self.doc("alpha.md", "See `alpha.py` for the other half.\n")
         self.assertEqual(mtr.scan_missing_modules([doc], ["alpha"]), [])
 
+    def test_a_foreign_citation_is_marked_as_such(self) -> None:
+        """A doc citing another project's file is not Northstar drift."""
+        self.module("alpha", "def kept():\n    return 1\n")
+        doc = self.doc("alpha.md", "LangGraph `types.py` holds the policy.\n")
+        missing = mtr.scan_missing_modules([doc], ["alpha"])
+        self.assertEqual([item.reason for item in missing], ["foreign-citation"])
+
+    def test_a_module_from_another_component_is_not_missing(self) -> None:
+        self.module("alpha", "def kept():\n    return 1\n")
+        doc = self.doc("alpha.md", "See `transport.py` from the sidecar.\n")
+        missing = mtr.scan_missing_modules(
+            [doc], ["alpha"], repo_modules=["transport"]
+        )
+        self.assertEqual(missing, [])
+
+    def test_a_method_of_a_class_resolves(self) -> None:
+        self.module(
+            "alpha",
+            "class Thing:\n"
+            "    def do_it(self):\n"
+            "        return 1\n",
+        )
+        doc = self.doc("alpha.md", "Use `alpha.Thing.do_it`.\n")
+        facts = mtr.collect_module_facts(self.modules())
+        found = mtr.scan_dangling_symbols([doc], facts, known_modules=["alpha"])
+        self.assertEqual(found, [])
+
+    def test_a_private_method_named_without_its_class_resolves(self) -> None:
+        """``context_controller._screen`` cites a real private method."""
+        self.module(
+            "alpha",
+            "class Thing:\n"
+            "    def _screen(self):\n"
+            "        return 1\n",
+        )
+        doc = self.doc("alpha.md", "Uses `alpha._screen` today.\n")
+        facts = mtr.collect_module_facts(self.modules())
+        found = mtr.scan_dangling_symbols([doc], facts, known_modules=["alpha"])
+        self.assertEqual(found, [])
+
+    def test_a_module_level_constant_resolves(self) -> None:
+        self.module("alpha", "MAX_SIZE = 120\n")
+        doc = self.doc("alpha.md", "Pins `alpha.MAX_SIZE`.\n")
+        facts = mtr.collect_module_facts(self.modules())
+        found = mtr.scan_dangling_symbols([doc], facts, known_modules=["alpha"])
+        self.assertEqual(found, [])
+
 
 # ---------------------------------------------------------------------------
 # Rule 2 -- same name, different meaning

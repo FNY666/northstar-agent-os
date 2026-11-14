@@ -118,6 +118,17 @@ _DOTTED_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*(?:\.py)?)((?:\.[A-Za-z_][A-Z
 #: An identifier-looking word.
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
+#: Words on a line that mark the line as citing a *foreign* project
+#: rather than a Northstar module.  A ``.py`` file named on such a line
+#: is a citation of the source, not a dangling Northstar reference.
+_FOREIGN_MARKERS = re.compile(
+    r"\b(LangGraph|MSAF|MSAF-orig|openai|langgraph|pregel|CrewAI|AutoGen|"
+    r"claude-code|Claude Code|inspect_ai|source|the source|upstream|"
+    r"reference repo|third[- ]party|open-sourced reference|"
+    r"reference implementation|agent_controller)\b",
+    re.IGNORECASE,
+)
+
 #: The verdict words these slices actually write into their records.  The
 #: set is deliberately closed: a word outside it is not a verdict word in
 #: this tree, so it cannot be a vocabulary overlap.
@@ -189,14 +200,19 @@ def _class_fields(node: ast.ClassDef) -> Tuple[str, ...]:
 
 
 def _class_members(node: ast.ClassDef) -> Tuple[str, ...]:
-    """Every public member name of a class (methods and annotated fields)."""
+    """Every member name of a class (methods and annotated fields).
+
+    Private members are included: the point of this set is to answer
+    "does this name exist", and a design doc that cites a private method
+    is pointing at something real.
+    """
     members: List[str] = []
     for statement in node.body:
         if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            if not statement.name.startswith("_"):
+            if statement.name not in members:
                 members.append(statement.name)
         elif isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name):
-            if not statement.target.id.startswith("_"):
+            if statement.target.id not in members:
                 members.append(statement.target.id)
     return tuple(members)
 
@@ -225,6 +241,7 @@ class ModuleFacts:
     functions: Mapping[str, Tuple[str, ...]] = field(default_factory=dict)
     classes: Mapping[str, Tuple[str, ...]] = field(default_factory=dict)
     class_fields: Mapping[str, Tuple[str, ...]] = field(default_factory=dict)
+    constants: Mapping[str, Tuple[str, ...]] = field(default_factory=dict)
     error_types: Tuple[str, ...] = ()
     verdict_vocabulary: Mapping[str, Tuple[str, ...]] = field(default_factory=dict)
     imports: Tuple[str, ...] = ()
@@ -232,11 +249,30 @@ class ModuleFacts:
 
     def public_symbols(self) -> Tuple[str, ...]:
         """Every public top-level name this module defines."""
-        return tuple(sorted(set(self.functions) | set(self.classes)))
+        return tuple(
+            sorted(
+                name
+                for name in (
+                    set(self.functions) | set(self.classes) | set(self.constants)
+                )
+                if not name.startswith("_")
+            )
+        )
 
     def has_symbol(self, name: str) -> bool:
         """Does this module define ``name`` at top level?"""
         return name in self.functions or name in self.classes
+
+    def all_symbols(self) -> Tuple[str, ...]:
+        """Every top-level name this module defines, private ones included.
+
+        A design doc may legitimately name a private helper -- a few do,
+        and say so.  The tool resolves those too, so that "dangling"
+        means "gone", not "private".
+        """
+        return tuple(
+            sorted(set(self.functions) | set(self.classes) | set(self.constants))
+        )
 
     def verdict_words(self) -> Tuple[str, ...]:
         """Every verdict-like word this module mints, across its vocabularies."""
@@ -266,60 +302,64 @@ def read_module_facts(path: Path) -> ModuleFacts:
     functions: Dict[str, Tuple[str, ...]] = {}
     classes: Dict[str, Tuple[str, ...]] = {}
     class_fields: Dict[str, Tuple[str, ...]] = {}
+    constants: Dict[str, Tuple[str, ...]] = {}
     error_types: List[str] = []
     vocabulary: Dict[str, Tuple[str, ...]] = {}
     imports: List[str] = []
 
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            if not node.name.startswith("_"):
-                functions[node.name] = tuple(
-                    argument.arg for argument in node.args.args
-                ) + tuple(
-                    argument.arg for argument in node.args.kwonlyargs
-                )
+            functions[node.name] = tuple(
+                argument.arg for argument in node.args.args
+            ) + tuple(
+                argument.arg for argument in node.args.kwonlyargs
+            )
         elif isinstance(node, ast.ClassDef):
-            if not node.name.startswith("_"):
-                bases = tuple(
-                    base for base in (_base_name(base) for base in node.bases) if base
-                )
-                classes[node.name] = _class_members(node)
-                class_fields[node.name] = _class_fields(node)
-                if _is_error_class(node.name, bases):
-                    error_types.append(node.name)
-                # An Enum's members are a verdict vocabulary too: the
-                # member *values* are the words callers write.
-                for statement in node.body:
-                    if not isinstance(statement, ast.Assign):
+            bases = tuple(
+                base for base in (_base_name(base) for base in node.bases) if base
+            )
+            classes[node.name] = _class_members(node)
+            class_fields[node.name] = _class_fields(node)
+            if _is_error_class(node.name, bases):
+                error_types.append(node.name)
+            # An Enum's members are a verdict vocabulary too: the
+            # member *values* are the words callers write.
+            for statement in node.body:
+                if not isinstance(statement, ast.Assign):
+                    continue
+                for target in statement.targets:
+                    if not isinstance(target, ast.Name):
                         continue
-                    for target in statement.targets:
-                        if not isinstance(target, ast.Name):
-                            continue
-                        values = _string_sequence(statement.value)
-                        if values:
-                            vocabulary.setdefault(
-                                f"{node.name}.{target.id}", values
-                            )
+                    values = _string_sequence(statement.value)
+                    if values:
+                        vocabulary.setdefault(
+                            f"{node.name}.{target.id}", values
+                        )
         elif isinstance(node, ast.Assign):
             for target in node.targets:
                 if not isinstance(target, ast.Name):
                     continue
                 name = target.id
+                values = _string_sequence(node.value)
                 if name.startswith("_"):
                     continue
-                values = _string_sequence(node.value)
                 if values and _VERDICT_CONST_RE.search(name):
                     vocabulary[name] = values
                 elif len(values) == 1:
                     vocabulary.setdefault(name, values)
+                constants[name] = values if values else ("",)
         elif isinstance(node, ast.AnnAssign):
-            if isinstance(node.target, ast.Name) and not node.target.id.startswith("_"):
+            if isinstance(node.target, ast.Name):
+                name = node.target.id
+                if name.startswith("_"):
+                    continue
                 if node.value is not None:
                     values = _string_sequence(node.value)
-                    if values and _VERDICT_CONST_RE.search(node.target.id):
-                        vocabulary[node.target.id] = values
+                    if values and _VERDICT_CONST_RE.search(name):
+                        vocabulary[name] = values
                     elif len(values) == 1:
-                        vocabulary.setdefault(node.target.id, values)
+                        vocabulary.setdefault(name, values)
+                    constants[name] = values if values else ("",)
         elif isinstance(node, ast.Import):
             for alias in node.names:
                 imports.append(alias.name)
@@ -340,6 +380,7 @@ def read_module_facts(path: Path) -> ModuleFacts:
         functions=functions,
         classes=classes,
         class_fields=class_fields,
+        constants=constants,
         error_types=tuple(sorted(error_types)),
         verdict_vocabulary=vocabulary,
         imports=tuple(sorted(set(imports))),
@@ -425,11 +466,35 @@ def _symbol_resolves(module_facts: ModuleFacts, symbol_path: str) -> bool:
 
     ``symbol_path`` may be a dotted path: ``Class`` or
     ``Class.method``.  A method of a class counts as present when the
-    class exists and the method is one of its public members.
+    class exists and the method is one of its members.
+
+    A path that names a *method* directly (``module.method``) also
+    resolves when exactly one class of the module defines a method of
+    that name.  Design docs routinely cite ``context_controller._screen``
+    without naming the class it lives on; refusing to resolve that would
+    report drift where there is none.
+
+    Private names count: a doc that names ``module._helper`` is pointing
+    at a real thing, and only a *deleted* name is drift.
     """
     parts = symbol_path.split(".")
     head = parts[0]
-    if head not in module_facts.public_symbols():
+    if head not in module_facts.all_symbols():
+        # Maybe it is a method of one of the module's classes.
+        owners = [
+            name
+            for name, members in module_facts.classes.items()
+            if head in members
+        ]
+        if not owners:
+            return False
+        if len(parts) == 1:
+            return True
+        # ``module.Class.method``: the method must be on that class.
+        if len(parts) == 2 and head in module_facts.classes:
+            return all(
+                part in module_facts.classes[head] for part in parts[1:]
+            )
         return False
     if len(parts) == 1:
         return True
@@ -497,14 +562,36 @@ def scan_dangling_symbols(
 def scan_missing_modules(
     doc_paths: Sequence[Path],
     known_modules: Sequence[str],
+    repo_modules: Optional[Sequence[str]] = None,
 ) -> List[DanglingReference]:
     """Rule 1b: design docs that name a ``*.py`` file the tree lacks.
 
     A doc that says ``alert_trigger_registry.py`` names a concrete file.
-    If that file is not in the runtime, the doc points at a module that
-    went away -- a weaker but unambiguous form of drift.
+    If that file is nowhere in the repository, the doc points at a module
+    that went away -- a weaker but unambiguous form of drift.
+
+    ``repo_modules`` is the set of every python module name in the whole
+    repository, not just the runtime.  A doc that names
+    ``components/northstar-egress-sidecar/lease_table.py`` is not
+    dangling: the file is in the repo, the runtime-scoped scan just
+    cannot see it.
+
+    This rule is deliberately narrow: it only fires for a bare
+    ``word.py`` code span that names nothing in the repository.  A doc
+    that cites a *foreign* project's file (LangGraph's ``types.py``,
+    MSAF's ``_compaction.py``) is citing its source, not pointing at a
+    Northstar module.  Such citations are reported with the reason
+    ``foreign-citation`` when the line also names a foreign project, and
+    with ``module-not-found`` when nothing in the repo carries that name
+    and the line gives no other clue.
+
+    The distinction is mechanical, not semantic: the human reviewer
+    still decides whether a foreign citation is right.
     """
     known = set(known_modules)
+    universe = set(known)
+    if repo_modules:
+        universe |= set(repo_modules)
     missing: List[DanglingReference] = []
     for doc_path in sorted(Path(p) for p in doc_paths):
         doc = doc_path
@@ -517,7 +604,7 @@ def scan_missing_modules(
                 if not span.endswith(".py") or not re.match(r"^[A-Za-z_][A-Za-z0-9_]*\.py$", span):
                     continue
                 module = span[:-3]
-                if module in known:
+                if module in universe:
                     continue
                 missing.append(
                     DanglingReference(
@@ -526,7 +613,11 @@ def scan_missing_modules(
                         module=module,
                         symbol="",
                         text=span,
-                        reason="module-not-found",
+                        reason=(
+                            "foreign-citation"
+                            if _FOREIGN_MARKERS.search(line)
+                            else "module-not-found"
+                        ),
                     )
                 )
     return missing
@@ -817,16 +908,21 @@ def analyze(
     module_paths: Sequence[Path],
     doc_paths: Sequence[Path],
     group_modules: Mapping[str, Sequence[str]] = GROUP_MODULES,
+    repo_modules: Optional[Sequence[str]] = None,
 ) -> ReviewResult:
     """Run all four rules over a tree.  Read-only.
 
     ``module_paths`` are the python files to inspect, ``doc_paths`` the
-    design docs to scan.  Nothing is written and nothing is imported.
+    design docs to scan.  ``repo_modules`` is the set of every python
+    module name in the whole repository -- used by Rule 1b so that a doc
+    that names a module from another component is not called dangling.
+
+    Nothing is written and nothing is imported.
     """
     facts = collect_module_facts(module_paths)
     known = sorted(facts)
     dangling = list(scan_dangling_symbols(doc_paths, facts, known_modules=known))
-    dangling.extend(scan_missing_modules(doc_paths, known))
+    dangling.extend(scan_missing_modules(doc_paths, known, repo_modules))
     return ReviewResult(
         modules=tuple(known),
         docs=tuple(sorted(str(path) for path in doc_paths)),
@@ -845,12 +941,27 @@ def _default_paths(root: Path) -> Tuple[List[Path], List[Path]]:
     return modules, docs
 
 
+def repo_module_names(root: Path) -> Tuple[str, ...]:
+    """Every python module name in the repository, by file stem.
+
+    Stems collide across components (``transport.py`` exists in more
+    than one), which is fine: the set answers "does a module of this
+    name exist anywhere", not "which one".
+    """
+    names: List[str] = []
+    for path in Path(root).rglob("*.py"):
+        if ".git" in path.parts:
+            continue
+        names.append(path.stem)
+    return tuple(sorted(set(names)))
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     """Print the review over a repository root.  Read-only."""
     args = list(sys.argv[1:] if argv is None else argv)
     root = Path(args[0]) if args else Path.cwd()
     modules, docs = _default_paths(root)
-    result = analyze(modules, docs)
+    result = analyze(modules, docs, repo_modules=repo_module_names(root))
     for line in result.summary_lines():
         print(line)
     return 0
