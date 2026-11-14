@@ -103,10 +103,7 @@ class FireCondition:
     def __post_init__(self) -> None:
         for name, value in (("severity_threshold", self.severity_threshold),
                             ("impact_floor", self.impact_floor)):
-            if isinstance(value, bool) or not isinstance(value, (int, float)):
-                raise DigestError(f"{name} must be a number, got {value!r}")
-            if not math.isfinite(float(value)):
-                raise DigestError(f"{name} must be finite, got {value!r}")
+            _require_number(name, value)
         if not isinstance(self.requires_legitimate, bool):
             raise DigestError("requires_legitimate must be a bool")
 
@@ -118,11 +115,14 @@ class FireCondition:
         suppressed event says *why* it was suppressed.
         """
         failed: list[str] = []
-        if float(severity) < float(self.severity_threshold):
+        severity_ok = not (float(severity) < float(self.severity_threshold))
+        impact_ok = not (float(impact) < float(self.impact_floor))
+        legitimate_ok = (not self.requires_legitimate) or bool(legitimate)
+        if not severity_ok:
             failed.append("severity_below_threshold")
-        if float(impact) < float(self.impact_floor):
+        if not impact_ok:
             failed.append("impact_below_floor")
-        if self.requires_legitimate and not legitimate:
+        if not legitimate_ok:
             failed.append("not_legitimate")
         return (not failed, tuple(failed))
 
@@ -261,12 +261,7 @@ class DigestEvent:
 
     def __post_init__(self) -> None:
         for name, value in (("severity", self.severity), ("impact", self.impact)):
-            if isinstance(value, bool) or not isinstance(value, (int, float)):
-                raise DigestError(f"{name} must be a number, got {value!r}")
-            if not math.isfinite(float(value)):
-                raise DigestError(f"{name} must be finite, got {value!r}")
-            if not 0.0 <= float(value) <= 1.0:
-                raise DigestError(f"{name} must be a normalized score in [0, 1], got {value!r}")
+            _require_score(name, value)
         if not isinstance(self.legitimate, bool):
             raise DigestError("legitimate must be a bool")
 
@@ -482,3 +477,24 @@ class ActionableDigest:
         return tuple(self._fired[k] for k in sorted(self._fired))
 
 
+
+
+# -- validation helpers ------------------------------------------------
+# These live at the end of the module on purpose: they are the tail of the
+# validation chain, and the fire condition above reads more clearly when the
+# clause arithmetic is not interleaved with type checks.
+
+
+def _require_number(name: str, value: Any) -> None:
+    """A finite real number -- never a bool, never NaN or inf."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise DigestError(f"{name} must be a number, got {value!r}")
+    if not math.isfinite(float(value)):
+        raise DigestError(f"{name} must be finite, got {value!r}")
+
+
+def _require_score(name: str, value: Any) -> None:
+    """A normalized score in [0, 1]."""
+    _require_number(name, value)
+    if float(value) < 0.0 or float(value) > 1.0:
+        raise DigestError(f"{name} must be a normalized score in [0, 1], got {value!r}")
