@@ -109,6 +109,26 @@ class RangeAndReextendRefusalTests(unittest.TestCase):
         with self.assertRaises(PinMismatchError):
             verify_record(other, record)
 
+    def test_non_integer_delivery_position_is_refused(self):
+        """A non-integer report is not a delivery position and is refused."""
+        item = make_item("t1", "The answer is forty two.")
+        for bogus in (9.0, "9", True, None):
+            with self.assertRaises(DeliveryRangeError):
+                truncate(item, bogus, seq=1)
+
+    def test_boolean_delivery_position_is_refused(self):
+        item = make_item("t1", "The answer is forty two.")
+        with self.assertRaises(DeliveryRangeError):
+            truncate(item, True, seq=1)
+
+    def test_a_boolean_delivery_position_does_not_pass_as_one(self):
+        """A bool is not a delivery position, even though ``True == 1``."""
+        item = make_item("t1", "The answer is forty two.")
+        with self.assertRaises(DeliveryRangeError):
+            truncate(item, True, seq=1)
+        with self.assertRaises(DeliveryRangeError):
+            truncate(item, False, seq=1)
+
     def test_tampered_pin_is_refused(self):
         item = make_item("t1", "The answer is forty two.")
         outcome = truncate(item, 9, seq=1)
