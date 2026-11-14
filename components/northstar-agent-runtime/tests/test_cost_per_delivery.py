@@ -224,6 +224,21 @@ class FailClosedInputTests(unittest.TestCase):
             with self.assertRaises(CostPerDeliveryError):
                 ledger.book_attempt("a1", bad, "verified_delivered", "sealed-receipt:r-1")
 
+    def test_zero_settled_cost_is_bookable(self):
+        """A genuinely free attempt settles at $0.00 -- that is not an error.
+
+        Only a *negative* settled cost is refused: zero spend is a fact, not
+        a mistake.
+        """
+        ledger = CostPerDeliveryLedger()
+        record = ledger.book_attempt(
+            "a1", 0.0, "verified_delivered", "sealed-receipt:r-1", model="local"
+        )
+        self.assertEqual(record.settled_cost_usd, 0.0)
+        self.assertEqual(ledger.total_settled_cost_usd(), 0.0)
+        self.assertEqual(ledger.cost_per_verified_delivery(), 0.0)
+        self.assertEqual(len(ledger.records), 1)
+
     def test_negative_per_attempt_cost_is_refused(self):
         """The projection refuses a negative attempt price too."""
         with self.assertRaises(CostPerDeliveryError):
