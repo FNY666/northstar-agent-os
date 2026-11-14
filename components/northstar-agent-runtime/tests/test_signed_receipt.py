@@ -337,3 +337,144 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class MutantOrAt179IssuerKeyIdTests(unittest.TestCase):
+    """Kills the ``or@179`` mutant in ``issuer_key_id``.
+
+    The guard is::
+
+        if not isinstance(issuer_pubkey, (bytes, bytearray)) or len(issuer_pubkey) != 32:
+
+    Mutating ``or`` to ``and`` makes the guard fire only when the key is
+    *both* not-bytes *and* the wrong length -- never, because a non-bytes
+    value has no ``len`` of 32.  The guard stops firing and a wrong-length
+    key reaches the digest.
+
+    Two wrong ways are needed:
+
+    * a **str** -- format right (not bytes) but type wrong.  The original
+      raises ``IssuerKeyError``; the mutant raises ``TypeError`` from
+      ``len()``/``hashlib`` instead.
+    * a **31-byte** key -- type right (bytes) but format wrong.  The
+      original raises ``IssuerKeyError``; the mutant computes a digest of
+      the short key and returns it as a valid-looking id.
+    """
+
+    def test_or_at_179_a_str_key_is_refused_with_the_module_error(self):
+        # Format right (not bytes) but type wrong.
+        with self.assertRaises(IssuerKeyError):
+            issuer_key_id("a" * 32)
+
+    def test_or_at_179_a_none_key_is_refused_with_the_module_error(self):
+        with self.assertRaises(IssuerKeyError):
+            issuer_key_id(None)
+
+    def test_or_at_179_a_key_one_byte_short_is_refused(self):
+        # Type right (bytes) but format wrong.
+        with self.assertRaises(IssuerKeyError):
+            issuer_key_id(b"\x00" * 31)
+
+    def test_or_at_179_a_key_one_byte_long_is_refused(self):
+        with self.assertRaises(IssuerKeyError):
+            issuer_key_id(b"\x00" * 33)
+
+    def test_or_at_179_a_real_32_byte_key_still_names_itself(self):
+        # The control: the happy path must survive the guard being pinned.
+        key = b"\x01" * 32
+        self.assertTrue(issuer_key_id(key).startswith("sha256:"))
+
+
+class MutantOrAt280SignReceiptSeedTests(unittest.TestCase):
+    """Kills the ``or@280`` mutant in ``sign_receipt``.
+
+    The guard is::
+
+        if not isinstance(issuer_seed, (bytes, bytearray)) or len(issuer_seed) != 32:
+
+    Mutating ``or`` to ``and`` makes the guard fire only when the seed is
+    *both* not-bytes *and* the wrong length -- never.  The guard stops
+    firing and a bad seed reaches the Ed25519 shim.
+
+    Two wrong ways are needed:
+
+    * a **str** -- format right (not bytes) but type wrong.  The original
+      raises ``SignedReceiptError``; the mutant raises ``TypeError`` from
+      ``bytes()`` instead.
+    * a **31-byte** seed -- type right (bytes) but format wrong.  The
+      original raises ``SignedReceiptError``; the mutant lets the shim's
+      own ``ValueError`` escape, which is not the module's error.
+    """
+
+    def test_or_at_280_a_str_seed_is_refused_with_the_module_error(self):
+        # Format right (not bytes) but type wrong.
+        with self.assertRaises(SignedReceiptError):
+            sign_receipt(_receipt(), "s" * 32)
+
+    def test_or_at_280_a_none_seed_is_refused_with_the_module_error(self):
+        with self.assertRaises(SignedReceiptError):
+            sign_receipt(_receipt(), None)
+
+    def test_or_at_280_a_seed_one_byte_short_is_refused(self):
+        # Type right (bytes) but format wrong.
+        with self.assertRaises(SignedReceiptError):
+            sign_receipt(_receipt(), b"\x00" * 31)
+
+    def test_or_at_280_a_seed_one_byte_long_is_refused(self):
+        with self.assertRaises(SignedReceiptError):
+            sign_receipt(_receipt(), b"\x00" * 33)
+
+    def test_or_at_280_a_real_32_byte_seed_still_signs(self):
+        # The control: the happy path must survive the guard being pinned.
+        signed = sign_receipt(_receipt(), _seed())
+        self.assertIsInstance(signed, SignedReceipt)
+
+
+class MutantOrAt317VerifySignedReceiptKeyTests(unittest.TestCase):
+    """Kills the ``or@317`` mutant in ``verify_signed_receipt``.
+
+    The guard is::
+
+        if not isinstance(issuer_pubkey, (bytes, bytearray)) or len(issuer_pubkey) != 32:
+
+    Mutating ``or`` to ``and`` makes the guard fire only when the key is
+    *both* not-bytes *and* the wrong length -- never.  The guard stops
+    firing and a wrong-length key reaches the verification path.
+
+    Two wrong ways are needed:
+
+    * a **str** -- format right (not bytes) but type wrong.  The original
+      raises ``IssuerKeyError``; the mutant raises ``TypeError`` from
+      ``bytes()`` instead.
+    * a **31-byte** key -- type right (bytes) but format wrong.  The
+      original raises ``IssuerKeyError``; the mutant reaches the signature
+      check and fails with a *signature* error, which claims the receipt
+      was forged when in fact the key was malformed.
+    """
+
+    def test_or_at_317_a_str_key_is_refused_with_the_module_error(self):
+        # Format right (not bytes) but type wrong.
+        signed = _signed()
+        with self.assertRaises(IssuerKeyError):
+            verify_signed_receipt(signed, "a" * 32)
+
+    def test_or_at_317_a_none_key_is_refused_with_the_module_error(self):
+        signed = _signed()
+        with self.assertRaises(IssuerKeyError):
+            verify_signed_receipt(signed, None)
+
+    def test_or_at_317_a_key_one_byte_short_is_refused(self):
+        # Type right (bytes) but format wrong.
+        signed = _signed()
+        with self.assertRaises(IssuerKeyError):
+            verify_signed_receipt(signed, b"\x00" * 31)
+
+    def test_or_at_317_a_key_one_byte_long_is_refused(self):
+        signed = _signed()
+        with self.assertRaises(IssuerKeyError):
+            verify_signed_receipt(signed, b"\x00" * 33)
+
+    def test_or_at_317_the_real_key_still_verifies(self):
+        # The control: the happy path must survive the guard being pinned.
+        seed = _seed()
+        signed = _signed(seed)
+        receipt = verify_signed_receipt(signed, signed_receipt_ed_pubkey(seed))
+        self.assertEqual(receipt.action, "dispatch")
