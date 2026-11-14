@@ -367,3 +367,105 @@ was to add a sourced line where none existed.
    `test_runtime_registration` red on three tests (verified pre-existing: at
    `72f351cf~1` the same suite is `Ran 37 tests -- OK`); and `seal-slice6`'s
    own suite carries four pre-existing sandbox socket `PermissionError`s.
+
+## What this slice measured, on 2026-11-14
+
+All numbers below were produced by running the commands on this branch, on
+this host, on 2026-11-14.  None is copied from an earlier slice's report.
+
+### The conformance test
+
+```
+$ cd components/northstar-agent-runtime
+$ PYTHONPATH=.:tests python3 -m unittest test_artifact_completion
+Ran 12 tests in 0.669s
+OK
+```
+
+**With the artifacts present** (this host, `/home/muse-newapi/` populated):
+**12 methods ran, 12 passed, 0 skipped.**
+
+**On a clean clone** (a fresh `git clone` of the branch on a host where
+`/home/muse-newapi/` holds none of the slice artifacts): **12 methods ran, 4
+passed with real assertions, 8 skipped.**  The four that still assert are
+the ones that depend on no outside file: `test_04` (a pending canary must
+not be shaped like a real one), `test_09` (the comparison table is not
+inside a FABLE section), `test_11` (the design doc exists and covers every
+slice) and `test_12` (the design doc names every pending canary and the
+open items).  The eight that skip are the ones whose subject is a file
+outside the repository.
+
+The test was checked for **vacuity** by breaking a report four ways and
+confirming that each break was caught:
+
+| injected fault | caught by |
+|---|---|
+| `FABLE VERIFICATION` renamed in `slice1` | `test_02` |
+| a fabricated `CANARY:` line added to `slice2` | `test_04` |
+| `PEAK_INPUT_TOKENS` raised above the session maximum in `c52` | `test_08` |
+| `161/169` changed to `161/170` in `horizon` | `test_06` |
+
+### The full runtime suite
+
+```
+$ find /tmp -maxdepth 1 -type d -name "nsar-*" -exec rm -rf {} +
+$ cd components/northstar-agent-runtime
+$ PYTHONPATH=.:tests python3 -m unittest discover -s tests -p 'test_*.py'
+Ran 21027 tests in 219.243s
+FAILED (failures=20, errors=10, skipped=13)
+```
+
+**30 failing items.**  The stored baseline
+(`/home/muse-newapi/b173-refusal-row-baseline-failures.txt`, measured
+2026-11-13 23:40) holds **27**.  The diff is exactly three items, and they
+are **not this slice's**:
+
+```
+> FAIL: test_the_check_agrees_with_the_layout_test
+> FAIL: test_the_check_passes_on_the_current_repository
+> FAIL: test_the_registry_covers_every_module_on_disk
+```
+
+All three are `test_runtime_registration` failures caused by the
+`merged-tree-review` slice's module `merged_tree_review`, which is on disk
+but in neither `runtime_registration.REGISTRY` nor `pyproject.toml`'s
+`py-modules` (both greps: 0 hits).  `merged-tree-review` landed at
+`dbaff0ad` on 2026-11-14 07:14, **after** the baseline was measured.
+
+Verified pre-existing: a fresh clone checked out at `c42bae66` (this
+slice's third commit, before the two of its own) reports
+
+```
+Ran 37 tests in 0.144s
+FAILED (failures=3)
+```
+
+for the same suite.  The 21027 vs 21015 difference is exactly this slice's
+twelve new test methods, all passing.
+
+### The bench
+
+```
+$ make bench
+summary: 161/169 passed, 8 failed (12207 ms)
+```
+
+Saved complete to `/home/muse-newapi/b173-artifact-completion-bench-final.txt`
+(17 791 bytes).  The eight failing items are **item for item identical** to
+`b173-bench-baseline-failures.txt`:
+
+```
+$ diff <(sort -u b173-bench-baseline-failures.txt) \
+       <(grep '^✗' b173-artifact-completion-bench-final.txt | awk '{print $2}' | sort -u)
+(no output)
+```
+
+### The 30 slices, re-measured
+
+`bash /home/muse-newapi/b173-accept.sh <slug>` was run for each of the 30
+slices after this slice's changes.  The result is the "verdict after
+completion" column of the table above: **16 PASS, 14 FAIL.**  All 14
+failures are accounted for in §"Open items" -- 13 wait on a coordinator
+canary, 5 have a mutant survivor, 2 have a pre-existing failure in another
+slice's suite and 1 has a pre-existing failure in another slice's commit
+(the counts overlap).
