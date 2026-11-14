@@ -174,11 +174,18 @@ text survives.
 
 ## Tests
 
-`components/northstar-agent-runtime/tests/test_turn_truncation.py` — 26 test
+`components/northstar-agent-runtime/tests/test_turn_truncation.py` — 34 test
 methods covering: truncation to the delivered prefix (prefix correct,
 suffix unreachable), the record's pin / lengths / seq, zero delivery, full
 delivery with no record, out-of-range refusal, re-extend refusal, shortened
 re-truncation refusal, mismatched and tampered summary pins, a status that
-contradicts the report, the three delivery states, `history_for_resume` per
-state (partial prefix + marker, unknown flagged, delivered unchanged), the
-three driven paths, and the "no audio arithmetic in the code" check.
+contradicts the report, non-int / boolean delivery positions refused at both
+the constructor and `truncate()`, the three delivery states,
+`history_for_resume` per state (partial prefix + marker, unknown flagged,
+delivered unchanged), the three driven paths, and the "no audio arithmetic
+in the code" check.
+
+The mutant probe (`b173-mutant.sh turn-truncation`) reports **3/3 killed**:
+the `status`/`expected` comparison, the delivery-position type guard, and the
+negative-bound check each break the suite when mutated.
+
