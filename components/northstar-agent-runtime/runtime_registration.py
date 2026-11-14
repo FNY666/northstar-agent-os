@@ -1308,6 +1308,7 @@ REGISTRY = (
     _registration("reflection", "runtime", "2026-10-08", "Reflection: self-critique / revise / score bookkeeping for agent outputs."),
     _registration("refusal_detect", "refusal-detect", "2026-10-09", "Refusal detection (D-OUT-017), Simulated."),
     _registration("refusal_hold", "refusal-hold", "2026-11-14", "Refusal hold: a refusal row blocks the re-dispatch of the same action."),
+    _registration("refusal_hold_wiring", "refusal-hold-wiring", "2026-11-14", "Refusal-hold wiring: a recorded refusal blocks the re-seal of the same grant pin."),
     _registration("refusal_monitor", "runtime", "2026-10-07", "Refusal-efficacy monitor: refusal is a metric, not a safety property."),
     _registration("refusal_pattern_probes", "runtime", "2026-10-07", "Refusal-pattern + reward-hacking-attempt probes (process evaluation shapes)."),
     _registration("refusal_row", "refusal-row", "2026-11-14", "Refusal as a first-class row: a \"no\" that is an auditable record."),

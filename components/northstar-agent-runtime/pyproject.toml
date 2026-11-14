@@ -1187,6 +1187,7 @@ py-modules = [
     "reflection",
     "refusal_detect",
     "refusal_hold",
+    "refusal_hold_wiring",
     "refusal_monitor",
     "refusal_pattern_probes",
     "refusal_row",
