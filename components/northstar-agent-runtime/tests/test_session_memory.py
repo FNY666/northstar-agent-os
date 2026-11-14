@@ -21,11 +21,13 @@ from pathlib import Path
 import session_memory
 from session_memory import (
     CONTINUATION_OPTIONS,
+    SESSION_ITEM_ROLES,
     MemorySessionBackend,
     SessionBackend,
     SessionConfigError,
     SessionContentError,
     SessionEmptyError,
+    SessionError,
     SessionExclusionError,
     SessionIntegrityError,
     SessionItem,
@@ -860,3 +862,82 @@ class SettingValidationTests(unittest.TestCase):
 
     def test_a_none_limit_is_accepted(self):
         self.assertIsNone(SessionSettings(limit=None).limit)
+
+
+class PublicSurfaceTests(unittest.TestCase):
+    """Every public name of the module is exercised by a named test."""
+
+    def test_the_session_error_base_class_is_the_parent_of_every_error(self):
+        """A caller can catch SessionError alone and be sure it caught
+        one of this module's refusals."""
+        for error in (
+            SessionConfigError,
+            SessionExclusionError,
+            SessionEmptyError,
+            SessionIntegrityError,
+            SessionContentError,
+        ):
+            self.assertTrue(issubclass(error, SessionError), error.__name__)
+        self.assertTrue(issubclass(SessionError, Exception))
+
+    def test_resolved_limit_prefers_a_non_none_override(self):
+        """The public helper behind the per-run override rule."""
+        default = SessionSettings(limit=2)
+        self.assertEqual(default.resolved_limit(None), 2)
+        self.assertEqual(default.resolved_limit(SessionSettings(limit=5)), 5)
+        self.assertEqual(default.resolved_limit(SessionSettings(limit=None)), 2)
+        self.assertIsNone(SessionSettings(limit=None).resolved_limit(None))
+
+    def test_the_store_exposes_its_settings_and_backend(self):
+        backend = MemorySessionBackend()
+        settings = SessionSettings(limit=3)
+        store = SessionStore(backend, settings)
+        self.assertIs(store.settings, settings)
+        self.assertIs(store.backend, backend)
+        self.assertEqual(store.settings.limit, 3)
+
+    def test_the_backend_read_returns_the_rows_in_insertion_order(self):
+        backend = MemorySessionBackend()
+        store = SessionStore(backend)
+        store.add_items([_item("user", "a"), _item("assistant", "b")])
+        rows = backend.read()
+        self.assertEqual([row["role"] for row in rows], ["user", "assistant"])
+        self.assertEqual([row["seq"] for row in rows], [0, 1])
+
+    def test_the_backend_delete_last_removes_and_returns_the_last_row(self):
+        backend = MemorySessionBackend()
+        SessionStore(backend).add_items([_item("user", "a"), _item("assistant", "b")])
+        row = backend.delete_last()
+        self.assertEqual(row["role"], "assistant")
+        self.assertEqual(len(backend.read()), 1)
+
+    def test_the_backend_delete_last_on_an_empty_backend_answers_none(self):
+        """The backend's own contract: an empty delete answers None. The
+        store turns that None into a refusal."""
+        self.assertIsNone(MemorySessionBackend().delete_last())
+
+    def test_the_run_result_carries_the_model_input_and_the_stored_items(self):
+        store = _store()
+        result = run_session(
+            store,
+            ["q"],
+            new_items=[_item("user", "q"), _item("assistant", "a")],
+        )
+        self.assertEqual(result.model_input, ["q"])
+        self.assertEqual([item.content for item in result.stored], ["q", "a"])
+        self.assertEqual(result.history, [])
+
+    def test_the_run_result_history_holds_the_retrieved_history(self):
+        store = _store()
+        store.add_items([_item("user", "old")])
+        result = run_session(store, ["q"], new_items=[_item("user", "q")])
+        self.assertEqual([item.content for item in result.history], ["old"])
+
+    def test_the_role_vocabulary_is_the_documented_four(self):
+        self.assertEqual(
+            SESSION_ITEM_ROLES, ("user", "assistant", "tool_call", "tool_result")
+        )
+        for role in SESSION_ITEM_ROLES:
+            store = _store()
+            store.add_items([_item(role, "x")])
+            self.assertEqual(store.get_items()[0].role, role)
