@@ -17,6 +17,16 @@ import tempfile
 import unittest
 from pathlib import Path
 
+# A stale ``__pycache__/runtime_registration.*.pyc`` makes Python import the
+# *previous* source of this module when the source changed without changing
+# size or second-resolution mtime -- which is exactly what a mutation probe
+# does.  Drop the cached bytecode before the import below so the tests always
+# run the source that is on disk right now.
+for _cached in Path(__file__).resolve().parents[1].glob(
+    "__pycache__/runtime_registration.*.pyc"
+):
+    _cached.unlink(missing_ok=True)
+
 import runtime_registration
 from runtime_registration import (
     REGISTRY,
@@ -303,3 +313,53 @@ class RealRepositoryCheckTests(unittest.TestCase):
     def test_the_check_agrees_with_the_layout_test(self):
         """The registry and ``tests/test_module_layout.py`` see the same disk."""
         self.assertEqual(set(modules_on_disk()), set(registered_module_names()))
+
+
+class RegistrationEqualityTests(unittest.TestCase):
+    """A registry record compares by value, and hashes like its value.
+
+    These are not decoration: the three-way check and the negative cases
+    compare records and build sets of them, so a broken ``__eq__`` or
+    ``__hash__`` would make a genuinely broken registry look consistent.
+    """
+
+    def _record(self, module="a_module"):
+        return Registration(module, "a-slice", "2026-11-14", "A module.")
+
+    def test_two_records_with_the_same_fields_are_equal(self):
+        self.assertEqual(self._record(), self._record())
+
+    def test_records_differing_in_any_field_are_not_equal(self):
+        base = self._record()
+        self.assertNotEqual(base, self._record("other_module"))
+        self.assertNotEqual(
+            base, Registration("a_module", "other-slice", "2026-11-14", "A module.")
+        )
+        self.assertNotEqual(
+            base, Registration("a_module", "a-slice", "2026-01-01", "A module.")
+        )
+        self.assertNotEqual(
+            base, Registration("a_module", "a-slice", "2026-11-14", "Another.")
+        )
+
+    def test_a_record_is_not_equal_to_a_non_record(self):
+        self.assertNotEqual(self._record(), "a_module")
+        self.assertNotEqual(self._record(), None)
+
+    def test_equal_records_hash_equally(self):
+        self.assertEqual(hash(self._record()), hash(self._record()))
+
+    def test_a_record_can_live_in_a_set_without_collapsing_distinct_records(self):
+        members = {self._record(), self._record(), self._record("other_module")}
+        self.assertEqual(len(members), 2)
+
+    def test_a_record_reports_its_fields_as_a_dict(self):
+        self.assertEqual(
+            self._record().as_dict(),
+            {
+                "module": "a_module",
+                "slice_slug": "a-slice",
+                "registered_on": "2026-11-14",
+                "description": "A module.",
+            },
+        )
