@@ -162,7 +162,9 @@ class TurnItem:
         if self.delivered_len is not None:
             if not isinstance(self.delivered_len, int) or isinstance(self.delivered_len, bool):
                 raise TurnTruncationError("delivered_len must be an int or None")
-            if self.delivered_len < 0 or self.delivered_len > self.generated_len:
+            if self.delivered_len < 0:
+                raise DeliveryRangeError(f"delivered_len {self.delivered_len} is negative")
+            if self.delivered_len > self.generated_len:
                 raise DeliveryRangeError(
                     f"delivered_len {self.delivered_len} outside 0..{self.generated_len}"
                 )
@@ -270,7 +272,9 @@ def truncate(item: TurnItem, delivered_len: int, seq: int) -> TruncationOutcome:
     """
     if not isinstance(delivered_len, int) or isinstance(delivered_len, bool):
         raise DeliveryRangeError(f"delivered_len must be an int, got {delivered_len!r}")
-    if delivered_len < 0 or delivered_len > item.generated_len:
+    if delivered_len < 0:
+        raise DeliveryRangeError(f"delivered_len {delivered_len} is negative")
+    if delivered_len > item.generated_len:
         raise DeliveryRangeError(
             f"delivered_len {delivered_len} outside 0..{item.generated_len} for item {item.item_id!r}"
         )
