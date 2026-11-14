@@ -13,6 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import endpoint_identity  # noqa: E402
 from endpoint_identity import (  # noqa: E402
     ACCEPTED,
     CONFLICT,
@@ -316,3 +317,5 @@ class TestEndToEndPaths(unittest.TestCase):
             prove_at_effect(self.b, EPOCH_A)  # the caller presents a new epoch
         with self.assertRaises(UnprovenIdentityError):
             prove_at_effect(self.a, None)  # the destination attested nothing
+
+
