@@ -37,7 +37,7 @@ OUTCOME_INFRA = "infra"
 
 with the docstring rule that `infra` "is a *third* state, never a synonym for
 `failed`: an environment failure says nothing about the proposal under test"
-(`ledger_concurrency.py:106-110`, `VerificationResult` at `ledger_concurrency.py:585-596`).
+(`ledger_concurrency.py:106-111`, `VerificationResult` at `ledger_concurrency.py:583-596`).
 
 **[CODE]** That tri-state lives at the level of *one verification run*, not at the
 level of *one scored case in an aggregate*. There is no module in the runtime that
@@ -56,7 +56,12 @@ unscored case out of a pass-rate denominator.
 
 > "in collaboration with 250+ industry experts"
 
+> "the hardest tier remains far from saturated: across mainstream harness and backbone configurations"
+
 > "the average full pass rate is below 1%"
+
+(The abstract frames the below-1% figure as applying to the hardest tier; it
+does not use the phrase "Last-Exam layer".)
 
 **[SOURCE]** Appendix C.3.5, Table 4 — "Distribution of judge type and execution
 locale across the open-sourced task workflows in the ALE reference task tree."
@@ -66,23 +71,26 @@ locale across the open-sourced task workflows in the ALE reference task tree."
 | Code-based (deterministic) | 93.2% |
 | LLM-as-judge | 6.8% |
 
-**[SOURCE]** Appendix C.3.3, "Composition patterns":
+(The source states the scope of this table itself: the percentages count task
+*workflows* — `main.py` implementations — in the open-sourced reference task
+tree, derived by static analysis, not task instances and not the full release.)
+
+**[SOURCE]** §3.3, "Evaluation Modes" — the composition patterns:
+
+> "Gate-and-score is the most common pattern"
 
 > "Gate-and-score. A hard precondition that forces 0 on failure, followed by a continuous score."
 
 > "Used to prevent reward hacking by superficially close artifacts."
 
-**[SOURCE]** §C.3.3 / task cards:
-
 > "failure on the gate forces the task score to 0 regardless of partial progress on other criteria"
 
 **[SOURCE]** §4.1:
 
-> "Each run is capped at five hours; the overall timeout rate is 3.8%"
+> "Each run is capped at five hours"
 
-**[SOURCE]** §C.3.6, "Output presence and shape checks": workflows treat "no output
-produced" or "output in the wrong shape" as "score 0 rather than as a crash", so a
-timeout or refusal still yields a defined number.
+(The same paragraph gives the overall timeout rate as 3.8%, ranging from roughly
+1% for lightweight harnesses to 5.7% for Claude Code.)
 
 ### 2.2 Inspect AI — "Scoring Policy" (read 2026-11-14)
 
