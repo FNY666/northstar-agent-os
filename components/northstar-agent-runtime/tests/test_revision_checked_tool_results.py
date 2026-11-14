@@ -82,6 +82,39 @@ class ResultConstructionTests(unittest.TestCase):
         self.assertIs(result.payload, payload)
         self.assertIsNone(result.result_revision)
 
+    def test_result_as_dict_carries_the_schema_pin(self):
+        """The JSON-safe record names the schema and both revisions."""
+        result = RevisionCheckedResult(
+            tool_call_id="call-a", read_revision=41, payload={"x": 1}
+        )
+        record = result.as_dict()
+        self.assertEqual(record["schema"], "northstar.revision-checked-tool-results.v1")
+        self.assertEqual(record["tool_call_id"], "call-a")
+        self.assertEqual(record["read_revision"], 41)
+        self.assertIsNone(record["result_revision"])
+
+    def test_with_result_revision_returns_a_copy_and_leaves_the_original(self):
+        """Assigning a revision does not mutate the result that was read."""
+        result = RevisionCheckedResult(
+            tool_call_id="call-a", read_revision=41, payload={"x": 1}
+        )
+        assigned = result.with_result_revision(42)
+        self.assertEqual(assigned.result_revision, 42)
+        self.assertEqual(assigned.read_revision, 41)
+        self.assertIs(assigned.payload, result.payload)
+        # The original is untouched.
+        self.assertIsNone(result.result_revision)
+
+    def test_with_result_revision_validates_its_argument(self):
+        """A revision is an integer; nothing else is accepted."""
+        result = RevisionCheckedResult(
+            tool_call_id="call-a", read_revision=41, payload={}
+        )
+        with self.assertRaises(InvalidRevisionError):
+            result.with_result_revision("42")
+        with self.assertRaises(InvalidRevisionError):
+            result.with_result_revision(-1)
+
 
 class CommitPathTests(unittest.TestCase):
     """Path (a): the result matches the current revision."""
@@ -190,6 +223,63 @@ class StaleResultPathTests(unittest.TestCase):
             ledger.evidence_slot.get("call-late").payload, stale.payload
         )
 
+    def test_evidence_entries_lists_retained_results_in_order(self):
+        """The slot keeps every rejected result, in retention order."""
+        ledger = RevisionCheckedToolResults(current_revision=42)
+        first = RevisionCheckedResult(
+            tool_call_id="call-1", read_revision=41, payload={"n": 1}
+        )
+        second = RevisionCheckedResult(
+            tool_call_id="call-2", read_revision=40, payload={"n": 2}
+        )
+        ledger.commit(first, 42, lambda res: None)
+        ledger.commit(second, 42, lambda res: None)
+
+        entries = ledger.evidence_slot.entries()
+        self.assertEqual(len(entries), 2)
+        self.assertEqual(
+            [e.tool_call_id for e in entries], ["call-1", "call-2"]
+        )
+        self.assertEqual(ledger.evidence_slot.name, "default")
+
+    def test_outcome_record_names_both_revisions_and_the_verdict(self):
+        """The commit outcome is a complete, JSON-safe record."""
+        ledger = RevisionCheckedToolResults(current_revision=42)
+        stale = RevisionCheckedResult(
+            tool_call_id="call-late", read_revision=41, payload={"goal": "old"}
+        )
+        outcome = ledger.commit(stale, 42, lambda res: None)
+
+        record = outcome.as_dict()
+        self.assertEqual(
+            record["schema"], "northstar.revision-checked-tool-results.v1"
+        )
+        self.assertTrue(record["rejected"])
+        self.assertFalse(record["committed"])
+        self.assertEqual(record["read_revision"], 41)
+        self.assertEqual(record["current_revision"], 42)
+        self.assertEqual(record["expected_revision"], 41)
+        self.assertIsNone(record["result_revision"])
+        self.assertEqual(record["reason"], "revision_mismatch")
+        self.assertEqual(record["evidence_slot"], "default")
+
+    def test_ledger_records_every_outcome_in_order(self):
+        """The ledger keeps the history of what it decided."""
+        ledger = RevisionCheckedToolResults(current_revision=41)
+        fresh = RevisionCheckedResult(
+            tool_call_id="call-a", read_revision=41, payload={}
+        )
+        stale = RevisionCheckedResult(
+            tool_call_id="call-b", read_revision=41, payload={}
+        )
+        ledger.commit(fresh, 41, lambda res: None)
+        ledger.commit(stale, 42, lambda res: None)
+
+        outcomes = ledger.outcomes()
+        self.assertEqual(len(outcomes), 2)
+        self.assertTrue(outcomes[0].committed)
+        self.assertTrue(outcomes[1].rejected)
+
 
 class ReconciliationTests(unittest.TestCase):
     """The stale result goes to reconciliation -- as a record, not a rewrite."""
@@ -272,6 +362,26 @@ class ReconciliationTests(unittest.TestCase):
         ledger = RevisionCheckedToolResults(current_revision=41)
         with self.assertRaises(TypeError):
             ledger.reconcile({"tool_call_id": "call-a"}, {})
+
+    def test_reconciliation_record_is_json_safe_and_complete(self):
+        """The reconciliation record names everything, with the schema pin."""
+        ledger = RevisionCheckedToolResults(current_revision=42)
+        stale = RevisionCheckedResult(
+            tool_call_id="call-late", read_revision=41, payload={"goal": "old"}
+        )
+        ledger.commit(stale, 42, lambda res: None)
+
+        record = ledger.reconcile(stale, {}).as_dict()
+
+        self.assertEqual(
+            record["schema"], "northstar.revision-checked-tool-results.v1"
+        )
+        self.assertEqual(record["tool_call_id"], "call-late")
+        self.assertEqual(record["read_revision"], 41)
+        self.assertEqual(record["current_revision"], 42)
+        self.assertFalse(record["applicable"])
+        self.assertEqual(record["status"], "stale_evidence")
+        self.assertEqual(record["evidence_slot"], "default")
 
 
 class AtomicityTests(unittest.TestCase):
@@ -428,3 +538,99 @@ class AtomicityTests(unittest.TestCase):
             ledger.commit(result, -1, lambda res: None)
         with self.assertRaises(InvalidRevisionError):
             ledger.commit(result, 41.0, lambda res: None)
+
+
+class OrphanAdoptionTests(unittest.TestCase):
+    """The behaviour the adopted orphan work claims, checked end to end.
+
+    These are the tests this slice adds on top of the six orphan test
+    methods it inherited: they cover the *adjudication* itself -- that
+    the records the module emits are complete enough to be audited, that
+    the evidence slot really is a slot (one named place, not a growing
+    list of places), and that the revision numbers in the JSON-safe
+    records are the numbers the ledger actually holds.
+    """
+
+    def test_the_schema_pin_is_the_same_on_every_record(self):
+        """Result, outcome and reconciliation all carry one schema pin."""
+        ledger = RevisionCheckedToolResults(current_revision=42)
+        stale = RevisionCheckedResult(
+            tool_call_id="call-late", read_revision=41, payload={"goal": "old"}
+        )
+        outcome = ledger.commit(stale, 42, lambda res: None)
+        reconciliation = ledger.reconcile(stale, {})
+        pin = "northstar.revision-checked-tool-results.v1"
+        self.assertEqual(stale.as_dict()["schema"], pin)
+        self.assertEqual(outcome.as_dict()["schema"], pin)
+        self.assertEqual(reconciliation.as_dict()["schema"], pin)
+
+    def test_a_committed_outcome_carries_no_evidence_slot(self):
+        """A commit that succeeded left no evidence behind."""
+        ledger = RevisionCheckedToolResults(current_revision=41)
+        fresh = RevisionCheckedResult(
+            tool_call_id="call-a", read_revision=41, payload={}
+        )
+        outcome = ledger.commit(fresh, 41, lambda res: None)
+        record = outcome.as_dict()
+        self.assertTrue(record["committed"])
+        self.assertFalse(record["rejected"])
+        self.assertIsNone(record["evidence_slot"])
+        self.assertEqual(record["reason"], "committed")
+        self.assertEqual(record["result_revision"], 42)
+        self.assertEqual(len(ledger.evidence_slot), 0)
+
+    def test_the_ledger_advances_its_own_revision_only_on_a_commit(self):
+        """A rejection leaves the revision where it was."""
+        ledger = RevisionCheckedToolResults(current_revision=41)
+        stale = RevisionCheckedResult(
+            tool_call_id="call-late", read_revision=40, payload={}
+        )
+        ledger.commit(stale, 41, lambda res: None)
+        self.assertEqual(ledger.current_revision, 41)
+        fresh = RevisionCheckedResult(
+            tool_call_id="call-fresh", read_revision=41, payload={}
+        )
+        ledger.commit(fresh, 41, lambda res: None)
+        self.assertEqual(ledger.current_revision, 42)
+
+    def test_one_named_slot_holds_the_evidence(self):
+        """The evidence lives in one named place, not in a growing list."""
+        ledger = RevisionCheckedToolResults(current_revision=42)
+        for index in range(3):
+            stale = RevisionCheckedResult(
+                tool_call_id=f"call-{index}", read_revision=41, payload={"n": index}
+            )
+            ledger.commit(stale, 42, lambda res: None)
+        slot = ledger.evidence_slot
+        self.assertEqual(slot.name, "default")
+        self.assertEqual(len(slot), 3)
+        self.assertEqual(len(ledger.outcomes()), 3)
+        # The slot is reachable by tool call id, and it is the same slot.
+        retained = slot.get("call-1")
+        self.assertIsNotNone(retained)
+        self.assertEqual(retained.payload, {"n": 1})
+        self.assertIsNone(slot.get("call-absent"))
+
+    def test_the_record_carries_the_revisions_the_ledger_holds(self):
+        """The JSON-safe record and the ledger agree, revision for revision."""
+        ledger = RevisionCheckedToolResults(current_revision=41)
+        fresh = RevisionCheckedResult(
+            tool_call_id="call-a", read_revision=41, payload={}
+        )
+        outcome = ledger.commit(fresh, 41, lambda res: None)
+        record = outcome.as_dict()
+        self.assertEqual(record["current_revision"], 41)
+        self.assertEqual(record["result_revision"], ledger.current_revision)
+        self.assertEqual(record["read_revision"], 41)
+        self.assertEqual(record["tool_call_id"], "call-a")
+
+    def test_retaining_the_same_result_twice_is_idempotent(self):
+        """Re-retaining the same evidence does not grow the slot."""
+        ledger = RevisionCheckedToolResults(current_revision=42)
+        stale = RevisionCheckedResult(
+            tool_call_id="call-late", read_revision=41, payload={"goal": "old"}
+        )
+        ledger.commit(stale, 42, lambda res: None)
+        slot = ledger.evidence_slot
+        slot.retain(stale)
+        self.assertEqual(len(slot), 1)
