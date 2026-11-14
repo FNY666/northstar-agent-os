@@ -815,3 +815,48 @@ class ReopenedStoreTests(unittest.TestCase):
         SessionStore(backend).add_items([_item("user", "a")])
         reopened = SessionStore(backend)
         self.assertTrue(reopened.get_items()[0].digest.startswith("sha256:"))
+
+
+class SettingValidationTests(unittest.TestCase):
+    """The validation branches of the frozen records."""
+
+    def test_a_bool_seq_is_refused(self):
+        """A bool is an int subclass in Python, so a bool seq must be
+        refused explicitly."""
+        with self.assertRaises(SessionConfigError):
+            SessionItem(role="user", content="a", seq=True)
+
+    def test_a_non_integer_seq_is_refused(self):
+        for bad in ("0", 1.5, None, [0]):
+            with self.assertRaises(SessionConfigError):
+                SessionItem(role="user", content="a", seq=bad)
+
+    def test_a_bool_limit_is_refused(self):
+        """A bool limit must be refused: ``True`` is not a limit of one."""
+        with self.assertRaises(SessionConfigError):
+            SessionSettings(limit=True)
+
+    def test_a_zero_limit_is_accepted(self):
+        """Zero is a legal limit: it retrieves nothing, and it must not
+        be refused as if it were negative."""
+        self.assertEqual(SessionSettings(limit=0).limit, 0)
+
+    def test_a_zero_limit_retrieves_nothing_from_the_runner(self):
+        store = _store()
+        store.add_items([_item("user", "a"), _item("assistant", "b")])
+        model_input = begin_turn(store, ["n"], settings=SessionSettings(limit=0))
+        self.assertEqual(model_input, ["n"])
+
+    def test_a_zero_limit_on_the_session_default_retrieves_nothing(self):
+        store = _store(settings=SessionSettings(limit=0))
+        store.add_items([_item("user", "a")])
+        self.assertEqual(begin_turn(store, ["n"]), ["n"])
+
+    def test_a_zero_limit_resolved_override_wins_over_the_default(self):
+        store = _store(settings=SessionSettings(limit=5))
+        store.add_items([_item("user", f"i{index}") for index in range(5)])
+        model_input = begin_turn(store, ["n"], settings=SessionSettings(limit=0))
+        self.assertEqual(model_input, ["n"])
+
+    def test_a_none_limit_is_accepted(self):
+        self.assertIsNone(SessionSettings(limit=None).limit)
