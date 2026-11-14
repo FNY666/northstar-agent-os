@@ -170,6 +170,49 @@ class ScopeRenderingTests(unittest.TestCase):
             )
         self.assertTrue(svc.Scope().is_empty())
 
+    def test_a_block_without_a_trailing_newline_is_refused(self):
+        # The parser reads header lines up to a newline. A block whose last
+        # line has no newline at all must be refused, not half-read: a
+        # truncated carry is exactly the shape of a dropped scope.
+        good = svc.verbatim_scope_block(_scope())
+        stripped = good.rstrip("\n")
+        self.assertNotEqual(stripped, good)
+        with self.assertRaises(svc.MalformedScopeError):
+            svc.parse_scope_block(stripped)
+
+    def test_the_refusal_message_names_the_offending_line(self):
+        # The refusal must quote the line it refused, and it must do so on
+        # one line: a message carrying a raw newline would corrupt the
+        # audit log it goes into and would hide which line was offending.
+        good = svc.verbatim_scope_block(_scope())
+        broken = good.replace(svc.BLOCK_BEGIN + "\n", svc.BLOCK_BEGIN + "\n\n", 1)
+        self.assertNotEqual(broken, good)
+        with self.assertRaises(svc.MalformedScopeError) as caught:
+            svc.parse_scope_block(broken)
+        message = str(caught.exception)
+        self.assertNotIn("\n", message)
+        self.assertIn("malformed", message)
+        self.assertTrue(message.endswith("''"), message)
+
+    def test_a_header_whose_length_is_too_long_is_refused(self):
+        # The length prefix is what delimits a value. A value shorter than
+        # its prefix says must be refused, never silently cut short: a
+        # half-read instruction is a dropped instruction.
+        good = svc.verbatim_scope_block(_scope())
+        broken = good.replace("scope_id[7]:", "scope_id[99]:", 1)
+        self.assertNotEqual(broken, good)
+        with self.assertRaises(svc.MalformedScopeError):
+            svc.parse_scope_block(broken)
+
+    def test_the_end_marker_is_required(self):
+        # Both markers are load-bearing: a block that lost its end marker
+        # was truncated, and a truncated carry must not parse.
+        good = svc.verbatim_scope_block(_scope())
+        broken = good.replace(svc.BLOCK_END, "<<OTHER-END>>")
+        self.assertNotEqual(broken, good)
+        with self.assertRaises(svc.MalformedScopeError):
+            svc.parse_scope_block(broken)
+
 
 class ScopeHashTests(unittest.TestCase):
     """The hash is canonical: field order is irrelevant, content is not."""
