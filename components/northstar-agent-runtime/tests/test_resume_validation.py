@@ -203,6 +203,67 @@ class ValidateTest(unittest.TestCase):
         with self.assertRaises(InvalidSchemaError):
             v.declare("m#1", {"q": 1}, {"required": ["ghost"]}, seq=2)
 
+    def test_schema_with_inverted_bounds_is_refused(self):
+        from resume_validation import InvalidSchemaError, ResumeValidator
+
+        v = ResumeValidator()
+        with self.assertRaises(InvalidSchemaError):
+            v.declare(
+                "b#0",
+                {"q": 1},
+                {"fields": {"n": {"type": "int", "minimum": 10, "maximum": 0}}},
+                seq=1,
+            )
+
+    def test_schema_with_non_numeric_bound_is_refused(self):
+        from resume_validation import InvalidSchemaError, ResumeValidator
+
+        v = ResumeValidator()
+        with self.assertRaises(InvalidSchemaError):
+            v.declare(
+                "b#1",
+                {"q": 1},
+                {"fields": {"n": {"type": "int", "minimum": "zero"}}},
+                seq=1,
+            )
+
+    def test_schema_with_non_finite_bound_is_refused(self):
+        from resume_validation import InvalidSchemaError, ResumeValidator
+
+        v = ResumeValidator()
+        with self.assertRaises(InvalidSchemaError):
+            v.declare(
+                "b#2",
+                {"q": 1},
+                {"fields": {"n": {"type": "float", "minimum": float("inf")}}},
+                seq=1,
+            )
+
+    def test_schema_bounds_on_a_non_numeric_field_are_refused(self):
+        from resume_validation import InvalidSchemaError, ResumeValidator
+
+        v = ResumeValidator()
+        with self.assertRaises(InvalidSchemaError):
+            v.declare(
+                "b#3",
+                {"q": 1},
+                {"fields": {"s": {"type": "str", "minimum": 0}}},
+                seq=1,
+            )
+
+    def test_empty_enum_is_refused(self):
+        from resume_validation import InvalidSchemaError, ResumeValidator
+
+        v = ResumeValidator()
+        with self.assertRaises(InvalidSchemaError):
+            v.declare(
+                "e#1",
+                {"q": 1},
+                {"fields": {"s": {"type": "str", "enum": []}}},
+                seq=1,
+            )
+
+
 
 class ResolveTest(unittest.TestCase):
     def setUp(self):
