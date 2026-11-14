@@ -82,8 +82,8 @@ so it is not affected by a flip — but it is the same *shape* of decision
 
 **The MCP client drops the annotations on the floor.**
 `components/northstar-agent-runtime/mcp_client.py` parses `tools/list`
-(line 611) and reads, per tool entry: `name` (line 621), `description`
-(line 627), `inputSchema` (line 628) and `outputSchema` (line 648). It never
+(line 610) and reads, per tool entry: `name` (line 620), `description`
+(line 625), `inputSchema` (line 626) and `outputSchema` (line 647). It never
 reads `raw.get("annotations")` — a grep for `get("annotations"` in that file
 returns nothing. The `RemoteTool` dataclass (line 171) does carry an
 `annotations: dict[str, Any]` field, but it is never populated: the
@@ -94,12 +94,15 @@ A grep for `annotations` across the whole file returns exactly two hits: the
 declaration (line 176).
 
 **The admission pin does not cover the hints either.** `tool_definition_digest`
-(mcp_client.py line 178) hashes `(server, name, description, input_schema,
+(mcp_client.py line 179) hashes `(server, name, description, input_schema,
 output_schema)` under the JCS canonicalization — the annotation set is not in
 the payload. `tool_pinning.hash_definition` (tool_pinning.py line 44) hashes
-`name, description, inputSchema, version` — also no annotation. A server can
-therefore flip the hint it publishes for a tool from read-only to destructive
-while every existing digest stays identical.
+`name, description, inputSchema, version` — also no annotation. The live
+`refresh_tools` (mcp_client.py line 971) re-lists the tools, recomputes those
+digests (line 1034) and quarantines the server when one differs (the drift
+comparison is at lines 1039-1048) — but the hint set is not in the digest it
+compares. A server can therefore flip the hint it publishes for a tool from
+read-only to destructive while every existing digest stays identical.
 
 **Nothing compares a hint set across sessions.** A grep for the MCP hint
 spellings across `components/` returns no annotation-handling code outside
@@ -279,10 +282,10 @@ They are complementary, and both are standalone layers today: neither is
 imported by the gate.
 
 The *live* admission pin is a third thing, and it lives in the MCP client:
-`mcp_client.tool_definition_digest` (line 178) digests
+`mcp_client.tool_definition_digest` (line 179) digests
 `(server, name, description, input_schema, output_schema)` under the JCS
 canonicalization, and `refresh_tools` recomputes those digests and
-quarantines a server on mismatch (see the comment at mcp_client.py line 688).
+quarantines a server on mismatch (see the comment at mcp_client.py line 690).
 That pin is the real-world instance of the *definition* half of the table
 above — and, like `tool_pinning.hash_definition`, it does not cover the
 annotation set, which is why the claimed-effect half needs its own layer.
