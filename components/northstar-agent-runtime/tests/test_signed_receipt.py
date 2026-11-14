@@ -52,6 +52,7 @@ from signed_receipt import (
     MissingSignatureError,
     SignatureMismatchError,
     SignedReceipt,
+    SignedReceiptError,
     canonical_receipt_bytes,
     canonical_receipt_text,
     issuer_key_id,
@@ -334,3 +335,5 @@ class DependencyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
