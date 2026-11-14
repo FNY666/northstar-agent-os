@@ -200,19 +200,20 @@ class FieldSpec:
                     f"field {name!r} {bound_name} must be a number, "
                     f"got {type(bound).__name__}"
                 )
-            if kind in _NUMERIC_TYPES and isinstance(bound, float):
-                if bound != bound:
-                    raise InvalidSchemaError(
-                        f"field {name!r} {bound_name} must be a finite number"
-                    )
-                if bound == float("inf"):
-                    raise InvalidSchemaError(
-                        f"field {name!r} {bound_name} must be a finite number"
-                    )
-                if bound == float("-inf"):
-                    raise InvalidSchemaError(
-                        f"field {name!r} {bound_name} must be a finite number"
-                    )
+            if kind in _NUMERIC_TYPES:
+                if isinstance(bound, float):
+                    if bound != bound:
+                        raise InvalidSchemaError(
+                            f"field {name!r} {bound_name} must be a finite number"
+                        )
+                    if bound == float("inf"):
+                        raise InvalidSchemaError(
+                            f"field {name!r} {bound_name} must be a finite number"
+                        )
+                    if bound == float("-inf"):
+                        raise InvalidSchemaError(
+                            f"field {name!r} {bound_name} must be a finite number"
+                        )
         if minimum is not None and maximum is not None and minimum > maximum:
             raise InvalidSchemaError(
                 f"field {name!r} minimum {minimum} is above maximum {maximum}"
