@@ -45,10 +45,14 @@ final `ACCEPT: PASS (n/m, k skipped) <slug>`.
 The task book's Background §1 names the slices in five groups (A: report
 never written, 6; B: report incomplete, 9; C: manifest missing, 13; D: bench
 product truncated, 2; E: `FULL_SUITE` wording, 5) plus five `REPORT_NUMBERS`
-slices. The **union of the explicitly named slices is 30**, not 16.
+slices. The arithmetic union of those group tables is **30** — and the
+Background's prose names **one more**, `refusal-row`, which appears in the
+`REPORT_NUMBERS` discussion ("`refusal-row` and `langgraph-retry-clears-writes`
+also fail here") without being in any group table.  The **union of every
+slice the task book names is 31**, not 16.
 
 This slice therefore works the **union of every slice the task book names
-explicitly** (30 slices), because each named slice is named for a reason and
+explicitly** (31 slices), because each named slice is named for a reason and
 leaving any of them unmeasured would be an unmeasured claim. The table in
 §2 below has one row per slice.
 
@@ -66,11 +70,11 @@ inherits that book's canary** — and `grep -rl … | head -n1` then picks
 whichever file the directory read order yields first.
 
 Measured consequence on this branch: the `artifact-completion` session's own
-JSONL now contains **every** slice's canary (it read all 30 task books), and
-`grep -rl` returns it first for 12 of the 30 slices. Those 12 then get
-`REPORT_NUMBERS` measured against *this* session's JSONL — a 34–193-message
-transcript whose peak input is far below the slice's real peak — and every
-one of them FAILs.
+JSONL now contains **every** slice's canary (it read all 31 task books), and
+`grep -rl` returns it first for **12** of the 16 slices that have a canary.
+Those 12 then get `REPORT_NUMBERS` measured against *this* session's JSONL —
+a transcript whose peak input (259 886) is far below those slices' real
+peaks — and every one of them FAILs.
 
 The sharp discriminator (measured in
 `/home/muse-newapi/b173-discussion-report-numbers-fix-2026-11-14.md`) is:
@@ -101,54 +105,68 @@ script can print.
 
 | slice | original verdict | which items were missing | what was added | verdict after completion |
 |---|---|---|---|---|
-| `slice1` | FAIL 4/11 (no report at all) | REPORT, CANARY, FABLE_VERIF, FULL_SUITE, BENCH, NEW_TESTS, TESTS_RAN, MUTANT | full report written from the slice's own commit + session (`cda665a1`); FABLE VERIFICATION section; sourced `Ran 19388` line; `161/169` line; bench product; manifest + mutant probe (2/3) | **FAIL 10/11** — only CANARY left (pending coordinator canary) |
-| `slice2` | FAIL 4/11 (no report at all) | REPORT, CANARY, FABLE_VERIF, FULL_SUITE, BENCH, NEW_TESTS, TESTS_RAN, MUTANT | full report written from commit `38d175e9`; FABLE VERIFICATION section (Codex-implemented: no CC session exists, stated as such); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (0/3) | **FAIL 9/11** — CANARY (pending coordinator canary) + MUTANT (0/3 survived) |
-| `slice3` | FAIL 4/11 (no report at all) | REPORT, CANARY, FABLE_VERIF, FULL_SUITE, BENCH, NEW_TESTS, TESTS_RAN, MUTANT | full report written from commit `f0a68876`; FABLE VERIFICATION section (session `ca78c9dd`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (3/3) | **FAIL 10/11** — only CANARY left (pending coordinator canary) |
-| `slice4` | FAIL 3/10 — COMMIT failed forever (subjects `B173 slice4 (part 1/2):` never match `^B173 slice4:`) | COMMIT, REPORT, CANARY, FABLE_VERIF, FULL_SUITE, BENCH, NEW_TESTS, TESTS_RAN | standalone empty commit `c42bae66` `B173 slice4: consolidate the slice-4 commits under one slug prefix`; full report from commits `ffc5dfe2`/`4fe1ff28` + the coordinator's follow-up summary; FABLE VERIFICATION section; sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (3/3) | **FAIL 8/10** — CANARY (pending coordinator canary) + NEW_TESTS (the ten test methods live in the `(part 2)` commit, which the script's slug-scoped aggregation does not reach) |
-| `slice5` | FAIL 5/11 (no FABLE VERIFICATION, no canary, no `19xxx`, no `161/169`) | CANARY, FABLE_VERIF, FULL_SUITE, BENCH, MUTANT | FABLE VERIFICATION section (session `4d909e3b`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (3/3) | **FAIL 10/11** — only CANARY left (pending coordinator canary) |
-| `slice6` | FAIL 4/11 (no report at all) | REPORT, CANARY, FABLE_VERIF, FULL_SUITE, BENCH, NEW_TESTS, TESTS_RAN, MUTANT | full report written from commits `92b29098`/`afecd7ca`/`a49d073f`; FABLE VERIFICATION section (Codex-implemented: no CC session exists, stated as such); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (0/3) | **FAIL 9/11** — CANARY (pending coordinator canary) + MUTANT (0/3 survived) |
-| `runtime-registration` | FAIL 3/11 (no report; only a mislabelled STUB for the `runtime-registration-closure` slug, naming commit `377775ff` = evidence-independence) | REPORT, CANARY, FABLE_VERIF, FULL_SUITE, BENCH, NEW_TESTS, TESTS_RAN, MUTANT | full report written from commits `82e01194`/`4747bf54`/`e4236448`/`50431914`; FABLE VERIFICATION section (session `60a92cf5`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (3/3) | **FAIL 9/11** — CANARY (pending coordinator canary) + TESTS_RAN (the suite is red on 3 pre-existing `merged-tree-review` failures, not this slice's) |
-| `audit-head` | FAIL 4/11 (report written but incomplete) | CANARY, FABLE_VERIF, FULL_SUITE, BENCH, MUTANT | FABLE VERIFICATION section (session `b923bdb8`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (0/3) | **FAIL 9/11** — CANARY (pending coordinator canary) + MUTANT (0/3 survived) |
-| `c52` | FAIL 4/11 (report written but incomplete) | CANARY, FABLE_VERIF, FULL_SUITE, BENCH, MUTANT | FABLE VERIFICATION section (session `6fdf83a2`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (1/3) | **FAIL 10/11** — only CANARY left (pending coordinator canary) |
-| `c54` | FAIL 4/11 (report written but incomplete) | CANARY, FABLE_VERIF, FULL_SUITE, BENCH, MUTANT | FABLE VERIFICATION section (session `6db4dda9`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (2/3) | **FAIL 10/11** — only CANARY left (pending coordinator canary) |
-| `c58` | FAIL 4/11 (report written but incomplete) | CANARY, FABLE_VERIF, FULL_SUITE, BENCH, MUTANT | FABLE VERIFICATION section (session `fd5920eb`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (3/3) | **FAIL 10/11** — only CANARY left (pending coordinator canary) |
-| `diviner` | FAIL 4/11 (report written but incomplete) | CANARY, FABLE_VERIF, FULL_SUITE, BENCH, MUTANT | FABLE VERIFICATION section (session `cd6f8952`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (0/3) | **FAIL 9/11** — CANARY (pending coordinator canary) + MUTANT (0/3 survived) |
-| `e2b` | FAIL 4/11 (report written but incomplete) | CANARY, FABLE_VERIF, FULL_SUITE, BENCH, MUTANT | FABLE VERIFICATION section (session `95b89bb3`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (0/3) | **FAIL 9/11** — CANARY (pending coordinator canary) + MUTANT (0/3 survived) |
-| `unwind` | FAIL 4/11 (report written but incomplete) | CANARY, FABLE_VERIF, FULL_SUITE, BENCH, MUTANT | FABLE VERIFICATION section (session `3fae30b8`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (1/3) | **FAIL 10/11** — only CANARY left (pending coordinator canary) |
-| `seal-slice6` | FAIL 3/10 (report written but incomplete) | CANARY, FABLE_VERIF, FULL_SUITE, BENCH, MUTANT | FABLE VERIFICATION section (session `6ef85f80`); sourced `Ran 19388`; `161/169`; bench product; manifest written (probe is a genuine SKIP: its test lives at repo-root `tests/`, not under a component's `tests/`) | **FAIL 8/10** — CANARY (pending coordinator canary) + TESTS_RAN (4 pre-existing sandbox socket `PermissionError`s, not this slice's) |
-| `stale-checkpoint-gate` | FAIL 3/12 — the report was a `b173-watch.sh` STUB | REPORT, CANARY, FABLE_VERIF, FULL_SUITE, BENCH, MUTANT | the STUB was **replaced** with a real report built from commits `814df5c3`/`96ee730b`, the design doc and the module's own source; FABLE VERIFICATION section (session `37a5373f`); the task book's real canary `8vjgXTKmxZxbyjkJMK9L` echoed; sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe | **PASS 12/12** |
-| `fable` | FAIL 4/11 (report written but incomplete) | CANARY, FABLE_VERIF, FULL_SUITE, BENCH, MUTANT | FABLE VERIFICATION section; sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (0/3) | **FAIL 10/11** — CANARY + MUTANT |
-| `false-green-detector` | FAIL 11/12 — BENCH_DIFF failed: the bench product was a truncated 65-byte `make: *** Terminated` with no failure list | BENCH_DIFF | `make bench` re-run for real and the **complete** 17 798-byte output saved to `b173-false-green-detector-bench-final.txt`, containing `summary: 161/169 passed, 8 failed (12125 ms)` and the full 8-item failure list | **PASS 12/12** |
-| `tombstone-mutant-blindspots` | FAIL 11/12 — BENCH_DIFF failed: the bench product was a truncated 151-byte `make: *** Terminated` | BENCH_DIFF | `make bench` re-run for real; complete output saved to `b173-tombstone-mutant-blindspots-bench-final.txt` | **PASS 12/12** |
-| `autogen-speaker-selector` | FAIL 11/12 — FULL_SUITE failed: the report had only the current 20 241-test count, no historical `19xxx` line | FULL_SUITE | a sourced historical line added (`Ran 19388 tests`, from `b173-ageofagents-baseline-runtime.txt`) **below** the existing content — no existing number changed | **PASS 12/12** |
-| `cwl-episode-eviction` | FAIL 11/12 — FULL_SUITE failed (same reason) | FULL_SUITE | the same sourced historical line added | **PASS 12/12** |
-| `langgraph-durability` | FAIL 11/12 — FULL_SUITE failed (same reason) | FULL_SUITE | the same sourced historical line added | **PASS 12/12** |
-| `langgraph-retry-clears-writes` | FAIL 11/12 — FULL_SUITE failed (same reason) | FULL_SUITE | the same sourced historical line added | **PASS 12/12** |
-| `refusal-row` | FAIL 11/12 — FULL_SUITE failed (same reason) | FULL_SUITE | the same sourced historical line added | **PASS 12/12** |
-| `evidence-independence` | FAIL 11/12 — REPORT_NUMBERS failed (session-resolution collision, see Fact 2) | REPORT_NUMBERS | **nothing changed in the report.** The slice's own session resolves to `b2122159` and its numbers are correct there; the failure was `b173-accept.sh` picking the wrong JSONL | **PASS 12/12** |
-| `scope-verbatim-compaction` | FAIL 11/12 — REPORT_NUMBERS failed (same cause) | REPORT_NUMBERS | nothing changed in the report; own session is `e6d52242` | **PASS 12/12** |
-| `silent-failure-detector` | FAIL 11/12 — REPORT_NUMBERS failed (same cause) | REPORT_NUMBERS | nothing changed in the report; own session is `9e81194d` | **PASS 12/12** |
-| `tool-output-filter` | FAIL 11/12 — REPORT_NUMBERS failed (same cause) | REPORT_NUMBERS | nothing changed in the report; own session is `6624ef66` | **PASS 12/12** |
-| `strands` | FAIL 11/12 — REPORT_NUMBERS failed (same cause) | REPORT_NUMBERS | nothing changed in the report; own session is `9dffa57e` | **PASS 12/12** |
-| `horizon` | FAIL 10/11 — REPORT_NUMBERS failed (same cause) | REPORT_NUMBERS | nothing changed in the report; own session is `f99b358b` | **PASS 11/11** (MUTANT is SKIP — the slice ships no new module) |
-| `langgraph` | FAIL 10/11 — REPORT_NUMBERS failed (same cause) | REPORT_NUMBERS | nothing changed in the report; own session is `b7e76b47` | **PASS 11/11** (MUTANT is SKIP — the slice ships no new module) |
-
+| `slice1` | FAIL (4/9, 3 skipped) | REPORT, CANARY, FABLE_VERIF, FULL_SUITE, BENCH | full report written from the slice's own commits `79bf11f6`/`0232157f` + session `cda665a1`; FABLE VERIFICATION section; sourced `Ran 19388` line; `161/169` line; bench product; manifest + mutant probe (2/3) | **FAIL** (10/11, 1 skipped) — only CANARY left (pending coordinator canary) |
+| `slice2` | FAIL (4/10, 2 skipped) | REPORT, CANARY, FABLE_VERIF, FULL_SUITE, BENCH, MUTANT | full report written from commit `38d175e9`; FABLE VERIFICATION section (Codex-implemented: no CC session exists, stated as such); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (0/3) | **FAIL** (9/11, 1 skipped) — CANARY (pending coordinator canary) + MUTANT (0/3 survived) |
+| `slice3` | FAIL (5/10, 2 skipped) | REPORT, CANARY, FABLE_VERIF, FULL_SUITE, BENCH | full report written from commit `f0a68876`; FABLE VERIFICATION section (session `ca78c9dd`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (3/3) | **FAIL** (10/11, 1 skipped) — only CANARY left (pending coordinator canary) |
+| `slice4` | FAIL (0/9, 3 skipped) | COMMIT, REPORT, CANARY, FABLE_VERIF, FULL_SUITE, BENCH, NEW_TESTS, WORKTREE_CLEAN, TESTS_RAN | standalone empty commit `c42bae66` `B173 slice4: consolidate the slice-4 commits under one slug prefix`; full report from the slice-4 commits + the coordinator's follow-up summary; FABLE VERIFICATION section; sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (3/3) | **FAIL** (8/10, 2 skipped) — CANARY (pending coordinator canary) + NEW_TESTS (the ten test methods live in the `(part 2)` commit, which the script's slug-scoped aggregation does not reach) |
+| `slice5` | FAIL (6/10, 2 skipped) | CANARY, FABLE_VERIF, FULL_SUITE, BENCH | FABLE VERIFICATION section (session `4d909e3b`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (3/3) | **FAIL** (10/11, 1 skipped) — only CANARY left (pending coordinator canary) |
+| `slice6` | FAIL (4/10, 2 skipped) | REPORT, CANARY, FABLE_VERIF, FULL_SUITE, BENCH, MUTANT | full report written from the slice-6 commits; FABLE VERIFICATION section (Codex-implemented: no CC session exists, stated as such); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (0/3) | **FAIL** (9/11, 1 skipped) — CANARY (pending coordinator canary) + MUTANT (0/3 survived) |
+| `runtime-registration` | FAIL (3/9, 3 skipped) | REPORT, CANARY, FABLE_VERIF, FULL_SUITE, BENCH, TESTS_RAN | full report written from commits `82e01194`/`4747bf54`/`e4236448`/`50431914`; FABLE VERIFICATION section (session `60a92cf5`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (3/3) | **FAIL** (9/11, 1 skipped) — CANARY (pending coordinator canary) + TESTS_RAN (the suite is red on 3 pre-existing `merged-tree-review` failures, not this slice's) |
+| `audit-head` | FAIL (5/10, 2 skipped) | CANARY, FABLE_VERIF, FULL_SUITE, BENCH, MUTANT | FABLE VERIFICATION section (session `b923bdb8`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (0/3) | **FAIL** (9/11, 1 skipped) — CANARY (pending coordinator canary) + MUTANT (0/3 survived) |
+| `c52` | FAIL (7/10, 2 skipped) | CANARY, FABLE_VERIF, FULL_SUITE | FABLE VERIFICATION section (session `6fdf83a2`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (1/3) | **FAIL** (10/11, 1 skipped) — only CANARY left (pending coordinator canary) |
+| `c54` | FAIL (8/11, 1 skipped) | CANARY, FABLE_VERIF, FULL_SUITE | FABLE VERIFICATION section (session `6db4dda9`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (2/3) | **FAIL** (10/11, 1 skipped) — only CANARY left (pending coordinator canary) |
+| `c58` | FAIL (7/10, 2 skipped) | CANARY, FABLE_VERIF, FULL_SUITE | FABLE VERIFICATION section (session `fd5920eb`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (3/3) | **FAIL** (10/11, 1 skipped) — only CANARY left (pending coordinator canary) |
+| `diviner` | FAIL (7/10, 2 skipped) | CANARY, FABLE_VERIF, MUTANT | FABLE VERIFICATION section (session `cd6f8952`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (0/3) | **FAIL** (9/11, 1 skipped) — CANARY (pending coordinator canary) + MUTANT (0/3 survived) |
+| `e2b` | FAIL (6/10, 2 skipped) | CANARY, FABLE_VERIF, FULL_SUITE, MUTANT | FABLE VERIFICATION section (session `95b89bb3`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (0/3) | **FAIL** (9/11, 1 skipped) — CANARY (pending coordinator canary) + MUTANT (0/3 survived) |
+| `unwind` | FAIL (7/10, 2 skipped) | CANARY, FABLE_VERIF, FULL_SUITE | FABLE VERIFICATION section (session `3fae30b8`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (1/3) | **FAIL** (10/11, 1 skipped) — only CANARY left (pending coordinator canary) |
+| `seal-slice6` | FAIL (4/9, 3 skipped) | CANARY, FABLE_VERIF, FULL_SUITE, BENCH, TESTS_RAN | FABLE VERIFICATION section (session `6ef85f80`); sourced `Ran 19388`; `161/169`; bench product; manifest written (the probe is a genuine SKIP: its test lives at repo-root `tests/`, not under a component's `tests/`) | **FAIL** (8/10, 2 skipped) — CANARY (pending coordinator canary) + TESTS_RAN (4 pre-existing sandbox socket `PermissionError`s, not this slice's) |
+| `stale-checkpoint-gate` | FAIL (9/12, 0 skipped) | CANARY, FULL_SUITE, BENCH | the STUB was **replaced** with a real report built from the slice's commits, the design doc and the module's own source; FABLE VERIFICATION section (session `37a5373f`); the task book's real canary `8vjgXTKmxZxbyjkJMK9L` echoed; sourced `Ran 19388`; `161/169`; bench product | **PASS** (12/12, 0 skipped) |
+| `fable` | PASS (10/10, 2 skipped) | (none) | manifest built, so the probe now **runs** (it was `SKIP` before); FABLE VERIFICATION section; sourced `Ran 19388`; `161/169`; bench product | **FAIL** (11/12, 0 skipped) — MUTANT (0/3 survived).  **This slice turned a SKIP into a FAIL**: building the manifest made the probe run, and the probe found the module's tests do not detect the planted faults |
+| `horizon` | FAIL (10/11, 1 skipped) | REPORT_NUMBERS | nothing changed in the report; own session is `f99b358b` (peak 187331).  The `REPORT_NUMBERS` FAIL is the session-resolution defect — see Fact 2 | **FAIL** (11/12, 0 skipped) — REPORT_NUMBERS, the session-resolution defect (see Fact 2).  Against the slice's own session `f99b358b` the check is `rc=0` |
+| `langgraph` | FAIL (10/11, 1 skipped) | REPORT_NUMBERS | nothing changed in the report; own session is `b7e76b47` (peak 249446).  The `REPORT_NUMBERS` FAIL was the session-resolution defect — see Fact 2 | **PASS** (12/12, 0 skipped) |
+| `false-green-detector` | FAIL (10/12, 0 skipped) | BENCH_DIFF, REPORT_NUMBERS | `make bench` re-run for real and the **complete** output saved to `b173-false-green-detector-bench-final.txt`, containing `summary: 161/169 passed, 8 failed` and the full 8-item failure list | **PASS** (12/12, 0 skipped) |
+| `tombstone-mutant-blindspots` | FAIL (9/12, 0 skipped) | FULL_SUITE, BENCH_DIFF, REPORT_NUMBERS | `make bench` re-run for real; complete output saved to `b173-tombstone-mutant-blindspots-bench-final.txt`; sourced `Ran 19388` line added | **PASS** (12/12, 0 skipped) |
+| `autogen-speaker-selector` | FAIL (10/12, 0 skipped) | FULL_SUITE, REPORT_NUMBERS | a sourced historical line added (`Ran 19388 tests`, from `b173-ageofagents-baseline-runtime.txt`) **below** the existing content — no existing number changed | **PASS** (12/12, 0 skipped) |
+| `cwl-episode-eviction` | FAIL (11/12, 0 skipped) | FULL_SUITE | the same sourced historical line added | **PASS** (12/12, 0 skipped) |
+| `langgraph-durability` | FAIL (11/12, 0 skipped) | FULL_SUITE | the same sourced historical line added | **PASS** (12/12, 0 skipped) |
+| `langgraph-retry-clears-writes` | FAIL (10/12, 0 skipped) | FULL_SUITE, REPORT_NUMBERS | the same sourced historical line added | **PASS** (12/12, 0 skipped) |
+| `evidence-independence` | FAIL (11/12, 0 skipped) | REPORT_NUMBERS | **nothing changed in the report.** The slice's own session resolves to `b2122159` and its numbers are correct there; the failure was `b173-accept.sh` picking the wrong JSONL | **PASS** (12/12, 0 skipped) |
+| `scope-verbatim-compaction` | FAIL (11/12, 0 skipped) | REPORT_NUMBERS | nothing changed in the report; own session is `e6d52242` | **PASS** (12/12, 0 skipped) |
+| `silent-failure-detector` | FAIL (11/12, 0 skipped) | REPORT_NUMBERS | nothing changed in the report; own session is `9e81194d` | **PASS** (12/12, 0 skipped) |
+| `tool-output-filter` | FAIL (11/12, 0 skipped) | REPORT_NUMBERS | nothing changed in the report; own session is `6624ef66` | **PASS** (12/12, 0 skipped) |
+| `strands` | FAIL (11/12, 0 skipped) | REPORT_NUMBERS | nothing changed in the report; own session is `9dffa57e` | **PASS** (12/12, 0 skipped) |
+| `refusal-row` | FAIL (10/12, 0 skipped) | FULL_SUITE, REPORT_NUMBERS | the same sourced historical line added | **PASS** (12/12, 0 skipped) |
 ### Totals
 
 | | before | after |
 |---|---|---|
-| PASS 12/12 (or 11/11) | 0 of 30 | **16 of 30** |
-| FAIL | 30 of 30 | 14 of 30 |
-| of which: blocked only on a **pending coordinator canary** | — | 13 |
-| of which: blocked on a **mutant survivor** (a real finding for `mutant-evidence-closure`) | — | 5 (`slice2`, `slice6`, `audit-head`, `diviner`, `e2b`) |
+| **slices measured** | **31** | **31** |
+| PASS | 1 of 31 (`fable`, which passed only because its probe was still `SKIP`) | **14 of 31** |
+| FAIL | 30 of 31 | 17 of 31 |
+| of which: blocked on a **pending coordinator canary** | — | 15 |
+| of which: blocked on a **mutant survivor** (a real finding for `mutant-evidence-closure`) | — | 6 (`slice2`, `slice6`, `audit-head`, `diviner`, `e2b`, `fable`) |
 | of which: blocked on a **pre-existing failure in another slice's suite** | — | 2 (`runtime-registration`, `seal-slice6`) |
 | of which: blocked on a **pre-existing failure in another slice's commit** | — | 1 (`slice4` NEW_TESTS) |
+| of which: blocked on the **`REPORT_NUMBERS` session-resolution defect** | — | 1 (`horizon`) |
 
-The 13 "pending coordinator canary" slices are `slice1`, `slice2`, `slice3`,
+**The counts overlap** — a slice can be blocked on more than one thing — so
+the rows do not sum to 17.
+
+The 15 "pending coordinator canary" slices are `slice1`, `slice2`, `slice3`,
 `slice4`, `slice5`, `slice6`, `runtime-registration`, `audit-head`, `c52`,
 `c54`, `c58`, `diviner`, `e2b`, `unwind`, `seal-slice6` — see §3.
 
-## The canary gap — 14 slices have no canary, and this slice did not invent one
+**One slice got worse, and honestly so.**  `fable` was `PASS (10/10, 2
+skipped)` before this slice, because its probe was `SKIP` for want of a
+manifest.  Building the manifest made the probe run, and the probe found
+that `context_budget.py`'s tests do not detect the planted faults (0/3), so
+`MUTANT` now FAILs.  That is the task book's explicit instruction — *"build
+the manifests so the probe runs … what the probe hits and whether to fix it
+is the `mutant-evidence-closure` slice's job"* — and it is why the PASS
+count went **down** from 1 to 14 rather than up.  Building the artifact
+surfaced the gap the artifact was hiding.
+
+## The canary gap — 15 slices have no canary, and this slice did not invent one
 
 `b173-accept.sh:65` reads the canary out of the slice's **task book**:
 
@@ -156,21 +174,22 @@ The 13 "pending coordinator canary" slices are `slice1`, `slice2`, `slice3`,
 CANARY=$(grep -oE "CANARY: [A-Za-z0-9]+" "$TASKBOOK" | head -n1 | awk '{print $2}')
 ```
 
-Fifteen of the slices' task books were generated by `b173-taskbook-gen.py`,
+Sixteen of the slices' task books were generated by `b173-taskbook-gen.py`,
 which mints a random 20-character canary and writes it into the book.  The
-**fourteen** task books listed below were hand-written, before that generator
-existed, and carry **no `CANARY:` line at all**.  Verified by grepping each
-book and by grepping every session JSONL for a `CANARY:` token:
+**fifteen** slices listed below were hand-written, before that generator
+existed, and carry **no `CANARY:` line at all** in the file the referee
+reads.  Verified by grepping each book and by grepping every session JSONL
+for a `CANARY:` token:
 
-| slice | task book | canary in the book? |
+| slice | the task book that actually exists | canary in it? |
 |---|---|---|
-| `slice1` | `b173-slice1-cc-prompt.md` | no |
-| `slice2` | `b173-slice2-cc-prompt.md` | no |
-| `slice3` | `b173-slice3-cc-prompt.md` | no |
-| `slice4` | `b173-slice4-cc-prompt.md` | no |
+| `slice1` | `b173-slice1-prompt.txt` | no |
+| `slice2` | `b173-slice2-prompt.md` | no |
+| `slice3` | `b173-slice3-prompt.txt` | no |
+| `slice4` | `b173-slice4-prompt.md` (+ `b173-slice4-followup-prompt.md`) | no |
 | `slice5` | `b173-slice5-cc-prompt.md` | no |
-| `slice6` | `b173-slice6-cc-prompt.md` | no |
-| `runtime-registration` | `b173-runtime-registration-closure-cc-prompt-rerun.md` | no (`4jSKPM37Acvut63GEnBO` belongs to the **closure** book, not to the four `B173 runtime-registration:` commits) |
+| `slice6` | `b173-slice6-prompt.md` | no |
+| `runtime-registration` | `b173-runtime-registration-closure-cc-prompt-rerun.md` | it has `4jSKPM37Acvut63GEnBO`, but that belongs to the **closure** book, not to the four `B173 runtime-registration:` commits |
 | `audit-head` | `b173-audit-head-cc-prompt.md` | no |
 | `c52` | `b173-c52-cc-prompt.md` | no |
 | `c54` | `b173-c54-cc-prompt.md` | no |
@@ -179,6 +198,16 @@ book and by grepping every session JSONL for a `CANARY:` token:
 | `e2b` | `b173-e2b-cc-prompt-rerun.md` | no |
 | `unwind` | `b173-unwind-cc-prompt.md` | no |
 | `seal-slice6` | `b173-seal-slice6-cc-prompt.md` | no |
+
+**The referee's own task-book path is the operative one.**  `b173-accept.sh:34`
+reads `TASKBOOK="$HOME_DIR/b173-${SLUG}-cc-prompt-rerun.md"`, so a slice only
+has a canary if *that exact filename* carries one.  Measured: the
+`-cc-prompt-rerun.md` book exists for **16** of the 31 slices and carries a
+canary for **16**; the other **15** have either no `-rerun` book at all
+(`slice1`–`slice6`, `runtime-registration`) or a `-rerun` book with no
+`CANARY:` line (`audit-head`, `c52`, `c54`, `c58`, `diviner`, `e2b`, `unwind`,
+`seal-slice6`).  That is exactly the 15 the referee reports as
+`FAIL CANARY no canary in taskbook`.
 
 For these slices the `CANARY` acceptance item cannot be satisfied by any
 amount of writing: the referee has no token to compare the report against.
@@ -200,7 +229,7 @@ cannot be mistaken for a real canary echo, and the referee still FAILs the
 item — which is the honest outcome.
 
 **What would close it.** The coordinator can mint a canary for each of the
-fourteen books and re-issue the books.  Two mechanisms already exist and
+fifteen books and re-issue the books.  Two mechanisms already exist and
 either would work; neither is this slice's to use, because the task book
 files are the coordinator's artifacts and this slice's writable set does not
 include them:
@@ -209,7 +238,7 @@ include them:
    with a fresh canary.  It needs `--background-file`, `--tasks-file` and
    `--acceptance-file`; the coordinator's per-slice content lives in
    `b173-coord/<slug>-{background,tasks,acceptance}.md` — but there are
-   **no** `b173-coord/` entries for these fourteen, so their content would
+   **no** `b173-coord/` entries for these fifteen, so their content would
    have to be reconstructed from the existing hand-written books.
 2. `b173-taskbook-gen.py` also mints the canary itself when `--canary` is
    omitted (a random 20 characters), and prints it as `CANARY: <token>`.
@@ -217,11 +246,15 @@ include them:
 ## The mutant census after the manifests were built
 
 `b173-mutant.sh` plants up to three semantic faults in the slice's module and
-re-runs the slice's test file against each.  Before this slice, sixteen of
-these slices had **no manifest at all**, so `MUTANT` was `SKIP` and the probe
-had never run on them.  Sixteen manifests were built (the pairings came from
-the task book's Group C table; `unwind`'s pairing was found by reading its
-commit, which names `shutdown_unwind.py` and `tests/test_shutdown_unwind.py`).
+re-runs the slice's test file against each.  The task book's Group C list
+names **17** slices that had **no manifest at all**, so `MUTANT` was `SKIP`
+and the probe had never run on them.  **17 manifests were built** (the
+pairings came from the task book's Group C table; `unwind`'s pairing was
+found by reading its commit, which names `shutdown_unwind.py` and
+`tests/test_shutdown_unwind.py`).  The census below covers all **31**
+target slices, re-measured by this slice: the 17 newly probed plus the 14
+that already had a manifest, so that every row is a fresh measurement rather
+than a remembered one.
 
 | slice | module probed | result |
 |---|---|---|
@@ -230,12 +263,25 @@ commit, which names `shutdown_unwind.py` and `tests/test_shutdown_unwind.py`).
 | `slice4` | `alert_trigger_registry.py` | **3/3** |
 | `slice5` | `blind_rerunner.py` | **3/3** |
 | `runtime-registration` | `runtime_registration.py` | **3/3** |
+| `stale-checkpoint-gate` | `stale_checkpoint_gate.py` | **3/3** |
+| `false-green-detector` | `false_green_detector.py` | **3/3** |
+| `tombstone-mutant-blindspots` | `cancellation_tombstone.py` | **3/3** |
+| `cwl-episode-eviction` | `episode_eviction.py` | **3/3** |
+| `scope-verbatim-compaction` | `scope_verbatim_compaction.py` | **3/3** |
 | `c54` | `deny_hotpath.py` | 2/3 |
 | `langgraph` | `durable_resume.py` | 2/3 |
 | `slice1` | `code_task.py` | 2/3 |
+| `autogen-speaker-selector` | `speaker_selector.py` | 2/3 |
+| `langgraph-retry-clears-writes` | `retry_clears_writes.py` | 2/3 |
+| `silent-failure-detector` | `silent_failure_detector.py` | 2/3 |
+| `tool-output-filter` | `tool_output_filter.py` | 2/3 |
+| `strands` | `strands_checkpoint.py` | 2/3 |
 | `c52` | `grant_pin_ledger.py` | 1/3 |
 | `horizon` | `long_horizon.py` | 1/3 |
 | `unwind` | `shutdown_unwind.py` | 1/3 |
+| `langgraph-durability` | `checkpoint_durability.py` | 1/3 |
+| `refusal-row` | `refusal_row.py` | 1/3 |
+| `evidence-independence` | `evidence_independence.py` | 1/3 |
 | `audit-head` | `audit_head_holder.py` | **0/3** |
 | `diviner` | `scope_qualifier.py` | **0/3** |
 | `e2b` | `egress_client.py` | **0/3** |
@@ -243,6 +289,19 @@ commit, which names `shutdown_unwind.py` and `tests/test_shutdown_unwind.py`).
 | `slice2` | `code_task.py` | **0/3** |
 | `slice6` | `egress_client.py` | **0/3** |
 | `seal-slice6` | — | **MUTANT SKIP** (no module/test pair) |
+
+**How many manifests existed before this slice.**  Measured by file mtime
+against the start of this session (2026-11-14 10:15 UTC): **17** were built
+by this slice (`slice1`–`slice5`, `runtime-registration`, `audit-head`,
+`c52`, `c54`, `c58`, `diviner`, `e2b`, `unwind`, `seal-slice6`, `fable`,
+`horizon`, `langgraph`) and **14** already existed
+(`slice6`, `stale-checkpoint-gate`, `false-green-detector`,
+`tombstone-mutant-blindspots`, `autogen-speaker-selector`,
+`cwl-episode-eviction`, `langgraph-durability`,
+`langgraph-retry-clears-writes`, `refusal-row`, `evidence-independence`,
+`scope-verbatim-compaction`, `silent-failure-detector`, `tool-output-filter`,
+`strands`).  The task book's Group C list — the 17 that were `MUTANT SKIP`
+for want of a manifest — is exactly the set this slice built.
 
 ### Three corrections to the task book's Group C table
 
@@ -276,11 +335,14 @@ to make any mutant die.
 
 `make bench` was run for real and the **complete** output saved to
 `/home/muse-newapi/b173-<slug>-bench-final.txt` for every slice this slice
-touched.  Each file is 17 798 bytes and contains, verbatim:
+touched.  Each file contains, verbatim:
 
 ```
 summary: 161/169 passed, 8 failed (12125 ms)
 ```
+
+(the elapsed-time figure differs per run; it is the only line that differs
+between two products of the same bench).
 
 and the eight failing items, item for item identical to the stored baseline
 `b173-bench-baseline-failures.txt`:
@@ -301,6 +363,18 @@ slice compared that output against the stored baseline file and confirmed the
 sets match.  `b173-accept.sh:151–163` does exactly this comparison itself,
 which is why `BENCH_DIFF` now PASSes for `false-green-detector` and
 `tombstone-mutant-blindspots`.
+
+**Sizes differ, and that is fine.**  A bench product is a real run's stdout,
+so its byte count depends on how long the timing lines happen to be: 17 798
+bytes for 24 of them, 17 791 for 32, 17 734 for 1, 17 729 for 8.  The
+pass/fail *content* — the score line and the eight failing items — is
+identical across all of them, and that is what `BENCH_DIFF` compares.
+
+**Three bench products that were missing have been created.**  `fable`,
+`horizon` and `langgraph` had no `b173-<slug>-bench-final.txt` at all, so
+their `BENCH_DIFF` was `SKIP` ("no bench artifact — claim only") rather than
+a real check.  All three now have a real `make bench` product, and all three
+`BENCH_DIFF` items now PASS on the merits.
 
 ## The historical full-suite number, and where it comes from
 
@@ -337,7 +411,7 @@ was to add a sourced line where none existed.
 * It did **not** touch any session JSONL under `~/.claude/projects/`.
 * It did **not** touch `b173-accept.sh`, `b173-mutant.sh`, `b173-mutant.py`,
   `b173-report-numbers.py` or `b173-watch.sh`.
-* It did **not** fabricate a canary for the fourteen slices that have none.
+* It did **not** fabricate a canary for the fifteen slices that have none.
 * It did **not** write a bench failure list by hand.
 * It did **not** push, merge `main`, tag, or bump a version.
 * It made **one** repository commit beyond its own two, and only because the
@@ -346,11 +420,22 @@ was to add a sourced line where none existed.
 
 ## Open items
 
-1. **Fourteen canaries.**  The coordinator must mint and re-issue them; until
+1. **Fifteen canaries.**  The coordinator must mint and re-issue them; until
    then those slices cannot pass `CANARY`.  See the table above.
-2. **Five mutant survivors.**  `slice2`, `slice6`, `audit-head`, `diviner`,
-   `e2b` (and `fable`) have modules whose tests do not detect the planted
-   faults.  That is the `mutant-evidence-closure` slice's work.
+2. **Six mutant survivors.**  `slice2`, `slice6`, `audit-head`, `diviner`,
+   `e2b` and `fable` have modules whose tests do not detect the planted
+   faults (0/3 each).  That is the `mutant-evidence-closure` slice's work,
+   as the task book says: *"探针打中什么、要不要修，是 mutant-evidence-closure
+   片的活。本片只负责把 manifest 建出来"*.  This slice built the manifests
+   and recorded the `k/3`; it changed no production code to make any mutant
+   die.
+   Five more slices are below the 3/3 line but still `PASS` the criterion
+   (`c52` 1/3, `horizon` 1/3, `unwind` 1/3, `langgraph-durability` 1/3,
+   `refusal-row` 1/3, `evidence-independence` 1/3, `c54` 2/3, `langgraph`
+   2/3, `autogen-speaker-selector` 2/3, `langgraph-retry-clears-writes` 2/3,
+   `silent-failure-detector` 2/3, `tool-output-filter` 2/3, `strands` 2/3,
+   `slice1` 2/3) — the criterion is "≥1 killed", and the ledger explicitly
+   declines to raise that bar.
 3. **The `REPORT_NUMBERS` session-resolution defect.**  `b173-accept.sh:166`
    uses `grep -rl "$CANARY" … | head -n1`, which is read-order dependent and
    picks the wrong session whenever another session has read the same task
@@ -378,22 +463,33 @@ this host, on 2026-11-14.  None is copied from an earlier slice's report.
 ```
 $ cd components/northstar-agent-runtime
 $ PYTHONPATH=.:tests python3 -m unittest test_artifact_completion
-Ran 12 tests in 0.669s
+Ran 12 tests in 0.652s
 OK
 ```
 
 **With the artifacts present** (this host, `/home/muse-newapi/` populated):
 **12 methods ran, 12 passed, 0 skipped.**
 
-**On a clean clone** (a fresh `git clone` of the branch on a host where
-`/home/muse-newapi/` holds none of the slice artifacts): **12 methods ran, 4
-passed with real assertions, 8 skipped.**  The four that still assert are
-the ones that depend on no outside file: `test_04` (a pending canary must
-not be shaped like a real one), `test_09` (the comparison table is not
-inside a FABLE section), `test_11` (the design doc exists and covers every
-slice) and `test_12` (the design doc names every pending canary and the
-open items).  The eight that skip are the ones whose subject is a file
-outside the repository.
+**On a clean clone** (a fresh `git clone` of the branch, with `OUTSIDE`
+pointed at an empty directory so that none of the slice artifacts is
+visible): **12 methods ran, 4 passed with real assertions, 8 skipped.**
+
+```
+$ cd /tmp/ac-clean && git checkout -q batch-173-moltbook-absorb
+$ cd components/northstar-agent-runtime
+$ PYTHONPATH=.:tests python3 -m unittest test_artifact_completion -v
+Ran 12 tests in 0.004s
+OK (skipped=8)
+```
+
+The four that still assert are the ones that depend on no outside file:
+`test_04` (a pending canary must not be shaped like a real one),
+`test_09` (the comparison table is not inside a FABLE section),
+`test_11` (the design doc exists and covers every slice) and `test_12`
+(the design doc names every pending canary and the open items).  The eight
+that skip are the ones whose subject is a file outside the repository:
+`test_01`, `test_02`, `test_03`, `test_05`, `test_06`, `test_07` (reports),
+`test_08` (session JSONLs) and `test_10` (manifests).
 
 The test was checked for **vacuity** by breaking a report four ways and
 confirming that each break was caught:
@@ -460,12 +556,18 @@ $ diff <(sort -u b173-bench-baseline-failures.txt) \
 (no output)
 ```
 
-### The 30 slices, re-measured
+### The 31 slices, re-measured
 
-`bash /home/muse-newapi/b173-accept.sh <slug>` was run for each of the 30
+`bash /home/muse-newapi/b173-accept.sh <slug>` was run for each of the **31**
 slices after this slice's changes.  The result is the "verdict after
-completion" column of the table above: **16 PASS, 14 FAIL.**  All 14
-failures are accounted for in §"Open items" -- 13 wait on a coordinator
-canary, 5 have a mutant survivor, 2 have a pre-existing failure in another
-slice's suite and 1 has a pre-existing failure in another slice's commit
-(the counts overlap).
+completion" column of the table above: **14 PASS, 17 FAIL.**  All 17
+failures are accounted for in §"Open items" — 15 wait on a coordinator
+canary, 6 have a mutant survivor, 2 have a pre-existing failure in another
+slice's suite, 1 has a pre-existing failure in another slice's commit and 1
+is the `REPORT_NUMBERS` session-resolution defect (the counts overlap).
+
+**Before this slice touched anything**, the same script over the same 31
+slugs reported **1 PASS, 30 FAIL** (measured 2026-11-14 10:20 UTC, before
+any report was written or appended).  The net movement is therefore
+**+13 PASS, −13 FAIL**, with one slice (`fable`) moving the other way
+because building its manifest turned a `SKIP` into a measured `0/3`.
