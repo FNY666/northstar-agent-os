@@ -324,3 +324,140 @@ class ImportanceExtensionTests(unittest.TestCase):
         # The middle between the head and the recent window -- not the
         # lowest-scored events, because there is no score here at all.
         self.assertEqual(forgotten, [4, 5, 6, 7])
+class MutantOrAt127ForgottenGuardTests(unittest.TestCase):
+    """Kills the ``or@127`` mutant in ``CondensationEvent.__init__``.
+
+    The guard is::
+
+        if isinstance(forgotten, (str, bytes)) or not isinstance(forgotten, Iterable):
+
+    Mutating ``or`` to ``and`` makes the guard fire only when the value is
+    *both* string-like *and* not iterable -- which is never true, because
+    ``str`` and ``bytes`` are iterable.  The guard therefore stops firing
+    entirely.
+
+    Two wrong ways are needed, because ``or`` -> ``and`` only differs from
+    the original when exactly one side is true:
+
+    * a **string** -- type right (iterable), format wrong.  The original
+      refuses it with "must be an iterable of event ids"; the mutant lets
+      it through and the *ids* guard then refuses the characters instead,
+      so the error message is the discriminator.
+    * a **non-iterable** -- format right (not a string), type wrong.  The
+      original refuses it with ``InvalidCondensationError``; the mutant
+      lets it through and the ``for`` loop raises a bare ``TypeError``.
+    """
+
+    def test_or_at_127_a_string_is_refused_as_not_an_iterable_of_event_ids(self):
+        # Type right (iterable) but format wrong (a str is not a list of ids).
+        with self.assertRaises(InvalidCondensationError) as caught:
+            CondensationEvent(forgotten="abc", summary="s", summary_offset=0)
+        self.assertIn("must be an iterable of event ids", str(caught.exception))
+
+    def test_or_at_127_bytes_are_refused_as_not_an_iterable_of_event_ids(self):
+        with self.assertRaises(InvalidCondensationError) as caught:
+            CondensationEvent(forgotten=b"abc", summary="s", summary_offset=0)
+        self.assertIn("must be an iterable of event ids", str(caught.exception))
+
+    def test_or_at_127_a_non_iterable_is_refused_with_the_module_error(self):
+        # Format right (not a string) but type wrong (not iterable at all).
+        for bad in (123, 4.5, None, object()):
+            with self.subTest(value=bad):
+                with self.assertRaises(InvalidCondensationError) as caught:
+                    CondensationEvent(forgotten=bad, summary="s", summary_offset=0)
+                self.assertIn("must be an iterable of event ids", str(caught.exception))
+
+    def test_or_at_127_a_list_of_ids_is_still_accepted(self):
+        # The control: the happy path must survive the guard being pinned.
+        event = CondensationEvent(forgotten=[1, 2], summary="s", summary_offset=0)
+        self.assertEqual(event.forgotten, (1, 2))
+
+
+class MutantOrAt132ForgottenIdTypeTests(unittest.TestCase):
+    """Kills the ``or@132`` mutant in ``CondensationEvent.__init__``.
+
+    The guard is::
+
+        if isinstance(raw, bool) or not isinstance(raw, int):
+
+    Mutating ``or`` to ``and`` makes the guard fire only when the value is
+    *both* a bool *and* not an int -- never, because ``bool`` is a subclass
+    of ``int``.  The guard stops firing entirely.
+
+    Two wrong ways are needed:
+
+    * a **bool** -- type right (``isinstance(True, int)`` is True) but
+      format wrong (a bool is not an event id).  The original refuses it;
+      the mutant accepts it and ``True`` becomes event id 1.
+    * a **non-int** (a string) -- format right (not a bool) but type wrong.
+      The original refuses it; the mutant lets it through and the id
+      ``"7"`` is booked.
+    """
+
+    def test_or_at_132_a_bool_is_refused_as_not_an_event_id(self):
+        # Type right (bool is an int subclass) but format wrong.
+        with self.assertRaises(InvalidCondensationError) as caught:
+            CondensationEvent(forgotten=[True], summary="s", summary_offset=0)
+        self.assertIn("must be ints", str(caught.exception))
+
+    def test_or_at_132_a_false_bool_is_refused_as_not_an_event_id(self):
+        with self.assertRaises(InvalidCondensationError) as caught:
+            CondensationEvent(forgotten=[False], summary="s", summary_offset=0)
+        self.assertIn("must be ints", str(caught.exception))
+
+    def test_or_at_132_a_non_int_id_is_refused_as_not_an_event_id(self):
+        # Format right (not a bool) but type wrong.
+        for bad in ("7", 3.5, None, [1]):
+            with self.subTest(value=bad):
+                with self.assertRaises(InvalidCondensationError) as caught:
+                    CondensationEvent(forgotten=[bad], summary="s", summary_offset=0)
+                self.assertIn("must be ints", str(caught.exception))
+
+    def test_or_at_132_a_real_int_id_is_still_accepted(self):
+        # The control: the happy path must survive the guard being pinned.
+        event = CondensationEvent(forgotten=[0, 1], summary="s", summary_offset=0)
+        self.assertEqual(event.forgotten, (0, 1))
+
+
+class MutantOrAt146SummaryOffsetTypeTests(unittest.TestCase):
+    """Kills the ``or@146`` mutant in ``CondensationEvent.__init__``.
+
+    The guard is::
+
+        if isinstance(summary_offset, bool) or not isinstance(summary_offset, int):
+
+    Mutating ``or`` to ``and`` makes the guard fire only when the offset is
+    *both* a bool *and* not an int -- never.  The guard stops firing.
+
+    Two wrong ways are needed:
+
+    * a **bool** -- ``isinstance(True, int)`` is True, so the type half
+      passes; only the bool half refuses it.  The mutant accepts ``True``
+      and books the offset as 1.
+    * a **non-int** (a string) -- the type half refuses it; the mutant
+      books the string as the offset.
+    """
+
+    def test_or_at_146_a_bool_offset_is_refused_as_not_an_int(self):
+        # Type right (bool is an int subclass) but format wrong.
+        with self.assertRaises(InvalidCondensationError) as caught:
+            CondensationEvent(forgotten=[1], summary="s", summary_offset=True)
+        self.assertIn("summary_offset must be an int", str(caught.exception))
+
+    def test_or_at_146_a_false_bool_offset_is_refused_as_not_an_int(self):
+        with self.assertRaises(InvalidCondensationError) as caught:
+            CondensationEvent(forgotten=[1], summary="s", summary_offset=False)
+        self.assertIn("summary_offset must be an int", str(caught.exception))
+
+    def test_or_at_146_a_non_int_offset_is_refused_as_not_an_int(self):
+        # Format right (not a bool) but type wrong.
+        for bad in ("3", 1.5, None, [0]):
+            with self.subTest(value=bad):
+                with self.assertRaises(InvalidCondensationError) as caught:
+                    CondensationEvent(forgotten=[1], summary="s", summary_offset=bad)
+                self.assertIn("summary_offset must be an int", str(caught.exception))
+
+    def test_or_at_146_a_real_int_offset_is_still_accepted(self):
+        # The control: the happy path must survive the guard being pinned.
+        event = CondensationEvent(forgotten=[1], summary="s", summary_offset=4)
+        self.assertEqual(event.summary_offset, 4)
