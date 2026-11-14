@@ -129,6 +129,59 @@ class RangeAndReextendRefusalTests(unittest.TestCase):
         with self.assertRaises(DeliveryRangeError):
             truncate(item, False, seq=1)
 
+    def test_constructor_refuses_a_non_integer_delivery_position(self):
+        """The record itself refuses a delivery position that is not an int."""
+        with self.assertRaises(TurnTruncationError):
+            TurnItem(
+                item_id="t1",
+                generated_text="hello",
+                generated_len=5,
+                delivered_len="3",
+                status=PARTIAL,
+            )
+
+    def test_constructor_refuses_a_negative_delivery_position(self):
+        with self.assertRaises(DeliveryRangeError):
+            TurnItem(
+                item_id="t1",
+                generated_text="hello",
+                generated_len=5,
+                delivered_len=-1,
+                status=PARTIAL,
+            )
+
+    def test_constructor_refuses_an_over_long_delivery_position(self):
+        with self.assertRaises(DeliveryRangeError):
+            TurnItem(
+                item_id="t1",
+                generated_text="hello",
+                generated_len=5,
+                delivered_len=6,
+                status=PARTIAL,
+            )
+
+    def test_constructor_accepts_a_zero_delivery_position(self):
+        """Zero is a legal position: the turn was cut before anything landed."""
+        item = TurnItem(
+            item_id="t1",
+            generated_text="hello",
+            generated_len=5,
+            delivered_len=0,
+            status=PARTIAL,
+        )
+        self.assertEqual(item.delivered_len, 0)
+        self.assertEqual(delivered_prefix(item), "")
+
+    def test_constructor_accepts_a_full_delivery_position(self):
+        item = TurnItem(
+            item_id="t1",
+            generated_text="hello",
+            generated_len=5,
+            delivered_len=5,
+            status=DELIVERED,
+        )
+        self.assertEqual(delivered_prefix(item), "hello")
+
     def test_tampered_pin_is_refused(self):
         item = make_item("t1", "The answer is forty two.")
         outcome = truncate(item, 9, seq=1)
