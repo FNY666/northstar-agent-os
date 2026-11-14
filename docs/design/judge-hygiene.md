@@ -410,6 +410,17 @@ New text:
 
 ### 6.2 `/home/muse-newapi/b173-mutant.sh` (D-23 — **in the patch**)
 
+> **Line numbers.**  The line numbers below refer to the *original*
+> `b173-mutant.sh` (37 lines), which is what the live script still is:
+> `COMPDIR=` on line 28, `WT=` on line 29, the `mutant probe:` echo on
+> line 34.  The live `b173-mutant.py` has meanwhile grown the round-5
+> D-22 helper, so its line numbers have shifted (`drop_cached_bytecode`
+> on line 64, `run_tests` on line 88, `PYTHONPATH` on line 90,
+> `PYTHONDONTWRITEBYTECODE` on line 94, the two
+> `drop_cached_bytecode(a.file)` calls on lines 137 and 149).  The D-22
+> change specification below is written against the *original* file, which
+> is what it was measured against.
+
 **Change 5 — after `COMPDIR=` (line 28 of the original file) and before
 `WT=` (line 29).**
 
