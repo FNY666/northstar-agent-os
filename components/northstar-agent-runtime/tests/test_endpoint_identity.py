@@ -319,3 +319,128 @@ class TestEndToEndPaths(unittest.TestCase):
             prove_at_effect(self.a, None)  # the destination attested nothing
 
 
+class MutantOrAt81CanonicalNoneBoolTests(unittest.TestCase):
+    """Kills the ``or@81`` mutant in ``_canonical``.
+
+    The guard is::
+
+        if value is None or isinstance(value, bool):
+            pass
+
+    Mutating ``or`` to ``and`` makes the guard fire only when the value is
+    *both* ``None`` *and* a bool -- never.  The ``None``/``bool`` branch
+    stops being taken and those values fall through to the final ``else``,
+    which raises ``TypeError``.
+
+    Two wrong ways are needed, because ``or`` -> ``and`` only differs from
+    the original when exactly one side is true:
+
+    * ``None`` -- format right (not a bool) but type wrong.  The original
+      canonicalizes it to ``b"null"``; the mutant raises ``TypeError``.
+    * ``True``/``False`` -- type right (a bool) but format wrong.  The
+      original canonicalizes them to ``b"true"``/``b"false"``; the mutant
+      raises ``TypeError``.
+    """
+
+    def test_or_at_81_none_is_canonicalized_as_null(self):
+        # Format right (not a bool) but type wrong.
+        self.assertEqual(endpoint_identity._canonical(None), b"null")
+
+    def test_or_at_81_true_is_canonicalized_as_true(self):
+        # Type right (a bool) but format wrong.
+        self.assertEqual(endpoint_identity._canonical(True), b"true")
+
+    def test_or_at_81_false_is_canonicalized_as_false(self):
+        self.assertEqual(endpoint_identity._canonical(False), b"false")
+
+    def test_or_at_81_a_none_inside_a_structure_is_still_canonicalized(self):
+        # The nested path must survive the guard being pinned.
+        self.assertEqual(
+            endpoint_identity._canonical({"a": None, "b": True}),
+            b'{"a":null,"b":true}',
+        )
+
+
+class MutantOrAt86CanonicalNanInfTests(unittest.TestCase):
+    """Kills the ``or@86`` mutant in ``_canonical``.
+
+    The guard is::
+
+        if math.isnan(value) or math.isinf(value):
+            raise TypeError("value must not contain NaN or infinity")
+
+    Mutating ``or`` to ``and`` makes the guard fire only when the value is
+    *both* NaN *and* infinite -- never, because no float is both.  The
+    guard stops firing and NaN/Inf are canonicalized into the digest.
+
+    Two wrong ways are needed:
+
+    * a **NaN** -- format right (not infinite) but type wrong.  The original
+      raises ``TypeError``; the mutant writes ``"NaN"`` into the digest.
+    * an **infinity** -- type right (not NaN) but format wrong.  The
+      original raises ``TypeError``; the mutant writes ``"Infinity"`` into
+      the digest.
+    """
+
+    def test_or_at_86_a_nan_is_refused(self):
+        # Format right (not infinite) but type wrong.
+        with self.assertRaises(TypeError) as caught:
+            endpoint_identity._canonical(float("nan"))
+        self.assertIn("NaN", str(caught.exception))
+
+    def test_or_at_86_a_positive_infinity_is_refused(self):
+        # Type right (not NaN) but format wrong.
+        with self.assertRaises(TypeError) as caught:
+            endpoint_identity._canonical(float("inf"))
+        self.assertIn("infinity", str(caught.exception))
+
+    def test_or_at_86_a_negative_infinity_is_refused(self):
+        with self.assertRaises(TypeError):
+            endpoint_identity._canonical(float("-inf"))
+
+    def test_or_at_86_a_nan_inside_a_structure_is_still_refused(self):
+        with self.assertRaises(TypeError):
+            endpoint_identity._canonical([1.0, float("nan")])
+
+    def test_or_at_86_an_ordinary_float_is_still_canonicalized(self):
+        # The control: the happy path must survive the guard being pinned.
+        self.assertEqual(endpoint_identity._canonical(1.5), b"1.5")
+
+
+class MutantGtAt131RequireAddressTests(unittest.TestCase):
+    """Kills the ``gt@131`` mutant in ``_require_address``.
+
+    The guard is::
+
+        if len(address) > _MAX_LABEL_LEN:
+
+    Mutating ``>`` to ``>=`` rejects an address of *exactly* the limit,
+    which the rule allows.  Only the exact-boundary value distinguishes
+    the two, so the tests feed the limit itself and the limit +/- 1.
+
+    ``_require_address`` is a private helper, so the tests reach it
+    directly: the boundary is not observable through
+    ``DestinationIdentity``'s public constructor in the same shape.
+    """
+
+    def test_gt_at_131_an_address_of_exactly_the_limit_is_accepted(self):
+        address = "a" * endpoint_identity._MAX_LABEL_LEN
+        self.assertEqual(
+            endpoint_identity._require_address(address), address
+        )
+
+    def test_gt_at_131_an_address_one_over_the_limit_is_refused(self):
+        address = "a" * (endpoint_identity._MAX_LABEL_LEN + 1)
+        with self.assertRaises(ValueError) as caught:
+            endpoint_identity._require_address(address)
+        self.assertIn("at most", str(caught.exception))
+
+    def test_gt_at_131_an_address_one_under_the_limit_is_accepted(self):
+        address = "a" * (endpoint_identity._MAX_LABEL_LEN - 1)
+        self.assertEqual(
+            endpoint_identity._require_address(address), address
+        )
+
+    def test_gt_at_131_a_none_address_is_still_the_empty_string(self):
+        # The control: the None short-circuit must survive.
+        self.assertEqual(endpoint_identity._require_address(None), "")
