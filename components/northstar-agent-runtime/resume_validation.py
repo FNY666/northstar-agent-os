@@ -201,7 +201,11 @@ class FieldSpec:
                     f"got {type(bound).__name__}"
                 )
             if kind in _NUMERIC_TYPES and isinstance(bound, float):
-                if bound != bound or bound in (float("inf"), float("-inf")):
+                if bound != bound:
+                    raise InvalidSchemaError(
+                        f"field {name!r} {bound_name} must be a finite number"
+                    )
+                if bound == float("inf") or bound == float("-inf"):
                     raise InvalidSchemaError(
                         f"field {name!r} {bound_name} must be a finite number"
                     )

@@ -239,6 +239,18 @@ class ValidateTest(unittest.TestCase):
                 seq=1,
             )
 
+    def test_schema_with_nan_bound_is_refused(self):
+        from resume_validation import InvalidSchemaError, ResumeValidator
+
+        v = ResumeValidator()
+        with self.assertRaises(InvalidSchemaError):
+            v.declare(
+                "b#4",
+                {"q": 1},
+                {"fields": {"n": {"type": "float", "maximum": float("nan")}}},
+                seq=1,
+            )
+
     def test_schema_bounds_on_a_non_numeric_field_are_refused(self):
         from resume_validation import InvalidSchemaError, ResumeValidator
 
