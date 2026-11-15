@@ -1,0 +1,112 @@
+B173 seal-slice6 -- final report
+
+State
+- Branch: batch-173-moltbook-absorb.
+- Commit: c9e8885b0424b5971c77f2d6def41be409c78c19
+  "B173 seal-slice6: sealed delivery for slice 6 -- v2 seal enables real blind comparison"
+- Parent before this slice: 5f2d6cbb.
+- Bundle: /home/muse-newapi/b173-seal-slice6.bundle (git bundle verify: okay, complete history).
+- No version change, no tag, no release, no push, no main merge. Slice 5 / audit-head
+  landed code was not modified.
+
+What the gap was
+Slice 5's blind re-runner could not complete the Slice 6 comparison: the delivery
+had no seal, so extract_auditor_checks had nothing to read, and the report came
+back auditor_available=false with both blind checks parked in unassessed_blind.
+That was honest but left the claim untested. This slice produces the missing seal.
+
+How the seal was produced (not hand-written)
+scripts/seal-delivery.py drives the repository's own CodePhaseMachine:
+  - materialises commit a49d073f as an actual patch on its start commit 38d175e9
+    (git worktree at the start commit + git apply of the real diff);
+  - replays the host-declared checks against that patched tree, recording each
+    check through the phase machine's begin_check/complete_execution protocol;
+  - lets the phase machine write delivery-seal.json, patch-replay.json,
+    patch-audit.json and phases.json.
+Every field of the seal (start commit, start tree hash, check-input pins, patch
+digests) is produced by the same code that produces a live run's seal.
+The tool refuses a delivery whose patch does not apply to the start commit and
+refuses to emit a seal when a host check fails; it never falls back to writing a
+plausible-looking receipt.
+
+Seal location and contents
+- Seal: docs/delivery/slice6/slice6-seal.json
+- Supporting evidence in the same directory: slice6-phases.json,
+  slice6-manifest.json, slice6-reconcile.json, slice6-patch-audit.json,
+  slice6-patch-replay.json, slice6-blind-checks.json,
+  slice6-divergence-report.json
+- schema: northstar.delivery-seal.v2, ok=true
+- start_commit: 38d175e9565c8ae46ee5ef7a8be8d874ea3038f0
+- start_tree_hash: 6bc4388db4064a4ef0abfbb045cfa4f6add0203f
+- check_inputs_pinned: true, check_inputs_unchanged: true
+- 7 check-input pins: northstar-egress-sidecar/transport.py,
+  northstar-agent-runtime/{egress_enforcer,audit_chain,canonical_json,ed25519,
+  defensive_agent,action_card}.py
+- lease_table.py is the file the delivery creates, so it cannot be a start-commit
+  pin; the seal's patch digest covers it instead.
+- Seal verified with: python3 scripts/seal-delivery.py verify --evidence-dir docs/delivery/slice6
+  -> ok=true, problems=[]
+- The seal is byte-reproducible: regenerating it produces an identical file.
+
+Real divergence report
+docs/delivery/slice6/slice6-divergence-report.json, produced by the real
+run_blind_rerun against the real seal with Slice 5's recorded blind checks:
+  auditor_available: true
+  blind_only:   2 -- blind-sidecar-suite, blind-client-suite
+  auditor_only: 8 -- pinned-start-tree + one per pinned check input
+  both:         0
+  unassessed_blind: []   (empty: the auditor side is available)
+  findings: []
+The two sides genuinely check different things, and the report says so rather
+than claiming a pass: the auditor proves the pinned inputs were not tampered
+with, the blind re-runner proves the delivered suites still cover the claimed
+behaviour. Neither side states the other's assertion, so there is no shared
+check and no pass/fail threshold -- an operator judges the gap.
+
+Tests actually run
+- New suite tests/test_delivery_seal.py: 37 passed, 0 failed.
+- Repository suite (pytest tests/): 137 passed, 1 failed, 694 subtests passed.
+  The single failure is tests/test_code_task_pack.py::
+  test_northstar_delivered_patch_passes_clean_fixture_evaluation. It is
+  PRE-EXISTING: reproduced on the unmodified tree via git stash (1 failed,
+  14 passed) before my change, and it is unrelated to this slice.
+- Same result re-run in a fresh clone of the branch: 137 passed, 1 failed
+  (same pre-existing failure).
+- tests/ under unittest discover (the CI invocation): 132 tests, same 1
+  pre-existing failure.
+- docbuild: python3 tests/docbuild.py verify -> fresh + links resolve.
+- Shallow-clone path checked (CI clones with the default depth): the
+  history-dependent tests skip, and the CI step skips the seal verification
+  rather than failing on an absent commit. 26 passed, 5 skipped there.
+- Sidecar suite (slice 6): 43 passed. Client suite (slice 6): 10 passed.
+
+Pre-existing failure fixed
+tests/test_docbuild.py::test_every_public_module_is_documented_or_deliberately_excluded
+failed with two gaps: 'northstar-egress-sidecar: lease_table' (Slice 6's module)
+and 'northstar-agent-runtime: audit_head_holder' (audit-head slice's module).
+Both are now registered in tests/docbuild.py MANIFEST and the API pages were
+regenerated (docs/api/northstar-egress-sidecar.md +20 lines,
+docs/api/northstar-agent-runtime.md +110 lines). That test now passes
+(13 passed, 543 subtests passed).
+
+One finding worth flagging
+The committed evidence is deliberately NOT under the protocol's reserved
+delivery-evidence/ directory name. build_blind_bundle refuses a start commit
+that tracks any path under that directory, and the rule is blanket over the
+whole tree -- so committing the seal there would have made EVERY future blind
+bundle fail, including the one for this very delivery. The committed files
+carry prefixed names (slice6-seal.json and friends) instead, and
+CommittedEvidenceDoesNotBreakFutureBundlesTests pins that invariant.
+
+Open items and limits
+- The seal proves the delivery patch replays onto its start commit, that the
+  host checks passed against the patched tree, and that the pinned check inputs
+  were unchanged. It does not prove the Slice 6 implementation is correct.
+- Seal v2 still pins input FILES, not test COMMANDS. That is why the two check
+  sets do not overlap and why both=0 is the honest result rather than a
+  defect. Pinning a functional test-command manifest remains open.
+- The full runtime suite (18k+ tests) and make bench were not re-run for this
+  slice; the change adds no runtime module and touches no runtime behaviour.
+  The slice 6 suites it does exercise were run directly.
+- lightningzero comment 2675d32a remains unanswered; the original three
+  protocol questions remain open for the lurk round.

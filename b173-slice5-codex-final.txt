@@ -1,0 +1,38 @@
+B173 Slice 5 final report
+
+State
+- Branch: batch-173-moltbook-absorb.
+- Uncommitted because .git is read-only. Commit escalation was blocked when the approval reviewer returned 503 before review.
+- Requested commit message: B173 slice5: blind re-runner protocol -- blind bundle, check-set compare, divergence report
+- Files changed: components/northstar-agent-runtime/blind_rerunner.py; components/northstar-agent-runtime/tests/test_blind_rerunner.py; docs/design/blind-rerunner-protocol.md.
+- No version, tag, release, main-branch, or remote changes were made.
+
+Tests actually run
+- New module tests: 18 passed, 0 failed.
+- Focused protocol + forward seal ledger + sealed attestation + attested receipts: 78 passed, 0 failed.
+- Neighboring forward seal ledger + sealed audit sink + sealed attestation + attested receipts + Merkle batch: 80 passed, 0 failed (with PYTHONPATH configured).
+- Existing code-task/seal-format suite: 33 passed, 0 failed.
+- Python compile check passed; git diff --check passed.
+- Initial pre-edit focused run: 73 passed, 3 failed. All failures were in the pre-existing untracked Slice 5 work and were fixed.
+- A functional Slice 6 sidecar suite attempt inside the sandbox produced 33 passed, 4 failed, 9 errors because local socket operations were denied. An outside-sandbox rerun was not executed because approval review returned 503. The acceptance test runs the exact commands in collection-only mode against an archive of a49d073f.
+
+Slice 6 acceptance run
+- End commit: a49d073f0b4039d4171676bb5af54df47ede68f4.
+- Start commit: 38d175e9565c8ae46ee5ef7a8be8d874ea3038f0.
+- Claim: This delivery revokes live sockets when authorization leases are withdrawn and surfaces termination and network errors.
+- I recorded the blind check set without opening a Slice 6 receipt, seal, or delivery summary. I inspected the committed live-socket design note later during review; the blind checks were already present in the untracked test before that inspection.
+- blind-sidecar-suite: Assert the egress sidecar tests cover lease withdrawal and live-connection termination. Command: python3 -m pytest --collect-only -q components/northstar-egress-sidecar/tests
+- blind-client-suite: Assert the egress client tests cover surfaced network failures. Command: env PYTHONPATH=components/northstar-agent-runtime python3 -m pytest --collect-only -q components/northstar-agent-runtime/tests/test_egress_client.py
+- Both commands succeeded against a git archive of the exact Slice 6 end commit.
+- The blind bundle contained only schema, start_commit, claim, and repo_path. Receipt/seal/patch/summary attachment and reference rejection tests passed.
+- Auditor set: unavailable. No Slice 6 delivery seal or receipt exists in the committed tree or available repository artifacts, so no v2 start-tree/check-input pins can be extracted. The implementation does not invent an auditor check set.
+- Real divergence report: auditor_available=false; blind_only=[]; auditor_only=[]; both=[]; unassessed_blind=[blind-sidecar-suite, blind-client-suite]; finding="delivery seal was not supplied". There are no honestly nameable real blind-only checks without an auditor set.
+- Synthetic known-answer divergence names blind-only check b1 (revoked sockets are closed), auditor-only check a1 (pinned inputs are unchanged), and shared client-error check b2/a2.
+
+Open items and limits
+- Missing Slice 6 seal is an evidence gap; the real auditor comparison cannot be completed from available evidence.
+- The independent-context premise is recorded: re-derive from raw repo and sealed ledger, never trust a summary digest. No Slice 6 sealed-ledger artifact was available to re-derive.
+- lightningzero comment 2675d32a remains unanswered and the original three questions remain open for the lurk round. A later lightningzero reply revises the protocol.
+- Full runtime suite was not run.
+- Token usage was not reported by the CLI.
+- Required external report path /home/muse-newapi/b173-slice5-codex-final.txt could not be written because it is outside the writable workspace and approval review returned 503. This copy is staged in the workspace instead.
