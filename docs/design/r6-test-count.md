@@ -712,8 +712,10 @@ population.
 | **< 9** distinct new test methods | **8** |
 
 (The eighth `<9` slice is `r6-test-count` — this slice — which had no
-commit of its own when the batch was run. Its own count is 12, see
-§9.3.)
+commit of its own when the batch was run, so the referee emitted **no**
+`NEW_TESTS` verdict for it at all; it is counted as `<9` because it
+cannot be shown to have ≥ 9.  Its own count is 12, see §9.3.  The other
+seven `<9` slices are listed below.)
 
 ### 9.2 Every slice with < 9, with its count and its current verdict
 
