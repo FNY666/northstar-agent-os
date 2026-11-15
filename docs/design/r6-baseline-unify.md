@@ -473,6 +473,19 @@ from.
 | `b173-*-bench-baseline.txt` (6 files) | c54 / ageofagents / step-reliability-budget / tof / outsideloop / horizon-gate | bench *outputs* (the whole scorecard), not bench failure sets. |
 | `b173-acceptance-conformance-baseline-accept.txt` | acceptance-conformance slice | an accept-log excerpt. |
 
+The table above covers the **38** pre-existing files. This slice adds
+three more files outside the repository:
+
+| file | what it is |
+|---|---|
+| `b173-baseline-2db42e93….failures.txt` | the runtime baseline in force (main @ `2db42e93`) |
+| `b173-baseline-2db42e93….suite.log` | the raw suite log the baseline was taken from |
+| `b173-bench-baseline-2db42e93….failures.txt` | the bench baseline in force (the 8 failing bench items) |
+| `b173-baseline-CURRENT`, `b173-bench-baseline-CURRENT` | the two pointers |
+
+(That is five paths, four of which are artifacts of one baseline plus its
+log; the two pointers are one line each.)
+
 ### 8.3 The rule this census produces
 
 > A file is a baseline only if it is a **failure set** in the **fixed item
