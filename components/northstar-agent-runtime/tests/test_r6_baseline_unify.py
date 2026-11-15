@@ -473,7 +473,10 @@ class FlakyItemBandTests(unittest.TestCase):
             name = line.split(" ", 1)[1].split(" ", 1)[0]
             self.assertIn(name, text, f"{name} is not recorded in the design doc")
 
-    def test_the_design_doc_states_the_three_measured_item_counts(self):
+    def test_the_design_doc_states_the_measured_item_counts(self):
         text = DESIGN_DOC.read_text(encoding="utf-8")
         for count in ("33", "26", "27"):
             self.assertIn(f"**{count}**", text, f"run count {count} not stated")
+        # four runs were measured; the fourth repeated the second exactly
+        self.assertIn("**26**", text)
+        self.assertIn("all four runs", text)

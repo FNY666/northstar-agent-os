@@ -488,7 +488,7 @@ what a baseline can honestly claim to be.
 
 ### 9.1 The measurement
 
-The generator was run **three times against the same sha**
+The generator was run **four times against the same sha**
 (`2db42e939477bc2ceca9f20d35384dfc7731e972`, `main`'s HEAD), each in a
 fresh detached worktree, each with the same command:
 
@@ -501,11 +501,12 @@ PYTHONPATH=.:tests python3 -m unittest <all test modules>
 | 1 | **33** | 22 | 11 | `FAILED (failures=22, errors=11, skipped=13)` |
 | 2 | **26** | 16 | 10 | `FAILED (failures=16, errors=10, skipped=13)` |
 | 3 | **27** | 17 | 10 | `FAILED (failures=17, errors=10, skipped=13)` |
+| 4 | **26** | 16 | 10 | `FAILED (failures=16, errors=10, skipped=13)` |
 
 The test count is identical every time (`Ran 18703 tests`), so the same
 tests ran. The **failure set is not a function of the tree**.
 
-The intersection of all three runs is **26 items**; the union is **34**.
+The intersection of all four runs is **26 items**; the union is **34**.
 Exactly **8 items are flaky**:
 
 ```
