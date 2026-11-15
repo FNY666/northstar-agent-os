@@ -421,3 +421,59 @@ class CurrentPointerTests(unittest.TestCase):
         self.assertEqual(len(items), len(set(items)))
         for line in items:
             self.assertRegex(line, ITEM_RE)
+
+
+class FlakyItemBandTests(unittest.TestCase):
+    """The suite's failure set is not a function of the tree alone.
+
+    Measured over three runs at main's sha (2db42e93...), the failure sets
+    were 33, 26 and 27 items.  The stable core is 26 items; the difference
+    is a band of items that appear in some runs and not others.  This class
+    pins the *shape* of that finding so it cannot be quietly dropped.
+    """
+
+    FLAKY_ITEMS = [
+        "ERROR: test_the_sidecar_environment_holds_no_model_credentials "
+        "(test_integration_sidecar.SidecarIntegrationTest."
+        "test_the_sidecar_environment_holds_no_model_credentials)",
+        "FAIL: test_a_silent_peer_cannot_hang_the_run_forever "
+        "(test_integration_sidecar.SidecarIntegrationTest."
+        "test_a_silent_peer_cannot_hang_the_run_forever)",
+        "FAIL: test_a_write_in_the_same_plan_run_is_still_refused "
+        "(test_integration_sidecar.SidecarIntegrationTest."
+        "test_a_write_in_the_same_plan_run_is_still_refused)",
+        "FAIL: test_the_runtime_never_spawns_codex_itself "
+        "(test_integration_sidecar.SidecarIntegrationTest."
+        "test_the_runtime_never_spawns_codex_itself)",
+        "FAIL: test_the_sidecar_listens_on_a_private_unix_socket "
+        "(test_integration_sidecar.SidecarIntegrationTest."
+        "test_the_sidecar_listens_on_a_private_unix_socket)",
+        "FAIL: test_the_sidecar_only_ever_runs_codex_read_only_and_ephemeral "
+        "(test_integration_sidecar.SidecarIntegrationTest."
+        "test_the_sidecar_only_ever_runs_codex_read_only_and_ephemeral)",
+        "FAIL: test_two_parallel_delegations_are_both_served "
+        "(test_integration_sidecar.SidecarIntegrationTest."
+        "test_two_parallel_delegations_are_both_served)",
+        "FAIL: test_one_mutation_end_to_end_turns_its_test_red "
+        "(test_tools_verify_invariants.PrepareCopiesTheWholeComponentsTree."
+        "test_one_mutation_end_to_end_turns_its_test_red)",
+    ]
+
+    def test_the_flaky_band_is_eight_items(self):
+        self.assertEqual(len(self.FLAKY_ITEMS), 8)
+        self.assertEqual(len(set(self.FLAKY_ITEMS)), 8)
+
+    def test_every_flaky_item_is_well_formed(self):
+        for line in self.FLAKY_ITEMS:
+            self.assertRegex(line, ITEM_RE)
+
+    def test_the_flaky_band_is_named_in_the_design_doc(self):
+        text = DESIGN_DOC.read_text(encoding="utf-8")
+        for line in self.FLAKY_ITEMS:
+            name = line.split(" ", 1)[1].split(" ", 1)[0]
+            self.assertIn(name, text, f"{name} is not recorded in the design doc")
+
+    def test_the_design_doc_states_the_three_measured_item_counts(self):
+        text = DESIGN_DOC.read_text(encoding="utf-8")
+        for count in ("33", "26", "27"):
+            self.assertIn(f"**{count}**", text, f"run count {count} not stated")
