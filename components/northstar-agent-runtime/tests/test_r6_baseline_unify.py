@@ -38,6 +38,15 @@ GEN_SCRIPT = REPO_ROOT / "scripts" / "b173-baseline-gen.sh"
 DESIGN_DOC = REPO_ROOT / "docs" / "design" / "r6-baseline-unify.md"
 PATCH_FILE = Path("/home/muse-newapi/b173-r6-baseline-unify-fix.patch")
 
+# The referee as it was BEFORE the round-6 patches.  The patched referee is
+# built from this, not from the live script, so these tests keep their
+# coverage whether or not the coordinator has applied the patches yet.
+# (2026-11-16: building from the live script made both patch tests FAIL
+# once the patches were applied, because `patch` then correctly reports
+# "Reversed (or previously applied)".  A test that stops testing the thing
+# it was written to test is worse than no test.)
+BASE_ACCEPT = Path("/home/muse-newapi/b173-accept.sh.preround6")
+
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 ITEM_RE = re.compile(r"^(FAIL|ERROR): \S+ \(([^)]+)\)$")
 
@@ -281,7 +290,7 @@ class AcceptancePatchTests(unittest.TestCase):
         )
 
     def test_patch_applies_to_a_clean_copy_of_accept_sh(self):
-        accept = Path("/home/muse-newapi/b173-accept.sh")
+        accept = BASE_ACCEPT if BASE_ACCEPT.is_file() else Path("/home/muse-newapi/b173-accept.sh")
         if not accept.is_file():
             self.skipTest("b173-accept.sh not present on this machine")
         target = self.tmp / "b173-accept.sh"
@@ -298,7 +307,7 @@ class AcceptancePatchTests(unittest.TestCase):
         )
 
     def test_patched_accept_sh_still_has_twelve_checks(self):
-        accept = Path("/home/muse-newapi/b173-accept.sh")
+        accept = BASE_ACCEPT if BASE_ACCEPT.is_file() else Path("/home/muse-newapi/b173-accept.sh")
         if not accept.is_file():
             self.skipTest("b173-accept.sh not present on this machine")
         target = self.tmp / "b173-accept.sh"
