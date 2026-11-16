@@ -256,7 +256,7 @@ class SubjectHashListTests(unittest.TestCase):
     So the first half of the ownership rule -- "the commit that introduced
     this file is one of the slice's own subject commits" -- silently did
     nothing for every slice with TWO OR MORE subject commits.  Measured:
-    40 of the batch's 84 slices have 2+ subject commits.
+    47 of the batch's 84 slices have 2+ subject commits.
     """
 
     @classmethod
