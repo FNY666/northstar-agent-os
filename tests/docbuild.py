@@ -24,6 +24,7 @@ import ast
 import re
 import sys
 import urllib.parse
+from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -538,534 +539,353 @@ def render_page(component: str) -> str:
     return "\n".join(lines) + "\n"
 
 
+#: The reason kinds an exclusion can carry.
+#: A reason is a *kind*, not a module: a reviewer checks that the kind is the
+#: right one for the modules it covers, and the modules are then covered by the
+#: rule rather than by a line in a list.
+EXCLUSION_REASON_KINDS: tuple[str, ...] = (
+    "generated-artifact",
+    "shared-internal-base",
+    "numbered-probe-family",
+    "ops-bookkeeping",
+    "policy-mechanism",
+    "sandbox-config",
+    "probe-corpus",
+    "mock-stand-in",
+    "guard-detector",
+)
+
+
+#: The order in which the reason kinds are considered.
+#:
+#: A module's reason is the **first** kind in this order whose rule matches
+#: it.  The order is stated rather than implied so the resolution never
+#: depends on dict or set iteration order.
+EXCLUSION_REASON_PRECEDENCE: tuple[str, ...] = (
+    "numbered-probe-family",
+    "generated-artifact",
+    "shared-internal-base",
+    "ops-bookkeeping",
+    "policy-mechanism",
+    "sandbox-config",
+    "probe-corpus",
+    "mock-stand-in",
+    "guard-detector",
+)
+
+
+@dataclass(frozen=True)
+class ExclusionFamily:
+    """A numbered family of sibling modules that share one reason.
+
+    The family names a *stem* and an index range; the modules are derived, so
+    a module that follows the pattern is classified without anybody adding its
+    name to a list.
+    """
+
+    name: str
+    stem: str
+    first: int
+    last: int
+    reason: str
+    description: str
+
+    def member_names(self) -> tuple[str, ...]:
+        return tuple(f"{self.stem}_{index:02d}" for index in range(self.first, self.last + 1))
+
+
+#: The numbered families of sibling modules in the runtime.
+#:
+#: Each entry was measured against the filesystem: every member named here is
+#: a file at the runtime root, and every file matching the family's stem-and-
+#: index pattern is a member.  No family member is published.
+EXCLUSION_FAMILIES: tuple[ExclusionFamily, ...] = (
+    ExclusionFamily(
+        "attack_extra", "attack_extra", 1, 20, "numbered-probe-family",
+        "Red-team attack probes, one per attack shape.",
+    ),
+    ExclusionFamily(
+        "ba", "ba", 1, 50, "numbered-probe-family",
+        "Scratch utility modules from the benchmark-authoring batch.",
+    ),
+    ExclusionFamily(
+        "crypto_defense", "crypto_defense", 1, 30, "numbered-probe-family",
+        "Cryptography defence probes: signature and transparency-log interfaces.",
+    ),
+    ExclusionFamily(
+        "def_extra", "def_extra", 1, 20, "numbered-probe-family",
+        "Extra defence gates: biometrics, fingerprinting, geofencing.",
+    ),
+    ExclusionFamily(
+        "inj_variant", "inj_variant", 1, 20, "numbered-probe-family",
+        "Prompt-injection variants, one per encoding trick.",
+    ),
+    ExclusionFamily(
+        "input_defense", "input_defense", 1, 30, "numbered-probe-family",
+        "Input-side defences: blocklists, classifier sidecars, filters.",
+    ),
+    ExclusionFamily(
+        "model_attack", "model_attack", 1, 20, "numbered-probe-family",
+        "Model-extraction attacks, one per extraction route.",
+    ),
+    ExclusionFamily(
+        "multi_attack", "multi_attack", 1, 20, "numbered-probe-family",
+        "Multi-turn attacks: crescendo, many-shot, persona shift.",
+    ),
+    ExclusionFamily(
+        "out_def", "out_def", 31, 50, "numbered-probe-family",
+        "Output-side defences: exfiltration and steganography checks.",
+    ),
+    ExclusionFamily(
+        "output_defense", "output_defense", 8, 22, "numbered-probe-family",
+        "Output-side defences: content filtering, toxicity, bias, factuality.",
+    ),
+    ExclusionFamily(
+        "priv_esc", "priv_esc", 1, 20, "numbered-probe-family",
+        "Privilege-escalation probes: env exfiltration, traversal, symlinks.",
+    ),
+    ExclusionFamily(
+        "runtime_defense", "runtime_defense", 1, 30, "numbered-probe-family",
+        "Runtime isolation: seccomp, AppArmor, SELinux and sibling profiles.",
+    ),
+    ExclusionFamily(
+        "sm2", "sm2", 1, 30, "numbered-probe-family",
+        "Scratch string-utility modules from the second mock batch.",
+    ),
+    ExclusionFamily(
+        "state_mgmt", "state_mgmt", 1, 30, "numbered-probe-family",
+        "State-management probes: checkpoints, registers, CRDTs.",
+    ),
+    ExclusionFamily(
+        "tool_system", "tool_system", 1, 30, "numbered-probe-family",
+        "Tool-system probes: discovery, versioning, deprecation.",
+    ),
+)
+
+
+#: Every module the numbered families cover.  Derived, so a family member can
+#: never be spelled wrong.
+_RUNTIME_FAMILY_MODULES: tuple[str, ...] = tuple(
+    name for family in EXCLUSION_FAMILIES for name in family.member_names()
+)
+
+
+def family_members(family: ExclusionFamily | str) -> tuple[str, ...]:
+    """The module names a family covers."""
+    if isinstance(family, str):
+        for declared in EXCLUSION_FAMILIES:
+            if declared.name == family:
+                return declared.member_names()
+        raise KeyError(family)
+    return family.member_names()
+
+
+#: Modules excluded for a reason that cannot be read off the module's name.
+#: These are named because the decision *is* about the module: a mock stands in
+#: for a thing that does not exist here, an ops module is bookkeeping rather
+#: than a supported entry point, a policy module implements a mechanism whose
+#: reference is elsewhere.
+EXCLUSION_NAMED: dict[str, dict[str, str]] = {
+    "northstar-agent-runtime": {
+        # generated at build time; no docstring worth publishing.
+        "_version": "generated-artifact",
+        # shared base for the domain packs; the packs themselves are published.
+        "_domain_base": "shared-internal-base",
+        # operations bookkeeping (shaped after real ops products) rather than
+        # supported entry points.
+        "alerting_rules": "ops-bookkeeping",
+        "capacity_planning": "ops-bookkeeping",
+        "chaos_engineering": "ops-bookkeeping",
+        "cost_optimization": "ops-bookkeeping",
+        "distributed_tracing": "ops-bookkeeping",
+        "incident_management": "ops-bookkeeping",
+        "log_aggregation": "ops-bookkeeping",
+        "metrics_collection": "ops-bookkeeping",
+        "oncall_rotation": "ops-bookkeeping",
+        "resource_tagging": "ops-bookkeeping",
+        "runbook_automation": "ops-bookkeeping",
+        "status_page": "ops-bookkeeping",
+        # policy mechanisms whose reference documentation lives elsewhere.
+        "alignment_check": "policy-mechanism",
+        "command_registry": "policy-mechanism",
+        "confidence_gate": "policy-mechanism",
+        "counterfactual": "policy-mechanism",
+        "deliberative_spec": "policy-mechanism",
+        "deterministic_veto": "policy-mechanism",
+        "floor_settings": "policy-mechanism",
+        "goal_comparator": "policy-mechanism",
+        "hop_validation": "policy-mechanism",
+        "in_len_guard": "policy-mechanism",
+        "interleaved_thinking": "policy-mechanism",
+        "lifecycle_hooks": "policy-mechanism",
+        "pii_vault": "policy-mechanism",
+        "resource_defense": "policy-mechanism",
+        "stateful_veto": "policy-mechanism",
+        "structured_output": "policy-mechanism",
+        "task_snapshot": "policy-mechanism",
+        "tool_pinning": "policy-mechanism",
+        "two_tier_gating": "policy-mechanism",
+    },
+}
+
+
+def _module_source(component: str, name: str) -> str:
+    """The source of a module, or ``""`` when it has none."""
+    root = ROOT / "components" / component
+    path = root / f"{name}.py"
+    if not path.exists():
+        path = root / (name.replace(".__init__", "/__init__") + ".py")
+    if not path.exists():
+        return ""
+    return path.read_text(encoding="utf-8")
+
+
+def _has_design_tag(component: str, name: str) -> bool:
+    """Whether the module's docstring carries a ``(D-IN-nnn)``/``(D-OUT-nnn)`` tag.
+
+    The tag is the runtime's own register for "this module implements a
+    numbered input or output defence", and it is written by the module's
+    author rather than by this file.
+    """
+    source = _module_source(component, name)
+    parts = source.split('"""')
+    if len(parts) < 2:
+        return False
+    return bool(re.search(r"\(D-(?:IN|OUT)-\d+", parts[1]))
+
+
+def _family_for(component: str, name: str) -> ExclusionFamily | None:
+    """The family a module belongs to, if any."""
+    if component != "northstar-agent-runtime":
+        return None
+    for family in EXCLUSION_FAMILIES:
+        if name in family.member_names():
+            return family
+    return None
+
+
+def exclusion_reason_kinds(component: str, name: str) -> list[str]:
+    """Every exclusion reason kind that applies to a module.
+
+    The kinds are returned in the order of
+    :data:`EXCLUSION_REASON_PRECEDENCE`, and the **first** one is the module's
+    reason.  Each rule's domain excludes the domains of the rules above it,
+    so the kinds are disjoint: a module lands under exactly one.
+    """
+    matched = {kind for kind in _matching_reason_kinds(component, name)}
+    return [kind for kind in EXCLUSION_REASON_PRECEDENCE if kind in matched]
+
+
+def _matching_reason_kinds(component: str, name: str) -> set[str]:
+    """The kinds whose *rule* matches a module.
+
+    The rules are written to be **mutually exclusive**: each rule's domain
+    excludes the domains of the rules above it in
+    :data:`EXCLUSION_REASON_PRECEDENCE`.  The two overlaps that exist in the
+    source tree are both resolved here, and both resolutions are stated:
+
+    * five ``out_def_*`` family members also carry a ``(D-OUT-nnn)`` tag.
+      The family is their reason -- they are siblings in a numbered defence
+      series -- so the tag rule excludes family members.
+    * seven ``*_mock`` modules also carry a ``(D-IN-nnn)``/``(D-OUT-nnn)`` tag.
+      Their reason is the mock -- they stand in for a classifier that does
+      not exist here -- so the tag rule excludes mocks.
+    """
+    kinds: set[str] = set()
+
+    if _family_for(component, name) is not None:
+        kinds.add("numbered-probe-family")
+
+    named = EXCLUSION_NAMED.get(component, {}).get(name)
+    if named is not None:
+        kinds.add(named)
+
+    if name.startswith("sandbox_"):
+        kinds.add("sandbox-config")
+    if name.endswith("_probe") or name.endswith("_probes"):
+        kinds.add("probe-corpus")
+    if name.endswith("_mock"):
+        kinds.add("mock-stand-in")
+    if _has_design_tag(component, name) and "numbered-probe-family" not in kinds \
+            and "mock-stand-in" not in kinds:
+        kinds.add("guard-detector")
+
+    return kinds
+
+
+def exclusion_reason(component: str) -> dict[str, str]:
+    """Every excluded module of a component, mapped to its reason kind.
+
+    The reason is *derived* from the module, not declared beside it, so a new
+    module that follows an existing pattern is classified without anybody
+    adding its name.
+    """
+    reasons: dict[str, str] = {}
+    for name in sorted(MANIFEST_EXCLUSIONS.get(component, frozenset())):
+        kinds = exclusion_reason_kinds(component, name)
+        if kinds:
+            reasons[name] = kinds[0]
+    return reasons
+
+
 #: Public modules deliberately left out of the API reference, per component.
 #: "listed explicitly on purpose" is only a true statement if forgetting is loud, so
 #: a module that is neither in MANIFEST nor listed here fails the coverage test. An
 #: exclusion is a recorded decision, not a parking spot: ``_version`` is generated at
 #: build time and has no docstring worth publishing.
+#:
+#: The names are grouped by *reason*, so a reviewer checks the reason rather than
+#: 519 names.  The grouping itself is derived (see :func:`exclusion_reason`);
+#: the names below are the decision.
 MANIFEST_EXCLUSIONS: dict[str, frozenset[str]] = {
     "northstar-agent-runtime": frozenset({
-        # Most excluded runtime modules are benchmark probes, one-off detectors,
-        # fixtures, or standalone experiments rather than supported entry points.
-        # Each exclusion stays explicit so any new module still needs a docs decision.
-        "_version", "_domain_base",
-        'alerting_rules',
-        'alignment_check',
-        'allowlist',
-        'approval_fatigue_probes',
-        'argument_smuggling_probes',
-        'artifact_graph_probes',
-        'asi02_probe',
-        'ask_or_solve_probes',
-        'attack_extra_01',
-        'attack_extra_02',
-        'attack_extra_03',
-        'attack_extra_04',
-        'attack_extra_05',
-        'attack_extra_06',
-        'attack_extra_07',
-        'attack_extra_08',
-        'attack_extra_09',
-        'attack_extra_10',
-        'attack_extra_11',
-        'attack_extra_12',
-        'attack_extra_13',
-        'attack_extra_14',
-        'attack_extra_15',
-        'attack_extra_16',
-        'attack_extra_17',
-        'attack_extra_18',
-        'attack_extra_19',
-        'attack_extra_20',
-        'b64_detect',
-        'ba_01',
-        'ba_02',
-        'ba_03',
-        'ba_04',
-        'ba_05',
-        'ba_06',
-        'ba_07',
-        'ba_08',
-        'ba_09',
-        'ba_10',
-        'ba_11',
-        'ba_12',
-        'ba_13',
-        'ba_14',
-        'ba_15',
-        'ba_16',
-        'ba_17',
-        'ba_18',
-        'ba_19',
-        'ba_20',
-        'ba_21',
-        'ba_22',
-        'ba_23',
-        'ba_24',
-        'ba_25',
-        'ba_26',
-        'ba_27',
-        'ba_28',
-        'ba_29',
-        'ba_30',
-        'ba_31',
-        'ba_32',
-        'ba_33',
-        'ba_34',
-        'ba_35',
-        'ba_36',
-        'ba_37',
-        'ba_38',
-        'ba_39',
-        'ba_40',
-        'ba_41',
-        'ba_42',
-        'ba_43',
-        'ba_44',
-        'ba_45',
-        'ba_46',
-        'ba_47',
-        'ba_48',
-        'ba_49',
-        'ba_50',
-        'benchmark_retirement_probes',
-        'bias_mock',
-        'bidi_remove',
-        'bipia_probe',
-        'canary_tokens',
-        'capacity_planning',
-        'captcha_mock',
-        'case_norm',
-        'chaos_engineering',
-        'citation_verify',
-        'cmdi_detect',
-        'code_scan',
-        'coerce_guard',
-        'command_registry',
-        'commerce_mandate_probes',
-        'confidence_calib',
-        'confidence_gate',
-        'confusable_detect',
-        'constraint_synthesis_probes',
-        'content_filter',
-        'cost_optimization',
-        'counterfactual',
-        'counterfactual_explanation_probes',
-        'crescendo_probe',
-        'crypto_defense_01',
-        'crypto_defense_02',
-        'crypto_defense_03',
-        'crypto_defense_04',
-        'crypto_defense_05',
-        'crypto_defense_06',
-        'crypto_defense_07',
-        'crypto_defense_08',
-        'crypto_defense_09',
-        'crypto_defense_10',
-        'crypto_defense_11',
-        'crypto_defense_12',
-        'crypto_defense_13',
-        'crypto_defense_14',
-        'crypto_defense_15',
-        'crypto_defense_16',
-        'crypto_defense_17',
-        'crypto_defense_18',
-        'crypto_defense_19',
-        'crypto_defense_20',
-        'crypto_defense_21',
-        'crypto_defense_22',
-        'crypto_defense_23',
-        'crypto_defense_24',
-        'crypto_defense_25',
-        'crypto_defense_26',
-        'crypto_defense_27',
-        'crypto_defense_28',
-        'crypto_defense_29',
-        'crypto_defense_30',
-        'ctrl_strip',
-        'def_extra_01',
-        'def_extra_02',
-        'def_extra_03',
-        'def_extra_04',
-        'def_extra_05',
-        'def_extra_06',
-        'def_extra_07',
-        'def_extra_08',
-        'def_extra_09',
-        'def_extra_10',
-        'def_extra_11',
-        'def_extra_12',
-        'def_extra_13',
-        'def_extra_14',
-        'def_extra_15',
-        'def_extra_16',
-        'def_extra_17',
-        'def_extra_18',
-        'def_extra_19',
-        'def_extra_20',
-        'deliberative_spec',
-        'deser_guard',
-        'destructive_prefix_probes',
-        'deterministic_veto',
-        'distributed_tracing',
-        'dlp_interface',
-        'encoding_norm',
-        'enforcement_gap_probes',
-        'evidence_aging_probes',
-        'evidence_compaction_probes',
-        'factuality_mock',
-        'floor_settings',
-        'goal_comparator',
-        'hallucination_mock',
-        'hex_detect',
-        'history_deviation_probes',
-        'homoglyph_norm',
-        'honeytokens',
-        'hop_validation',
-        'html_entity_guard',
-        'in_len_guard',
-        'incident_management',
-        'inj_variant_01',
-        'inj_variant_02',
-        'inj_variant_03',
-        'inj_variant_04',
-        'inj_variant_05',
-        'inj_variant_06',
-        'inj_variant_07',
-        'inj_variant_08',
-        'inj_variant_09',
-        'inj_variant_10',
-        'inj_variant_11',
-        'inj_variant_12',
-        'inj_variant_13',
-        'inj_variant_14',
-        'inj_variant_15',
-        'inj_variant_16',
-        'inj_variant_17',
-        'inj_variant_18',
-        'inj_variant_19',
-        'inj_variant_20',
-        'input_defense_01',
-        'input_defense_02',
-        'input_defense_03',
-        'input_defense_04',
-        'input_defense_05',
-        'input_defense_06',
-        'input_defense_07',
-        'input_defense_08',
-        'input_defense_09',
-        'input_defense_10',
-        'input_defense_11',
-        'input_defense_12',
-        'input_defense_13',
-        'input_defense_14',
-        'input_defense_15',
-        'input_defense_16',
-        'input_defense_17',
-        'input_defense_18',
-        'input_defense_19',
-        'input_defense_20',
-        'input_defense_21',
-        'input_defense_22',
-        'input_defense_23',
-        'input_defense_24',
-        'input_defense_25',
-        'input_defense_26',
-        'input_defense_27',
-        'input_defense_28',
-        'input_defense_29',
-        'input_defense_30',
-        'interleaved_thinking',
-        'invis_remove',
-        'lang_filter',
-        'len_limit',
-        'lifecycle_hooks',
-        'log_aggregation',
-        'memory_admission_probes',
-        'metrics_collection',
-        'ml_sidecar',
-        'model_attack_01',
-        'model_attack_02',
-        'model_attack_03',
-        'model_attack_04',
-        'model_attack_05',
-        'model_attack_06',
-        'model_attack_07',
-        'model_attack_08',
-        'model_attack_09',
-        'model_attack_10',
-        'model_attack_11',
-        'model_attack_12',
-        'model_attack_13',
-        'model_attack_14',
-        'model_attack_15',
-        'model_attack_16',
-        'model_attack_17',
-        'model_attack_18',
-        'model_attack_19',
-        'model_attack_20',
-        'monitor_channel_probes',
-        'monitor_deafness_probes',
-        'multi_attack_01',
-        'multi_attack_02',
-        'multi_attack_03',
-        'multi_attack_04',
-        'multi_attack_05',
-        'multi_attack_06',
-        'multi_attack_07',
-        'multi_attack_08',
-        'multi_attack_09',
-        'multi_attack_10',
-        'multi_attack_11',
-        'multi_attack_12',
-        'multi_attack_13',
-        'multi_attack_14',
-        'multi_attack_15',
-        'multi_attack_16',
-        'multi_attack_17',
-        'multi_attack_18',
-        'multi_attack_19',
-        'multi_attack_20',
-        'multi_axis_autonomy_probes',
-        'negotiation_corpus_probes',
-        'oncall_rotation',
-        'out_def_31',
-        'out_def_32',
-        'out_def_33',
-        'out_def_34',
-        'out_def_35',
-        'out_def_36',
-        'out_def_37',
-        'out_def_38',
-        'out_def_39',
-        'out_def_40',
-        'out_def_41',
-        'out_def_42',
-        'out_def_43',
-        'out_def_44',
-        'out_def_45',
-        'out_def_46',
-        'out_def_47',
-        'out_def_48',
-        'out_def_49',
-        'out_def_50',
-        'out_len_guard',
-        'output_defense_08',
-        'output_defense_09',
-        'output_defense_10',
-        'output_defense_11',
-        'output_defense_12',
-        'output_defense_13',
-        'output_defense_14',
-        'output_defense_15',
-        'output_defense_16',
-        'output_defense_17',
-        'output_defense_18',
-        'output_defense_19',
-        'output_defense_20',
-        'output_defense_21',
-        'output_defense_22',
-        'output_limits',
-        'partial_redact',
-        'per_action_autonomy_probes',
-        'pii_redaction',
-        'pii_vault',
-        'plan_injection_probes',
-        'planner_executor_seam_probes',
-        'pow_mock',
-        'pre_completion_signal_probes',
-        'priv_esc_01',
-        'priv_esc_02',
-        'priv_esc_03',
-        'priv_esc_04',
-        'priv_esc_05',
-        'priv_esc_06',
-        'priv_esc_07',
-        'priv_esc_08',
-        'priv_esc_09',
-        'priv_esc_10',
-        'priv_esc_11',
-        'priv_esc_12',
-        'priv_esc_13',
-        'priv_esc_14',
-        'priv_esc_15',
-        'priv_esc_16',
-        'priv_esc_17',
-        'priv_esc_18',
-        'priv_esc_19',
-        'priv_esc_20',
-        'privilege_at_recall_probes',
-        'punct_norm',
-        'quota_enforce',
-        'range_check',
-        'refusal_detect',
-        'refusal_pattern_probes',
-        'regex_block',
-        'resource_defense',
-        'resource_tagging',
-        'run_assert_eval_probes',
-        'runbook_automation',
-        'runtime_defense_01',
-        'runtime_defense_02',
-        'runtime_defense_03',
-        'runtime_defense_04',
-        'runtime_defense_05',
-        'runtime_defense_06',
-        'runtime_defense_07',
-        'runtime_defense_08',
-        'runtime_defense_09',
-        'runtime_defense_10',
-        'runtime_defense_11',
-        'runtime_defense_12',
-        'runtime_defense_13',
-        'runtime_defense_14',
-        'runtime_defense_15',
-        'runtime_defense_16',
-        'runtime_defense_17',
-        'runtime_defense_18',
-        'runtime_defense_19',
-        'runtime_defense_20',
-        'runtime_defense_21',
-        'runtime_defense_22',
-        'runtime_defense_23',
-        'runtime_defense_24',
-        'runtime_defense_25',
-        'runtime_defense_26',
-        'runtime_defense_27',
-        'runtime_defense_28',
-        'runtime_defense_29',
-        'runtime_defense_30',
-        'safe_completion',
-        'sandbox_bun',
-        'sandbox_deno',
-        'sandbox_docker',
-        'sandbox_firecracker',
-        'sandbox_gvisor',
-        'sandbox_nsjail',
-        'sandbox_podman',
-        'sandbox_pypy',
-        'sandbox_restrictedpython',
-        'sandbox_wasm',
-        'schema_valid',
-        'script_mix',
-        'secret_scan',
-        'self_modification_probes',
-        'self_referential_trust_probes',
-        'sleeper_agent_probes',
-        'sm2_01',
-        'sm2_02',
-        'sm2_03',
-        'sm2_04',
-        'sm2_05',
-        'sm2_06',
-        'sm2_07',
-        'sm2_08',
-        'sm2_09',
-        'sm2_10',
-        'sm2_11',
-        'sm2_12',
-        'sm2_13',
-        'sm2_14',
-        'sm2_15',
-        'sm2_16',
-        'sm2_17',
-        'sm2_18',
-        'sm2_19',
-        'sm2_20',
-        'sm2_21',
-        'sm2_22',
-        'sm2_23',
-        'sm2_24',
-        'sm2_25',
-        'sm2_26',
-        'sm2_27',
-        'sm2_28',
-        'sm2_29',
-        'sm2_30',
-        'source_attrib',
-        'sqli_detect',
-        'ssti_detect',
-        'stale_plan_probes',
-        'state_mgmt_01',
-        'state_mgmt_02',
-        'state_mgmt_03',
-        'state_mgmt_04',
-        'state_mgmt_05',
-        'state_mgmt_06',
-        'state_mgmt_07',
-        'state_mgmt_08',
-        'state_mgmt_09',
-        'state_mgmt_10',
-        'state_mgmt_11',
-        'state_mgmt_12',
-        'state_mgmt_13',
-        'state_mgmt_14',
-        'state_mgmt_15',
-        'state_mgmt_16',
-        'state_mgmt_17',
-        'state_mgmt_18',
-        'state_mgmt_19',
-        'state_mgmt_20',
-        'state_mgmt_21',
-        'state_mgmt_22',
-        'state_mgmt_23',
-        'state_mgmt_24',
-        'state_mgmt_25',
-        'state_mgmt_26',
-        'state_mgmt_27',
-        'state_mgmt_28',
-        'state_mgmt_29',
-        'state_mgmt_30',
-        'stateful_veto',
-        'status_page',
-        'structured_output',
-        'summarization_guard',
-        'task_snapshot',
-        'tool_pinning',
-        'tool_schema_digest_probes',
-        'tool_system_01',
-        'tool_system_02',
-        'tool_system_03',
-        'tool_system_04',
-        'tool_system_05',
-        'tool_system_06',
-        'tool_system_07',
-        'tool_system_08',
-        'tool_system_09',
-        'tool_system_10',
-        'tool_system_11',
-        'tool_system_12',
-        'tool_system_13',
-        'tool_system_14',
-        'tool_system_15',
-        'tool_system_16',
-        'tool_system_17',
-        'tool_system_18',
-        'tool_system_19',
-        'tool_system_20',
-        'tool_system_21',
-        'tool_system_22',
-        'tool_system_23',
-        'tool_system_24',
-        'tool_system_25',
-        'tool_system_26',
-        'tool_system_27',
-        'tool_system_28',
-        'tool_system_29',
-        'tool_system_30',
-        'toxicity_mock',
-        'trace_tamper_probes',
-        'translation_guard',
-        'traversal_detect',
-        'trust_inversion_probes',
-        'two_tier_gating',
-        'uncertainty_mock',
-        'unicode_sanit',
-        'url_decode_guard',
-        'ws_norm',
-        'xss_detect',
-        'xxe_detect',
+        # --- generated-artifact -------------------------------------------------
+        '_version',
+        # --- shared-internal-base -----------------------------------------------
+        '_domain_base',
+        # --- ops-bookkeeping ----------------------------------------------------
+        'alerting_rules', 'capacity_planning', 'chaos_engineering', 'cost_optimization',
+        'distributed_tracing', 'incident_management', 'log_aggregation', 'metrics_collection',
+        'oncall_rotation', 'resource_tagging', 'runbook_automation', 'status_page',
+        # --- policy-mechanism ---------------------------------------------------
+        'alignment_check', 'command_registry', 'confidence_gate', 'counterfactual',
+        'deliberative_spec', 'deterministic_veto', 'floor_settings', 'goal_comparator',
+        'hop_validation', 'in_len_guard', 'interleaved_thinking', 'lifecycle_hooks',
+        'pii_vault', 'resource_defense', 'stateful_veto', 'structured_output',
+        'task_snapshot', 'tool_pinning', 'two_tier_gating',
+        # --- sandbox-config -----------------------------------------------------
+        'sandbox_bun', 'sandbox_deno', 'sandbox_docker', 'sandbox_firecracker',
+        'sandbox_gvisor', 'sandbox_nsjail', 'sandbox_podman', 'sandbox_pypy',
+        'sandbox_restrictedpython', 'sandbox_wasm',
+        # --- probe-corpus -------------------------------------------------------
+        'approval_fatigue_probes', 'argument_smuggling_probes', 'artifact_graph_probes', 'asi02_probe',
+        'ask_or_solve_probes', 'benchmark_retirement_probes', 'bipia_probe', 'commerce_mandate_probes',
+        'constraint_synthesis_probes', 'counterfactual_explanation_probes', 'crescendo_probe', 'destructive_prefix_probes',
+        'enforcement_gap_probes', 'evidence_aging_probes', 'evidence_compaction_probes', 'history_deviation_probes',
+        'memory_admission_probes', 'monitor_channel_probes', 'monitor_deafness_probes', 'multi_axis_autonomy_probes',
+        'negotiation_corpus_probes', 'per_action_autonomy_probes', 'plan_injection_probes', 'planner_executor_seam_probes',
+        'pre_completion_signal_probes', 'privilege_at_recall_probes', 'refusal_pattern_probes', 'run_assert_eval_probes',
+        'self_modification_probes', 'self_referential_trust_probes', 'sleeper_agent_probes', 'stale_plan_probes',
+        'tool_schema_digest_probes', 'trace_tamper_probes', 'trust_inversion_probes',
+        # --- mock-stand-in ------------------------------------------------------
+        'bias_mock', 'captcha_mock', 'factuality_mock', 'hallucination_mock',
+        'pow_mock', 'toxicity_mock', 'uncertainty_mock',
+        # --- guard-detector (the D-IN-nnn / D-OUT-nnn registers) -----------------
+        'allowlist', 'b64_detect', 'bidi_remove', 'canary_tokens',
+        'case_norm', 'citation_verify', 'cmdi_detect', 'code_scan',
+        'coerce_guard', 'confidence_calib', 'confusable_detect', 'content_filter',
+        'ctrl_strip', 'deser_guard', 'dlp_interface', 'encoding_norm',
+        'hex_detect', 'homoglyph_norm', 'honeytokens', 'html_entity_guard',
+        'invis_remove', 'lang_filter', 'len_limit', 'ml_sidecar',
+        'out_len_guard', 'output_limits', 'partial_redact', 'pii_redaction',
+        'punct_norm', 'quota_enforce', 'range_check', 'refusal_detect',
+        'regex_block', 'safe_completion', 'schema_valid', 'script_mix',
+        'secret_scan', 'source_attrib', 'sqli_detect', 'ssti_detect',
+        'summarization_guard', 'translation_guard', 'traversal_detect', 'unicode_sanit',
+        'url_decode_guard', 'ws_norm', 'xss_detect', 'xxe_detect',
         'zw_remove',
+        # --- numbered-probe-family (the 385 siblings; see EXCLUSION_FAMILIES) ---
+        *_RUNTIME_FAMILY_MODULES,
     }),
 }
 
