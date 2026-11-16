@@ -277,6 +277,54 @@ These are **real gaps**, not legitimate zeros: all three taskbooks explicitly
 promise test methods, and all three delivered a documentation-only commit.
 The threshold now says so.
 
+### 2.7 The threshold a slice is held to is the one it was *promised*
+
+Raising the threshold to 9 exposed a false FAIL of the same family as the
+CANARY one: **seven slices have no taskbook at all** —
+`runtime-registration`, `slice1`..`slice6`. They were launched before the
+taskbook mechanism existed (the template's "≥9" clause was added
+2026-11-14 08:22; those slices ran on 2026-11-12), so they were never
+promised 9 test methods.
+
+Holding them to a contract they never received is the same false FAIL the
+CANARY check had for the 8 taskbooks written before the canary mechanism
+existed, and the same reasoning applies: *"no comparison was possible" is not
+"the slice failed"*.
+
+The rule the referee now implements:
+
+| slice | threshold | why |
+|---|---|---|
+| **with** a taskbook | **9** | the taskbook's promise |
+| **without** a taskbook | **1** | the pre-taskbook rule — the only rule that existed when those slices ran |
+
+```bash
+if [ -s "$TASKBOOK" ]; then
+  NTEST_THRESHOLD=9
+else
+  NTEST_THRESHOLD=1
+fi
+[ "$NTEST" -ge "$NTEST_THRESHOLD" ] && check NEW_TESTS PASS ...
+```
+
+Measured distinct new test methods for the seven taskbook-less slices:
+
+| slice | distinct | verdict under threshold 1 |
+|---|---|---|
+| `runtime-registration` | 37 | PASS |
+| `slice5` | 18 | PASS |
+| `slice6` | 13 | PASS |
+| `slice1` | 7 | PASS |
+| `slice3` | 3 | PASS |
+| `slice2` | 2 | PASS |
+| `slice4` | **0** | **FAIL** — genuinely no new test methods |
+
+`slice4` still fails: it delivered no new test methods at all, so it fails
+under either rule. That is the correct outcome.
+
+Pinned by `tests/test_r7_new_tests_threshold.py`
+(`NewTestsThresholdTaskbookLessTests`, 4 methods; RED 4 failures).
+
 ---
 
 ## 3. The behavioural tests
