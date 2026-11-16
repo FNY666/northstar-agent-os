@@ -218,6 +218,12 @@ class ContentCommitSelectionTests(unittest.TestCase):
             "subject-matched commit and the commit that introduced the "
             "slice's files; got %d: %r" % (count, subjects),
         )
+        # The commit that introduced the slice's files must still be among
+        # the content commits.  It carries the slice's 59 test methods and
+        # sits under the WRONG subject ("B173 scorer-disagreement: ..."),
+        # because the commit that carried the slice's work was amended in
+        # place and its subject overwritten.  If the selection drops it,
+        # correcting the subject destroys the slice's evidence.
         self.assertTrue(
             any("scorer-disagreement" in s for s in subjects),
             "the commit that introduced the slice's files must still be "

@@ -270,6 +270,23 @@ class TestFallbackAttribution(ManifestIntegrityBase):
         self.assertIn("none", verdict)
 
     def test_e_fallback_accepts_the_slugs_own_subject(self) -> None:
+        """The slice's OWN commit is credited for attribution.
+
+        Since r8 the content-commit set is a UNION: the slice's subject
+        commits plus the commits that introduced the manifest's files.
+        The other slice's commit is therefore *listed* -- it carries
+        evidence -- but it is not what the slice is *attributed* to, and
+        the listing says which is which:
+
+            commit (subject):     <the slice's own commit>
+            commit (introducing): <the other slice's commit>
+
+        Before r8 the content-commit set was an EXCLUSIVE fallback: it
+        fired only when the slice had no subject commit at all.  That made
+        correcting a slice's subject DESTROY its evidence -- measured on
+        `capability-ceiling-probe`, whose NEW_TESTS count fell from 59 to 8
+        the moment its subject was corrected.
+        """
         slug = "own-slice"
         sb = self.sandbox(slug)
         sb.write(f"{MODDIR}/mod_shared.py", "VALUE = 1\n")
@@ -287,7 +304,19 @@ class TestFallbackAttribution(ManifestIntegrityBase):
         verdict = _verdict(lines, "COMMIT")
         self.assertTrue(verdict.startswith("PASS "), verdict)
         # The credited commit is the slice's own, not the other slice's.
-        self.assertNotIn("some-other-slice", "\n".join(lines))
+        self.assertNotIn("some-other-slice", _verdict(lines, "COMMIT"))
+        # The other slice's commit is listed, but LABELLED as evidence.
+        listed = "\n".join(
+            ln for ln in lines if ln.strip().startswith("commit (")
+        )
+        self.assertIn("subject", listed, listed)
+        self.assertIn("introducing", listed, listed)
+        # and the subject-labelled commit is the slice's own
+        subject_line = [
+            ln for ln in listed.splitlines() if "subject" in ln
+        ]
+        self.assertTrue(subject_line, listed)
+        self.assertNotIn("some-other-slice", "\n".join(subject_line))
 
 
 class TestRefereeShape(ManifestIntegrityBase):
