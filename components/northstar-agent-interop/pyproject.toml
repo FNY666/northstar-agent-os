@@ -33,4 +33,5 @@ py-modules = [
     "process_adapter",
     "process_backend",
     "remote_transport",
+    "remote_worker",
 ]

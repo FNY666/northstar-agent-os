@@ -116,7 +116,7 @@ jobs:
         run: |
           python -m pip install --quiet .
           cd /tmp
-          python -c "import interop_contract, handoff, interop_adapter, canary, process_adapter, process_backend, remote_transport; print('northstar-agent-interop imports OK')"
+          python -c "import interop_contract, handoff, interop_adapter, canary, process_adapter, process_backend, remote_transport, remote_worker; print('northstar-agent-interop imports OK')"
       - name: Shell syntax
         working-directory: components/northstar-codex-sidecar
         run: sh -n install.sh rollback.sh

@@ -1039,6 +1039,64 @@ def undecided_installed_modules(component: str) -> list[str]:
     return sorted(installed_modules(component) - decided)
 
 
+# --- the components that ship a wheel ---------------------------------------
+
+#: Files in a component directory that are not runtime modules.  The runtime
+#: component's own registry excludes the same names (``setup``, ``conftest``)
+#: and the same ``test_`` prefix, so the two views agree by construction.
+NOT_MODULES = frozenset({"setup.py", "conftest.py"})
+
+
+def is_runtime_module(path: Path) -> bool:
+    """True when a file in a component directory is a runtime module.
+
+    A test file (``test_*.py``) and the two packaging helpers are not.
+    """
+    return (
+        path.is_file()
+        and path.suffix == ".py"
+        and not path.name.startswith("test_")
+        and path.name not in NOT_MODULES
+    )
+
+
+def components_that_ship_a_wheel() -> list[str]:
+    """Every component that has a ``pyproject.toml`` and therefore a wheel."""
+    components = ROOT / "components"
+    if not components.is_dir():
+        return []
+    return sorted(
+        path.name
+        for path in components.iterdir()
+        if path.is_dir() and (path / "pyproject.toml").is_file()
+    )
+
+
+def flat_modules_on_disk(component: str) -> set[str]:
+    """The flat runtime modules a component has in its directory."""
+    root = ROOT / "components" / component
+    if not root.is_dir():
+        return set()
+    return {path.stem for path in root.glob("*.py") if is_runtime_module(path)}
+
+
+def uninstalled_modules(component: str) -> list[str]:
+    """Modules a component has on disk that its wheel would not ship.
+
+    The check is against the INSTALLED surface -- ``py-modules`` union the
+    package members -- because those are the two mechanisms setuptools
+    actually uses.  Comparing against ``py-modules`` alone would report the
+    runtime's 22 package members as missing.
+
+    Measured 2026-11-16: this found exactly one module in the whole
+    repository -- the interop component's ``remote_worker.py``, which was
+    therefore absent from the wheel, and therefore absent from the CI
+    install smoke check as well.
+    """
+    installed = installed_modules(component)
+    return sorted(flat_modules_on_disk(component) - installed)
+
+
 def documented_but_absent() -> list[str]:
     """The other direction: a page that documents a module which no longer exists."""
     ghosts: list[str] = []
