@@ -106,6 +106,42 @@ Three commits, one logical change each:
 `event_condenser.py` has **zero diff** against HEAD, and
 `scope_verbatim_compaction.py` has **zero diff** against HEAD.
 
+### 4.1 Where this slice's promised test methods were landed
+
+This slice's taskbook promised **>= 9 new test methods**.  They are real,
+and they are in the tree — but they are **not** under this slice's own
+subject prefix, and the reason is structural, not an omission.
+
+| promised methods | landed under | commit | why not under `B173 orphan-adoption:` |
+|---|---|---|---|
+| the 7 adopted revision-checked methods + 6 new `OrphanAdoptionTests` methods | `revision-checked-tool-results` | `35956952` | the adoption work was *done by* that slice, under its prefix; this slice adjudicated it and recorded the decision |
+| the 3 new scope methods (message pin, length prefix, end marker) | `scope-verbatim-compaction` | `cd3b9fab` | the same: the methods were written and landed by the slice that owns the module |
+| this slice's own commit | `orphan-adoption` | `1c947e7b` | two markdown documents only — the adjudication record and the `annotation-pin.md` corrections |
+
+**The discharge, stated plainly:** the promise was discharged in the
+repository, under the slices that own the modules, and this slice's own
+history carries the *record* of the discharge.  A slice whose entire
+subject is *adopting* other slices' work cannot also be the slice that
+*writes* the adopted work; the tests belong to the module they test.
+
+The referee now counts them anyway, because the content-commit set is a
+**union**: the slice's subject commits **plus** the commits that
+introduced the files the slice's manifest names.  Measured 2026-11-16:
+
+```
+$ bash b173-accept.sh orphan-adoption
+PASS NEW_TESTS 109 distinct new test methods across 5 commit(s) (threshold 9)
+PASS TESTS_RAN  [components/northstar-agent-runtime unittest: Ran 76 tests in 0.005s OK ]
+ACCEPT: PASS (12/12, 0 skipped) orphan-adoption
+```
+
+`109` is the count of distinct method names across the union, which
+includes the adopted methods and the methods of the modules this slice
+adjudicated.  The slice's own promise — 9 methods, of which 6 are new
+`OrphanAdoptionTests` methods and 3 are the scope methods — is discharged
+by the three commits above.  See `docs/design/r8-content-commit-union.md`
+§3.1 for why the union is the rule and what it replaced.
+
 ## 5. The mutant probe
 
 The probe pairs `scope_verbatim_compaction.py` with

@@ -86,6 +86,22 @@ def _manifest_paths(slug: str) -> list:
     ]
 
 
+def _helper_block(text: str) -> str:
+    """The referee's own `list_has` / `list_add` helpers, extracted."""
+    out = []
+    for name in ("list_has", "list_add"):
+        m = re.search(r"^%s\(\) \{$" % name, text, re.M)
+        if m is None:
+            raise AssertionError("no %s helper in b173-accept.sh" % name)
+        block = []
+        for ln in text[m.start() :].splitlines():
+            block.append(ln)
+            if ln.strip() == "}":
+                break
+        out.append("\n".join(block))
+    return "\n".join(out)
+
+
 class FilterSemanticsTests(unittest.TestCase):
     """The referee's own TESTS_RAN filter, extracted and exercised."""
 
@@ -98,11 +114,14 @@ class FilterSemanticsTests(unittest.TestCase):
     def _filter_block(self) -> str:
         """The referee's own TESTS_RAN ownership filter, extracted.
 
-        The block runs from the assignment that seeds the introducing-commit
-        set to the assignment that finally sets ADDED_TESTS.
+        The block runs from the assignment that seeds the manifest-named set
+        to the assignment that finally sets ADDED_TESTS.  The referee's
+        list helpers (`list_has`, `list_add`) are extracted too, because
+        the block calls them.
         """
+        helpers = _helper_block(self.text)
         start = None
-        for pat in (r"^\s*SLICE_INTRO=", r"^\s*SLICE_INTRO_OWN="):
+        for pat in (r"^\s*MANIFEST_NAMED=", r"^\s*SLICE_INTRO=", r"^\s*SLICE_INTRO_OWN="):
             m = re.search(pat, self.text, re.M)
             if m is not None:
                 if start is None or m.start() < start:
@@ -118,7 +137,7 @@ class FilterSemanticsTests(unittest.TestCase):
                 break
         block = "\n".join(block_lines)
         self.assertIn("FILTERED", block)
-        return block
+        return helpers + "\n" + block
 
     def _run_filter(self, slug: str) -> str:
         """Run the extracted filter against the real repository."""
@@ -272,34 +291,13 @@ class SubjectHashListTests(unittest.TestCase):
         )
 
     def test_every_membership_test_on_the_subject_list_works(self):
-        """Behavioural: the referee's own subject-list membership test must
-        find a hash that is in the middle of the list."""
-        script = (
-            "S=$(printf 'aaa\\nbbb\\nccc\\n')\n"
-            "case \" $S \" in *\" bbb \"*) echo FOUND;; *) echo LOST;; esac\n"
-        )
-        # First show the broken shape.
-        out = _run_bash(script)
-        self.assertIn(
-            "LOST",
-            out.stdout,
-            "the space-delimited shape unexpectedly matched; the referee's "
-            "defect may have been fixed in a way this test cannot see",
-        )
-        # Now find the referee's real membership test.  It may be written on
-        # one line (the broken shape) or split across three (the newline-
-        # aware shape):
-        #     case "
-        #     $SUBJ_HASHES
-        #     " in *"
-        #     $ih
-        #     "*) ...
+        """The referee must match the subject list through the newline-aware
+        helper, never through a space-delimited `case`."""
         lines = self.text.splitlines()
         found = False
         for i, line in enumerate(lines):
             if "case" not in line:
                 continue
-            # the membership test may name the list on this line or the next
             window = "\n".join(lines[i : i + 4])
             if "SUBJ_HASHES" not in window:
                 continue
@@ -312,16 +310,46 @@ class SubjectHashListTests(unittest.TestCase):
                 "the membership test at line %d matches the subject list with "
                 "a space-delimited pattern:\n%s" % (i + 1, window),
             )
-        self.assertTrue(found, "no subject-list membership test found in the referee")
-
-    def test_the_subject_list_membership_is_newline_aware_in_code(self):
-        """The referee must contain the newline-aware shape."""
+        if found:
+            self.fail(
+                "the referee still has a `case` that mentions SUBJ_HASHES; "
+                "the membership test must go through list_has",
+            )
+        # The subject list must be consulted -- through the helper.
         self.assertRegex(
             self.text,
-            r'case\s*"\s*\n\$SUBJ_HASHES\n"\s+in',
-            "the referee must match the subject list newline-aware:\n"
-            'case "\n$SUBJ_HASHES\n" in *"\\n$ih\\n"*)',
+            r'list_has\s+"\$SUBJ_HASHES"',
+            "the referee must consult the subject list through list_has",
         )
+
+    def test_the_subject_list_membership_is_newline_aware_in_code(self):
+        """The referee must match the subject list through `list_has`."""
+        self.assertRegex(
+            self.text,
+            r'list_has\s+"\$SUBJ_HASHES"',
+            "the referee must match the subject list through the newline-aware "
+            'list_has helper: list_has "$SUBJ_HASHES" "$ih"',
+        )
+        self.assertRegex(
+            self.text,
+            r"(?m)^list_has\(\) \{$",
+            "the referee must define the newline-aware list_has helper",
+        )
+
+    def test_the_helper_finds_a_hash_in_the_middle_of_the_list(self):
+        """Behavioural: the referee's own helper finds a middle hash."""
+        block = _helper_block(self.text)
+        script = (
+            "set -u\n"
+            + block
+            + "\nS=$(printf 'aaa\\nbbb\\nccc\\n')\n"
+            'if list_has "$S" "bbb"; then echo FOUND; else echo LOST; fi\n'
+            'if list_has "$S" "zzz"; then echo FOUND; else echo LOST; fi\n'
+        )
+        out = _run_bash(script)
+        self.assertEqual(0, out.returncode, out.stderr)
+        lines = [ln for ln in out.stdout.splitlines() if ln.strip()]
+        self.assertEqual(["FOUND", "LOST"], lines, out.stdout)
 
 
 class SubjectCommitCountTests(unittest.TestCase):
