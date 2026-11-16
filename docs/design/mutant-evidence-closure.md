@@ -26,19 +26,66 @@ This slice does three things: it restores the lost manifests, it makes
 the six 0/3 slices measure 3/3, and it re-measures all 64 slices with
 the cache-free run so the census table in this document is trustworthy.
 
-### 0.1 The denominator is "the first three constructs"
+### 0.1 The denominator is "the first N constructs" (N = 12 since round 7)
+
+> **CORRECTION (2026-11-16, round 7).** This section originally read
+> "the denominator is *the first three constructs*", and every k/3 in this
+> document was measured under that denominator. The probe has since been
+> fixed and the denominator is now **12**, not 3. See "What changed in
+> round 7" below.
 
 `b173-mutant.py` collects every mutable construct in the module in
-source order and then tries `cands[:--tries]`, with `--tries`
-defaulting to **3**.  So:
+source order and then tries `cands[:--tries]`.
 
-* **3/3** does **not** mean the module is fully verified -- only the
-  first three constructs are.
-* **0/3** does **not** mean the whole module is untested -- only the
-  first three are.
+**As of round 7 (2026-11-16) `--tries` defaults to 12**, not 3. The
+`b173-mutant.sh` wrapper sets `TRIES="${B173_MUTANT_TRIES:-12}"`.
 
-Every k/3 in this document is "the first three constructs of that
-module", and it is never described as the module's mutation score.
+* **k/12** does **not** mean the module is fully verified -- only the
+  first twelve constructs are.
+* **0/12** does **not** mean the whole module is untested -- only the
+  first twelve are.
+
+**Round 7 also fixed the MODULE/TEST PAIRING.** The probe used to pair the
+module with the **first** test file in the manifest. For
+`mutant-evidence-closure` that was `test_event_condenser.py`, which does
+not reference `artifact_authority.py` at all — the real tester is
+`test_artifact_authority.py` (39 test methods). `b173-mutant.sh` now picks
+the test file that actually **references** the module:
+
+```bash
+MODBASE=$(basename "$MOD" .py)
+for cand in $(grep -E '/tests/test_[^/]+\.py$' "$MANIFEST"); do
+  if grep -qE "(^|[^A-Za-z0-9_])${MODBASE}([^A-Za-z0-9_]|$)|from ${MODBASE} import|import ${MODBASE}" "$src"; then
+    TESTF="$cand"; break
+  fi
+done
+```
+
+### What changed in round 7, and what it invalidated
+
+Measured 2026-11-16, with the probe fixed, against the four slices that had
+been accused of having a weak test suite:
+
+| slice | under the old probe (3 candidates, first test file) | under the fixed probe (12 candidates, referencing test file) |
+|---|---|---|
+| `audit-head` | 3/12 | — (killed) |
+| `diviner` | 4/12 | — (killed) |
+| `e2b` | 5/12 | — (killed) |
+| `fable` | 2/12 | — (killed) |
+| `mutant-evidence-closure` | **0/3 (SURVIVED)** | **KILLED on the first try** |
+
+**Four of the five "weak test suite" accusations were false.** They came
+from the probe trying only the first three constructs in source order
+(modules have 18–72 candidates) and pairing the module with a test file
+that does not reference it.
+
+**What this invalidates in this document:** every k/3 number in the census
+table was measured under the old denominator with the old pairing. The
+numbers are therefore **lower bounds** that the probe can no longer
+reproduce, and any slice whose row says "0/3" must be re-measured before
+the number is quoted again. The **structure** of the census — one row per
+slice, the pinned-commit column beside the HEAD column, the reason column —
+is unaffected and remains the point of this document.
 
 ### 0.2 Every number here is a cache-free run
 
