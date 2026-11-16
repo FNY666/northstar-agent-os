@@ -33,6 +33,10 @@ All 23 were added by a **single commit** whose subject is the literal string
   one manifest file the attribution test had to carry as a known exception;
 * the commit's subject failed the batch's own naming rule.
 
+The reworded commit closes the exception: it now names
+`merged-tree-review, slice5, seal-slice6`, so every manifest file is
+accounted for and the attribution rule is unconditional.
+
 ### 1.2 What it cost
 
 The cost is not disk (the machine has 154 GiB free).  It is:
