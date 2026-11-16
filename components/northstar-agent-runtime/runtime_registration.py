@@ -535,7 +535,7 @@ REGISTRY = (
     _registration("canary_tokens", "canary-tokens", "2026-10-09", "Canary tokens: deception for exfiltration detection (D-OUT-005), Simulated."),
     _registration("cancellation_tombstone", "tombstone", "2026-11-14", "Cancellation tombstones: sticky revocation state that survives compaction."),
     _registration("canonical_json", "ninety-fifth", "2026-10-04", "JSON Canonicalization Scheme (RFC 8785) — the single canonicalizer."),
-    _registration("capability_ceiling_probe", "scorer-disagreement", "2026-11-14", "Capability-ceiling probe: fail-first admission, calibration error, ceiling routing."),
+    _registration("capability_ceiling_probe", "capability-ceiling-probe", "2026-11-14", "Capability-ceiling probe: fail-first admission, calibration error, ceiling routing."),
     _registration("capability_eval", "runtime", "2026-10-08", "Capability testing (probe/measure/profile) interface, simulated."),
     _registration("capability_reassembly", "runtime", "2026-10-07", "Capability reassembly detector: benign calls that chain into a denied capability."),
     _registration("capability_warrants", "identity/mandate/warrant primitives (e+f lines) + refusal-qualit", "2026-10-05", "Tenuo-inspired capability warrants: holder-bound, attenuating, audited."),

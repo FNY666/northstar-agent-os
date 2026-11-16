@@ -170,3 +170,69 @@ Open (deliberately not built in this slice):
 - The source's "over 70%" whole-model calibration error is **not**
   reproduced here: this module reports *per-bucket* error with a
   Northstar-chosen threshold, and the two numbers are not comparable.
+
+## 6. Attribution (added 2026-11-16, round 8)
+
+This slice's deliverable was committed on 2026-11-13 under the **wrong
+subject**:
+
+```
+9ea57f23  B173 scorer-disagreement: disagreement detector over multi-scorer verdicts
+```
+
+The commit carried all three of this slice's files.  The correctly-subjected
+twin still exists in the reflog — `f85282fb`, `B173 capability-ceiling-probe:
+fail-first admission + calibration error + ceiling routing` — with the **same
+parent** (`0a2f3f42`) and the **same author date** (`2026-11-13 19:30:34
++0000`); the reflog records `commit` → `commit (amend)`, so the commit was
+amended in place and its subject was overwritten.  The two trees differ by one
+file, `scorer_disagreement.py`, and that difference is **three comment-header
+lines rotated** (`# helpers` ↔ `# records` ↔ `# pure computation`) with **no
+code change** — `scorer_disagreement.py` was introduced by a different commit
+(`965c376f`), so an amend elsewhere in the tree swept it in.
+
+The consequence was that the referee, which attributes a slice by subject
+prefix, could not see this slice at all:
+
+```
+$ bash b173-accept.sh capability-ceiling-probe
+FAIL COMMIT none
+ACCEPT: FAIL (11/12, 0 skipped) capability-ceiling-probe
+```
+
+Three things were fixed, all of them this slice's own business:
+
+1. **The subject.**  The slice's files are now carried by a commit whose
+   subject names this slice.  Nothing was rewritten and nothing was deleted:
+   `9ea57f23` still stands, and the commit that carries this note is the one
+   the referee sees.
+2. **The registry.**  `runtime_registration.py` named `scorer-disagreement` as
+   the slice that introduced `capability_ceiling_probe`.  The `slice_slug`
+   field is documented as *"the slice that introduced the module"*, and that
+   is this slice — the same mis-attribution as the commit subject, in the
+   runtime registry itself.
+3. **The unreachable refusal.**  `UnknownProbeError` was declared and never
+   raised.  Every operation on the ledger takes the probe *object*, so no
+   call can name an id the ledger has never seen: an unknown id is refused as
+   `BadProbeError` or `DuplicateProbeError`.  The class is now **documented
+   as reserved and deliberately not raised**, with the reason, rather than
+   being left to rot.  It is kept because the name is the runtime's
+   established one — `ai_probing`, `capability_eval`, `probing` and
+   `reward_hacking` all raise it for their own id-keyed ledgers — and a
+   future id-keyed operation here would need it.
+
+Reading the deliverable also turned up the one thing this slice's own task
+book flagged and its rule-coverage verifier was commissioned to check:
+*"every new public function has a test naming it"*.  Measured, the slice's
+test file named **none** of `submit`, `CalibrationBucket`, `RoutingVerdict`,
+`Submission`, `CapabilityCeilingProbeError` or `UnknownProbeError`.  They are
+named now — `PublicSurfaceTests` in the slice's test file exercises each one
+by name — and the slice's test count went from 59 to 63.
+
+### 6.1 The one thing this slice did not do
+
+`9ea57f23` also carries the comment-header rotation in
+`scorer_disagreement.py`.  That edit is a **no-op** (comments only) and it
+belongs to another slice's file, which this slice's scope forbids touching —
+so it stands, recorded here as the fingerprint of the fault rather than
+reverted.

@@ -22,16 +22,22 @@ path end to end.
 """
 from __future__ import annotations
 
+import pathlib
 import unittest
 
 import capability_ceiling_probe
 from capability_ceiling_probe import (
     BadProbeError,
+    CalibrationBucket,
+    CapabilityCeilingProbeError,
     CeilingLedger,
     CeilingProbe,
     DuplicateProbeError,
     NotAFailureError,
     RouteTarget,
+    RoutingVerdict,
+    Submission,
+    UnknownProbeError,
     bucket_for,
 )
 
@@ -456,3 +462,63 @@ class ProvenanceTests(unittest.TestCase):
 
     def test_module_self_check_runs(self):
         capability_ceiling_probe.main()
+
+
+class PublicSurfaceTests(unittest.TestCase):
+    """Every public name of the module is exercised here.
+
+    The task book's rule-coverage verifier asks for "every new public
+    function has a test naming it".  These tests name the record types
+    and the base refusal explicitly, so the module's public surface is
+    covered by name and not only through the values it happens to return.
+    """
+
+    def test_submit_is_the_documented_entry_point(self):
+        """``submit`` is the alias the module's own docs show."""
+        ledger = CeilingLedger()
+        submission = ledger.submit(probe("s-1", 90.0, 0.95, passed=False))
+        self.assertIsInstance(submission, Submission)
+        self.assertTrue(submission.admitted)
+        # and it is the same door as observe()
+        self.assertEqual(len(ledger.probes), 1)
+
+    def test_the_record_types_are_the_documented_ones(self):
+        """The ledger's returns are the four public record types."""
+        ledger = CeilingLedger()
+        submission = ledger.observe(probe("s-2", 45.0, 0.5, passed=True))
+        self.assertIsInstance(submission, Submission)
+        bucket = ledger.calibration()[0]
+        self.assertIsInstance(bucket, CalibrationBucket)
+        verdict = ledger.route(500.0)
+        self.assertIsInstance(verdict, RoutingVerdict)
+        self.assertIsInstance(submission.as_dict(), dict)
+        self.assertIsInstance(bucket.as_dict(), dict)
+        self.assertIsInstance(verdict.as_dict(), dict)
+
+    def test_every_refusal_is_a_capability_ceiling_probe_error(self):
+        """Every refusal the module raises shares the module's base class.
+
+        A caller that wants to catch "the ceiling probe refused this" can
+        catch one class, and the base class is named here so that it is
+        exercised.
+        """
+        for exc in (BadProbeError, DuplicateProbeError, NotAFailureError):
+            self.assertTrue(issubclass(exc, CapabilityCeilingProbeError))
+            self.assertTrue(issubclass(exc, Exception))
+
+    def test_the_unknown_probe_error_is_reserved_and_documented(self):
+        """``UnknownProbeError`` is declared and deliberately not raised.
+
+        The runtime's other id-keyed ledgers (``ai_probing``,
+        ``capability_eval``, ``probing``, ``reward_hacking``) raise it;
+        this module's operations all take the probe object, so it has no
+        reachable path here.  The class says so in its own docstring
+        rather than rotting silently.
+        """
+        self.assertTrue(issubclass(UnknownProbeError, CapabilityCeilingProbeError))
+        self.assertIn("never raised", (UnknownProbeError.__doc__ or ""))
+        # and nothing in the module raises it
+        source = pathlib.Path(capability_ceiling_probe.__file__).read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("raise UnknownProbeError", source)

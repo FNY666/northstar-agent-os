@@ -105,7 +105,18 @@ class DuplicateProbeError(CapabilityCeilingProbeError):
 
 
 class UnknownProbeError(CapabilityCeilingProbeError):
-    """A probe id was referenced that has never been submitted."""
+    """A probe id was referenced that has never been submitted.
+
+    **Reserved, never raised.**  Every operation on this ledger takes the
+    probe object itself, so no call can name a probe id the ledger has
+    never seen: an unknown id is refused as :class:`BadProbeError` (a
+    malformed record) or :class:`DuplicateProbeError` (an id already
+    submitted).  The class is kept because the name is the runtime's
+    established one -- ``ai_probing``, ``capability_eval``, ``probing``
+    and ``reward_hacking`` all raise it for their own id-keyed ledgers --
+    and a future id-keyed operation here would need it.  It is declared,
+    documented, and deliberately not raised by this module.
+    """
 
 
 class NotAFailureError(CapabilityCeilingProbeError):
