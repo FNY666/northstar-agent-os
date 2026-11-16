@@ -214,8 +214,8 @@ rules.  A future change to the manifest that reintroduces the gap fails them.
   as the *on-disk* check, and `tests/test_docbuild.py` still uses it.  The
   new test adds the *shipped* check on top; removing the on-disk check would
   weaken a rule that predates this slice.
-* **The exclusion list was not pruned.**  The 23 package members and
-  `test_runner` are excluded on purpose and stay excluded.
+* **The exclusion list was not pruned.**  The 22 package members and
+  `test_runner` are *published*, not excluded, and stay published.
 * **No `docbuild.py` module was moved, renamed, or re-registered.**  The
   slice adds documentation decisions; it does not change what ships.
 
@@ -279,11 +279,35 @@ re-measured in a fresh clone.
 
 ## 5. Open items
 
-* The 23 package members (`providers.*`, `tools.*`) are excluded from the API
-  reference as a class.  They are real shipped surface — `tools.shell` is
-  installed and importable — and the exclusion is a blanket decision recorded
-  once for the whole class rather than per module.  That is defensible, but
-  it is a decision someone should make deliberately rather than inherit.
+* **CLOSED — and the open item itself was wrong.**  This section previously
+  said:
+
+  > The 23 package members (`providers.*`, `tools.*`) are excluded from the
+  > API reference as a class.
+
+  That was **false**, and the `package-member-publication` slice (2026-11-16)
+  measured it: all 22 package members are *published*, and not one is
+  excluded.
+
+  ```
+  exclusions containing a dot: []
+  package members: 22   all PUBLISHED: True   any EXCLUDED: False
+  ```
+
+  A reader who believed the false claim would have gone and excluded the
+  published package members, or would have inherited a decision nobody made.
+  The slice corrected both statements in this document and pinned the truth
+  with `tests/test_package_member_publication.py`, which now fails if any
+  document says a package member is excluded.
+
+  The count was also wrong: **22** package members, not 23.  The 23rd number
+  came from counting `test_runner` — the runtime's own entry point — which is
+  a flat module, not a package member, and is published too.
+
 * `MANIFEST_EXCLUSIONS` now has **519** entries for the runtime alone.  A
   list that long is not reviewable by eye; a future slice should group them
   by reason, so that a reviewer can check the reason rather than 519 names.
+
+  **CLOSED** by the `exclusion-reasons` slice (2026-11-16): the exclusions
+  are now grouped into nine derived reason kinds, and 486 of the 519 names
+  are covered by a rule rather than by a line in a list.

@@ -23,6 +23,7 @@ from __future__ import annotations
 import ast
 import re
 import sys
+import tomllib
 import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
@@ -922,6 +923,120 @@ def undocumented_modules() -> list[str]:
             )
         )
     return gaps
+
+
+# --- the installed surface ---------------------------------------------------
+#
+# "Shipped" is not the same as "on disk", and it is not the same as
+# "listed in py-modules" either.  ``py-modules`` lists FLAT module names
+# only, so a package's members cannot appear there -- setuptools installs them
+# through ``[tool.setuptools.packages.find]`` instead.  The runtime ships 22
+# such package members (``providers.*``, ``tools.*``), and they are installed
+# and importable by anyone who runs ``pip install .``.
+#
+# So the installed surface has two halves, and a coverage check that looks at
+# only one of them is blind to 22 modules.  These helpers compute both halves
+# from the packaging configuration itself, so the check follows the
+# configuration rather than a hand-maintained list of package names.
+
+_PACKAGING_CACHE: dict[str, dict[str, object]] = {}
+
+
+def _packaging(component: str) -> dict[str, object]:
+    """The component's packaging configuration, parsed from its pyproject.toml.
+
+    Returns an empty mapping for a component with no ``pyproject.toml``, so
+    the caller does not have to special-case it.
+    """
+    if component in _PACKAGING_CACHE:
+        return _PACKAGING_CACHE[component]
+    path = ROOT / "components" / component / "pyproject.toml"
+    data: dict[str, object] = {}
+    if path.is_file():
+        with path.open("rb") as handle:
+            data = tomllib.load(handle)
+    _PACKAGING_CACHE[component] = data
+    return data
+
+
+def flat_modules(component: str) -> set[str]:
+    """The flat modules ``pip install .`` puts on the path for this component.
+
+    These are the ``[tool.setuptools] py-modules`` entries: top-level modules
+    only, because a flat module name has no package prefix.
+    """
+    setuptools = _packaging(component).get("tool", {})
+    if not isinstance(setuptools, dict):
+        return set()
+    section = setuptools.get("setuptools", {})
+    if not isinstance(section, dict):
+        return set()
+    modules = section.get("py-modules", [])
+    return {name for name in modules if isinstance(name, str)}
+
+
+def _package_patterns(component: str) -> list[str]:
+    """The package-name patterns setuptools' ``packages.find`` installs."""
+    setuptools = _packaging(component).get("tool", {})
+    if not isinstance(setuptools, dict):
+        return []
+    section = setuptools.get("setuptools", {})
+    if not isinstance(section, dict):
+        return []
+    packages = section.get("packages", {})
+    if not isinstance(packages, dict):
+        return []
+    find = packages.get("find", {})
+    if not isinstance(find, dict):
+        return []
+    include = find.get("include", [])
+    return [pattern for pattern in include if isinstance(pattern, str)]
+
+
+def package_members(component: str) -> set[str]:
+    """The installed members of the component's packages.
+
+    A package member is a module inside a package directory that setuptools'
+    ``packages.find`` selects.  The package itself is a module too
+    (``tools.__init__`` carries the registry), so it is included.
+    """
+    root = ROOT / "components" / component
+    if not root.is_dir():
+        return set()
+    patterns = _package_patterns(component)
+    stems = {pattern.rstrip("*") for pattern in patterns}
+    found: set[str] = set()
+    for stem in sorted(stems):
+        package_dir = root / stem
+        if not (package_dir / "__init__.py").is_file():
+            continue
+        found.add(f"{stem}.__init__")
+        for path in sorted(package_dir.glob("*.py")):
+            if path.name != "__init__.py":
+                found.add(f"{stem}.{path.stem}")
+    return found
+
+
+def installed_modules(component: str) -> set[str]:
+    """Every module ``pip install .`` makes importable for this component.
+
+    This is the union of the two installation mechanisms: the flat
+    ``py-modules`` list and the members of the packages setuptools finds.
+    """
+    return flat_modules(component) | package_members(component)
+
+
+def undecided_installed_modules(component: str) -> list[str]:
+    """Installed modules that carry no documentation decision.
+
+    The installed-surface counterpart of ``undocumented_modules()``: a module
+    that ``pip install .`` puts on the path must be published in the API
+    reference or explicitly excluded from it.
+    """
+    decided = set(MANIFEST.get(component, ())) | set(
+        MANIFEST_EXCLUSIONS.get(component, frozenset())
+    )
+    return sorted(installed_modules(component) - decided)
 
 
 def documented_but_absent() -> list[str]:
