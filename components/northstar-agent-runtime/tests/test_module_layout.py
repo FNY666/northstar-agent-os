@@ -58,7 +58,9 @@ class PackagingCompletenessTests(unittest.TestCase):
       ``py-modules`` at all, because that array lists flat names only.
 
     Before this, the rule read only the flat half, so it could not see the
-    22 installed package members (``tools.shell`` among them).
+    22 installed package members (``tools.shell`` among them).  There are
+    now 23: the ``runtime-data-files`` slice made ``policy`` a real
+    package, so that it can carry the data files the runtime reads.
     """
 
     def _installed_package_members(self) -> set[str]:

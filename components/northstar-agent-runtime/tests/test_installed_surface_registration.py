@@ -21,6 +21,12 @@ So the runtime ships **22** package members (`providers.*`, `tools.*`) that
 `pip install .` puts on the path, that `from tools.shell import ...` imports,
 and that **no view of the registration closure could see**.
 
+(That was the count when this slice was written.  It is now **23**: the
+`runtime-data-files` slice added `policy`, a real package carrying the
+data files the runtime reads at runtime.  The live assertions below are
+re-measured; the prose above is left as the record of the state this
+slice found.)
+
 Measured before the fix:
 
     registry: 1613   flat py-modules: 1613   package members: 22
@@ -98,9 +104,12 @@ class InstalledSurfaceRegistrationTests(unittest.TestCase):
         # The load-bearing truth.  Before the fix these 22 were installed
         # and unregistered at the same time.
         members = _installed_package_members(COMPONENT)
+        # RE-MEASURED 2026-11-16: the `runtime-data-files` slice made
+        # `policy` a real package (it carries the data files the runtime
+        # reads at runtime), so there are now 23 package members.
         self.assertEqual(
             len(members),
-            22,
+            23,
             "the installed package members: " + ", ".join(sorted(members)),
         )
         registered = set(rr.registered_module_names())
@@ -218,14 +227,16 @@ class InstalledSurfaceRegistrationTests(unittest.TestCase):
 
     def test_the_installed_surface_is_larger_than_the_flat_one(self):
         # The three views agree -- so the registry "covered" 1613 modules.
-        # The installed surface is 1635, and the difference is exactly the
-        # 22 package members.  The registry now covers both halves.
+        # The installed surface is 1636, and the difference is exactly the
+        # 23 package members.  The registry now covers both halves.
         flat = set(rr.declared_py_modules())
         members = _installed_package_members(COMPONENT)
         installed = flat | members
+        # RE-MEASURED 2026-11-16: `policy` joined the package members
+        # (the `runtime-data-files` slice), so 22 -> 23 and 1635 -> 1636.
         self.assertEqual(len(flat), 1613)
-        self.assertEqual(len(members), 22)
-        self.assertEqual(len(installed), 1635)
+        self.assertEqual(len(members), 23)
+        self.assertEqual(len(installed), 1636)
         registered = set(rr.registered_module_names())
         self.assertEqual(
             registered,

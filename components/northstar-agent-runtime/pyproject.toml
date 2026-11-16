@@ -1686,8 +1686,14 @@ include = ["providers*", "tools*", "policy*"]
 #   policy/dataflow.toml                    -- the default dataflow policy
 #   policy/deny_monotonicity_baseline.json  -- the pinned deny set
 #
-# `policy/` is a data directory (no `__init__.py`), and `package-data` is
-# what puts its contents in the wheel.  The deny-monotonicity baseline has
-# NO embedded fallback and fails closed without it, so it must ship.
+# `policy/` is a real package (it has an `__init__.py`), and `package-data`
+# is what puts its data files in the wheel.  The deny-monotonicity baseline
+# has NO embedded fallback and fails closed without it, so it must ship.
+#
+# It could have been a namespace directory instead (no `__init__.py`), which
+# also ships the files -- but a namespace directory puts a top-level name
+# on `sys.path` that the registry cannot name, and the registry is required
+# to cover the whole installed surface.  A real package keeps the
+# installed surface nameable.
 [tool.setuptools.package-data]
 "policy" = ["*.toml", "*.json"]

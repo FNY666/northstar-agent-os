@@ -61,6 +61,7 @@ These tests pin:
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -88,12 +89,46 @@ DATA_FILES = {
 }
 
 
+def _build_artifacts_in_the_component() -> set[str]:
+    """The build scratch artifacts currently sitting in the component.
+
+    setuptools writes ``build/`` and ``<name>.egg-info/`` into the source
+    directory it is given.  Both are listed here so a test can assert
+    that a wheel build left the checkout alone.
+    """
+    found = set()
+    for path in COMPONENT.iterdir():
+        if path.name == "build" or path.name.endswith(".egg-info"):
+            found.add(path.name)
+    return found
+
+
 def _build_wheel(tmp: Path) -> Path:
     """Build the runtime's wheel for real.
 
     Reading ``pyproject.toml`` proves only what somebody wrote; the wheel
     is the artifact setuptools actually ships.
+
+    The build runs OUT OF TREE.  setuptools writes its scratch tree
+    (``build/``, ``<name>.egg-info/``) into the source directory it is
+    handed, does not clean it between builds, and a second build then
+    dies with ``Errno 17: File exists`` on the first build's
+    ``.dist-info``.  So the sources are copied to a scratch directory
+    first and the wheel is built there: the artifact is then a function
+    of the source and nothing else, and the checkout is untouched.
+
+    The copy is of the *build* inputs only -- the modules, the packages
+    and the packaging configuration -- not of ``tests/``, which is not
+    part of the wheel and is large.
     """
+    source = tmp / "src"
+    shutil.copytree(
+        COMPONENT,
+        source,
+        ignore=shutil.ignore_patterns(
+            "tests", "sdk-ts", "build", "dist", "__pycache__", "*.egg-info"
+        ),
+    )
     dist = tmp / "dist"
     result = subprocess.run(
         [
@@ -105,7 +140,7 @@ def _build_wheel(tmp: Path) -> Path:
             "--no-build-isolation",
             "-w",
             str(dist),
-            str(COMPONENT),
+            str(source),
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -178,6 +213,75 @@ def _run_in(site: Path, code: str) -> subprocess.CompletedProcess:
         stderr=subprocess.STDOUT,
         text=True,
     )
+
+
+class WheelBuildIsolationTests(unittest.TestCase):
+    """Building the wheel must not write into the component's checkout.
+
+    THE DEFECT THIS PINS
+    --------------------
+    ``pip wheel <dir>`` runs the build backend with the *source directory*
+    as the working directory, and setuptools writes its scratch tree
+    there::
+
+        <component>/build/bdist.<platform>/wheel/
+        <component>/<name>.egg-info/
+
+    The scratch tree is NOT cleaned between builds, so the second build
+    finds the first build's ``.dist-info`` already in place and dies::
+
+        error: [Errno 17] File exists:
+          'build/bdist.linux-aarch64/wheel/northstar_agent_runtime-...dist-info'
+        ERROR: Failed building wheel for northstar-agent-runtime
+
+    Measured on this repository before the fix: 7 of the tests in
+    ``WheelDataFileTests`` failed on that error, and 10 further errors in
+    the same component's suite were the same build failure seen from
+    other tests.
+
+    The scratch tree is also *state*: a stale ``build/`` directory in a
+    checkout can make a later build fail for reasons that have nothing to
+    do with the code under test.  A test that builds a wheel must build
+    it out of tree, so the artifact it inspects is a function of the
+    source and nothing else.
+    """
+
+    def test_building_the_wheel_leaves_the_checkout_unchanged(self):
+        # RED against the in-tree build: the build directory appears in
+        # the component, and the egg-info directory with it.
+        before = _build_artifacts_in_the_component()
+        _build_wheel(Path(tempfile.mkdtemp(prefix="b173-isolation-")))
+        after = _build_artifacts_in_the_component()
+        self.assertEqual(
+            before,
+            after,
+            "building the wheel wrote into the component checkout: %s"
+            % sorted(after - before),
+        )
+
+    def test_two_wheel_builds_in_a_row_both_succeed(self):
+        # The failure mode the isolation fixes: the second build trips
+        # over the first build's scratch tree and dies with
+        # ``Errno 17: File exists``.
+        first = _build_wheel(Path(tempfile.mkdtemp(prefix="b173-iso-a-")))
+        second = _build_wheel(Path(tempfile.mkdtemp(prefix="b173-iso-b-")))
+        self.assertTrue(first.is_file())
+        self.assertTrue(second.is_file())
+        self.assertNotEqual(
+            first.resolve(),
+            second.resolve(),
+            "the two builds must be independent artifacts",
+        )
+        # The same source must give the same wheel: a build that is a
+        # function of the source and nothing else.  (The two wheels carry
+        # the same name -- they are the same package -- so they are
+        # compared by their contents, not by their file names.)
+        with zipfile.ZipFile(first) as a, zipfile.ZipFile(second) as b:
+            self.assertEqual(
+                sorted(a.namelist()),
+                sorted(b.namelist()),
+                "two builds of the same source disagree about the wheel contents",
+            )
 
 
 class WheelDataFileTests(unittest.TestCase):

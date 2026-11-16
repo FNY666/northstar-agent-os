@@ -261,3 +261,109 @@ The slice's changed non-test module is
 file is `components/northstar-agent-runtime/tests/test_runtime_data_files.py`.
 The probe's candidate sites are taken in source order; this module has few
 enough of them that the default window reaches its new code.
+
+### 5.3 Two defects the first full-suite run found
+
+The slice was committed and then verified against the **whole runtime
+component suite**. That run had 16 failures and 10 errors the baseline
+did not have. Two of them were real, and both are recorded here because
+both were introduced *by this slice's own test file* — the slice's first
+version of the world was not the repo's.
+
+**Defect A: the wheel was built in-tree.**
+
+The first version of the test built the wheel with `pip wheel
+<component>`. setuptools runs the build backend with the *source
+directory* as the working directory and writes its scratch tree there:
+
+```
+<component>/build/bdist.<platform>/wheel/
+<component>/<name>.egg-info/
+```
+
+That scratch tree is **state**. It is not cleaned between builds, and a
+stale `build/bdist.<platform>/wheel/<name>.dist-info` makes every
+subsequent in-tree build die:
+
+```
+error: [Errno 17] File exists:
+  'build/bdist.linux-aarch64/wheel/northstar_agent_runtime-0.1.0.dev0.dist-info'
+ERROR: Failed building wheel for northstar-agent-runtime
+```
+
+Reproduced directly (the poison is a single stray file in the scratch
+tree):
+
+```
+$ mkdir -p build/bdist.linux-aarch64/wheel/northstar_agent_runtime-0.1.0.dev0.dist-info
+$ python3 -m pip wheel --no-deps --no-build-isolation -w /tmp/w .
+error: [Errno 17] File exists: 'build/bdist.linux-aarch64/wheel/northstar_agent_runtime-0.1.0.dev0.dist-info'
+exit=1
+```
+
+Measured impact on the component's own suite: **7** of this slice's
+wheel tests failed on that error, and **10** further errors elsewhere in
+the same suite were the same build failure seen from other tests.
+
+The fix is to build **out of tree**: the sources are copied to a scratch
+directory first (without `tests/`, `sdk-ts/`, `build/` and `dist/`), and
+the wheel is built there. The artifact is then a function of the source
+and nothing else, and the checkout is left untouched.
+
+Pinned by `WheelBuildIsolationTests`:
+
+* `test_building_the_wheel_leaves_the_checkout_unchanged` — the build
+  writes no `build/` and no `*.egg-info/` into the component. Verified
+  RED against the in-tree build (it reported exactly `['build',
+  'northstar_agent_runtime.egg-info']`) and GREEN after.
+* `test_two_wheel_builds_in_a_row_both_succeed` — two builds in a row
+  both succeed and carry the same contents.
+
+**Defect B: the runtime component's own tests pinned 22 package members.**
+
+This slice updated the counts in the **repository-level** `tests/`, and
+forgot the runtime component's **own** `tests/`. Two files there pinned
+the old numbers:
+
+* `tests/test_installed_surface_registration.py` — `22` package members
+  and `1635` installed modules;
+* `tests/test_module_layout.py` — the same `22` in prose.
+
+Both are updated to the re-measured `23` and `1636`, with a note saying
+why.
+
+**The lesson, and it is the second time in this batch:** a count is
+re-measured *wherever it is pinned*. The repository-level suite and the
+component-level suite are two different places to pin the same fact, and
+fixing one does not fix the other. The first version of this slice
+looked at the first and declared the second updated.
+
+### 5.4 What the runtime suite looks like now
+
+Measured, after the two fixes above:
+
+```
+Ran 21343 tests in 303.690s
+FAILED (failures=16, errors=10, skipped=14)
+```
+
+The **failure set is byte-identical to the baseline** — 26 names, compared
+on the name part only (unittest's parenthetical suffix carries the test
+class, which differs between runs):
+
+```
+$ comm -23 new-fails.txt baseline-fails.txt     # NEW  -> (empty)
+$ comm -13 new-fails.txt baseline-fails.txt     # GONE -> (empty)
+$ diff -q new-fails.txt baseline-fails.txt
+IDENTICAL
+```
+
+The count is 21343 against the slice-7 baseline's 21326: **+17**, which
+is exactly this slice's 17 tests in the component suite (15 for the data
+files, 2 for the build isolation).
+
+The first run, before the two fixes, was `Ran 21341 tests` with 25
+failures and 10 errors — 16 names beyond the baseline. After the fixes
+it is 16 failures and 10 errors, and every one of those 26 names is a
+pre-existing baseline failure.
+
