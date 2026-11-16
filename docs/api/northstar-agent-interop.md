@@ -59,7 +59,9 @@ Signed Agent attestations and narrowed handoff grants.
 
 #### `verify_handoff_grant(token: str, secret: bytes, *, now: int)`
 
-#### `authorize_handoff(request: HandoffRequest, *, parent_authorization: AuthorizationValidation | None=None, parent_handoff: HandoffValidation | None=None, source_attestation: HandoffValidation, registry: AgentRegistry, now: int, current_policy_revision: str | None=None, secret: bytes, grant_ttl_seconds: int=300)`
+#### `authorize_handoff(request: HandoffRequest, *, parent_authorization: AuthorizationValidation | None=None, parent_handoff: HandoffValidation | None=None, source_attestation: HandoffValidation, registry: AgentRegistry, now: int, current_policy_revision: str | None=None, secret: bytes, grant_ttl_seconds: int=300, tombstones: Any=None)`
+
+Issue the signed handoff grant for ``request``.
 
 ### `interop_adapter`
 

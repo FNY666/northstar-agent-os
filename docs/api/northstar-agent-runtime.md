@@ -88023,3 +88023,4171 @@ Mint a valid proof for tests/harnesses (prover-side helper).
 #### `main()`
 
 Self-check: valid proof verifies, substituted statement does not.
+
+### `actionable_digest`
+
+Source: `components/northstar-agent-runtime/actionable_digest.py`
+
+Actionable digest: stay silent unless the conjunctive fire condition holds.
+
+#### `DigestError`
+
+Raised on any fail-closed violation. Never returned as data.
+
+#### `FireCondition`
+
+The conjunctive fire condition. All three clauses must hold.
+
+- `evaluate(severity: float, impact: float, legitimate: bool)`
+  - Return ``(fires, failed_clauses)`` for one event.
+#### `DecisionBranch`
+
+Both branches of one uncertain attribute, stated as branches.
+
+- `as_dict()`
+#### `DigestItem`
+
+One emitted digest entry.
+
+- `as_dict()`
+#### `DigestRecord`
+
+The per-window record. Produced for every observed window.
+
+- `as_dict()`
+#### `Credibility`
+
+Credibility = false-alarm rate (the source's rule), not hit rate.
+
+- `undefined` (property)
+- `as_dict()`
+#### `IngestResult`
+
+The outcome of one :meth:`ActionableDigest.ingest` call.
+
+#### `DigestEvent`
+
+One observed event, normalized.
+
+- `from_mapping(event: Mapping[str, Any])`
+  - Normalize an event mapping, fail-closed on missing fields.
+#### `ActionableDigest`
+
+A digest that stays silent unless the fire condition holds.
+
+- `ingest(event: Mapping[str, Any])`
+  - Consume one event. Returns what happened.
+- `digest_window(window_id: str)`
+  - Produce the record for one window -- always, even when empty.
+- `record_for(window_id: str)`
+  - The stored record for a window, or ``None`` if there is none.
+- `windows()`
+- `mark_alarm(seq: int, verdict: str)`
+  - Mark a fired digest as a false alarm or a true alarm.
+- `credibility()`
+  - Credibility = false-alarm rate, not hit rate.
+- `fired_items()`
+### `agent_handoff`
+
+Source: `components/northstar-agent-runtime/agent_handoff.py`
+
+Agent handoff: ``transfer_to_<name>`` tool with a fixed destination.
+
+#### `HandoffError`
+
+Base class for every agent-handoff error.
+
+#### `HandoffConfigError`
+
+Construction-time misuse -- the OpenAI ``UserError`` analogue.
+
+#### `HandoffValidationError`
+
+Call-time input problem -- the OpenAI ``ModelBehaviorError`` analogue.
+
+#### `HandoffTargetError`
+
+The destination is unknown, unregistered, or the handoff is disabled.
+
+#### `HandoffCallbackError`
+
+The ``on_handoff`` callback raised.
+
+#### `HandoffFilterError`
+
+The ``input_filter`` raised.
+
+#### `HandoffCancelled`
+
+A cancellation happened during the handoff.
+
+#### `HandoffRecord`
+
+One registered handoff tool.
+
+- `filtered` (property)
+  - True when an input filter was supplied.
+- `enabled_by_default` (property)
+  - True when ``is_enabled`` is a plain bool (not a predicate).
+- `identity()`
+  - The identity used for bookkeeping: ``(agent, tool)``.
+#### `HandoffDecision`
+
+The booked outcome of one handoff attempt.
+
+- `handed_off` (property)
+#### `HandoffErrorRecord`
+
+A booked error. Written *before* the matching exception is raised.
+
+#### `GuardrailScope`
+
+Where guardrails apply within one run.
+
+#### `HandoffRegistry`
+
+A registry of handoff tools, keyed by agent name.
+
+- `register_agent(name: str)`
+  - Declare an agent name. Fail-closed on anything but a string.
+- `register(agent_name: str, target_name: str, tool_name: Optional[str]=None, tool_description: Optional[str]=None, input_schema: Optional[Mapping[str, Any]]=None, input_filter: Optional[Callable[[Mapping[str, Any]], Mapping[str, Any]]]=None, on_handoff: Optional[Callable[..., Any]]=None, is_enabled: Union[bool, Callable[[Any, str], bool]]=True, run_id: str='default')`
+  - Register one handoff tool and return its frozen record.
+- `visible_handoffs(agent_name: str, ctx: Any=None)`
+  - The handoffs ``agent_name`` may offer right now.
+- `invoke(record: HandoffRecord, input_json: Any=None, ctx: Any=None, run_id: str='default', context: Optional[Mapping[str, Any]]=None)`
+  - Invoke a handoff and return the destination agent name.
+- `invoke_handled(record: HandoffRecord, input_json: Any=None, ctx: Any=None, run_id: str='default', context: Optional[Mapping[str, Any]]=None, failure_error_function: Optional[Callable[[BaseException], str]]=None)`
+  - Invoke a handoff, applying the OpenAI failure semantics.
+- `begin_run(run_id: str, agent_name: str)`
+  - Record the first agent of a run.
+- `set_final_agent(run_id: str, agent_name: str)`
+  - Record the agent that produced the final output of a run.
+- `guardrail_scope(run_id: str)`
+  - Return the guardrail placement for one run.
+- `record(tool_name: str)`
+  - The record for a tool name, or None.
+- `records()`
+  - All registered records, sorted by tool name.
+- `agents()`
+  - All declared agent names, sorted.
+- `decisions()`
+  - All booked decisions, oldest first.
+- `errors()`
+  - All booked error records, oldest first.
+#### `main()`
+
+Deterministic self-check of the three headline paths.
+
+### `annotation_pin`
+
+Source: `components/northstar-agent-runtime/annotation_pin.py`
+
+Annotation-hint pinning for MCP tools (silent-widening defense), Simulated.
+
+#### `AnnotationPinError`
+
+Fail-closed: an unusable pin or an unusable hint set raises.
+
+#### `hash_schema(schema: Optional[Mapping[str, Any]])`
+
+Hash a tool's input schema -- the artifact, not the version string.
+
+#### `normalize_annotations(annotations: Any)`
+
+Normalise an annotation set, or return ``None`` if it is unusable.
+
+#### `capability_rank(annotations: Any)`
+
+Rank the *claimed* effect. Higher means more dangerous.
+
+#### `effective_read_only(annotations: Any)`
+
+True only when the annotation set *proves* a read-only tool.
+
+#### `AnnotationPin`
+
+A pinned annotation hint set for one tool of one server.
+
+- `to_dict()`
+  - Serialise the pin.
+- `from_dict(data: Mapping[str, Any])`
+  - Rebuild a pin. Fails closed.
+#### `TrustTable`
+
+Operator-written per-server trust.
+
+- `trust(server: str)`
+  - Mark a server trusted (operator action).
+- `distrust(server: str)`
+  - Remove a server from the trusted set.
+- `is_trusted(server: str)`
+  - True only for an explicitly trusted server.
+- `trusted_servers()`
+  - The trusted servers, sorted.
+- `to_dict()`
+  - Serialise the table.
+- `from_dict(data: Mapping[str, Any])`
+  - Rebuild the table. Unknown or malformed entries are ignored.
+#### `hint_digest(annotations: Any, schema: Optional[Mapping[str, Any]])`
+
+The digest of one tool's claimed effect: hints + schema hash.
+
+#### `AnnotationRegistry`
+
+Registry of annotation-hint pins, with a per-server trust table.
+
+- `trust` (property)
+  - The operator-written trust table.
+- `is_trusted(server: str)`
+  - True only for an explicitly trusted server.
+- `pin(server: str, tool: str, annotations: Any, schema: Optional[Mapping[str, Any]], pinned_by: str, pinned_at: str='')`
+  - Pin a tool's claimed effect (first discovery, or a human re-pin).
+- `is_pinned(server: str, tool: str)`
+  - True when this tool has a pin.
+- `get_pin(server: str, tool: str)`
+  - The pin for a tool, or ``None``.
+- `pins()`
+  - Every pin, sorted by (server, tool).
+- `export_pins()`
+  - Export the pins as plain records (portable, digest-only).
+- `restore_pins(records: Mapping[str, Any])`
+  - Restore exported pins.
+- `verify(server: str, tool: str, annotations: Any, schema: Optional[Mapping[str, Any]])`
+  - Classify a tool's claimed effect against its pin.
+- `accept_safe_flip(server: str, tool: str, annotations: Any, schema: Optional[Mapping[str, Any]], pinned_by: str='system', pinned_at: str='')`
+  - Move the pin forward over a *safe* flip.
+- `requires_confirmation(server: str, tool: str, annotations: Any, schema: Optional[Mapping[str, Any]])`
+  - True when the human-in-the-loop step must be re-armed.
+- `rearm_reason(server: str, tool: str, annotations: Any, schema: Optional[Mapping[str, Any]])`
+  - Why confirmation is required (empty string when it is not).
+#### `stdlib_only()`
+
+AST check: stdlib only.
+
+#### `main()`
+
+Self-check: pin, verify, safe flip, dangerous flip, drift.
+
+### `approval_rules`
+
+Source: `components/northstar-agent-runtime/approval_rules.py`
+
+Standing approval rules: approval as data, not a callback.
+
+#### `ApprovalRuleError`
+
+A rule or state that cannot be trusted to authorise anything.
+
+#### `ToolApprovalRule`
+
+A standing rule: approve calls to ``tool_name`` that match.
+
+- `matches(tool_name: str, arguments: Mapping[str, Any] | None=None, *, server_label: str | None=None)`
+  - True when this rule authorises a call to ``tool_name``.
+- `as_dict()`
+- `from_dict(payload: Mapping[str, Any])`
+#### `ToolApprovalState`
+
+The rules a session carries, and the approval pair it has open.
+
+- `add_rule(rule: ToolApprovalRule | Mapping[str, Any])`
+  - Add a rule; a repeated rule for the same tool *replaces* the earlier one.
+- `authorises(tool_name: str, arguments: Mapping[str, Any] | None=None, *, server_label: str | None=None)`
+  - True when any rule in the state authorises this call.
+- `as_dict()`
+- `from_dict(payload: Mapping[str, Any])`
+### `artifact_authority`
+
+Source: `components/northstar-agent-runtime/artifact_authority.py`
+
+Artifact authority: the artifact carries the authority it was granted.
+
+#### `ArtifactAuthorityError`
+
+Base class for artifact-authority errors.
+
+#### `MalformedReceiptError`
+
+The receipt is not a well-formed receipt.
+
+#### `UnnamedGrantError`
+
+The grant is unnamed: the seal is refused, no receipt lands.
+
+#### `ClockNotIndependentError`
+
+The epoch's clock is the issuer's own clock: fail closed.
+
+#### `PresentTenseClaimError`
+
+The receipt text claims present-tense authorization.
+
+#### `Verdict`
+
+The answer of one read-time check: a state and why.
+
+- `is_valid` (property)
+  - True only for the state that says "current".
+- `to_dict()`
+#### `ArtifactReceipt`
+
+The authority an artifact carries with it.
+
+- `render()`
+  - Render the receipt into its past-tense text.
+- `parse(rendered: Any)`
+  - Parse a rendered receipt back into a receipt.
+- `is_bound_to(artifact_bytes: Any)`
+  - True when these bytes are the ones the receipt was written for.
+- `is_superseded_by(other: 'ArtifactReceipt')`
+  - True when ``other`` is a later state of the same grant.
+- `to_dict()`
+#### `bind(artifact_bytes: Any, grant_pin: Any, permitted_at_seq: int, epoch: int, clock_id: str, issuer_id: str, *, action: str='dispatch', subject: str='')`
+
+Bind the authority to the bytes: write the receipt that travels with them.
+
+#### `seal_bytes(artifact_bytes: Any, receipt: ArtifactReceipt)`
+
+Seal the bytes and their receipt into one container.
+
+#### `open_sealed(container: Any)`
+
+Open a sealed container: the bytes and the receipt that came with them.
+
+#### `verify(receipt: Any, epoch_now: int, tombstone_set: Any=None, *, artifact_bytes: Any=None, current_grant: Any=None)`
+
+Read a receipt against the state that is true *now*.
+
+#### `SealedArtifact`
+
+One sealed artifact: the bytes and the receipt that travels with them.
+
+- `open()`
+  - The bytes this artifact carries, checked against its receipt.
+#### `ArtifactAuthorityLedger`
+
+The ledger of artifacts that carry their own authority.
+
+- `artifacts` (property)
+- `bind_and_seal(artifact_bytes: Any, grant_pin: Any, permitted_at_seq: int, epoch: int, clock_id: str, issuer_id: str, *, action: str='dispatch', subject: str='')`
+  - Bind the authority to the bytes and seal them together.
+- `artifact(seq: int)`
+  - The sealed artifact with 1-based ``seq``.
+- `verify(seq: int, epoch_now: int, tombstone_set: Any=None, *, current_grant: Any=None)`
+  - Read one sealed artifact back and check it against the present.
+#### `stdlib_only()`
+
+AST check: this module imports stdlib modules only.
+
+#### `main()`
+
+Self-check: seal, read back, revoke, tamper.
+
+### `cancellation_tombstone`
+
+Source: `components/northstar-agent-runtime/cancellation_tombstone.py`
+
+Cancellation tombstones: sticky revocation state that survives compaction.
+
+#### `TombstoneError`
+
+Base class for tombstone failures. Fail-closed: always raise.
+
+#### `TombstoneLiftError`
+
+A lift was refused. The tombstone stays standing.
+
+#### `CancelledActionError`
+
+An action was refused because a tombstone covers it.
+
+#### `Tombstone`
+
+One sticky revocation.
+
+- `identity` (property)
+  - The grant-pin identity this tombstone covers.
+- `covers(grant_id: str, action: str, subject: str | None=None)`
+  - True when this tombstone covers the given action identity.
+- `to_dict()`
+- `from_dict(value: Any)`
+- `digest()`
+  - Stable digest of the canonical form (a ``sha256:`` pin).
+#### `Lift`
+
+A new instruction that claims to lift a tombstone.
+
+- `names(tombstone: Tombstone)`
+  - True when this instruction names the tombstone's action exactly.
+- `to_dict()`
+- `from_dict(value: Any)`
+#### `check_lift(tombstone: Tombstone, lift: Lift)`
+
+Raise unless ``lift`` may lift ``tombstone``.
+
+#### `check_renewal(tombstone: Tombstone, measurement: str, *, now: float, valid_until: float)`
+
+Raise unless a fresh measurement may renew ``tombstone``.
+
+#### `TombstoneSet`
+
+The live tombstones of one session (or one ledger), in memory.
+
+- `list()`
+  - The live tombstones, in declaration order.
+- `get(grant_id: str, action: str, subject: str | None=None)`
+  - The tombstone covering the identity, if any.
+- `blocked(grant_id: str, action: str, subject: str | None=None, *, now: float | None=None)`
+  - The tombstone that blocks this action now, if any.
+- `is_blocked(grant_id: str, action: str, subject: str | None=None, *, now: float | None=None)`
+  - True when the action is covered by a live tombstone.
+- `add(tombstone: Tombstone)`
+  - Record a tombstone. Re-declaring the same identity replaces it.
+- `lift(lift: Lift)`
+  - Lift the tombstone ``lift`` names.
+- `renew(grant_id: str, action: str, *, measurement: str, now: float, valid_until: float, subject: str | None=None)`
+  - Renew a capacity denial with a bounded fresh measurement.
+- `to_list()`
+- `from_list(value: Any)`
+### `capability_ceiling_probe`
+
+Source: `components/northstar-agent-runtime/capability_ceiling_probe.py`
+
+Capability-ceiling probe: fail-first admission, calibration error, ceiling routing.
+
+#### `CapabilityCeilingProbeError`
+
+Base class for every refusal this module raises.
+
+#### `BadProbeError`
+
+A probe record is unusable (bad id, difficulty, confidence, outcome).
+
+#### `DuplicateProbeError`
+
+The same probe id was submitted twice.
+
+#### `UnknownProbeError`
+
+A probe id was referenced that has never been submitted.
+
+#### `NotAFailureError`
+
+Fail-first refusal: the agent already passed this task.
+
+#### `RouteTarget`
+
+Where an over-ceiling task goes.
+
+#### `CeilingProbe`
+
+One probe observation.
+
+- `bucket` (property)
+  - The difficulty bucket this probe falls in.
+- `error` (property)
+  - Per-probe calibration error: confidence - actual correctness.
+- `as_dict()`
+#### `CalibrationBucket`
+
+Calibration for one difficulty bucket, as data.
+
+- `as_dict()`
+#### `RoutingVerdict`
+
+The routing verdict for one task estimate.
+
+- `over_ceiling` (property)
+  - Whether the task was kept out of the agent's own hands.
+- `as_dict()`
+#### `Submission`
+
+The result of submitting one probe.
+
+- `as_dict()`
+#### `bucket_for(difficulty_human_minutes: float)`
+
+The difficulty bucket label for a difficulty estimate.
+
+#### `CeilingLedger`
+
+The capability-ceiling ledger: probes, calibration, routing.
+
+- `verified_ceiling_human_minutes` (property)
+  - The verified ceiling in human minutes, or ``None`` if unmeasured.
+- `ceiling_source` (property)
+  - ``"measured"``, ``"declared"`` or ``"none"``.
+- `probes` (property)
+  - Every admitted (failed) probe, in submission order.
+- `passes` (property)
+  - Every passed probe, in submission order.
+- `verdicts` (property)
+  - Every routing verdict, in order.
+- `submit(probe: CeilingProbe)`
+  - Submit one probe observation (deprecated alias).
+- `observe(probe: CeilingProbe)`
+  - Record one observation of the agent on one task.
+- `admit_probe(probe: CeilingProbe)`
+  - Admit a task to the ceiling-probe library, fail-first.
+- `calibration()`
+  - Calibration per difficulty bucket, over every observation.
+- `miscalibrated_buckets()`
+  - Only the buckets whose calibration error exceeds the threshold.
+- `route(task_difficulty_human_minutes: float)`
+  - Decide what happens to a task of the given difficulty.
+#### `main()`
+
+Self-check: fail-first admission, calibration, routing, one-way ceiling.
+
+### `checkpoint_durability`
+
+Source: `components/northstar-agent-runtime/checkpoint_durability.py`
+
+Checkpoint durability modes: *when* a checkpoint reaches disk.
+
+#### `DurabilityError`
+
+A durability mode or durability request the runtime refuses.
+
+#### `InvalidDurabilityModeError`
+
+A durability mode that is not one of the three known modes.
+
+#### `DurabilityStateError`
+
+A durability request made out of order (writing after the run ended).
+
+#### `DurabilityMode`
+
+The three durability modes, by LangGraph's names.
+
+- `parse(value: Any)`
+  - Parse a mode, refusing anything that is not exactly one of the three.
+#### `WriteTiming`
+
+When a checkpoint write happens, relative to the run.
+
+#### `StepCost`
+
+What it costs to lose one step. (Northstar extension.)
+
+#### `DurabilityReceipt`
+
+What one checkpoint write did, and when.
+
+- `as_dict()`
+#### `CrashWindow`
+
+What a crash costs under one mode. (Northstar extension.)
+
+#### `DurabilityPolicy`
+
+The write policy: what mode, and therefore when each write happens.
+
+- `parse(mode: Any)`
+  - Build a policy from a mode name or a :class:`DurabilityMode`.
+- `write_timing(kind: str='step')`
+  - When a write of this kind happens under this mode.
+- `awaits_writes()`
+  - Whether the run waits for a write before the next step begins.
+- `crash_window()`
+  - What a mid-run crash costs under this mode.
+- `recommend(cost: StepCost | None=None)`
+  - The mode to use for a step of this cost.
+#### `CheckpointSink`
+
+Where a checkpoint write goes.
+
+- `write(checkpoint_id: str, payload: Mapping[str, Any])`
+  - Write ``payload`` under ``checkpoint_id``; return the stored id.
+- `exists(checkpoint_id: str)`
+  - Whether a checkpoint with this id is present.
+#### `MemorySink`
+
+A sink that keeps checkpoints in memory. Used by tests and dry runs.
+
+- `write(checkpoint_id: str, payload: Mapping[str, Any])`
+- `exists(checkpoint_id: str)`
+- `load(checkpoint_id: str)`
+- `ids()`
+  - Every stored id, in write order.
+#### `FileSink`
+
+A sink over ``checkpoint_store.FileCheckpointStorage``.
+
+- `write(checkpoint_id: str, payload: Mapping[str, Any])`
+- `exists(checkpoint_id: str)`
+#### `DurableStoreSink`
+
+A sink over ``durable_resume.DurableStore``.
+
+- `write(checkpoint_id: str, payload: Mapping[str, Any])`
+- `exists(checkpoint_id: str)`
+- `external_id(checkpoint_id: str)`
+#### `SimulatedCrash`
+
+A simulated process crash. (Northstar extension.)
+
+#### `DurabilityInterrupt`
+
+A step asking for human input.
+
+#### `DurabilityController`
+
+Applies a durability policy to one run.
+
+- `receipts` (property)
+  - Every write this run issued, in order.
+- `landed_ids` (property)
+  - The checkpoint ids that actually reached the sink.
+- `outstanding` (property)
+  - How many issued writes have not reached the sink yet.
+- `crash_window()`
+  - What a crash costs under this run's mode.
+- `start(state: Mapping[str, Any] | None=None)`
+  - The first checkpoint of a new thread.
+- `step(index: int, state: Mapping[str, Any] | None=None)`
+  - The checkpoint taken after one super-step.
+- `interrupt(index: int, value: Any=None, state: Mapping[str, Any] | None=None)`
+  - The checkpoint taken when the run pauses for human input.
+- `finish(*, reason: str='completed', state: Mapping[str, Any] | None=None)`
+  - The run is over.
+- `await_pending()`
+  - Land every outstanding write and report the receipts that settled.
+- `resume(steps: Sequence[Callable[[], Any]], *, from_checkpoint_id: str, initial_state: Mapping[str, Any] | None=None, starting_index: int=0)`
+  - Resume a paused run from the checkpoint the interrupt left behind.
+- `crash_at(point: str, index: int)`
+  - Fire the crash hook directly.
+- `run(steps: Sequence[Callable[[], Any]], *, initial_state: Mapping[str, Any] | None=None)`
+  - Drive ``steps`` under this run's durability policy.
+#### `RunOutcome`
+
+What a run did, and what reached the sink.
+
+- `checkpoint_count` (property)
+  - How many checkpoints reached the sink.
+- `receipt_for(checkpoint_id: str)`
+#### `state_digest(state: Mapping[str, Any])`
+
+A canonical digest of a checkpoint state.
+
+### `checkpoint_store`
+
+Source: `components/northstar-agent-runtime/checkpoint_store.py`
+
+Atomic, path-safe checkpoint storage.
+
+#### `register_checkpoint_type()`
+
+Allow one more type to be restored from a checkpoint payload.
+
+#### `allowed_types()`
+
+Every type name the loader will accept right now.
+
+#### `CheckpointStoreError`
+
+A checkpoint id, payload, or stored file the store refuses.
+
+#### `FileCheckpointStorage`
+
+Checkpoints on disk: one file per id, written atomically.
+
+- `save(checkpoint_id: str, payload: Mapping[str, Any])`
+  - Store ``payload`` under ``checkpoint_id``; returns the id.
+- `load(checkpoint_id: str)`
+  - Read the payload stored under ``checkpoint_id``.
+- `list_ids()`
+  - Every stored checkpoint id, sorted.
+### `cost_per_delivery`
+
+Source: `components/northstar-agent-runtime/cost_per_delivery.py`
+
+Cost per delivery: quote a slice's budget per *verified delivery*.
+
+#### `CostPerDeliveryError`
+
+Fail-closed: an illegal argument is refused, never defaulted.
+
+#### `AttemptRecord`
+
+One booked attempt (immutable).
+
+#### `AdmissionVerdict`
+
+The admission decision, as data.
+
+#### `ModelCostQuote`
+
+One model's cost, quoted per verified delivery.
+
+- `as_dict()`
+#### `projected_cost_per_delivery(per_attempt_cost: float, resolution_rate: float)`
+
+The cost of one *verified delivery*, projected from an attempt price.
+
+#### `admit(per_attempt_cost: float, resolution_rate: float, max_cost_per_delivery: float)`
+
+Fail-closed admission: may this slice be dispatched at this price?
+
+#### `compare(models: Iterable[Mapping[str, Any]])`
+
+Rank models by *cost per verified delivery*, cheapest first.
+
+#### `CostPerDeliveryLedger`
+
+Book attempts, quote cost per verified delivery, admit dispatches.
+
+- `book_attempt(attempt_id: str, settled_cost_usd: float, verdict: str, verdict_source: str, *, model: str='', failure_mode: str='')`
+  - Book one attempt and return the frozen record.
+- `records` (property)
+  - Every booked attempt, in booking order.
+- `attempts_for(model: str)`
+  - Every booked attempt of one model, in booking order.
+- `total_settled_cost_usd(model: str | None=None)`
+  - Total settled cost, optionally for one model only.
+- `count(verdict: str, model: str | None=None)`
+  - How many attempts carry ``verdict`` (optionally for one model).
+- `verified_delivery_count(model: str | None=None)`
+  - How many attempts were verified deliveries.
+- `cost_per_verified_delivery(model: str | None=None)`
+  - The price of one verified delivery, or ``None`` when undefined.
+- `observed_resolution_rate(model: str | None=None)`
+  - The observed share of verified deliveries, or ``None`` if no attempts.
+- `failure_mode_counts(model: str | None=None)`
+  - How many failed attempts carry each failure mode.
+- `failure_mode_shares(model: str | None=None)`
+  - The share of failed attempts per failure mode (0.0 when none).
+- `as_dict()`
+  - A JSON-friendly view of the ledger.
+### `coverage_manifest`
+
+Source: `components/northstar-agent-runtime/coverage_manifest.py`
+
+Coverage manifest and intake audit: the layer under the blind re-runner.
+
+#### `CoverageManifestError`
+
+Base class for all coverage_manifest errors.
+
+#### `ManifestError`
+
+The manifest is malformed.
+
+#### `AuditInputError`
+
+The log handed to the intake audit is malformed.
+
+#### `CoverageManifest`
+
+An ordered list of expected event ids, retained independently.
+
+- `expected_count` (property)
+  - How many events the manifest expects.
+- `digest()`
+  - ``sha256:`` pin over the canonical manifest body.
+- `as_dict()`
+  - Serialisable form; round-trips through :func:`manifest_from_dict`.
+- `to_json()`
+  - Canonical JSON text of the manifest.
+- `from_dict(raw: Mapping[str, Any])`
+  - Rebuild a manifest from its serialised form.
+#### `manifest_from_dict(raw: Mapping[str, Any])`
+
+Module-level alias for :meth:`CoverageManifest.from_dict`.
+
+#### `build_manifest(session_id: str, expected_event_ids: Iterable[str])`
+
+Build a manifest from an ordered iterable of expected event ids.
+
+#### `LogRecord`
+
+One row of a session log: a sequence number and the event it records.
+
+- `as_dict()`
+  - Serialisable form of the record.
+#### `SessionLog`
+
+A session log: ordered rows plus an optional one-line end reason.
+
+- `event_ids()`
+  - The event ids recorded by this log, in row order.
+- `as_dict()`
+  - Serialisable form of the log.
+#### `mark_session_end(log: SessionLog, reason: str)`
+
+Return a copy of ``log`` carrying the one-line session end reason.
+
+#### `StructureReport`
+
+The structural verdict: is the log internally consistent?
+
+- `as_dict()`
+  - Serialisable form of the report.
+#### `IntakeAuditReport`
+
+The coverage verdict: did the log record the events it should have?
+
+- `structure_ok` (property)
+  - The structural verdict, kept apart from the coverage verdict.
+- `covered` (property)
+  - True only when both verdicts pass.
+- `as_dict()`
+  - Serialisable form of the report.
+#### `audit_structure(log: SessionLog)`
+
+Check the log's internal consistency only.
+
+#### `audit_intake(manifest: CoverageManifest, log: SessionLog)`
+
+Audit a log against an independently retained manifest.
+
+#### `audit_pipeline_only(log: SessionLog)`
+
+The blind-re-runner layer: what a ledger-only audit can and cannot say.
+
+#### `synthesize_log(manifest: CoverageManifest, *, end_reason: Optional[str]=None)`
+
+Build a complete, internally consistent log from a manifest.
+
+#### `synthesize_log_with_gap(manifest: CoverageManifest, dropped_event_id: str, *, end_reason: Optional[str]=None)`
+
+Build a log from a manifest with one event removed.
+
+#### `stdlib_only()`
+
+AST check: this module imports stdlib modules only.
+
+#### `main()`
+
+Self-check: a clean log covers, a gapped log is named.
+
+### `deterministic_gate_score`
+
+Source: `components/northstar-agent-runtime/deterministic_gate_score.py`
+
+Deterministic gate-and-score ledger with a three-state case outcome.
+
+#### `DeterministicGateScoreError`
+
+Base error: every integrity failure raises, never returns bad data.
+
+#### `BadGateSetError`
+
+The gate set is malformed (empty, bad name, non-callable check).
+
+#### `EmptyGateSetError`
+
+A case declared zero gates: it could trivially "pass everything".
+
+#### `DuplicateGateError`
+
+Two gates share a name.
+
+#### `BadCaseError`
+
+The case spec is malformed.
+
+#### `DuplicateCaseError`
+
+The same case was booked twice.
+
+#### `BadMetricError`
+
+The metric is not a finite float in [0, 1].
+
+#### `GateExecutionError`
+
+A gate callable raised or returned a non-bool: no verdict.
+
+#### `SeqOrderError`
+
+Seq discipline violation.
+
+#### `Gate`
+
+One named deterministic gate.
+
+- `run(artifact: Any)`
+  - Run the gate once. Any failure to reach a bool is an error.
+- `as_dict()`
+#### `CaseSpec`
+
+The pinned identity of one case.
+
+- `as_dict()`
+#### `GateVerdict`
+
+The verdict of one gate: passed or failed, with its evidence pointer.
+
+- `as_dict()`
+#### `GateReport`
+
+The result of running one case's whole gate set.
+
+- `failed_gates` (property)
+- `passed_gates` (property)
+- `as_dict()`
+#### `run_gates(gates: Sequence[Gate], artifact: Any)`
+
+Run a whole gate set over one artifact and return the gate report.
+
+#### `CaseOutcome`
+
+The booked outcome of scoring one case.
+
+- `scored` (property)
+- `unscored` (property)
+- `errored` (property)
+- `retryable` (property)
+  - Only an errored case may be scored again.
+- `counts_in_denominator` (property)
+  - Only a scored case lands in the pass-rate denominator.
+- `as_dict()`
+#### `is_retryable(outcome: str)`
+
+Retry eligibility of a booking state, as a free function.
+
+#### `Aggregates`
+
+The aggregate view of one run.
+
+- `as_dict()`
+#### `aggregate(outcomes: Sequence[CaseOutcome])`
+
+Aggregate a sequence of case outcomes.
+
+#### `CaseBooking`
+
+One booked case: its identity, its outcome and its attempt count.
+
+- `as_dict()`
+#### `GateScoreLedger`
+
+A deterministic gate-and-score ledger with three-state outcomes.
+
+- `booking(case_id: str)`
+  - The booking of one case. Raises if the case is unknown.
+- `outcomes()`
+  - Every booked outcome, in booking order (case id order for ties).
+- `report()`
+  - The aggregate view of the ledger.
+- `score(case_id: str, artifact_digest: str, gates: Sequence[Gate], artifact: Any, seq: int, *, error: str='', score_on_error: bool=False)`
+  - Score one case by running its deterministic gates.
+- `mark_unscored(case_id: str, artifact_digest: str, reason: str, seq: int)`
+  - Book a case as ``unscored``: the scorer reached no verdict.
+- `mark_errored(case_id: str, artifact_digest: str, error: str, seq: int)`
+  - Book a case as ``errored``: an infrastructure or solver error.
+- `retryable_cases()`
+  - The case ids that may be scored again (the errored ones).
+#### `score_case(ledger: GateScoreLedger, case_id: str, artifact_digest: str, gates: Sequence[Gate], solve: Callable[[], Any], seq: int, *, score_on_error: bool=False, partial: Optional[Callable[[], Any]]=None)`
+
+Solve one case and book its outcome, tri-state.
+
+### `durable_resume`
+
+Source: `components/northstar-agent-runtime/durable_resume.py`
+
+Durable checkpoints, retry-clears-writes, and an explicit resume command.
+
+#### `DurableResumeError`
+
+Base class for every refusal this module makes.
+
+#### `MissingRunIdError`
+
+A checkpoint was requested without a run (thread) id.
+
+#### `CheckpointIntegrityError`
+
+A checkpoint's state does not hash to the digest it recorded.
+
+#### `InterruptRequiresCheckpointError`
+
+A step asked to interrupt with no checkpointer to resume from.
+
+#### `ResumeRequiresCommandError`
+
+Something other than an explicit ``Command`` was offered as a resume.
+
+#### `ResumeValueMismatchError`
+
+A resume value does not belong to the interrupt it was offered for.
+
+#### `RetryExhaustedError`
+
+Every attempt of a step failed and the policy gave up.
+
+#### `DurableStoreError`
+
+The durable log is malformed or cannot be read back.
+
+#### `state_digest(state: Mapping[str, Any])`
+
+The digest a checkpoint records for its state.
+
+#### `PendingWrite`
+
+One write a step declared: a side effect it *intends* to land.
+
+- `sort_key` (property)
+  - The order writes are applied in.
+- `as_dict()`
+- `from_dict(value: Mapping[str, Any])`
+#### `DurableCheckpoint`
+
+A durable boundary: the committed state, and where to resume from.
+
+- `as_dict()`
+- `from_dict(value: Mapping[str, Any])`
+#### `Command`
+
+An explicit instruction to resume.
+
+#### `Interrupt`
+
+A step's request to be paused, with the value it asked for.
+
+- `interrupt_id` (property)
+  - The stable id a resume value may be addressed to.
+- `as_dict()`
+#### `GraphInterrupt`
+
+Raised inside a step to pause it.
+
+#### `DurableStore`
+
+The append-only durable log of checkpoints and pending writes.
+
+- `put_checkpoint(*, run_id: str, state: Mapping[str, Any], parent_checkpoint_id: str | None=None, interrupted_task: str | None=None, interrupt_value: Any=None, task_path: str='', interrupt_answers: Mapping[str, Any] | None=None)`
+  - Store the committed state of a run at a boundary.
+- `put_writes(checkpoint_id: str, writes: Sequence[PendingWrite])`
+  - Hang a step's pending writes under a checkpoint, in order.
+- `move_writes(from_checkpoint_id: str, to_checkpoint_id: str)`
+  - Re-parent the pending writes of one checkpoint onto another.
+- `clear_writes(checkpoint_id: str, *, reason: str, effect_keys: frozenset[str] | None=None, task_id: str | None=None)`
+  - Drop a step's uncommitted writes.
+- `commit_writes(checkpoint_id: str, *, applier: Callable[[PendingWrite], Any] | None=None)`
+  - Apply and commit the pending writes under a checkpoint.
+- `delete_thread(run_id: str)`
+  - Forget every checkpoint and write of a run.
+- `get_checkpoint(run_id: str, checkpoint_id: str)`
+  - One checkpoint of a run, or ``None``.
+- `latest_checkpoint(run_id: str)`
+  - The newest checkpoint of a run.
+- `list_checkpoints(run_id: str)`
+  - Every checkpoint of a run, oldest first.
+- `pending_writes(checkpoint_id: str)`
+  - The writes still pending under a checkpoint, in order.
+- `cleared_writes(checkpoint_id: str)`
+  - The writes that were dropped under a checkpoint.
+- `committed_writes(checkpoint_id: str)`
+  - The writes that were committed under a checkpoint, in order.
+- `verify(checkpoint: DurableCheckpoint)`
+  - Whether a checkpoint still hashes to its own digest.
+#### `default_retry_on(error: BaseException)`
+
+Which failures may be retried.
+
+#### `RetryPolicy`
+
+How a failing step is retried.
+
+- `should_retry(error: BaseException)`
+  - Whether this failure may be retried under this policy.
+- `delay(attempt: int, random: Callable[[], float] | None=None)`
+  - The wait before retry number ``attempt`` (1 = the first retry).
+- `as_dict()`
+#### `Attempt`
+
+One attempt of a step.
+
+- `failed` (property)
+#### `StepResult`
+
+What a step produced.
+
+- `attempt_count` (property)
+- `succeeded` (property)
+#### `DurableRunner`
+
+Runs steps against a :class:`DurableStore`.
+
+- `interrupt(value: Any)`
+  - Pause the step and ask for a value.
+- `declare(write: PendingWrite)`
+  - Declare a write the step intends to make.
+- `run(*, task_id: str, step: Callable[[], Any], state: Mapping[str, Any] | None=None, run_id: str | None=None, applier: Callable[[PendingWrite], Any] | None=None, checkpoint_id: str | None=None)`
+  - Run one step, with the retry rule applied.
+- `resume(command: Command, *, task_id: str, step: Callable[[], Any], state: Mapping[str, Any] | None=None, run_id: str | None=None, applier: Callable[[PendingWrite], Any] | None=None, checkpoint_id: str | None=None)`
+  - Re-enter an interrupted step with an explicit command.
+#### `unwind_effect_keys(transcript: Sequence[Any])`
+
+The effect keys of the calls the shutdown unwind pass says never ran.
+
+#### `drop_unwound_writes(store: DurableStore, checkpoint_id: str, transcript: Sequence[Any])`
+
+Drop the pending writes of the calls the unwind pass says never ran.
+
+#### `committed_writes_only(store: DurableStore, checkpoint_id: str)`
+
+The writes that actually landed, in order.
+
+#### `checkpoint_from_verified(*, run_id: str, round_index: int, objective: str, verified_progress: Sequence[Any], context_digest: str)`
+
+The state a long-horizon round's checkpoint holds.
+
+#### `verify_verified_checkpoint(store: DurableStore, checkpoint: DurableCheckpoint, *, expected_round_index: int)`
+
+Whether a durable checkpoint still carries the verified progress it claimed.
+
+### `effect_directive`
+
+Source: `components/northstar-agent-runtime/effect_directive.py`
+
+Typed effect envelope: pure ``decide``, host-only minting, runtime execution.
+
+#### `EffectDirectiveError`
+
+Base class for every refusal of this module.
+
+#### `UnknownDirectiveKind`
+
+The directive kind is outside the closed type set.
+
+#### `MintError`
+
+A minting attempt was refused (missing or wrong host capability).
+
+#### `ParseRejected`
+
+Untrusted data could not be parsed into a directive -- always.
+
+#### `UnknownSignal`
+
+The signal type is not in the frozen routing table.
+
+#### `HostCapability`
+
+In-memory proof that the caller is host code.
+
+#### `Directive`
+
+A typed description of one external effect (never state mutation).
+
+- `payload` (property)
+  - The decoded payload.
+#### `derive_idempotency_key(kind: str, payload_json: str)`
+
+Derive a deterministic idempotency key from the effect description.
+
+#### `mint(kind: str, payload: Any, *, capability: HostCapability, idempotency_key: str | None=None)`
+
+Mint a directive. **Host code only.**
+
+#### `ParseResult`
+
+The result of :func:`parse_untrusted`.
+
+#### `parse_untrusted(data: Any)`
+
+Parse untrusted data. **Never mints a directive.**
+
+#### `Signal`
+
+A signal: the only thing that enters :func:`decide`.
+
+#### `SignalRouter`
+
+A routing table fixed at construction and frozen thereafter.
+
+- `action_for(signal: Signal)`
+  - The action bound to ``signal.signal_type``.
+- `known_types()`
+  - The signal types this router accepts, sorted.
+#### `FrozenMapping`
+
+A read-only mapping used for frozen payloads (stdlib only).
+
+#### `DecideResult`
+
+The result of :func:`decide` -- literally the pair ``(state, directives)``.
+
+#### `decide(state: Mapping[str, Any], signal: Signal, router: SignalRouter | None=None)`
+
+Pure decide: route the signal, run the action, return the proposal.
+
+#### `TurnResult`
+
+The outcome of one turn.
+
+#### `ActionFailure`
+
+Raised by an action to fail its turn (the state is rolled back).
+
+#### `ValidatorFailure`
+
+Raised by the candidate validator to fail its turn.
+
+#### `CommitFailure`
+
+Raised by the persister to fail its turn.
+
+#### `run_turn(state: Mapping[str, Any], signal: Signal, router: SignalRouter, *, validator: Callable[[Mapping[str, Any], Sequence[Directive]], bool] | None=None, persister: Callable[[Mapping[str, Any]], None] | None=None, executor: 'DirectiveExec | None'=None)`
+
+Run one turn through the seven-step pipeline.
+
+#### `ExecReceipt`
+
+The receipt of one executed directive.
+
+#### `DirectiveExec`
+
+The interpreter: the only place external effects are produced.
+
+- `dispatch(directives: Sequence[Directive])`
+  - Execute the directives that have not been executed yet.
+- `receipts()`
+  - Every receipt this executor produced, in order.
+- `executed_keys()`
+  - The idempotency keys that have actually produced an effect.
+#### `install_router(name: str, router: SignalRouter, *, make_default: bool=False)`
+
+Install a routing table under ``name`` (host code only).
+
+#### `default_router()`
+
+The installed default router.
+
+#### `installed_routers()`
+
+The names of the installed routers, sorted.
+
+#### `main()`
+
+Self-check: the module's own invariants, offline and deterministic.
+
+### `effort_scaling`
+
+Source: `components/northstar-agent-runtime/effort_scaling.py`
+
+Effort scaling: task complexity -> parallelism budget (orchestrator-worker).
+
+#### `EffortScalingError`
+
+Raised when a mapping input is malformed (fail-closed).
+
+#### `TaskSignals`
+
+The declared shape of a Northstar task, as the classifier sees it.
+
+- `as_dict()`
+#### `ComplexityAssessment`
+
+The graded tier plus the reasons that produced it.
+
+- `rank` (property)
+  - 0 for simple, 1 for moderate, 2 for complex.
+- `as_dict()`
+#### `classify_complexity(signals: TaskSignals)`
+
+Grade a task as simple / moderate / complex. [Northstar]
+
+#### `EffortScaling`
+
+One row of Anthropic's effort-scaling table, plus its Northstar mapping.
+
+- `is_multi_agent` (property)
+  - True when the row asks for more than one agent.
+- `total_tool_calls()`
+  - The row's total tool-call ceiling across all agents.
+- `as_dict()`
+#### `effort_scaling_for(complexity: str)`
+
+The table row for a tier. [Anthropic] bands, [Northstar] counts.
+
+#### `Applicability`
+
+Whether a multi-agent shape fits this task at all.
+
+- `as_dict()`
+#### `check_applicability(signals: TaskSignals)`
+
+The multi-agent gate. [Anthropic] disqualifiers, [Northstar] plumbing.
+
+#### `ParallelPlan`
+
+The two levels of parallelization, plus any card degradation.
+
+- `scale` (property)
+  - The ``(subagent_count, tools_per_subagent)`` pair.
+- `total_tool_calls` (property)
+- `as_dict()`
+#### `parallel_plan_for(scaling: EffortScaling, *, window_cards: int=WINDOW_CARD_LIMIT)`
+
+Map a table row onto the two levels of parallelization.
+
+#### `EffortPlan`
+
+The complete mapping for one task.
+
+- `scale` (property)
+  - The ``(subagent_count, tools_per_subagent)`` pair actually planned.
+- `parallel_spawn_count` (property)
+  - How many subagents the lead agent creates at the same time.
+- `as_dict()`
+#### `plan_effort(signals: TaskSignals, *, window_cards: int=WINDOW_CARD_LIMIT, remaining_tool_call_budget: Optional[int]=None)`
+
+Grade the task, gate it, map it, and (optionally) clamp the budget.
+
+#### `main()`
+
+Drive the three real paths end to end.
+
+### `endpoint_identity`
+
+Source: `components/northstar-agent-runtime/endpoint_identity.py`
+
+Destination identity by state epoch, for endpoint-switch idempotency.
+
+#### `EndpointIdentityError`
+
+Base class for endpoint-identity failures.
+
+#### `UnprovenIdentityError`
+
+Raised when a destination identity cannot be proven.
+
+#### `payload_fingerprint(payload: Any)`
+
+The canonical digest of a payload -- never the payload text itself.
+
+#### `DestinationIdentity`
+
+The identity of a destination: the state epoch it serves.
+
+- `to_dict()`
+- `from_dict(value: Any)`
+  - Build an identity from a mapping; refuses an absent/empty epoch.
+- `is_proven()`
+  - True when this identity carries a non-empty epoch.
+- `same_state_as(other: 'DestinationIdentity')`
+  - True when both identities name the same destination *state*.
+#### `bind_key(operation_key: str, destination: DestinationIdentity, payload: Any)`
+
+The bound digest of an operation: key + destination epoch + payload.
+
+#### `classify_replay(recorded_destination: DestinationIdentity, current_destination: DestinationIdentity, recorded_fingerprint: str, presented_fingerprint: str)`
+
+Classify a replay attempt against a recorded operation.
+
+#### `prove_at_effect(presented: DestinationIdentity, attested_epoch: Any)`
+
+Prove the destination identity *at effect time*.
+
+#### `Acceptance`
+
+What one destination accepted for one operation.
+
+- `to_dict()`
+#### `AcceptanceLedger`
+
+A minimal per-operation ledger of which destination accepted what.
+
+- `record_acceptance(operation_key: str, destination: DestinationIdentity, outcome: str=ACCEPTED, bound_digest: str='', payload_fingerprint: str='')`
+  - Record that ``destination`` accepted ``operation_key``.
+- `record_pending(operation_key: str, destination: DestinationIdentity)`
+  - Record that an operation was dispatched, outcome unknown.
+- `outcome_of(operation_key: str)`
+  - The outcome recorded for ``operation_key``, or None.
+- `accepted_by(operation_key: str)`
+  - The acceptance for ``operation_key``, or None if nobody accepted it.
+- `pending_at(operation_key: str)`
+  - The destination an operation is pending at, or None.
+- `accepted_operations()`
+  - Accepted operation keys, in first-acceptance order.
+- `pending_operations()`
+  - Pending operation keys, in first-dispatch order.
+- `acceptance_count()`
+  - How many operations some destination has accepted.
+#### `main()`
+
+### `episode_eviction`
+
+Source: `components/northstar-agent-runtime/episode_eviction.py`
+
+CWL structured context eviction: typed episodes, dependency DAG, and a deterministic graduated eviction policy.
+
+#### `EpisodeGraphError`
+
+An episode-graph invariant was violated. Fail closed.
+
+#### `DelimiterError`
+
+A delimiter call violated the paper's schema. Fail closed.
+
+#### `EvictionLevel`
+
+The four eviction levels, least destructive first.
+
+#### `Episode`
+
+One typed episode of the trajectory.
+
+- `token_count` (property)
+- `active` (property)
+- `evicted` (property)
+- `as_dict()`
+#### `parse_delimiter_call(call: Mapping[str, Any])`
+
+Validate one delimiter tool call against the paper's schema.
+
+#### `UserTurn`
+
+A user turn. Never evictable (paper P3: user content is inviolable).
+
+- `as_dict()`
+#### `EpisodeGraph`
+
+The append-only typed DAG of episodes.
+
+- `add_prologue(*, name: str='__prologue__', tokens: int=0)`
+  - Record the protected prologue (system prompt, tool definitions, initial user turns). It is closed and never evictable.
+- `add_episode(name: str, type: str, *, dependencies: Sequence[str]=(), reasoning_tokens: int=0, bulk_output_tokens: int=0, intermediate_tokens: int=0, core_tokens: int=0, status: str=STATUS_OPEN)`
+  - Add an episode to the graph.
+- `close_episode(name: str, *, description: str | None=None)`
+  - Close an episode.
+- `add_dependency(source: str, target: str)`
+  - Add the edge ``(source, target)``: ``target`` (an act) depends on ``source`` (a closed expl). Invariants are enforced, not assumed.
+- `add_user_turn(text: str)`
+  - Record a user turn. User turns are not episodes and are never evicted (paper P3).
+- `set_tokens(name: str, *, reasoning_tokens: int=0, bulk_output_tokens: int=0, intermediate_tokens: int=0, core_tokens: int=0)`
+  - Attach the token weight of an episode's content parts.
+- `handle_delimiter(call: Mapping[str, Any])`
+  - Apply one validated delimiter call to the graph.
+- `require(name: str)`
+- `get(name: str)`
+- `active_episode()`
+- `episodes()`
+- `user_turns()`
+- `dependents(name: str)`
+  - Names of the episodes that depend on ``name`` (the out-edges).
+- `user_turn_tokens()`
+- `token_count()`
+- `as_dict()`
+#### `count_tokens(graph: EpisodeGraph)`
+
+Total token count of a graph: episodes + user turns.
+
+#### `evictable_tokens(graph: EpisodeGraph)`
+
+Tokens that eviction may still free: everything except the protected prologue, active episodes and user turns.
+
+#### `EvictionReceipt`
+
+Northstar's eviction receipt (a Northstar extension, not the paper).
+
+- `as_dict()`
+#### `EvictionPolicy`
+
+Algorithm 1 of the paper: graduated, deterministic, model-free.
+
+- `candidates(graph: EpisodeGraph)`
+  - Episodes eligible for eviction right now.
+- `select_target(graph: EpisodeGraph)`
+  - The oldest eligible ACT episode, or the oldest eligible EXPL episode when no ACT is eligible.
+- `evict_to_budget(graph: EpisodeGraph)`
+  - Evict until the graph fits the budget, or until nothing is left to evict.
+#### `evict_to_budget(graph: EpisodeGraph, budget: int=DEFAULT_TOKEN_BUDGET)`
+
+Module-level convenience wrapper around :class:`EvictionPolicy`.
+
+### `event_condenser`
+
+Source: `components/northstar-agent-runtime/event_condenser.py`
+
+Condensation as a first-class log event: the view is derived from the log.
+
+#### `EventCondenserError`
+
+Base class for every failure this module raises.
+
+#### `InvalidCondensationError`
+
+A condensation event is malformed (bad types, bad offset, empty set).
+
+#### `DuplicateCondensationError`
+
+An event id was already forgotten by an earlier condensation.
+
+#### `ViewDerivationError`
+
+The view could not be derived (offset out of range, unknown id).
+
+#### `ContextStillExceededError`
+
+The retry after a reactive condensation still exceeded the limit.
+
+#### `CondensationEvent`
+
+One condensation, as a first-class log event.
+
+- `as_dict()`
+  - JSON-safe view with the schema pin.
+#### `CondensationObservation`
+
+The model-visible stand-in for a forgotten run of events.
+
+- `as_dict()`
+#### `new_log()`
+
+An empty log.
+
+#### `append_event(log: list[dict[str, Any]], event_id: int, source: str, payload: Any)`
+
+Append one ordinary event; returns the record that was appended.
+
+#### `append_condensation(log: list[dict[str, Any]], forgotten: Sequence[int], summary: str, offset: int)`
+
+Append a condensation to the log; the log is never rewritten in place.
+
+#### `derive_view(log: Sequence[Mapping[str, Any]])`
+
+Derive the model-visible view from the complete log.
+
+#### `replay(log: Sequence[Mapping[str, Any]])`
+
+Replay the log into the view.
+
+#### `audit_condensations(log: Sequence[Mapping[str, Any]])`
+
+List every condensation in the log with its forgotten set and summary.
+
+#### `throttle_by_source(log: list[dict[str, Any]], source: str, keep_last: int=ATTENTION_WINDOW)`
+
+Keep only the most recent ``keep_last`` events of one source.
+
+#### `condense_on_limit(log: list[dict[str, Any]], *, is_exceeded: Callable[[Sequence[Any]], bool], keep_first: int=KEEP_FIRST, keep_recent: int=KEEP_RECENT, summarizer: Callable[[Sequence[Mapping[str, Any]]], str] | None=None)`
+
+React to a context-limit signal: condense the middle, retry once.
+
+#### `condense_by_importance(log: list[dict[str, Any]], scorer: Callable[[Mapping[str, Any]], float], *, keep: int, summary: str | None=None, summary_offset: int | None=None)`
+
+Condense the *least important* events (Northstar extension).
+
+#### `main()`
+
+Self-check: the three paths the module exists for.
+
+### `evidence_independence`
+
+Source: `components/northstar-agent-runtime/evidence_independence.py`
+
+Evidence independence: count independent origins, not hits.
+
+#### `EvidenceIndependenceError`
+
+Base class for evidence-independence failures.
+
+#### `InvalidThresholdError`
+
+A claim threshold that is not a positive int.
+
+#### `MirrorStatus`
+
+What a dissent is with respect to the seal it challenges.
+
+#### `canonical_source_system(value: Any)`
+
+Canonical identity of an upstream source system.
+
+#### `Origin`
+
+The identity of an upstream source system.
+
+- `key` (property)
+  - The canonical origin key.
+- `as_dict()`
+#### `EvidenceItem`
+
+One piece of evidence, with the provenance that attributes it.
+
+- `origin` (property)
+  - The origin this item is attributed to, or ``None`` if unattributed.
+- `as_dict()`
+#### `item_origin(item: Any)`
+
+The origin of one evidence item, whatever shape it arrives in.
+
+#### `group_by_origin(evidence: Iterable[Any])`
+
+Group evidence items by their origin key.
+
+#### `partition_by_origin(evidence: Iterable[Any])`
+
+Split evidence into attributed groups and unattributed items.
+
+#### `independent_origin_count(evidence: Iterable[Any])`
+
+The number of *distinct* origins in the evidence.
+
+#### `origin_keys(evidence: Iterable[Any])`
+
+The sorted canonical origin keys of the evidence (UNATTRIBUTED excluded).
+
+#### `correlated_fields(evidence: Iterable[Any])`
+
+Group evidence by the upstream *field* it was read from.
+
+#### `claim_supported(evidence: Iterable[Any], min_origins: int=1)`
+
+Whether the evidence supports the claim.
+
+#### `mirror_status(dissent_evidence: Iterable[Any], seal_evidence: Iterable[Any])`
+
+Judge a dissent against the seal it challenges.
+
+#### `is_mirror(dissent_evidence: Iterable[Any], seal_evidence: Iterable[Any])`
+
+Whether the dissent is a mirror of the seal.
+
+#### `is_independent_witness(dissent_evidence: Iterable[Any], seal_evidence: Iterable[Any])`
+
+Whether the dissent is an independent witness against the seal.
+
+#### `main()`
+
+Self-check: the counting rules, the threshold, and the mirror rule.
+
+### `false_green_detector`
+
+Source: `components/northstar-agent-runtime/false_green_detector.py`
+
+False-green detector: a success signal whose content fails validation.
+
+#### `Verdict`
+
+What the detector concluded about one success signal.
+
+#### `is_success_status(status: str)`
+
+True when ``status`` declares success.
+
+#### `SuccessSignal`
+
+One claim of success, and the content the claim is about.
+
+#### `schema_validator(required_keys: Sequence[str])`
+
+Schema check: every required key must be present in the payload.
+
+#### `range_validator(bounds: Mapping[str, Tuple[Optional[float], Optional[float]]])`
+
+Range check: declared numeric fields must sit inside their bounds.
+
+#### `consistency_validator(rules: Sequence[Tuple[str, str, str]])`
+
+Consistency check: declared cross-field invariants must hold.
+
+#### `non_empty_validator(fields: Sequence[str]=())`
+
+Non-empty check: content that was expected must actually be there.
+
+#### `check(signal: SuccessSignal, validators: Optional[Sequence[ContentValidator]]=None)`
+
+Judge one success signal against its content validators.
+
+### `horizon_gate`
+
+Source: `components/northstar-agent-runtime/horizon_gate.py`
+
+Admission gate: only take tasks inside the *verified 80%* time horizon.
+
+#### `HorizonGateError`
+
+Base class for every horizon-gate refusal.
+
+#### `HorizonDeclarationError`
+
+The gate could not be declared, so it does not exist.
+
+#### `BadTaskDuration`
+
+The task duration handed to :meth:`HorizonGate.admit` is unusable.
+
+#### `AdmissionStatus`
+
+The three admission states.
+
+#### `Admission`
+
+One admission decision, with the evidence behind it.
+
+- `admitted` (property)
+  - Whether the task may be taken in (admitted, or flagged in).
+- `as_dict()`
+#### `HorizonReport`
+
+A horizon report: the horizon, its interval, and how firm it is.
+
+- `as_dict()`
+#### `pinning_verdict(task_count: int)`
+
+The pinning ladder for a horizon pinned down by ``task_count`` tasks.
+
+#### `HorizonGate`
+
+Admits tasks only inside the verified 80% horizon.
+
+- `horizon_interval` (property)
+  - The horizon's interval, in human minutes.
+- `admitted_count` (property)
+- `flagged_count` (property)
+- `refused_count` (property)
+- `report()`
+  - The horizon report: the horizon, its interval, and how firm it is.
+- `as_dict()`
+  - The gate's own view of itself, for an audit row.
+- `admit(task_human_minutes: Any)`
+  - Decide whether a task may be admitted.
+- `decisions()`
+  - Every decision this gate has made, in order.
+### `intent_bound_retry`
+
+Source: `components/northstar-agent-runtime/intent_bound_retry.py`
+
+Intent-bounded retry: a deadline + precondition gate in front of every retry.
+
+#### `RetryDecision`
+
+What the intent gate decided about one retry attempt.
+
+- `allowed` (property)
+  - True only for :attr:`ALLOW`.
+#### `IntentCheck`
+
+The intent bound declared for one logical action.
+
+- `as_dict()`
+  - The check as data, without the callable.
+#### `gate(intent_check: Optional[IntentCheck], now: float, state: Any=None, has_side_effects: bool=True, allow_unbounded: bool=False)`
+
+Decide whether one retry attempt may proceed.
+
+#### `should_retry(intent_check: Optional[IntentCheck], now: float, state: Any=None, attempt: int=0, has_side_effects: bool=True, allow_unbounded: bool=False)`
+
+Convenience wrapper around :func:`gate`: True exactly on ``ALLOW``.
+
+### `key_custody`
+
+Source: `components/northstar-agent-runtime/key_custody.py`
+
+Agent-held key custody: policy-sealed signing with a pre-sign rollback gate.
+
+#### `RefusalReason`
+
+Why a signature was refused (structured, never silent).
+
+#### `CustodyError`
+
+Base class for custody errors.
+
+#### `CustodyRefusal`
+
+A structured refusal: carries the reason, never swallowed.
+
+- `to_dict()`
+#### `CustodyPolicy`
+
+The policy the signing identity is bound to.
+
+- `canonical_form()`
+  - The canonical body the policy hash is taken over.
+- `policy_hash` (property)
+  - Canonical ``sha256:`` hash of this policy.
+- `epoch_of(now: float)`
+  - The epoch index ``now`` falls into.
+- `is_expired(now: float)`
+  - True once ``now`` is at or past the expiry.
+- `allows(op: str)`
+  - True when ``op`` is one of the permitted operation kinds.
+#### `VaultSeal`
+
+The seal that binds a policy hash to a vault version.
+
+- `create(*, vault_version: int, policy_hash: str, sealed_at: float, key_id: str)`
+  - Build a seal over (version, policy hash, time, key id).
+- `canonical_form()`
+- `verify_self()`
+  - True when the seal digest re-derives (self-consistency only).
+- `to_dict()`
+#### `AnchoredState`
+
+The vault state as published in the append-only ledger.
+
+- `to_dict()`
+#### `read_anchored(ledger: Any)`
+
+Read the newest anchored vault state back from the ledger.
+
+#### `anchor_vault(ledger: Any, seal: VaultSeal, *, anchored_at: float=0.0)`
+
+Publish a sealed vault state into the append-only ledger.
+
+#### `seal_is_valid(seal: VaultSeal)`
+
+The *old* check: is the seal self-consistent?
+
+#### `SignatureEnvelope`
+
+The signed receipt envelope.
+
+- `canonical_form()`
+  - The exact body the signature covers.
+- `signing_body()`
+  - Canonical bytes the signature is taken over.
+- `to_dict()`
+- `from_dict(value: Dict[str, Any])`
+  - Rebuild an envelope from its dict form.
+#### `verify_envelope(envelope: SignatureEnvelope, public_key: bytes, *, anchored_policy_hash: Optional[str]=None)`
+
+Verify an envelope with only the public key (and optionally the anchored policy hash).
+
+#### `KeyCustody`
+
+The agent-held signing identity, bound to a sealed policy.
+
+- `agent_id` (property)
+- `key_id` (property)
+  - The public identifier of the held signing key.
+- `public_key` (property)
+  - The public key (the only thing that leaves the custody object).
+- `seal` (property)
+  - The current seal, or ``None`` when nothing is sealed.
+- `policy` (property)
+  - The sealed policy, or ``None``.
+- `ledger` (property)
+- `signature_count(epoch: int)`
+  - How many signatures this custody object produced in ``epoch``.
+- `seal_policy(policy: CustodyPolicy, *, vault_version: int)`
+  - Seal a policy into the vault at a given version.
+- `anchor()`
+  - Publish the current seal into the ledger (the off-vault copy).
+- `anchored_state()`
+  - The anchored state as currently published in the ledger.
+- `pre_sign_gate(op: str, *, now: Optional[float]=None)`
+  - The pre-sign gate: refuse before anything is signed.
+- `sign(payload: Dict[str, Any], *, op: str='receipt', now: Optional[float]=None)`
+  - Sign a payload under the sealed policy.
+#### `stdlib_only()`
+
+AST check: stdlib only (the ed25519 primitive is vendored locally).
+
+#### `main()`
+
+Self-check: the happy path, the tamper, and the rollback.
+
+### `leased_task_claim`
+
+Source: `components/northstar-agent-runtime/leased_task_claim.py`
+
+Lease claim with a fencing token, and a reaper for expired leases.
+
+#### `LeasedTaskClaimError`
+
+Base class for this module's refusals.
+
+#### `UnknownTaskError`
+
+The task id was never claimed.
+
+#### `LeaseHeldError`
+
+The task already has a live lease; a second claim would be a double lease on the same task.
+
+#### `BackoffError`
+
+The task is in backoff after a reported failure and is not eligible for a claim yet.
+
+#### `TerminalTaskError`
+
+The task is already terminal (completed or dead).
+
+#### `StaleLeaseError`
+
+The presented fencing token is not the current one, or the lease has expired. The write is refused and nothing is changed.
+
+#### `CheckpointOrderError`
+
+The checkpoint would move the task's progress backwards.
+
+#### `QueueMirrorError`
+
+The queue mirror and the lease ledger disagree; the claim is refused rather than guessed.
+
+#### `TaskLease`
+
+A live (or recently dead) claim on a task.
+
+- `token` (property)
+  - The fencing token value.
+- `is_expired(now: float)`
+  - True when the lease is dead. Expiry is inclusive: the lease is valid *through* ``expires_at``.
+- `as_dict()`
+#### `TaskView`
+
+Pure read view of one task's lease-ledger state.
+
+#### `CheckpointRecord`
+
+One checkpoint of a task's progress.
+
+#### `TerminalRecord`
+
+A committed terminal state and the outbox row it committed with.
+
+#### `FailRecord`
+
+The outcome of a reported failure.
+
+#### `ReleasedRecord`
+
+A voluntarily released lease.
+
+#### `ReapedLease`
+
+One lease the reaper swept back into the queue.
+
+#### `OutboxRow`
+
+One row of the transactional outbox.
+
+#### `digest_of(text: str)`
+
+``sha256:`` + hex digest of ``text`` -- the digest shape used by ``job_queue`` and ``dead_letter_queue`` for payloads.
+
+#### `idempotency_key(task_id: str, event_type: str)`
+
+The stable idempotency key ``<task_id>:<event_type>``.
+
+#### `LeasedTaskClaim`
+
+Lease a task with a fencing token; reap the dead; refuse the zombies.
+
+- `queue_name_for(task_id: str)`
+  - The queue-mirror queue name of a task.
+- `task(task_id: str)`
+  - Pure read view of a task's lease-ledger state.
+- `checkpoint(task_id: str)`
+  - The newest checkpoint of a task, or ``None``.
+- `outbox_rows(task_id: str)`
+  - Every outbox row of a task, oldest first.
+- `audit_log()`
+  - The append-only audit trail of this manager.
+- `close()`
+  - Close the underlying SQLite connection.
+- `enqueue_task(task_id: str, task: str, payload: str='')`
+  - Register a task and put it in the queue mirror, ready to claim.
+- `claim(task_id: str, worker: str, ttl: float, now: Optional[float]=None)`
+  - Take a limited-time lease on a task with a new fencing token.
+- `heartbeat(task_id: str, token: int, now: Optional[float]=None, extend_seconds: float=0.0)`
+  - Extend a live lease. A stale token or an expired lease is refused.
+- `save_checkpoint(task_id: str, token: int, step: int, payload: Mapping[str, Any], now: Optional[float]=None)`
+  - Record progress for the current holder.
+- `complete(task_id: str, token: int, payload: Optional[Mapping[str, Any]]=None, now: Optional[float]=None, destination: str=DEFAULT_DESTINATION)`
+  - Commit the terminal state and its outbox row together.
+- `fail(task_id: str, token: int, reason: str='', now: Optional[float]=None)`
+  - Report a failure: backoff, or the dead letter when the budget is out.
+- `release(task_id: str, token: int, now: Optional[float]=None)`
+  - Give up a live lease voluntarily.
+- `reap(now: Optional[float]=None)`
+  - Sweep expired leases back into the queue.
+- `expired_leases(now: Optional[float]=None)`
+  - The leases that :meth:`reap` would sweep, without sweeping them.
+- `outbox_messages(task_id: str)`
+  - The outbox rows of a task as ``outbox_pattern.OutboxMessage``s.
+- `mark_delivered(task_id: str, message_id: str, now: Optional[float]=None)`
+  - Mark an outbox row as delivered (``sent``).
+- `delivered(task_id: str)`
+  - The message ids of a task's outbox rows that were delivered.
+- `resume_from(task_id: str)`
+  - The checkpoint a new holder resumes from.
+- `pending_steps(task_id: str)`
+  - How many steps the task has checkpointed.
+#### `main()`
+
+The source's demonstration, driven end to end.
+
+### `ledger_concurrency`
+
+Source: `components/northstar-agent-runtime/ledger_concurrency.py`
+
+Concurrent ledger append + check-then-append transaction + Infra flag.
+
+#### `LedgerConcurrencyError`
+
+Fail-closed: any integrity failure raises, never returns bad data.
+
+#### `LogCorruptError`
+
+The log holds a line that is neither a whole event nor a torn tail.
+
+#### `LedgerEvent`
+
+One appended event (immutable).
+
+#### `SidecarLock`
+
+An exclusive lock held on a **sidecar** file, not on the log.
+
+- `acquire(timeout: float=30.0)`
+  - Take the exclusive lock, waiting up to ``timeout`` seconds.
+- `release()`
+  - Release the lock (safe to call twice).
+- `hold(timeout: float=30.0)`
+  - Return a context manager that holds the lock for its body.
+#### `ConcurrentLedger`
+
+A file-backed append-only log with gapless, cross-process sequencing.
+
+- `read_events()`
+  - Read every whole event, lock-free.
+- `next_seq()`
+  - The sequence number the next append will take (1 when empty).
+- `repair_tail()`
+  - Repair a torn trailing line; return the discarded fragment.
+- `append(payload: str, *, idempotency_key: str='')`
+  - Append one event under the sidecar lock; return the sealed event.
+- `update(*, key: str, check: Callable[[Tuple[LedgerEvent, ...]], bool], decide: Callable[[Tuple[LedgerEvent, ...]], Any], payload_of: Callable[[Any], str])`
+  - Read-decide-append as one transaction; return ``(event, landed)``.
+- `find_by_key(key: str)`
+  - The event written under ``key``, or ``None``.
+#### `VerificationResult`
+
+The three-state outcome of one gate run.
+
+- `passed` (property)
+- `failed` (property)
+- `infra` (property)
+- `as_dict()`
+#### `classify_verification(*, exit_code: int=0, stdout: str='', stderr: str='', signals: Tuple[str, ...]=(), http_status: Optional[int]=None)`
+
+Classify one gate run as ``passed`` / ``failed`` / ``infra``.
+
+#### `tally(results: Tuple[VerificationResult, ...])`
+
+Tally the three states; ``infra`` never lands in ``failed``.
+
+#### `stdlib_only()`
+
+AST check: this module imports stdlib modules only.
+
+#### `main()`
+
+Self-check: concurrent append, gapless seq, idempotent update, infra.
+
+### `merged_tree_review`
+
+Source: `components/northstar-agent-runtime/merged_tree_review.py`
+
+Merged-tree review: find cross-slice conflicts in a merged tree.
+
+#### `ModuleFacts`
+
+Everything the four rules need to know about one module.
+
+- `public_symbols()`
+  - Every public top-level name this module defines.
+- `has_symbol(name: str)`
+  - Does this module define ``name`` at top level?
+- `all_symbols()`
+  - Every top-level name this module defines, private ones included.
+- `verdict_words()`
+  - Every verdict-like word this module mints, across its vocabularies.
+#### `read_module_facts(path: Path)`
+
+Collect the facts of one module file. Read-only.
+
+#### `collect_module_facts(module_paths: Iterable[Path])`
+
+Collect facts for many modules, keyed by module name.
+
+#### `DanglingReference`
+
+A design doc names a module symbol that no longer exists.
+
+- `as_dict()`
+#### `scan_dangling_symbols(doc_paths: Sequence[Path], facts: Mapping[str, ModuleFacts], known_modules: Optional[Sequence[str]]=None)`
+
+Rule 1: find design-doc references to module symbols that are gone.
+
+#### `scan_missing_modules(doc_paths: Sequence[Path], known_modules: Sequence[str], repo_modules: Optional[Sequence[str]]=None)`
+
+Rule 1b: design docs that name a ``*.py`` file the tree lacks.
+
+#### `SameNameGroup`
+
+A public name defined by more than one module.
+
+- `modules` (property)
+- `as_dict()`
+#### `find_same_name_symbols(facts: Mapping[str, ModuleFacts], only_functions: bool=True)`
+
+Rule 2: public names defined in more than one module.
+
+#### `VocabularyOverlap`
+
+A word two modules in the same group both mint.
+
+- `as_dict()`
+#### `vocabulary_overlap(facts: Mapping[str, ModuleFacts], group_modules: Mapping[str, Sequence[str]]=GROUP_MODULES, extra_words: Optional[Mapping[str, Sequence[str]]]=None)`
+
+Rule 3: verdict words shared by two modules of the same group.
+
+#### `RecordShapeConflict`
+
+Two record types of the same group that cannot be joined.
+
+- `as_dict()`
+#### `record_shape_conflicts(facts: Mapping[str, ModuleFacts], group_modules: Mapping[str, Sequence[str]]=GROUP_MODULES)`
+
+Rule 4: compare the record shapes two modules of a group produce.
+
+#### `ReviewResult`
+
+Everything the four rules found. Pure data, no side effects.
+
+- `as_dict()`
+- `summary_lines()`
+  - One line per rule, for a human reading the terminal.
+#### `analyze(module_paths: Sequence[Path], doc_paths: Sequence[Path], group_modules: Mapping[str, Sequence[str]]=GROUP_MODULES, repo_modules: Optional[Sequence[str]]=None)`
+
+Run all four rules over a tree. Read-only.
+
+#### `repo_module_names(root: Path)`
+
+Every python module name in the repository, by file stem.
+
+#### `main(argv: Optional[Sequence[str]]=None)`
+
+Print the review over a repository root. Read-only.
+
+### `refusal_hold`
+
+Source: `components/northstar-agent-runtime/refusal_hold.py`
+
+Refusal hold: a refusal row blocks the re-dispatch of the same action.
+
+#### `RefusalHoldError`
+
+Fail-closed: the hold could not be used, so nothing is allowed.
+
+#### `RefusalHoldKeyError`
+
+A hold key is malformed: a missing field, a wrong type, an unknown scope kind. The key is refused, never defaulted.
+
+#### `RefusalHoldStoreError`
+
+The refusal-row store could not answer.
+
+#### `RefusalHoldKey`
+
+What one refusal blocks: *this action, in this scope*.
+
+- `from_mapping(value: Mapping[str, Any])`
+  - Build a key from a mapping, failing closed on a missing field.
+- `identity` (property)
+  - The canonical string form of the key.
+#### `RefusalHoldEntry`
+
+One refusal row as the hold holds it: **a reference, never a copy**.
+
+- `identity` (property)
+  - The key's canonical string form.
+- `row_digest` (property)
+  - The ``sha256:`` digest of the referenced row, if it has one.
+- `is_refusal_row()`
+  - True when the referenced row is a ``refusal_row.RefusalRow``.
+- `is_intact()`
+  - True when the *live* row is a refusal row that still verifies.
+- `to_dict()`
+  - The entry as a plain dict (the row is serialized, not copied).
+#### `RefusalHoldResult`
+
+The answer to one query: blocked or not, and by which row.
+
+- `has_row` (property)
+  - True when a row reference is attached to the result.
+- `to_dict()`
+  - The result as a plain dict.
+#### `RefusalHoldStore`
+
+Where the hold reads refusal rows from.
+
+- `fetch(key: RefusalHoldKey)`
+  - The entry covering ``key``, or ``None`` when there is none.
+- `is_readable()`
+  - True when the store can answer at all.
+- `entries()`
+  - Every registered entry, in registration order.
+- `break_reads()`
+  - Make every read fail (test helper).
+- `repair()`
+  - Make reads work again (test helper).
+#### `RefusalHold`
+
+The hold: refusal rows in, a blocked/allowed answer out.
+
+- `entries()`
+  - Every entry the hold knows about, in registration order.
+- `now` (property)
+  - The hold's caller-supplied clock value.
+- `check(key: RefusalHoldKey, now: Optional[int]=None)`
+  - Is this re-dispatch blocked by a refusal, and by which row?
+- `is_blocked(key: RefusalHoldKey, now: Optional[int]=None)`
+  - True when the action is blocked by a refusal (or by a broken gate).
+- `blocked_row(key: RefusalHoldKey, now: Optional[int]=None)`
+  - The row that blocks this action, or ``None``.
+- `from_rows(rows: Iterable[RefusalRow], keys: Iterable[RefusalHoldKey], now: int=0)`
+  - Build a hold from parallel ``rows`` and ``keys`` iterables.
+- `to_list()`
+  - The hold's entries as plain dicts.
+#### `main()`
+
+Self-check: block, do not over-block, fail closed.
+
+### `refusal_hold_wiring`
+
+Source: `components/northstar-agent-runtime/refusal_hold_wiring.py`
+
+Refusal-hold wiring: a recorded refusal blocks the re-seal of a grant.
+
+#### `RefusalHoldWiringError`
+
+Fail-closed: the wiring could not be used, so nothing is sealed.
+
+#### `RefusalHoldKeyMappingError`
+
+The ledger-side identity could not be mapped onto a hold key.
+
+#### `RefusalRefusedError`
+
+A recorded refusal blocks the seal.
+
+#### `scope_kind_for(action: str, *, default: str=DEFAULT_SCOPE_KIND, overrides: Optional[Mapping[str, str]]=None)`
+
+The scope kind an action's refusals live under.
+
+#### `refusal_hold_key(grant_id: str, action: str, subject: Optional[str]=None, *, scope_kind: str=DEFAULT_SCOPE_KIND, scope_kind_overrides: Optional[Mapping[str, str]]=None)`
+
+The hold key for one ledger-side action identity.
+
+#### `subject_covers(refused_subject: Optional[str], offered_subject: Optional[str])`
+
+True when a refusal refused for ``refused_subject`` covers the action when it is offered with ``offered_subject``.
+
+#### `RefusalHoldRegistry`
+
+The registry the seal ledger's injection point accepts.
+
+- `hold` (property)
+  - The hold this registry reads from.
+- `store` (property)
+  - The store this registry reads from.
+- `scope_kind` (property)
+  - The scope kind this registry's refusals live under.
+- `key_for(grant_id: str, action: str, subject: Optional[str]=None)`
+  - The hold key for one ledger-side identity.
+- `check(grant_id: str, action: str, subject: Optional[str]=None, *, now: Optional[float]=None)`
+  - The gate's full answer for one identity.
+- `blocked(grant_id: str, action: str, subject: Optional[str]=None, *, now: Optional[float]=None)`
+  - The refusal that blocks this action now, if any.
+- `is_blocked(grant_id: str, action: str, subject: Optional[str]=None, *, now: Optional[float]=None)`
+  - True when the action is blocked by a refusal (or by a broken gate).
+- `record(grant_id: str, action: str, subject: Optional[str]=None, *, row: Optional[RefusalRow]=None, now: Optional[float]=None)`
+  - Record a refusal against one ledger-side identity.
+- `lift(lift: Any)`
+  - A tombstone lift offered against a refusal is refused.
+- `bind_gate(lock: Any)`
+  - Bind the registry to the lock the seal path runs under.
+- `events()`
+  - The audit trail: what was recorded and what was checked.
+- `to_dict()`
+  - The registry as a plain dict (the rows are not copied).
+#### `authorize(registry: Any, pin: Any, action: str, subject: Optional[str]=None, *, now: Optional[float]=None)`
+
+Authorize one grant seal against the refusal hold.
+
+#### `install_refusal_gate(ledger: Any, registry: RefusalHoldRegistry, *, action: str='dispatch', subject: str='', now: Optional[float]=None, grant_id: Optional[str]=None)`
+
+Bind the refusal gate into a ledger's commit critical section.
+
+#### `stdlib_only()`
+
+True when this module imports nothing outside the standard library.
+
+#### `main()`
+
+Self-check: block, do not over-block, fail closed.
+
+### `refusal_row`
+
+Source: `components/northstar-agent-runtime/refusal_row.py`
+
+Refusal as a first-class row: a "no" that is an auditable record.
+
+#### `RefusalRowError`
+
+Fail-closed: an illegal refusal row is refused, never defaulted.
+
+#### `digest_of(value: Any)`
+
+``sha256:`` digest of the canonical form of ``value``.
+
+#### `RefusalRow`
+
+One refusal, recorded as an immutable, auditable row.
+
+- `marker` (property)
+  - The marker on the row: ``SINGLE_INSTRUMENT`` or ``""``.
+- `instrument_count` (property)
+  - How many distinct instruments the refusal rests on.
+- `body()`
+  - The row's content, without its own digest.
+- `content_digest()`
+  - The ``sha256:`` digest of :meth:`body`.
+- `as_dict()`
+  - The row as a plain dict, including ``row_digest`` and ``marker``.
+#### `record_refusal(verdict: str, evidence_hash: str, ruleset_hash: str, verifier_key: str, population_digest: str, reason: str='', refused_at: int=0, instruments: Optional[Sequence[str]]=None, single_instrument: bool=False)`
+
+Record one refusal as an auditable row.
+
+#### `row_errors(row: Any)`
+
+Every reason ``row`` is not a valid refusal row (empty when it is).
+
+#### `verify_row(row: Any)`
+
+Re-verify a refusal row.
+
+#### `main()`
+
+Self-check: the two-instrument path and the fail-closed paths.
+
+### `resume_validation`
+
+Source: `components/northstar-agent-runtime/resume_validation.py`
+
+Resume validation: validate resume values before the step re-enters.
+
+#### `ResumeValidationError`
+
+Base class for every refusal this module makes.
+
+#### `UnknownInterruptError`
+
+A resume addressed an interrupt id that is not pending.
+
+#### `DuplicateInterruptError`
+
+An interrupt id was declared twice.
+
+#### `PayloadNotSerializableError`
+
+The interrupt payload is not JSON-serializable.
+
+#### `InvalidSchemaError`
+
+The declared response schema is malformed.
+
+#### `SchemaViolationError`
+
+A resume value does not satisfy its declared response schema.
+
+#### `InterruptExpiredError`
+
+The interrupt expired; expiry never turns into consent.
+
+#### `InterruptAlreadyResolvedError`
+
+The interrupt was already resolved; it is consumed exactly once.
+
+#### `FieldSpec`
+
+One field of a declarative response schema.
+
+- `from_mapping(name: str, raw: Mapping[str, Any])`
+- `as_dict()`
+#### `ResponseSchema`
+
+A declarative response schema for one interrupt.
+
+- `from_mapping(raw: Mapping[str, Any])`
+- `as_dict()`
+#### `InterruptDeclaration`
+
+One declared interrupt: what it asked for and what it expects back.
+
+- `as_dict()`
+#### `ResolvedInterrupt`
+
+The record of one interrupt that has been consumed.
+
+- `as_dict()`
+#### `ResumeValidator`
+
+The pending-interrupt list and the resume-value validation gate.
+
+- `declare(interrupt_id: str, payload: Any, response_schema: Any=None, seq: int=0)`
+  - Register one pending interrupt.
+- `pending()`
+  - Every interrupt still waiting for a resume value.
+- `resolved()`
+  - The interrupts already consumed, in resolution order.
+- `expired()`
+  - The interrupts the caller marked expired.
+- `get(interrupt_id: str)`
+  - Return a pending declaration. Raises ``KeyError`` if unknown.
+- `validate_resume(resume_map: Mapping[str, Any])`
+  - Validate a whole batch of resume values.
+- `resolve(interrupt_id: str, validated_value: Any, seq: int=0)`
+  - Consume one interrupt with an already validated value.
+- `mark_expired(interrupt_id: str)`
+  - Mark a pending interrupt expired (the caller decides when).
+#### `main()`
+
+### `retry_clears_writes`
+
+Source: `components/northstar-agent-runtime/retry_clears_writes.py`
+
+Retry clears writes: discard pending writes before re-invoking a retried node.
+
+#### `NodeCancelledError`
+
+The node body itself was cancelled.
+
+#### `NodeTimeoutError`
+
+The attempt exceeded its timeout.
+
+#### `ExternalCancelledError`
+
+The runtime cancelled the attempt because a sibling failed.
+
+#### `PendingWrite`
+
+One uncommitted write: the key, the value, and the write sequence.
+
+- `as_dict()`
+#### `PendingWrites`
+
+The uncommitted writes of the current attempt, plus the committed ones.
+
+- `write(key: str, value: Any)`
+  - Record an uncommitted write. Returns False when the set is sealed.
+- `clear()`
+  - Discard every pending write. Returns how many were discarded.
+- `seal()`
+  - Refuse further writes (used after an abandoned attempt).
+- `commit(key: str | None=None)`
+  - Move pending writes to the committed set. Committed writes survive every later ``clear()``.
+- `pending()`
+- `committed()`
+- `keys()`
+- `values()`
+- `get(key: str, default: Any=None)`
+- `return_value()`
+  - The value on the ``RETURN`` channel, if the node wrote one.
+#### `default_retry_on(exc: Exception)`
+
+LangGraph's default ``retry_on`` predicate (verbatim behaviour).
+
+#### `RetryPolicy`
+
+Retry configuration, with LangGraph's defaults.
+
+- `should_retry_on(exc: Exception)`
+  - Does this policy match the exception?
+- `interval(attempts: int)`
+  - The wait before the next attempt, without jitter.
+#### `AttemptRecord`
+
+What one attempt did, for the audit trail.
+
+- `as_dict()`
+#### `RetryOutcome`
+
+The result of a retried node run.
+
+- `as_dict()`
+#### `patch_configurable(config: dict[str, Any] | None, patch: dict[str, Any])`
+
+Patch the ``configurable`` section of a run config.
+
+#### `run_with_retry(node: Callable[[], Any], *, writes: PendingWrites, policies: Sequence[RetryPolicy]=(), timeout: float | None=None, sleep: Callable[[float], None]=time.sleep, uniform: Callable[[float, float], float]=random.uniform, resuming: bool=False, config: dict[str, Any] | None=None)`
+
+Run a node, clearing the pending writes before every attempt.
+
+### `retry_config`
+
+Source: `components/northstar-agent-runtime/retry_config.py`
+
+Declarative retry configuration and call-kind classification.
+
+#### `RetryConfigError`
+
+A retry configuration is unusable. Raised at construction, never mid-run.
+
+#### `WaitWindow`
+
+The declared wait for one retry step, as an interval.
+
+- `as_dict()`
+#### `RetryConfig`
+
+Declarative retry configuration -- the retry table as data.
+
+- `to_dict()`
+  - The configuration as plain data.
+- `from_dict(document: Mapping[str, Any])`
+  - Build a configuration from plain data.
+- `nominal_waits()`
+  - The deterministic backoff of every step, in seconds.
+- `schedule()`
+  - The full wait schedule: one declared window per retry step.
+- `as_dict()`
+  - The configuration as an auditable record.
+#### `CallKind`
+
+What kind of call this is -- and therefore whether it may be repeated.
+
+- `idempotent` (property)
+  - Whether repeating a call of this kind is safe.
+#### `RetryDecision`
+
+What the gate decided to do about a failed call.
+
+#### `RetryVerdict`
+
+The gate's answer for one failed call.
+
+- `should_retry` (property)
+- `as_dict()`
+#### `classify_call(kind: CallKind | str, failure: Failure | FailureClass | BaseException, *, attempt: int=0, config: RetryConfig | None=None)`
+
+Decide what may happen to a failed call.
+
+#### `GateOutcome`
+
+What a governed call produced.
+
+- `as_dict()`
+#### `RetryGate`
+
+Runs a call under the call-kind rules and the declarative config.
+
+- `execute(kind: CallKind | str, call: Callable[[], Any], *, classify: Callable[[Any], Failure] | None=None)`
+  - Run ``call`` under the gate.
+#### `SessionGuard`
+
+Create a session at most once, even under concurrency.
+
+- `created` (property)
+  - Whether a session has been created (successfully) by this guard.
+- `get()`
+  - Return the session, creating it at most once.
+#### `TimeoutResult`
+
+The result of a call that was wrapped in a timeout.
+
+- `as_dict()`
+#### `run_with_timeout(call: Callable[[], Any], timeout_seconds: float)`
+
+Run ``call`` under a timeout, turning a hang into a failed result.
+
+#### `main()`
+
+Self-check: the classification matrix and the schedule.
+
+### `reversible_compaction`
+
+Source: `components/northstar-agent-runtime/reversible_compaction.py`
+
+Make a compaction reversible: a record that can go back to before it.
+
+#### `ReversibleCompactionError`
+
+Base class for this module's refusals.
+
+#### `MissingHashError`
+
+A compaction that cannot be reversed was refused at mint time.
+
+#### `canonical_transcript(transcript: Sequence[Any])`
+
+The canonical text a transcript is hashed over.
+
+#### `transcript_hash(transcript: Sequence[Any])`
+
+The ``sha256:`` pin of a transcript's canonical form.
+
+#### `CompactionRecord`
+
+One reversible compaction: the summary, and the ticket back.
+
+- `is_reversible()`
+  - Are both hashes present and well formed?
+- `as_dict()`
+- `from_dict(payload: Mapping[str, Any])`
+  - Rebuild a record from its dict form; ``None`` when it is malformed.
+#### `prompt_hash_for(prompt: Any)`
+
+The ``sha256:`` pin of a prompt's exact bytes.
+
+#### `compact_reversible(transcript: Sequence[Any], summary: str, prompt_hash: str, *, revert_token: str | None=None)`
+
+Compact, reversibly: mint the record that can undo this compaction.
+
+#### `can_revert(record: Any, archive: Any)`
+
+Does the archive hold the transcript this record can go back to?
+
+#### `revert(record: Any, archive: Any)`
+
+Return the pre-compaction transcript, or ``None``.
+
+#### `rederive(record: Any, prompt_hash: str)`
+
+Is this record consistent with the prompt hash the caller dispatched?
+
+#### `is_reversible(record: Any)`
+
+Does this record carry both hashes needed to go back?
+
+### `revision_checked_tool_results`
+
+Source: `components/northstar-agent-runtime/revision_checked_tool_results.py`
+
+Tool results carry the revision they read; commit checks that revision atomically.
+
+#### `RevisionCheckedToolResultsError`
+
+Base class for every refusal raised by this module.
+
+#### `MissingReadRevisionError`
+
+A tool result was created without a usable read revision.
+
+#### `InvalidRevisionError`
+
+A revision was not a non-negative integer.
+
+#### `InvalidToolCallIdError`
+
+A tool call id was not a non-empty string.
+
+#### `RevisionCheckedResult`
+
+One tool result, tagged with the state revision it was read at.
+
+- `with_result_revision(revision: int)`
+  - Return a copy of this result carrying ``revision`` as assigned.
+- `as_dict()`
+  - JSON-safe record with the schema pin.
+#### `CommitOutcome`
+
+The result of one ``commit()`` call.
+
+- `as_dict()`
+  - JSON-safe record with the schema pin.
+#### `EvidenceSlot`
+
+A named slot that retains rejected tool results verbatim.
+
+- `name` (property)
+- `retain(result: RevisionCheckedResult)`
+  - Retain ``result`` verbatim. Returns this slot's name.
+- `entries()`
+  - Retained results, in retention order.
+- `get(tool_call_id: str)`
+  - The retained result for ``tool_call_id``, if any.
+#### `Reconciliation`
+
+A record about a rejected (stale) tool result.
+
+- `as_dict()`
+  - JSON-safe record with the schema pin.
+#### `RevisionCheckedToolResults`
+
+Atomic revision-checked write-back for tool results.
+
+- `current_revision` (property)
+  - The revision the state is currently at.
+- `evidence_slot` (property)
+  - The slot where rejected results are retained.
+- `outcomes()`
+  - Every commit outcome so far, in order.
+- `commit(result: RevisionCheckedResult, current_revision: int, apply: Callable[[RevisionCheckedResult], Any])`
+  - Check ``result`` against ``current_revision`` and write it back.
+- `reconcile(rejected_result: RevisionCheckedResult, current_state: Any=None)`
+  - Build a reconciliation record for a rejected result.
+#### `main()`
+
+Self-check: the commit path, the stale path, and reconciliation.
+
+### `runtime_registration`
+
+Source: `components/northstar-agent-runtime/runtime_registration.py`
+
+Single source of truth for runtime module registration.
+
+#### `RegistrationError`
+
+Raised when the registry, ``pyproject.toml`` and the disk disagree.
+
+#### `Registration`
+
+One registered runtime module.
+
+- `as_dict()`
+  - Return the record as a plain dict.
+#### `registered_modules()`
+
+Return the registry as a tuple of :class:`Registration` records.
+
+#### `registered_module_names()`
+
+Return the registered module names, sorted.
+
+#### `registration_for(module)`
+
+Return the :class:`Registration` for ``module``.
+
+#### `declared_py_modules(pyproject=PYPROJECT)`
+
+Return the module names declared in ``pyproject.toml``'s py-modules.
+
+#### `modules_on_disk(component=COMPONENT)`
+
+Return the runtime module names that exist as ``*.py`` on disk.
+
+#### `assert_registration_matches_disk(component=COMPONENT, pyproject=PYPROJECT, registry=REGISTRY)`
+
+Require the registry, ``pyproject.toml`` and the disk to agree.
+
+### `scope_qualifier`
+
+Source: `components/northstar-agent-runtime/scope_qualifier.py`
+
+Scope-qualifier check at dispatch: re-derive the grant scope from the source, and block on mismatch.
+
+#### `ScopeQualifierError`
+
+Base class for scope-qualifier errors.
+
+#### `MalformedGrantError`
+
+The grant record is not well-formed.
+
+#### `ScopeSourceError`
+
+The source store could not be read.
+
+#### `ScopeQualifier`
+
+One qualifier on a grant: the *restriction* itself.
+
+- `as_text()`
+  - The qualifier rendered the way it would read in prose.
+- `to_dict()`
+- `from_dict(value: Any)`
+#### `GrantRecord`
+
+The structured grant: a verb, its qualifiers, and its source line.
+
+- `to_dict()`
+- `from_dict(value: Any)`
+- `scope_text()`
+  - The grant's scope rendered as one comparable line.
+- `scope_atoms` (property)
+  - The grant's fence as a set of comparable atoms.
+- `is_bounded()`
+  - True when the grant carries at least one qualifier.
+#### `SourceLine`
+
+One source line: the authority a grant is checked against.
+
+- `scope_text` (property)
+  - The source's scope rendered as one comparable line.
+- `scope_atoms` (property)
+  - The source's fence as a set of comparable atoms.
+- `to_dict()`
+- `from_dict(value: Any)`
+#### `SourceStore`
+
+The sidecar of source lines: the authority outside the summarizable stream.
+
+- `put(line: SourceLine)`
+  - Store one source line.
+- `break_reads()`
+  - Make every read fail -- the store is broken (test helper).
+- `repair()`
+  - Make reads work again (test helper).
+- `fetch(source_ref: str)`
+  - Fetch a source line.
+- `refs()`
+  - Every stored source ref.
+#### `permitted_targets(qualifiers: Sequence[ScopeQualifier])`
+
+The set of targets a fence permits.
+
+#### `scope_relation(presented: Sequence[ScopeQualifier], source: Sequence[ScopeQualifier])`
+
+How the presented fence stands against the source fence.
+
+#### `narrower_scope(presented: Sequence[ScopeQualifier], source: Sequence[ScopeQualifier])`
+
+The fence both authorizations agree on -- the narrower of the two.
+
+#### `ScopeFallback`
+
+A narrowed authorization, with the clock that bounds it.
+
+- `is_expired(now: int)`
+  - True when the clock has run out (``now`` >= ``expires_at``).
+- `to_dict()`
+- `from_dict(value: Any)`
+#### `ScopeCheck`
+
+The result of one scope-qualifier check.
+
+- `as_dict()`
+#### `QualifierDiff`
+
+The scope-token diff between a source text and a compacted text.
+
+- `lost` (property)
+  - The tokens dropped without a removal note.
+- `as_dict()`
+#### `scope_tokens(text: Any)`
+
+The scope tokens present in ``text``, in order, lower-cased.
+
+#### `diff_qualifiers(source_text: Any, compacted_text: Any)`
+
+Diff the scope tokens of a source text against a compacted text.
+
+#### `ScopeQualifierGate`
+
+The gate: re-derive a grant's scope from its source, and block on mismatch.
+
+- `store` (property)
+  - The source store the gate reads.
+- `fallback_ttl_seconds` (property)
+  - The lifetime of a narrowed fallback, in seconds.
+- `fallback(grant_id: str)`
+  - The live fallback for a grant, if one was issued.
+- `seed_fallback(fallback: ScopeFallback)`
+  - Seed a persisted fallback into the ledger.
+- `fallbacks()`
+  - Every issued fallback, in issue order.
+- `check(grant: GrantRecord, *, now: int)`
+  - Check one grant against its source line.
+#### `ScopeGrantRegistry`
+
+The structured grant registry: two sides that must not be confused.
+
+- `gate` (property)
+  - The gate that checks the presented grants.
+- `sources` (property)
+  - The source-line sidecar.
+- `rows` (property)
+  - The denial-row sidecar.
+- `present(grant: GrantRecord)`
+  - Present a grant into the (possibly compacted) context.
+- `presented()`
+  - Every presented grant, in presentation order.
+- `presented_for(verb: str)`
+  - The presented grants that authorize ``verb``.
+- `drop(grant_id: str)`
+  - Remove a presented grant (it is no longer reissued).
+- `reissue(grants: Optional[Iterable[GrantRecord]]=None, *, source_text_for: Optional[Any]=None)`
+  - Reissue grants across a compaction boundary.
+#### `DenialRow`
+
+One denial row: either a refusal or a signed proof of no refusal.
+
+- `denies()`
+  - True when the row refuses the scope.
+- `to_dict()`
+#### `DenialRowStore`
+
+The denial-row sidecar the gate reads before it decides.
+
+- `put(row: DenialRow)`
+- `break_reads()`
+  - Make every read fail (test helper).
+- `repair()`
+  - Make reads work again (test helper).
+- `fetch(scope: str)`
+  - Fetch the row for ``scope``.
+#### `CompactionCheck`
+
+The result of checking one compaction boundary.
+
+- `blocked` (property)
+  - True when at least one grant was refused at the boundary.
+- `as_dict()`
+#### `check_compaction_boundary(grants: Sequence[GrantRecord], *, source_text_for: Optional[Any]=None)`
+
+Check the grants that survive a compaction boundary.
+
+#### `SurvivalMetrics`
+
+The measured survival of scope qualifiers across compaction rounds.
+
+- `grant_survival` (property)
+  - The share of grants that survived the round.
+- `qualifier_survival` (property)
+  - The share of qualifiers that survived the round.
+- `widening_rate` (property)
+  - The share of grants whose scope came out wider than it went in.
+- `caught_rate` (property)
+  - The share of the widenings the gate caught.
+- `as_dict()`
+#### `measure_qualifier_survival(grants: Sequence[GrantRecord], *, gate: Optional[ScopeQualifierGate]=None, rounds: int=1)`
+
+Measure qualifier survival across simulated compaction rounds.
+
+#### `scope_audit_event(kind: str, check: ScopeCheck, *, seq: int=0)`
+
+Shape an ``audit.ndjson/1`` record for a scope-qualifier check.
+
+#### `stdlib_only()`
+
+AST check: this module imports stdlib modules only.
+
+#### `main()`
+
+Self-check: a matching grant passes, a dropped fence blocks, a widening falls back to the narrower scope, and an expired fallback blocks.
+
+### `scope_verbatim_compaction`
+
+Source: `components/northstar-agent-runtime/scope_verbatim_compaction.py`
+
+Carry the scope block verbatim through compaction, fail closed on drop.
+
+#### `ScopeError`
+
+Base class for this module's refusals.
+
+#### `MalformedScopeError`
+
+A scope or a scope block could not be read.
+
+#### `ScopeNotPreservedError`
+
+A compaction product does not carry its scope verbatim.
+
+#### `Scope`
+
+The scope that must cross a compaction unchanged.
+
+- `coerce(value: Any)`
+  - Build a scope from a scope or from a mapping over its fields.
+- `is_empty()`
+  - True when nothing at all was declared.
+- `grant_set()`
+  - The grants as a set -- the permission-laundering comparison.
+- `canonical()`
+  - The canonical form of this scope.
+- `as_dict()`
+#### `scope_hash(scope: Any)`
+
+``sha256:`` pin of the scope's canonical form.
+
+#### `verbatim_scope_block(scope: Any)`
+
+Render the scope as a byte-preserved block.
+
+#### `parse_scope_block(block: Any)`
+
+Parse a rendered scope block back into a :class:`Scope`.
+
+#### `extract_scope_block(text: Any)`
+
+Find the scope block inside a carried text.
+
+#### `block_hash(block: str)`
+
+``sha256:`` pin of the block's exact bytes.
+
+#### `ScopeManifest`
+
+What the compaction carried, and how.
+
+- `as_dict()`
+- `block_is_intact()`
+  - True when the manifest's own hashes agree with its own block.
+#### `CompactedSession`
+
+One compaction that carries a scope.
+
+- `scope_text()`
+  - The scope block as it would be carried in the prompt.
+- `carried_text()`
+  - The scope block and the summary, in that order.
+- `as_dict()`
+#### `compact_with_scope(transcript: Sequence[Any], scope: Any, summarize: Callable[[Sequence[Any]], str])`
+
+Compact ``transcript`` while carrying ``scope`` verbatim.
+
+#### `scope_preserved(compacted: Any, original_scope: Any)`
+
+True only when the scope crossed the compaction **verbatim**.
+
+#### `require_scope_preserved(compacted: Any, original_scope: Any)`
+
+Return the scope when it was preserved; raise when it was not.
+
+#### `stdlib_only()`
+
+AST check: this module imports stdlib modules only.
+
+#### `main()`
+
+Self-check: the scope crosses verbatim, and every way of losing it is caught.
+
+### `scorer_disagreement`
+
+Source: `components/northstar-agent-runtime/scorer_disagreement.py`
+
+Scorer disagreement: a contested verdict is a verdict, not an average.
+
+#### `ScorerDisagreementError`
+
+Base error for the scorer-disagreement ledger.
+
+#### `BadCaseIdError`
+
+#### `BadScorerIdError`
+
+#### `BadVerdictError`
+
+#### `BadScoreError`
+
+#### `DuplicateScorerError`
+
+The same scorer already registered a verdict for this case.
+
+#### `UnknownCaseError`
+
+#### `BadThresholdError`
+
+#### `BadReducerError`
+
+#### `AuditKindError`
+
+#### `minority_share(pass_count: int, fail_count: int)`
+
+The primary disagreement metric: the smaller side's share.
+
+#### `score_spread(scores: Sequence[Optional[float]])`
+
+The auxiliary metric: the spread of the declared scores.
+
+#### `agreement_alpha(verdicts: Sequence[str])`
+
+Nominal Krippendorff-style alpha over one case's scorer verdicts.
+
+#### `aggregate_verdict(verdicts: Sequence[str], reducer: str)`
+
+Aggregate one case's verdicts. Returns ``(verdict, tie_resolved)``.
+
+#### `ScorerVerdict`
+
+One scorer's declared verdict for one case.
+
+- `as_dict()`
+- `verify()`
+#### `Disagreement`
+
+The derived disagreement view of one case.
+
+- `minority_share_text` (property)
+- `threshold_text` (property)
+- `agreement_alpha_text` (property)
+- `contested` (property)
+- `as_dict()`
+- `verify()`
+#### `ReviewItem`
+
+One case booked into the human-review queue.
+
+- `as_dict()`
+- `verify()`
+#### `ScorerDisagreement`
+
+Ledger of per-scorer verdicts plus the derived disagreement view.
+
+- `register(case_id: str, scorer_id: str, verdict: str, score: Optional[float]=None)`
+  - Register one scorer's verdict for one case.
+- `disagreement(case_id: str)`
+  - Derive the disagreement view of one case (pure read).
+- `adjudicate(case_id: str)`
+  - Derive the case verdict and book contested cases for review.
+- `collect(case_id: str)`
+  - ``collect`` semantics: the raw per-scorer values, kept forever.
+- `review_queue()`
+- `masked_cases()`
+- `case_ids()`
+- `stats()`
+- `run_cascade(case_id: str, scorers: Sequence[Tuple[str, float, Callable[[], Any]]])`
+  - Run scorers cheapest-first and stop at the first settled one.
+- `audit_log()`
+#### `CascadeResult`
+
+What a cascade run did: who ran, who was skipped, who settled.
+
+- `as_dict()`
+#### `stdlib_only()`
+
+AST self-check: the module imports stdlib names only.
+
+#### `main()`
+
+### `session_memory`
+
+Source: `components/northstar-agent-runtime/session_memory.py`
+
+Session memory: a four-operation conversation-memory protocol.
+
+#### `SessionError`
+
+Base class for every refusal this module raises.
+
+#### `SessionConfigError`
+
+An invalid setting (a bad ``limit``, a bad session ID).
+
+#### `SessionExclusionError`
+
+A session was combined with a server-side continuation option.
+
+#### `SessionEmptyError`
+
+``pop_item`` was called on an empty session.
+
+#### `SessionIntegrityError`
+
+A stored row failed to decode or its digest pin did not match.
+
+#### `SessionContentError`
+
+An item's content is not JSON-serializable.
+
+#### `SessionItem`
+
+One stored conversation item.
+
+#### `SessionSettings`
+
+Per-session retrieval settings.
+
+- `resolved_limit(override: 'SessionSettings | None')`
+  - Return the effective limit: a non-None override wins.
+#### `SessionBackend`
+
+The pluggable storage interface behind a :class:`SessionStore`.
+
+- `append(rows: Sequence[Mapping[str, Any]])`
+  - Append rows in order. Each row carries ``seq``, ``role``, ``content`` (a JSON document) and ``digest``.
+- `read()`
+  - Return every stored row, in insertion order.
+- `delete_last()`
+  - Remove and return the most recently inserted row, or ``None`` when the backend is empty.
+- `clear()`
+  - Remove every stored row.
+#### `MemorySessionBackend`
+
+In-memory backend: rows live in a list, in insertion order.
+
+- `append(rows: Sequence[Mapping[str, Any]])`
+- `read()`
+- `delete_last()`
+- `clear()`
+#### `Session`
+
+A conversation-memory session: an ID, a backend, and settings.
+
+- `store` (property)
+  - The protocol store backing this session.
+#### `SessionStore`
+
+The session protocol: ``get_items`` / ``add_items`` / ``pop_item`` / ``clear_session``, over a pluggable backend.
+
+- `session_id` (property)
+  - The session ID. It selects history; it grants nothing.
+- `settings` (property)
+- `backend` (property)
+- `get_items(limit: int | None=None)`
+  - Return the stored items in insertion order.
+- `add_items(items: Iterable[Any])`
+  - Append a batch of items and return them with their new seqs.
+- `pop_item()`
+  - Remove and return the most recently stored item.
+- `clear_session()`
+  - Remove every stored item from the session.
+#### `RunResult`
+
+What one turn produced: the model input and the booked items.
+
+#### `begin_turn(session: SessionStore, new_input: Sequence[Any] | None=None, *, settings: SessionSettings | None=None, merge_callback: Callable[[list[Any], list[Any]], list[Any]] | None=None, conversation_id: Any=None, previous_response_id: Any=None, auto_previous_response_id: Any=None)`
+
+Retrieve the history, prepend it to the new input, return the model input.
+
+#### `end_turn(session: SessionStore, new_items: Iterable[Any], *, conversation_id: Any=None, previous_response_id: Any=None, auto_previous_response_id: Any=None)`
+
+Book only the current turn's new items.
+
+#### `run_session(session: SessionStore, new_input: Sequence[Any] | None=None, *, new_items: Iterable[Any] | None=None, settings: SessionSettings | None=None, merge_callback: Callable[[list[Any], list[Any]], list[Any]] | None=None, conversation_id: Any=None, previous_response_id: Any=None, auto_previous_response_id: Any=None)`
+
+Run one turn: retrieve first, then store.
+
+#### `main()`
+
+### `shutdown_unwind`
+
+Source: `components/northstar-agent-runtime/shutdown_unwind.py`
+
+Shutdown unwind: a killed turn leaves tool_use blocks with no tool_result.
+
+#### `UnwindRecord`
+
+One synthesised result: the call that never got an answer.
+
+- `as_dict()`
+#### `UnwindOutcome`
+
+What the unwind pass did to one transcript.
+
+- `interrupted` (property)
+- `count` (property)
+- `as_dict()`
+#### `pending_tool_uses(transcript: Sequence[Any])`
+
+``(tool_use_id, tool_name)`` for every call that never got a result.
+
+#### `synthetic_result_blocks(transcript: Sequence[Any])`
+
+The synthesised results in a transcript, identified by their own marker.
+
+#### `successful_tool_results(transcript: Sequence[Any])`
+
+The tool results that count as successes.
+
+#### `unwind(transcript: Sequence[Any])`
+
+Return ``(unwound_transcript, outcome)`` for a resumed transcript.
+
+#### `classify(transcript: Sequence[Any])`
+
+``interrupted_turn`` when a call has no result, ``clean`` otherwise.
+
+#### `require_resumable(transcript: Sequence[Any], *, source: str='session')`
+
+Raise ``ResumeRefusedError`` when the transcript cannot be resumed.
+
+### `signed_receipt`
+
+Source: `components/northstar-agent-runtime/signed_receipt.py`
+
+Signed receipts: the receipt's own text is authenticated by the issuer.
+
+#### `SignedReceiptError`
+
+Base class for signed-receipt errors.
+
+#### `MissingSignatureError`
+
+The receipt carries no signature: nothing to verify.
+
+#### `SignatureMismatchError`
+
+The signature does not verify under the issuer's public key.
+
+#### `CanonicalReceiptError`
+
+The receipt text is not the canonical text, or does not match it.
+
+#### `IssuerKeyError`
+
+The issuer key identifier does not match the key it was given for.
+
+#### `canonical_receipt_text(receipt: ArtifactReceipt)`
+
+The receipt's canonical text: the exact bytes that get signed.
+
+#### `canonical_receipt_bytes(receipt: ArtifactReceipt)`
+
+The canonical bytes that are signed: the canonical text, UTF-8.
+
+#### `issuer_key_id(issuer_pubkey: bytes)`
+
+The ``sha256:`` identifier of an issuer's public key.
+
+#### `SignedReceipt`
+
+A receipt plus the issuer's signature over its canonical bytes.
+
+- `signature` (property)
+  - The signature, hex.
+- `rendered` (property)
+  - The canonical receipt text this signature covers.
+- `to_dict()`
+  - A serialisable mapping, round-tripped by :meth:`from_dict`.
+- `from_dict(doc: Any)`
+  - Rebuild a signed receipt from :meth:`to_dict`.
+#### `sign_receipt(receipt: ArtifactReceipt, issuer_seed: bytes, *, signer_id: str | None=None, timestamp: float | None=None, nonce: str | None=None)`
+
+Sign a receipt's canonical bytes with the issuer's Ed25519 seed.
+
+#### `verify_signed_receipt(signed: Any, issuer_pubkey: bytes)`
+
+Verify the issuer's signature over the receipt, then return it.
+
+### `silent_failure_detector`
+
+Source: `components/northstar-agent-runtime/silent_failure_detector.py`
+
+Silent-failure detector: sessions that end on a tool result with no prose.
+
+#### `has_prose(events: Iterable[Any])`
+
+True when the stream holds an assistant message carrying actual text.
+
+#### `final_event_type(events: Iterable[Any])`
+
+The ``type`` of the last record, or None for an empty stream.
+
+#### `ended_on_tool_result(events: Iterable[Any])`
+
+True when the stream's last record is a tool result.
+
+#### `ended_with_no_prose(events: Iterable[Any])`
+
+True when the stream's last record is not an assistant message with text.
+
+#### `compaction_count(events: Iterable[Any])`
+
+How many compaction events the stream holds.
+
+#### `is_silent_failure(events: Iterable[Any])`
+
+True when the whole stream carries no assistant prose at all.
+
+#### `died_on_compaction_seam(events: Iterable[Any])`
+
+True when the session died on a compaction seam.
+
+#### `classify_session(events: Iterable[Any])`
+
+Classify one session event stream.
+
+#### `load_events(path: str | Path)`
+
+Read a session JSONL file into a list of event dicts.
+
+#### `summarize_sessions(session_paths: Iterable[str | Path])`
+
+Count a set of session files the way the source counts its fleet.
+
+### `speaker_selector`
+
+Source: `components/northstar-agent-runtime/speaker_selector.py`
+
+Speaker selection for Northstar group chats: round-robin + model-based.
+
+#### `SpeakerSelectionError`
+
+Base class for every fail-closed refusal in this module.
+
+#### `BadParticipantError`
+
+Participant name/description shape is malformed.
+
+#### `DuplicateParticipantError`
+
+Two participants share a name.
+
+#### `NoParticipantsError`
+
+The selector was built without any participant.
+
+#### `BadSelectionError`
+
+A selection result is not a member of the participant set.
+
+#### `BadRuleError`
+
+Selection rule is outside the pinned vocabulary.
+
+#### `BadFallbackError`
+
+Fallback mode is outside the pinned vocabulary.
+
+#### `MaxRoundsError`
+
+The round guard tripped; the chat must stop.
+
+#### `ModelSelectionError`
+
+The injected model callable failed or returned a non-text reply.
+
+#### `transcript_digest(transcript: Sequence[str])`
+
+Digest pin of a transcript (a list of message texts).
+
+#### `Participant`
+
+One selectable agent: a name plus an optional description.
+
+- `as_dict()`
+#### `SelectionRecord`
+
+One booked selection round.
+
+- `verify()`
+  - Recompute the pin; True when untampered.
+- `as_dict()`
+#### `RoundRobinSelector`
+
+Deterministic rotation over the participants.
+
+- `participants` (property)
+- `participant_names` (property)
+- `next_speaker_index` (property)
+- `state()`
+  - Serialisable state: the rotation index rides with the state.
+- `restore(state: Mapping[str, Any])`
+  - Restore the rotation index from a state dict.
+- `select_speaker(transcript: Sequence[str]=(), previous_speaker: Optional[str]=None, round_index: int=0)`
+  - Pick the next speaker by index rotation.
+#### `parse_selection(reply: str, names: Sequence[str])`
+
+Parse a raw model reply into exactly one participant name.
+
+#### `ModelSelector`
+
+Model-based speaker selection with a strict output contract.
+
+- `participants` (property)
+- `participant_names` (property)
+- `previous_speaker` (property)
+- `allow_repeated_speaker` (property)
+- `fallback_mode` (property)
+- `state()`
+  - Serialisable state: the previous speaker rides with the state.
+- `restore(state: Mapping[str, Any])`
+  - Restore the previous speaker from a state dict.
+- `candidates(previous_speaker: Optional[str]=None)`
+  - The participant names the model may pick from.
+- `select_speaker(transcript: Sequence[str]=(), previous_speaker: Optional[str]=None, round_index: int=0)`
+  - Select the next speaker.
+#### `SelectionRequest`
+
+What a model / custom selector function receives.
+
+- `as_dict()`
+#### `SpeakerGroupChat`
+
+Drive speaker selection for a bounded number of rounds.
+
+- `max_rounds` (property)
+- `records` (property)
+- `rounds_used` (property)
+- `transcript` (property)
+- `state()`
+  - Serialisable state of the driver plus its selector.
+- `restore(state: Mapping[str, Any])`
+  - Restore the driver + selector state (index must not slip).
+- `select_next()`
+  - Select the next speaker, or raise ``MaxRoundsError``.
+- `append(message: str)`
+  - Append one transcript message (host side).
+- `run(speaker: Callable[[str], str], rounds: Optional[int]=None)`
+  - Drive the chat for up to ``rounds`` (default ``max_rounds``).
+#### `main()`
+
+Drive the three canonical paths (round-robin, model, fallback).
+
+### `stale_checkpoint_gate`
+
+Source: `components/northstar-agent-runtime/stale_checkpoint_gate.py`
+
+Recovery gate: a checkpoint carries the external world's checksum, and recovery checks it.
+
+#### `StaleCheckpointGateError`
+
+Base class for every refusal this module makes.
+
+#### `MissingExternalStateError`
+
+A checkpoint was created without a checksum or a freshness sequence.
+
+#### `UncanonicalizableStateError`
+
+The external state cannot be canonicalised, so it cannot be hashed.
+
+#### `InvalidFreshnessSeqError`
+
+A freshness sequence number is not a usable integer.
+
+#### `GateVerdictStatus`
+
+The three gate outcomes.
+
+#### `InvalidChecksumError`
+
+A checksum is not a ``sha256:<64 lowercase hex>`` string.
+
+#### `canonicalize(state: Any)`
+
+The canonical text of an external-state snapshot.
+
+#### `external_checksum(state: Any)`
+
+The canonical SHA-256 checksum of an external-state snapshot.
+
+#### `is_checksum(value: Any)`
+
+True when ``value`` is a well-formed checksum string.
+
+#### `ExternalStateWitness`
+
+What a checkpoint says about the outside world.
+
+- `as_dict()`
+#### `Checkpoint`
+
+A checkpoint that carries its witness of the external world.
+
+- `witness` (property)
+  - The witness this checkpoint carries.
+- `as_dict()`
+#### `GateVerdict`
+
+One recovery-gate decision, with the evidence behind it.
+
+- `passed` (property)
+  - Whether the recovery may proceed unchanged (pass only).
+- `recoverable` (property)
+  - Whether the recovery may proceed at all (pass, or flagged).
+- `as_dict()`
+#### `StaleCheckpointGate`
+
+The recovery gate: does the live world still match the checkpoint's witness?
+
+- `create(checkpoint_id: str, *, external_state: Any=None, external_checksum: str | None=None, freshness_seq: int, created_seq: int | None=None, session_id: str='', turns: int=0, tool_calls: int=0, payload: Mapping[str, Any] | None=None)`
+  - Create a checkpoint that carries a witness of the external world.
+- `verify(checkpoint: Checkpoint, live_checksum: str, live_seq: int)`
+  - Judge a checkpoint against the live external world.
+#### `WorldWrite`
+
+One write that landed after the checkpoint was taken.
+
+- `as_dict()`
+#### `ExternalWorld`
+
+A snapshot of the external world plus its sequence number.
+
+- `witnessed()`
+  - The part of the world a checkpoint's checksum covers.
+- `checksum` (property)
+  - The canonical checksum of the world's witnessed state.
+- `write(key: str, value: Any)`
+  - A new world with one more write applied and the sequence advanced.
+#### `DrillResult`
+
+What the dirty-recovery drill observed.
+
+- `status` (property)
+  - The gate status the drill observed.
+- `as_dict()`
+#### `drill(checkpoint: Checkpoint, live_state_with_writes: Any, *, live_seq: int | None=None, writes: tuple[WorldWrite, ...]=(), gate: StaleCheckpointGate | None=None)`
+
+Recover from a checkpoint into a world that moved on, and report it.
+
+#### `dirty_recovery_drill(gate: StaleCheckpointGate, initial_state: Mapping[str, Any], writes: tuple[WorldWrite, ...], *, checkpoint_id: str='drill-checkpoint', freshness_seq: int=0, created_seq: int | None=None, witness_keys: tuple[str, ...] | None=None)`
+
+Build a checkpoint, write to the world after it, then recover.
+
+#### `main()`
+
+Self-check: the three states, the fail-closed creation, the drill.
+
+### `state_budget`
+
+Source: `components/northstar-agent-runtime/state_budget.py`
+
+Hard cap on agent state size, enforced at every transition.
+
+#### `StateBudgetError`
+
+Base class for every state-budget refusal.
+
+#### `OverBudget`
+
+A transition was refused because it would exceed the state budget.
+
+#### `measure_state(state: Any)`
+
+Measure a state in bytes of canonical JSON.
+
+#### `TransitionResult`
+
+The outcome of an accepted transition.
+
+#### `TransitionOutcome`
+
+The outcome of a transition attempt: accepted, or explicitly refused.
+
+#### `StateBudget`
+
+A hard byte cap on agent state, checked at every transition.
+
+- `size_of(state: Any)`
+  - Measured size of ``state`` in bytes (canonical JSON).
+- `check(state: Any)`
+  - True when ``state`` fits inside the budget.
+- `check_or_raise(state: Any)`
+  - Raise :class:`OverBudget` when ``state`` does not fit.
+- `transition(state: Mapping[str, Any], delta: Mapping[str, Any])`
+  - Apply ``delta`` to ``state`` and return the accepted result.
+- `try_transition(state: Mapping[str, Any], delta: Mapping[str, Any])`
+  - Like :meth:`transition`, but a refusal is a returned value.
+- `would_fit(state: Mapping[str, Any], delta: Mapping[str, Any])`
+  - Whether ``delta`` applied to ``state`` would fit the budget.
+- `bytes_over_budget(state: Any)`
+  - How many bytes ``state`` exceeds the budget by (0 when it fits).
+### `step_reliability_budget`
+
+Source: `components/northstar-agent-runtime/step_reliability_budget.py`
+
+Step reliability budget: per-step success rate to run-level failure probability.
+
+#### `StepReliabilityError`
+
+Fail-closed: an illegal argument is refused, never defaulted.
+
+#### `run_failure_probability(p_step: float, n: int)`
+
+Probability a run of ``n`` steps contains at least one error.
+
+#### `required_step_rate(p_target: float, n: int)`
+
+Per-step success rate needed to reach run-level success ``p_target``.
+
+#### `max_steps(p_meas: float, p_target: float)`
+
+Largest step count whose run-level success stays at or above target.
+
+#### `AdmissionVerdict`
+
+The admission decision, as data.
+
+#### `admit(p_meas: float, p_target: float, n: int)`
+
+Fail-closed admission: may this run start at the measured rate?
+
+### `strands_checkpoint`
+
+Source: `components/northstar-agent-runtime/strands_checkpoint.py`
+
+A versioned resume marker and hook-based retry, split from run state.
+
+#### `CheckpointException`
+
+A marker that cannot be read as a marker.
+
+#### `CheckpointError`
+
+Alias kept for readers who expect the ``*Error`` spelling.
+
+#### `Checkpoint`
+
+A resume marker: the boundary that fired, and the cycle it fired in.
+
+- `to_dict()`
+  - The wire form: exactly the three marker fields.
+- `from_dict(value: Any)`
+  - Read a marker. Refuses a version it does not know, and state.
+#### `Cancel`
+
+A cancellation claim, and whether it is already in force.
+
+- `to_dict()`
+#### `cancel_is_in_force(cancel: Any)`
+
+True when the cancellation has been carried out, not just requested.
+
+#### `has_answer(interrupt: Any)`
+
+True when ``interrupt`` is an answer, even a falsy one.
+
+#### `resolve_outcome(*, interrupt: Any=NO_INTERRUPT, checkpoint: Any=None, cancel: Any=None)`
+
+Settle the three claims on a run: interrupt, checkpoint, cancel.
+
+#### `resume_outcome(*, checkpoint: Any=None, cancel: Any=None, interrupt: Any=NO_INTERRUPT)`
+
+The outcome for a run that is *coming back* from a marker.
+
+#### `ThrottledError`
+
+A retryable failure: the provider asked us to slow down.
+
+#### `RetryDecision`
+
+What the hook decided about one failed model call.
+
+- `as_dict()`
+#### `ModelRetryStrategy`
+
+Retry as a hook provider: the loop emits, the strategy decides.
+
+- `register_callback(event: str, callback: Any)`
+  - Register a callback for one of the model-call events.
+- `callbacks_for(event: str)`
+  - The callbacks registered for one event.
+- `register()`
+  - Register the strategy's own hook on the events it subscribes to.
+- `after_model_call(event: Mapping[str, Any] | None=None)`
+  - The hook body: decide whether the failed call is retried.
+- `is_retryable(error: BaseException)`
+  - Only throttling failures are retried. Override in a subclass.
+- `backoff_for(attempt: int)`
+  - The wait before the given attempt's retry, in seconds.
+- `reset()`
+  - Forget the attempt history - called after a success.
+- `attempts` (property)
+  - How many retries have been taken since the last success.
+#### `ModelCallLoop`
+
+A model-call loop that only emits events.
+
+- `on(event: str, handler: Any)`
+  - Register a handler for one event.
+- `emit(event: str, payload: Mapping[str, Any] | None=None)`
+  - Emit an event and return what the handlers said.
+- `call(prompt: str)`
+  - Call the provider; on failure emit ``after_model`` and return the hooks' answers. The loop does not decide whether to retry.
+#### `CheckpointSnapshotHook`
+
+A hook that records a marker at the model and tool boundaries.
+
+- `mark(position: str, *, cycle_index: int | None=None)`
+  - Record a marker at ``position`` and return it.
+- `after_model(event: Mapping[str, Any] | None=None)`
+  - The ``after_model`` boundary: mark, then return the marker.
+- `after_tools(event: Mapping[str, Any] | None=None)`
+  - The ``after_tools`` boundary: mark, then return the marker.
+- `register()`
+  - Register the hook's boundaries with a hook registry.
+- `last_marker` (property)
+  - The most recent marker, or ``None`` if none was written.
+#### `ResumePlan`
+
+What a resuming run should do, and from where.
+
+- `resumes` (property)
+  - True when the run continues from the marker.
+- `cancelled` (property)
+  - True when the run was revoked and must not come back.
+- `as_dict()`
+#### `plan_resume(marker_payload: Any=None, *, cancel: Any=None, interrupt: Any=NO_INTERRUPT)`
+
+Plan a resume from a marker, honouring the kill switch.
+
+### `stuck_detector`
+
+Source: `components/northstar-agent-runtime/stuck_detector.py`
+
+Stuck detector: five repetition patterns over Northstar session history.
+
+#### `StuckThresholds`
+
+Every threshold in one frozen record.
+
+- `as_dict()`
+#### `EvidencePointer`
+
+Where in the event history the evidence sits.
+
+- `as_dict()`
+#### `StuckVerdict`
+
+The detector's answer. It never stops a run by itself.
+
+- `as_dict()`
+#### `NormalizedEvent`
+
+One event, reduced to the keys the detector compares.
+
+- `is_progress` (property)
+  - True when the event is meaningful progress for the monologue rule.
+#### `StuckDetector`
+
+Detects repetition patterns in a Northstar session history.
+
+- `is_stuck(records: Sequence[dict[str, Any]])`
+  - Return the verdict for this history. Does not change any state.
+- `detect(records: Sequence[dict[str, Any]])`
+  - Run the five detectors over the history and return the first hit.
+- `normalised_events(records: Sequence[dict[str, Any]])`
+  - The normalised events, exposed so a caller can inspect the keys.
+#### `detect(records: Sequence[dict[str, Any]], thresholds: StuckThresholds | None=None)`
+
+One-shot detection over a session history.
+
+#### `is_stuck(records: Sequence[dict[str, Any]])`
+
+True when the history trips one of the five patterns.
+
+### `swe_failure_modes`
+
+Source: `components/northstar-agent-runtime/swe_failure_modes.py`
+
+Failure-mode classifier for failed patches, with a per-mode check route.
+
+#### `FailureMode`
+
+The four failure modes, plus the explicit ``UNKNOWN`` bucket.
+
+#### `SweFailureModesError`
+
+Raised when a record would carry a value outside the closed set.
+
+#### `TestOutcome`
+
+One test's outcome, as the caller reports it.
+
+#### `PatchChange`
+
+One file the patch touched, and what it did there.
+
+- `touched_symbols()`
+  - Every symbol name the patch refers to in this file.
+#### `FailureRecord`
+
+A failed patch, described from both sides.
+
+- `changed_files()`
+  - The files the patch touched.
+- `failing_tests()`
+  - The failed tests (from ``failed_tests`` if given, else from ``all_tests``).
+- `passed_tests()`
+  - The tests that passed, from whichever field carries them.
+#### `Evidence`
+
+One piece of evidence backing a classification.
+
+- `as_dict()`
+#### `Classification`
+
+The verdict: a mode, the rule that fired, and the evidence.
+
+- `is_unknown` (property)
+  - True when the failure fit none of the four modes.
+- `as_dict()`
+#### `classify(record: FailureRecord)`
+
+Classify a failed patch into one of the four modes, or ``UNKNOWN``.
+
+#### `CheckInput`
+
+One input to a check: a named value the check reads.
+
+- `as_dict()`
+#### `CheckItem`
+
+One check, in the fixed structure: name + inputs + criterion.
+
+- `as_dict()`
+#### `CheckList`
+
+The routed checks for one classification.
+
+- `as_dict()`
+#### `route(classification: Classification, record: Optional[FailureRecord]=None)`
+
+Route a classification to the check that can catch it.
+
+#### `DeliveryCost`
+
+Cost booked per verified delivery.
+
+- `cost_per_delivery` (property)
+  - Total cost divided by verified deliveries (``None`` if none).
+- `as_dict()`
+#### `ModeCost`
+
+What one failure mode cost, and how many deliveries it produced.
+
+- `as_dict()`
+#### `CostReport`
+
+The whole cost picture: per delivery, and per failure mode.
+
+- `as_dict()`
+#### `cost_per_delivery(total_cost: float, verified_deliveries: int, *, total_runs: int=0, cost_per_run: Optional[float]=None)`
+
+Book cost per verified delivery -- not per run.
+
+#### `apportion_cost_by_mode(mode_costs: Mapping[FailureMode, float], mode_resolved: Mapping[FailureMode, int], *, mode_runs: Optional[Mapping[FailureMode, int]]=None)`
+
+Apportion cost across failure modes.
+
+#### `cost_report(total_cost: float, verified_deliveries: int, mode_costs: Mapping[FailureMode, float], mode_resolved: Mapping[FailureMode, int], *, total_runs: int=0, cost_per_run: Optional[float]=None, mode_runs: Optional[Mapping[FailureMode, int]]=None)`
+
+The full cost picture in one object.
+
+#### `main()`
+
+Self-check: classify one record of each mode and print the routes.
+
+### `tool_failure`
+
+Source: `components/northstar-agent-runtime/tool_failure.py`
+
+Typed tool-failure normalization: every failure becomes a remedy-carrying tool_result.
+
+#### `ToolFailureError`
+
+Raised when a failure record would carry a kind outside the closed set.
+
+#### `ToolResultRemedy`
+
+The structured remedy: what the model (or harness) should do next.
+
+- `is_cc_verbatim` (property)
+  - True when the kind is one of Claude Code's own words.
+- `as_dict()`
+  - The remedy as data, with only the fields this kind carries.
+#### `ToolFailure`
+
+One failed tool call, as a typed result instead of an exception.
+
+- `is_error` (property)
+  - Always True: this record *is* a failure.
+- `content` (property)
+  - The enveloped content, as Claude Code wraps it.
+- `to_tool_result()`
+  - The typed tool_result a harness hands back to the model.
+- `to_telemetry_event(*, message_id: str='', is_mcp: bool=False)`
+  - The failure event, in the shape of Claude Code's ``tengu_tool_use_error``.
+#### `from_tool_error(error: BaseException, *, tool_name: str='', tool_use_id: str='')`
+
+Map the tool-use error hierarchy onto a typed failure.
+
+#### `from_provider_fault(fault: Any, *, provider: str='', tool_name: str='', tool_use_id: str='')`
+
+Map a provider fault (``ProviderFault``) onto a typed failure.
+
+#### `from_denial(denial_kind: str, *, summary: str='', ends_turn: bool=False, remedy: Optional[ToolResultRemedy]=None, error_code: str='denied', tool_name: str='', tool_use_id: str='')`
+
+Build a failure for a denial the host decided on.
+
+### `tool_output_filter`
+
+Source: `components/northstar-agent-runtime/tool_output_filter.py`
+
+Filter tool outputs *in code* before they are allowed into a context.
+
+#### `ToolOutputFilterError`
+
+The filter could not take the body. Never raised for a filter decision.
+
+#### `FilterConfig`
+
+Every number and switch the filter enforces, in one place.
+
+#### `FilterReceipt`
+
+One layer's receipt: what it did, why, and where the body is.
+
+- `as_dict()`
+- `to_json()`
+  - The receipt as one JSON line.
+#### `FilteredOutput`
+
+What a caller may put into a context, and the evidence for it.
+
+- `as_dict()`
+- `receipt_for(layer: str)`
+  - The receipt of one named layer.
+- `to_json()`
+  - The whole result as one JSON document.
+#### `redact_credentials(text: str)`
+
+Replace every credential value in ``text`` with a fixed placeholder.
+
+#### `BodyStore`
+
+Where a body that does not fit in a context goes.
+
+- `write(text: str, *, name: str)`
+  - Write ``text`` verbatim; return the path it was written to.
+#### `ToolOutputFilter`
+
+The gate a tool output passes before it is allowed into a context.
+
+- `filter(output: str, *, name: str='tool-output')`
+  - Run the three layers over ``output`` and return the result.
+### `turn_truncation`
+
+Source: `components/northstar-agent-runtime/turn_truncation.py`
+
+Turn truncation: an interrupted turn is recorded as the delivered prefix.
+
+#### `TurnTruncationError`
+
+Base class for every refusal this module makes.
+
+#### `DeliveryRangeError`
+
+A delivery position outside ``0 <= delivered_len <= generated_len``.
+
+#### `ReextendRefusedError`
+
+An attempt to restore the undelivered suffix of a truncated turn.
+
+#### `PinMismatchError`
+
+A truncation record whose summary pin does not match its item.
+
+#### `delivery_status(delivered_len: Optional[int], generated_len: int)`
+
+The state implied by a delivery report.
+
+#### `TurnItem`
+
+One recorded assistant turn and what is known about its delivery.
+
+#### `item_pin(item: TurnItem)`
+
+The summary pin of an item: a digest over its identity and content.
+
+#### `make_item(item_id: str, generated_text: str, delivered_len: Optional[int]=None)`
+
+Build a turn item; the status follows the delivery report.
+
+#### `TruncationRecord`
+
+The receipt of one truncation: what was cut and from which turn.
+
+- `marker()`
+  - The marker a resumed history carries in place of the missing text.
+#### `TruncationOutcome`
+
+The truncated item and the record describing the truncation.
+
+- `truncated` (property)
+#### `HistoryEntry`
+
+One entry of the history a resumed run may read.
+
+- `delivery_unknown` (property)
+#### `truncate(item: TurnItem, delivered_len: int, seq: int)`
+
+Truncate a recorded turn to the delivered prefix.
+
+#### `delivered_prefix(item: TurnItem)`
+
+The part of a turn that may be treated as said.
+
+#### `verify_record(item: TurnItem, record: TruncationRecord)`
+
+Refuse a truncation record that does not belong to this item.
+
+#### `history_for_resume(items: Iterable[TurnItem])`
+
+The history a resumed (or compacted, or later) turn may read.
+
+#### `stdlib_only()`
+
+True when this module imports nothing outside the standard library.
+
+### `verifiability_tier`
+
+Source: `components/northstar-agent-runtime/verifiability_tier.py`
+
+Verifiability tiers: how checkable a claim is, not whether it is true.
+
+#### `Tier`
+
+How checkable a claim is. UNTESTED is weakest, REPLICATED strongest.
+
+- `strength` (property)
+  - Ordinal strength, weakest first.
+#### `VerifiabilityError`
+
+Base class for verifiability-tier failures.
+
+#### `InvalidClaimError`
+
+A claim whose fields cannot be interpreted.
+
+#### `Claim`
+
+A claim under the source's "Verifier / Proof Contract v0".
+
+- `has_statement` (property)
+  - Q1 answered: the statement says what is being proven.
+- `has_inputs` (property)
+  - Q2 answered: the verifier consumes reader-accessible inputs.
+- `has_verifier` (property)
+  - Q3 answered: a verifier is named and pinned.
+- `answered_gate_questions()`
+  - Which of Q1-Q3 this claim answers.
+- `contract_fields()`
+  - The source's ten contract fields, each as answered / unanswered.
+#### `poses_as_proof(claim: Claim)`
+
+Does the claim present itself as a proof rather than an assertion?
+
+#### `grade(claim: Claim)`
+
+Grade a claim by its fields only -- never by ``asserted_tier``.
+
+#### `asserted_tier(claim: Claim)`
+
+Parse the author's self-described tier, if any.
+
+#### `downgrade_notice(claim: Claim)`
+
+Describe a self-description that outruns the fields, or None.
+
+#### `proof_category(claim: Claim)`
+
+The category of proof the claim actually performs.
+
+#### `detect_proof_laundering(claim: Claim, claimed_category: str)`
+
+Report a mismatch between the proof performed and the claim made.
+
+#### `checklist(claim: Claim)`
+
+The source's ten questions, answered one by one.
+
+#### `checklist_report(claim: Claim)`
+
+The ten questions with an answered / unanswered verdict for each.
+
+#### `grade_with_reason(claim: Claim)`
+
+The grade, plus the fields that decided it.
+
+#### `main()`
+
+Self-check: the source's own worked examples.
