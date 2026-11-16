@@ -126,7 +126,13 @@ def _build_wheel(tmp: Path) -> Path:
         COMPONENT,
         source,
         ignore=shutil.ignore_patterns(
-            "tests", "sdk-ts", "build", "dist", "__pycache__", "*.egg-info"
+            "tests",
+            "sdk-ts",
+            "build",
+            "dist",
+            "__pycache__",
+            "*.egg-info",
+            "*.bundle",
         ),
     )
     dist = tmp / "dist"
@@ -161,14 +167,26 @@ def _build_wheel(tmp: Path) -> Path:
 #: installed surface is read-only, so every test in a class can share it.
 #: The wheel is still really built and really installed -- only the
 #: repetition is removed.
+#:
+#: The scratch directory is kept alive for as long as the process lives and
+#: removed when it exits.  A wheel build leaves ~180 MB behind (the source
+#: copy plus the scratch tree), and leaving that in ``/tmp`` for every test
+#: run is how a test suite fills a disk.
 _CACHE: dict[str, object] = {}
+_SCRATCH: list[tempfile.TemporaryDirectory] = []
+
+
+def _scratch_dir(prefix: str) -> Path:
+    """A temporary directory removed when the process exits."""
+    holder = tempfile.TemporaryDirectory(prefix=prefix)
+    _SCRATCH.append(holder)
+    return Path(holder.name)
 
 
 def _built_wheel_and_site() -> tuple[Path, Path]:
     """Return ``(wheel, site)`` for the runtime component, built on demand."""
     if "wheel" not in _CACHE:
-        tmp = tempfile.mkdtemp(prefix="b173-runtime-data-files-")
-        tmp_path = Path(tmp)
+        tmp_path = _scratch_dir("b173-runtime-data-files-")
         wheel = _build_wheel(tmp_path)
         site = tmp_path / "site"
         site.mkdir()
@@ -250,7 +268,7 @@ class WheelBuildIsolationTests(unittest.TestCase):
         # RED against the in-tree build: the build directory appears in
         # the component, and the egg-info directory with it.
         before = _build_artifacts_in_the_component()
-        _build_wheel(Path(tempfile.mkdtemp(prefix="b173-isolation-")))
+        _build_wheel(_scratch_dir("b173-isolation-"))
         after = _build_artifacts_in_the_component()
         self.assertEqual(
             before,
@@ -263,8 +281,8 @@ class WheelBuildIsolationTests(unittest.TestCase):
         # The failure mode the isolation fixes: the second build trips
         # over the first build's scratch tree and dies with
         # ``Errno 17: File exists``.
-        first = _build_wheel(Path(tempfile.mkdtemp(prefix="b173-iso-a-")))
-        second = _build_wheel(Path(tempfile.mkdtemp(prefix="b173-iso-b-")))
+        first = _build_wheel(_scratch_dir("b173-iso-a-"))
+        second = _build_wheel(_scratch_dir("b173-iso-b-"))
         self.assertTrue(first.is_file())
         self.assertTrue(second.is_file())
         self.assertNotEqual(
