@@ -44,12 +44,37 @@ class ToolsPackageLayoutTests(unittest.TestCase):
 
 
 class PackagingCompletenessTests(unittest.TestCase):
-    """Every top-level module must be listed in pyproject's ``py-modules``.
+    """Every runtime module must be installed by the packaging configuration.
 
     A module that exists in the repository but is not packaged works in the checkout
     and disappears after ``pip install .`` - the failure mode nobody notices until a
     user hits it, so it is asserted here instead.
+
+    There are TWO installation mechanisms, and the rule covers both:
+
+    * the flat modules, through ``[tool.setuptools] py-modules``;
+    * the package members, through ``[tool.setuptools.packages.find]``'s
+      ``include`` patterns -- a package's members cannot appear in
+      ``py-modules`` at all, because that array lists flat names only.
+
+    Before this, the rule read only the flat half, so it could not see the
+    22 installed package members (``tools.shell`` among them).
     """
+
+    def _installed_package_members(self) -> set[str]:
+        pyproject = tomllib.loads((COMPONENT / "pyproject.toml").read_text(encoding="utf-8"))
+        include = pyproject["tool"]["setuptools"]["packages"]["find"]["include"]
+        found: set[str] = set()
+        for pattern in include:
+            stem = pattern.rstrip("*")
+            package_dir = COMPONENT / stem
+            if not (package_dir / "__init__.py").is_file():
+                continue
+            found.add(f"{stem}.__init__")
+            for path in sorted(package_dir.glob("*.py")):
+                if path.name != "__init__.py":
+                    found.add(f"{stem}.{path.stem}")
+        return found
 
     def test_every_module_is_installed(self):
         pyproject = tomllib.loads((COMPONENT / "pyproject.toml").read_text(encoding="utf-8"))
@@ -63,6 +88,42 @@ class PackagingCompletenessTests(unittest.TestCase):
             sorted(present - declared),
             [],
             "add the missing module(s) to [tool.setuptools] py-modules in pyproject.toml",
+        )
+
+    def test_every_package_member_is_installed(self):
+        # The package half of the rule.  A package member is installed by
+        # `packages.find`, so the check is that the packaging configuration
+        # SELECTS the package -- not that the member's name appears in
+        # `py-modules`, which it cannot.
+        pyproject = tomllib.loads((COMPONENT / "pyproject.toml").read_text(encoding="utf-8"))
+        include = pyproject["tool"]["setuptools"]["packages"]["find"]["include"]
+        stems = {pattern.rstrip("*") for pattern in include}
+        package_dirs = {
+            path.name
+            for path in COMPONENT.iterdir()
+            if path.is_dir() and (path / "__init__.py").is_file()
+        }
+        self.assertEqual(
+            sorted(package_dirs - stems),
+            [],
+            "add the missing package(s) to [tool.setuptools.packages.find] "
+            "include in pyproject.toml",
+        )
+
+    def test_every_installed_package_member_is_registered(self):
+        # The registry has to name the package members too: they are runtime
+        # modules, and `runtime_registration.assert_registration_matches_disk`
+        # checks that the four views agree.
+        import runtime_registration as rr
+
+        members = self._installed_package_members()
+        self.assertTrue(members, "the runtime ships package members")
+        registered = set(rr.registered_module_names())
+        self.assertEqual(
+            sorted(members - registered),
+            [],
+            "installed package member(s) not in the registry: %s"
+            % sorted(members - registered),
         )
 
     def test_no_packaged_module_is_missing_from_disk(self):

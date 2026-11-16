@@ -69,6 +69,7 @@ from runtime_registration import (
     assert_registration_matches_disk,
     declared_py_modules,
     modules_on_disk,
+    package_members_on_disk,
     registered_module_names,
     registration_for,
 )
@@ -108,15 +109,21 @@ class RegistrationClosureTests(unittest.TestCase):
             % sorted(on_disk - registered),
         )
 
-    def test_every_module_on_disk_is_in_py_modules(self):
-        """The packaging half: every module is declared for installation."""
+    def test_every_module_on_disk_is_installed(self):
+        """The packaging half: every module is declared for installation.
+
+        The package members are the exception, and a deliberate one: they
+        are installed by ``packages.find``, not by ``py-modules``.  The
+        rule is that every module is INSTALLED, by one mechanism or the
+        other.
+        """
         on_disk = set(modules_on_disk())
-        declared = set(declared_py_modules())
+        installed = set(declared_py_modules()) | set(package_members_on_disk())
         self.assertEqual(
             set(),
-            on_disk - declared,
-            "module(s) on disk but not in py-modules: %s"
-            % sorted(on_disk - declared),
+            on_disk - installed,
+            "module(s) on disk but not installed: %s"
+            % sorted(on_disk - installed),
         )
 
     def test_every_registry_entry_is_on_disk(self):
@@ -130,15 +137,15 @@ class RegistrationClosureTests(unittest.TestCase):
             % sorted(registered - on_disk),
         )
 
-    def test_every_registry_entry_is_in_py_modules(self):
-        """The registry and py-modules are the same set."""
+    def test_every_registry_entry_is_installed(self):
+        """The registry and the installed surface are the same set."""
         registered = set(registered_module_names())
-        declared = set(declared_py_modules())
+        installed = set(declared_py_modules()) | set(package_members_on_disk())
         self.assertEqual(
             set(),
-            registered - declared,
-            "module(s) registered but not in py-modules: %s"
-            % sorted(registered - declared),
+            registered - installed,
+            "module(s) registered but not installed: %s"
+            % sorted(registered - installed),
         )
 
     def test_merged_tree_review_is_registered(self):

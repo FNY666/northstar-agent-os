@@ -35,6 +35,7 @@ from runtime_registration import (
     assert_registration_matches_disk,
     declared_py_modules,
     modules_on_disk,
+    package_members_on_disk,
     registered_module_names,
     registered_modules,
     registration_for,
@@ -46,19 +47,25 @@ COMPONENT = Path(runtime_registration.__file__).resolve().parent
 class RegistryShapeTests(unittest.TestCase):
     """The registry itself: it is data, it is complete, it is immutable."""
 
-    def test_every_registered_module_is_declared_in_py_modules(self):
-        """Forward direction, item by item: the registry is a subset of py-modules.
+    def test_every_registered_module_is_declared_for_installation(self):
+        """Forward direction, item by item: the registry is a subset of the installed surface.
 
         Every single module name in the registry is checked -- not a sample
         -- so a newly forgotten registration cannot hide behind a passing
         spot check.
+
+        The installed surface has TWO halves: the flat ``py-modules`` array
+        and the package members that ``packages.find`` installs.  Before
+        this slice the check compared against ``py-modules`` alone, so the
+        22 package members could not pass it -- the registry could not name
+        them at all, because the constructor rejected a dotted name.
         """
-        declared = set(declared_py_modules())
+        installed = set(declared_py_modules()) | set(package_members_on_disk())
         for record in REGISTRY:
             self.assertIn(
                 record.module,
-                declared,
-                "module %r is in the registry but not in py-modules" % record.module,
+                installed,
+                "module %r is in the registry but not installed" % record.module,
             )
 
     def test_every_py_modules_entry_is_in_the_registry(self):

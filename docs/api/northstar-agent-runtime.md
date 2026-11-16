@@ -90767,9 +90767,29 @@ Return the :class:`Registration` for ``module``.
 
 Return the module names declared in ``pyproject.toml``'s py-modules.
 
-#### `modules_on_disk(component=COMPONENT)`
+#### `flat_modules_on_disk(component=COMPONENT)`
 
-Return the runtime module names that exist as ``*.py`` on disk.
+Return the flat runtime module names that exist as ``*.py`` on disk.
+
+#### `declared_package_patterns(pyproject=PYPROJECT)`
+
+Return the package-name patterns setuptools' ``packages.find`` installs.
+
+#### `modules_on_disk(component=COMPONENT, pyproject=PYPROJECT)`
+
+Return every runtime module name that exists on disk.
+
+#### `package_members_on_disk(component=COMPONENT, pyproject=PYPROJECT)`
+
+Return the installed members of the component's packages.
+
+#### `installed_modules(component=COMPONENT, pyproject=PYPROJECT)`
+
+Return every module ``pip install .`` makes importable.
+
+#### `assert_registration_matches_installed(component=COMPONENT, pyproject=PYPROJECT, registry=REGISTRY)`
+
+Require the registry to cover the whole *installed* surface.
 
 #### `assert_registration_matches_disk(component=COMPONENT, pyproject=PYPROJECT, registry=REGISTRY)`
 

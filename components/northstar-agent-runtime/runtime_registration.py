@@ -33,6 +33,30 @@ NON_RUNTIME_MODULES = frozenset({"setup.py", "conftest.py"})
 ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
+def _is_importable_module_name(name):
+    """Is ``name`` the importable name of a runtime module?
+
+    Two shapes are importable, and both are real in this component:
+
+    * a **flat** module -- ``tools`` -- the file stem at the component root;
+    * a **package member** -- ``tools.shell`` -- a module inside a package
+      directory.
+
+    A package member cannot appear in ``py-modules`` (that array lists flat
+    names only); setuptools installs it through ``packages.find``.  Refusing
+    a dotted name would therefore make the 22 installed package members
+    *unregistrable* -- a gap in the registry's ability to name the runtime's
+    modules at all, not merely a gap in its contents.
+
+    The check is deliberately structural rather than "does it import": every
+    dotted segment must be a valid Python identifier, so a name can never
+    smuggle a path, a keyword, or an empty segment.
+    """
+    if not isinstance(name, str) or not name:
+        return False
+    return all(part.isidentifier() for part in name.split("."))
+
+
 class RegistrationError(AssertionError):
     """Raised when the registry, ``pyproject.toml`` and the disk disagree.
 
@@ -72,7 +96,7 @@ class Registration:
                 "registration for %r is missing required field(s): %s"
                 % (module, ", ".join(missing))
             )
-        if not module.isidentifier():
+        if not _is_importable_module_name(module):
             raise ValueError(
                 "module name %r is not an importable identifier" % (module,)
             )
@@ -1284,6 +1308,12 @@ REGISTRY = (
     _registration("provenance_tagging", "provenance-tagging", "2026-10-08", "Per-value provenance tagging (CaMeL-inspired), Simulated."),
     _registration("provenance_taint", "eighty-eighth", "2026-10-04", "Provenance-tracked taint + fail-closed security automata + per-tool budgets (eighty-eighth batch)."),
     _registration("provider_retry", "define the retry budget: classified provider faults, a pure sche", "2026-09-08", "The retry budget: what a transient provider fault means, and what it costs."),
+    _registration("providers.__init__", "runtime", "2026-09-06", "Northstar runtime provider package."),
+    _registration("providers.anthropic", "runtime", "2026-09-06", "Anthropic Messages API provider."),
+    _registration("providers.base", "runtime", "2026-09-06", "Message and provider vocabulary shared by every Northstar runtime module."),
+    _registration("providers.http_response_limits", "harden agent runtime security and red-team governance", "2026-10-12", "Response-body limits for provider-owned synchronous SDK HTTP clients."),
+    _registration("providers.openai_compat", "runtime", "2026-09-08", "Any-model provider for endpoints that speak the OpenAI Chat Completions wire."),
+    _registration("providers.scripted", "runtime", "2026-09-06", "Deterministic, offline provider used by every Northstar runtime test."),
     _registration("pubsub_broker", "runtime", "2026-10-07", "PubSubBroker: topic-routed publish/subscribe messaging for agent pipelines."),
     _registration("pulsar_broker", "runtime", "2026-10-08", "Apache-Pulsar-shaped broker bookkeeping: topics, subscriptions, cursors."),
     _registration("punct_norm", "punct-norm", "2026-10-09", "Punctuation normalization (D-IN-020), Simulated."),
@@ -1659,6 +1689,22 @@ REGISTRY = (
     _registration("tool_system_29", "worker", "2026-10-09", "Tool orchestration (mock): DAG of tool tasks, Simulated."),
     _registration("tool_system_30", "worker", "2026-10-09", "Tool governance (policy): regex policies over tool names, Simulated."),
     _registration("tool_use", "runtime", "2026-10-08", "Tool-use (function calling) registration and invocation bookkeeping, simulated."),
+    _registration("tools.__init__", "dx foundations", "2026-09-07", "Tool registry, uniform handler signature, and the sandbox every path crosses."),
+    _registration("tools.capdrop", "sandbox", "2026-10-04", "Linux capability minimisation launcher for tool-effect subprocesses."),
+    _registration("tools.code", "runtime", "2026-10-13", "Structured repository tools for the ``northstar code`` product path."),
+    _registration("tools.effect_envelope", "governance", "2026-10-06", "Effect Envelope: unified path containment (Orrery Gate 2 style)."),
+    _registration("tools.fetch", "network boundary", "2026-10-04", "Agent-facing network tool routed through the egress sidecar."),
+    _registration("tools.os_sandbox", "runtime", "2026-09-09", "OS-level execution backends for governed command tools (Shell)."),
+    _registration("tools.parallel", "runtime", "2026-09-09", "Classify which tools may share a concurrent execution batch."),
+    _registration("tools.path_integrity", "path-shim red-team", "2026-10-04", "PATH-shim detection and tool-binary integrity pins."),
+    _registration("tools.pledge", "pledge-style self-restriction", "2026-10-04", "Pledge-style self-restriction for tool-effect execution."),
+    _registration("tools.resource_limits", "harden agent runtime security and red-team governance", "2026-10-12", "Per-process resource ceilings for Shell child processes."),
+    _registration("tools.sandbox", "sandbox", "2026-10-04", "Linux Landlock unprivileged self-sandbox for the process backend."),
+    _registration("tools.seccomp", "runtime", "2026-10-02", "Seccomp-BPF denylist for the sandbox backends."),
+    _registration("tools.shell", "runtime", "2026-09-09", "Shell tool: governed command execution inside the OS sandbox."),
+    _registration("tools.skill_scripts", "runtime", "2026-09-09", "Skill-bundled scripts: discoverable, sandboxed, never auto-run."),
+    _registration("tools.systemd_scope", "harden agent runtime security and red-team governance", "2026-10-12", "Root-managed systemd scopes for aggregate Shell process-tree limits."),
+    _registration("tools.verify_invariants", "runtime", "2026-09-07", "Revert each core guard in a throwaway copy of the component and confirm the match."),
     _registration("toxicity_mock", "toxicity-mock", "2026-10-09", "Toxicity detection mock (D-OUT-009), Simulated."),
     _registration("trace_export", "audit", "2026-10-03", "Export a Northstar audit chain head as a TRACE v0.2-shaped Trust Record."),
     _registration("trace_tamper_probes", "runtime", "2026-10-07", "Trace-tampering probe corpus + deletion / independence / integrity detectors."),
@@ -1793,8 +1839,8 @@ def declared_py_modules(pyproject=PYPROJECT):
     return tuple(modules)
 
 
-def modules_on_disk(component=COMPONENT):
-    """Return the runtime module names that exist as ``*.py`` on disk.
+def flat_modules_on_disk(component=COMPONENT):
+    """Return the flat runtime module names that exist as ``*.py`` on disk.
 
     The two excluded files are the ones ``tests/test_module_layout.py``
     excludes as well, so the two views agree by construction.
@@ -1811,30 +1857,157 @@ def modules_on_disk(component=COMPONENT):
     )
 
 
+def declared_package_patterns(pyproject=PYPROJECT):
+    """Return the package-name patterns setuptools' ``packages.find`` installs.
+
+    ``py-modules`` lists FLAT module names only, so a package's members
+    cannot appear there.  They are installed through a second mechanism::
+
+        [tool.setuptools.packages.find]
+        where = ["."]
+        include = ["providers*", "tools*"]
+
+    This reads that second mechanism, so the installed surface is derived
+    from the packaging configuration rather than from a hand-maintained list
+    of package names.
+    """
+    try:
+        data = tomllib.loads(Path(pyproject).read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise RegistrationError("cannot read %s: %s" % (pyproject, exc)) from exc
+    except tomllib.TOMLDecodeError as exc:
+        raise RegistrationError("cannot parse %s: %s" % (pyproject, exc)) from exc
+    try:
+        find = data["tool"]["setuptools"]["packages"]["find"]
+    except KeyError:
+        # A component with no packages is a component with no package
+        # members: an empty answer, not an error.
+        return ()
+    include = find.get("include", [])
+    return tuple(pattern for pattern in include if isinstance(pattern, str))
+
+
+def modules_on_disk(component=COMPONENT, pyproject=PYPROJECT):
+    """Return every runtime module name that exists on disk.
+
+    Two shapes, because the component has two kinds of runtime module:
+
+    * a **flat** module -- the file stem at the component root;
+    * a **package member** -- ``tools.shell``, a module inside a package
+      directory, named with its package prefix.
+
+    The package members are the ones the packaging configuration installs
+    through ``packages.find``; the flat ones through ``py-modules``.  A
+    view that listed only the flat ones would miss 22 of the runtime's
+    modules -- including ``tools.shell``.
+    """
+    return tuple(
+        sorted(
+            set(flat_modules_on_disk(component))
+            | set(package_members_on_disk(component, pyproject))
+        )
+    )
+
+
+def package_members_on_disk(component=COMPONENT, pyproject=PYPROJECT):
+    """Return the installed members of the component's packages.
+
+    A package's own module is a member too (``tools.__init__`` carries the
+    tool registry), so it is included.
+
+    The package set comes from ``pyproject.toml``'s ``packages.find``
+    ``include`` patterns, so a package added to the configuration is
+    covered automatically -- there is no second list to keep in step.
+    """
+    component = Path(component)
+    stems = {pattern.rstrip("*") for pattern in declared_package_patterns(pyproject)}
+    found: set[str] = set()
+    for stem in sorted(stems):
+        package_dir = component / stem
+        if not (package_dir / "__init__.py").is_file():
+            continue
+        found.add("%s.__init__" % stem)
+        for path in sorted(package_dir.glob("*.py")):
+            if path.name != "__init__.py":
+                found.add("%s.%s" % (stem, path.stem))
+    return tuple(sorted(found))
+
+
+def installed_modules(component=COMPONENT, pyproject=PYPROJECT):
+    """Return every module ``pip install .`` makes importable.
+
+    This is the union of the two installation mechanisms: the flat
+    ``py-modules`` array and the members of the packages setuptools finds.
+    It is the surface the registry has to cover.
+    """
+    flat = set(declared_py_modules(pyproject))
+    return tuple(sorted(flat | set(package_members_on_disk(component, pyproject))))
+
+
+def assert_registration_matches_installed(
+    component=COMPONENT, pyproject=PYPROJECT, registry=REGISTRY
+):
+    """Require the registry to cover the whole *installed* surface.
+
+    ``assert_registration_matches_disk`` compares three views -- the
+    registry, ``py-modules`` and the flat ``*.py`` files -- and all three
+    are blind to the package members, because a package's members cannot
+    appear in ``py-modules`` and are not flat files.
+
+    So the closure could be "complete" over 1613 modules while the
+    component shipped 1635.  This check closes that hole: it requires the
+    registry to name every installed module, and raises
+    :class:`RegistrationError` naming each one that it does not.
+
+    Returns the tuple of installed module names when the registry covers
+    them.
+    """
+    registry_set = {record.module for record in registry}
+    installed = installed_modules(component, pyproject)
+    unregistered = sorted(name for name in installed if name not in registry_set)
+    if unregistered:
+        raise RegistrationError(
+            "runtime module registration does not cover the installed "
+            "surface: module(s) installed but not in the registry: %s"
+            % ", ".join(unregistered)
+        )
+    return installed
+
+
 def assert_registration_matches_disk(
     component=COMPONENT, pyproject=PYPROJECT, registry=REGISTRY
 ):
     """Require the registry, ``pyproject.toml`` and the disk to agree.
 
-    Three sets must be equal:
+    Four views must agree:
 
     * the module names in the registry,
     * the module names declared in ``pyproject.toml``'s ``py-modules``,
-    * the ``*.py`` files in the component directory.
+    * the ``*.py`` files in the component directory,
+    * the members of the packages setuptools' ``packages.find`` installs.
+
+    The fourth view is the one that was missing.  ``py-modules`` lists FLAT
+    names only, so a package's members cannot appear there; setuptools
+    installs them through ``packages.find``.  Without the fourth view the
+    closure could be "complete" over 1613 modules while the component
+    shipped 1635 -- and the 22 it missed included ``tools.shell``.
 
     Raises :class:`RegistrationError` naming every module that is in one
     view but not another.  The message names the offending modules, so a
     failure says which line of ``pyproject.toml`` has to be added.
 
-    Returns the tuple of registered module names when the three agree.
+    Returns the tuple of registered module names when the views agree.
     """
     registry_names = tuple(record.module for record in registry)
     declared = tuple(declared_py_modules(pyproject))
     on_disk = tuple(modules_on_disk(component))
+    members = tuple(package_members_on_disk(component, pyproject))
 
     registry_set = set(registry_names)
     declared_set = set(declared)
     disk_set = set(on_disk)
+    member_set = set(members)
+    installed_set = declared_set | member_set
 
     problems = []
     unregistered = sorted(disk_set - registry_set)
@@ -1842,12 +2015,12 @@ def assert_registration_matches_disk(
         problems.append(
             "module(s) on disk but not in the registry: %s" % ", ".join(unregistered)
         )
-    undeclared = sorted(registry_set - declared_set)
+    undeclared = sorted(registry_set - declared_set - member_set)
     if undeclared:
         problems.append(
             "module(s) in the registry but not in py-modules: %s" % ", ".join(undeclared)
         )
-    not_packaged = sorted(disk_set - declared_set)
+    not_packaged = sorted(disk_set - declared_set - member_set)
     if not_packaged:
         problems.append(
             "module(s) on disk but not in py-modules: %s" % ", ".join(not_packaged)
@@ -1856,6 +2029,26 @@ def assert_registration_matches_disk(
     if missing_from_disk:
         problems.append(
             "module(s) in py-modules but not on disk: %s" % ", ".join(missing_from_disk)
+        )
+    # The installed-surface directions.  A package member that is on disk
+    # but not installed is a module the wheel does not ship; one that is
+    # installed but not registered is the gap this slice closes.
+    unpackaged_members = sorted(member_set - installed_set)
+    if unpackaged_members:
+        problems.append(
+            "package member(s) on disk but not installed: %s"
+            % ", ".join(unpackaged_members)
+        )
+    unregistered_members = sorted(installed_set - registry_set)
+    if unregistered_members:
+        problems.append(
+            "module(s) installed but not in the registry: %s"
+            % ", ".join(unregistered_members)
+        )
+    phantom = sorted(registry_set - disk_set - member_set)
+    if phantom:
+        problems.append(
+            "module(s) in the registry but not on disk: %s" % ", ".join(phantom)
         )
 
     if problems:
