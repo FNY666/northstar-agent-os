@@ -18,3 +18,8 @@ dist/
 .DS_Store
 .vscode/
 .idea/
+
+# Delivery bundles (b173-*.bundle): a git bundle is a DELIVERY ARTEFACT, not
+# source.  The batch's bundles were being written into the repo root by the
+# delivery step, where `git add -A` would have committed a 70 MB binary.
+*.bundle
