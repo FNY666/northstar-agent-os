@@ -112,6 +112,71 @@ class InstalledSurfaceRegistrationTests(unittest.TestCase):
             + "\n  ".join(unregistered),
         )
 
+    def test_the_name_check_answers_for_a_name_directly(self):
+        # The helper is the gate, so pin it DIRECTLY.  Reached only through
+        # the constructor, its behaviour is masked by the earlier
+        # "missing required field" guard: an empty name is rejected there
+        # for being empty, so a broken gate would never show.  Calling the
+        # helper itself is what makes the gate's own rules observable.
+        self.assertTrue(rr._is_importable_module_name("tools.shell"))
+        self.assertTrue(rr._is_importable_module_name("cli"))
+        self.assertTrue(rr._is_importable_module_name("a.b.c"))
+        self.assertFalse(rr._is_importable_module_name(""))
+        self.assertFalse(rr._is_importable_module_name("tools."))
+        self.assertFalse(rr._is_importable_module_name(".shell"))
+        self.assertFalse(rr._is_importable_module_name("tools..shell"))
+        self.assertFalse(rr._is_importable_module_name("tools/shell"))
+        self.assertFalse(rr._is_importable_module_name("tools shell"))
+        self.assertFalse(rr._is_importable_module_name(None))
+        self.assertFalse(rr._is_importable_module_name(42))
+
+    def test_a_registry_record_with_a_missing_field_is_refused(self):
+        # The metadata gate.  Pinned here because the slice's file is what
+        # the mutation probe runs against, and this is the gate that decides
+        # whether a registry entry is well-formed.
+        for kwargs in (
+            {"slice_slug": "", "registered_on": "2026-11-14", "description": "d"},
+            {"slice_slug": "s", "registered_on": "", "description": "d"},
+            {"slice_slug": "s", "registered_on": "2026-11-14", "description": "  "},
+            {"slice_slug": None, "registered_on": "2026-11-14", "description": "d"},
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises(ValueError):
+                    rr._registration("a_module", **kwargs)
+
+    def test_two_records_are_equal_only_when_every_field_matches(self):
+        # The value-equality of a record.  The registry is compared field by
+        # field when the closure check looks for a match, so a broken
+        # equality would make a genuinely different record look identical.
+        base = rr._registration("a_module", "a-slice", "2026-11-14", "A module.")
+        same = rr._registration("a_module", "a-slice", "2026-11-14", "A module.")
+        self.assertEqual(base, same)
+        self.assertEqual(hash(base), hash(same))
+        self.assertNotEqual(
+            base, rr._registration("other_module", "a-slice", "2026-11-14", "A module.")
+        )
+        self.assertNotEqual(
+            base, rr._registration("a_module", "other-slice", "2026-11-14", "A module.")
+        )
+        self.assertNotEqual(
+            base, rr._registration("a_module", "a-slice", "2026-11-16", "A module.")
+        )
+        self.assertNotEqual(
+            base, rr._registration("a_module", "a-slice", "2026-11-14", "Another.")
+        )
+
+    def test_registration_for_finds_the_right_record(self):
+        # The lookup.  It must return the record for the module that was
+        # asked for -- not merely *a* record from the registry.
+        shell = rr.registration_for("tools.shell")
+        self.assertEqual(shell.module, "tools.shell")
+        base = rr.registration_for("providers.base")
+        self.assertEqual(base.module, "providers.base")
+        self.assertNotEqual(shell.as_dict(), base.as_dict())
+        with self.assertRaises(KeyError) as caught:
+            rr.registration_for("no_such_module_exists")
+        self.assertIn("no_such_module_exists", str(caught.exception))
+
     def test_the_registry_can_express_a_package_member(self):
         # The hole in the registry's *ability*, not just its contents.
         # A dotted name used to be refused outright.
