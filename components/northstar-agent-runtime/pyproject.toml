@@ -934,6 +934,7 @@ py-modules = [
     "memory_fact_belief",
     "memory_flat_vs_graph",
     "memory_safety",
+    "merged_tree_review",
     "merkle_tree",
     "mesa_optimization",
     "message_broker",

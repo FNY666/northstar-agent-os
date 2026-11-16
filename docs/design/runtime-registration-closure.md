@@ -216,3 +216,149 @@ After both fixes the probe reports `killed 3/3`.
 * It does not assert anything about a *live provider*. The check is
   about the shape of the package on disk; nothing here was run against a
   live model.
+
+---
+
+## The closure, completed (2026-11-16, round 7)
+
+The work above was done in two parts. The registry, the check and the
+tests all landed. The **registration itself** did not: the closure was
+still open when the slice was accepted, and the check said so — loudly,
+which is what the check is for.
+
+### The gap, measured on 2026-11-16
+
+```python
+>>> import runtime_registration as rr
+>>> rr.assert_registration_matches_disk()
+RegistrationError: runtime module registration does not match the disk:
+  module(s) on disk but not in the registry: merged_tree_review;
+  module(s) on disk but not in py-modules: merged_tree_review
+```
+
+One module, not the 42 the taskbook's list predicted. The other 41 were
+closed by the earlier work; the list in the taskbook was measured before
+that work and is now stale.
+
+`merged_tree_review.py` was delivered by the `merged-tree-review` slice
+(`dbaff0ad`) and was never registered, because that slice's writable list
+did not include `pyproject.toml` — the same structural reason this slice
+exists.
+
+Two consequences, both measured:
+
+* `tests/test_runtime_registration.py` failed 3 of its 37 methods, so the
+  `runtime-registration` slice's own `TESTS_RAN` check failed;
+* `tests/test_module_layout.py::test_every_module_is_installed` failed,
+  so the packaging half of the promise was broken too.
+
+**The two slices were entangled**: closing `runtime-registration-closure`
+*is* what closes `runtime-registration`. One fix, two verdicts.
+
+### The fix
+
+Two lines, in two files:
+
+```diff
+--- a/components/northstar-agent-runtime/pyproject.toml
++++ b/components/northstar-agent-runtime/pyproject.toml
+@@ -934,6 +934,7 @@ py-modules = [
+     "memory_fact_belief",
+     "memory_flat_vs_graph",
+     "memory_safety",
++    "merged_tree_review",
+     "merkle_tree",
+```
+
+```diff
+--- a/components/northstar-agent-runtime/runtime_registration.py
++++ b/components/northstar-agent-runtime/runtime_registration.py
+@@ -1055,6 +1055,7 @@ REGISTRY = (
+     _registration("memory_safety", "eighty-second", "2026-10-04", "Memory write-time safety gates (eighty-second batch)."),
++    _registration("merged_tree_review", "merged-tree-review", "2026-11-16", "Merged-tree adversarial review: cross-slice conflicts that only appear when every slice is merged into one tree."),
+     _registration("merkle_tree", "runtime", "2026-10-07", "Merkle tree inclusion proofs: tamper-evident anchoring for audit logs."),
+```
+
+`pyproject.toml`'s diff contains **only** the one added `py-modules` line —
+no other field changed by a single character, which is what the taskbook's
+acceptance requires and what `git diff --stat` shows (`1 file changed,
+1 insertion(+)`).
+
+### Two things this slice got WRONG first, and what caught them
+
+**1. `test_runner.py` is a TEST file, not a runtime module.**
+
+The component directory contains `test_runner.py`, and both views exclude
+`test_`-prefixed files by design:
+
+```python
+# runtime_registration.py
+if path.is_file()
+and path.name not in NON_RUNTIME_MODULES
+and not path.name.startswith("test_")
+```
+
+`tests/test_module_layout.py` excludes exactly the same files, so the two
+views "agree by construction". The first draft of this slice's test
+asserted that `test_runner` *should* be registered and declared — and the
+check rejected it:
+
+```
+registered not on disk: ['test_runner']
+```
+
+Registering it would have put the registry and the layout test
+permanently out of step. The test now asserts the **correct** behaviour
+instead: `test_runner` is in none of the three views, and the registry's
+exclusion set and the layout test's exclusion set are checked against each
+other so they cannot drift apart silently.
+
+**2. The registry is sorted; the `py-modules` array is not.**
+
+The registry has a sortedness test. `merged_tree_review` sorts **after**
+every `memory_*` entry, because `_` (0x5f) sorts above the lowercase
+letters — so the entry goes after `memory_safety`, not after
+`media_forensics`. And the `py-modules` array is only *loosely* sorted: it
+had **9** out-of-order pairs before this change, and it still has exactly
+9 after it. The array's own neighbours (`memory_safety`, then
+`merkle_tree`) are the position to use; the registry's order is a
+different rule and a stricter one.
+
+The `pyproject.toml` diff was also briefly **two** identical
+`"merged_tree_review",` lines — a script that ran twice. `git diff` caught
+it; the packaging check would not have (setuptools deduplicates).
+
+### The recurrence guard
+
+The gap existed because nothing enforced the remembering. A slice that
+adds a module must add three things — the module, the registry entry, the
+`py-modules` line — and there was no check that it did.
+
+`tests/test_registration_closure.py` (14 methods) is that check, on the
+real repository:
+
+* the three-way check passes;
+* every module on disk is in the registry **and** in `py-modules`;
+* every registry entry is on disk **and** in `py-modules`;
+* `merged_tree_review` is registered with well-formed metadata;
+* `test_runner` is in **none** of the three views, and the registry's
+  exclusion set matches the layout test's;
+* the registry is sorted and duplicate-free;
+* a module dropped on disk without being registered is **caught and
+  named** (in a tmpdir, never in the working tree);
+* the guard is **not vacuous**: a registry that omits a module the
+  repository actually has must make the check fail.
+
+That last one is the test that stops the guard from being a rubber stamp.
+
+### The result
+
+```
+$ PYTHONPATH=.:tests python3 -m unittest test_registration_closure \
+      test_runtime_registration test_module_layout
+Ran 59 tests in 0.309s
+OK
+```
+
+Both entangled slices close together: `runtime-registration-closure` and
+`runtime-registration` both PASS.

@@ -1055,6 +1055,7 @@ REGISTRY = (
     _registration("memory_flat_vs_graph", "runtime", "2026-10-07", "Flat vs graph memory retrieval: empirical comparison, not a slogan."),
     _registration("memory_integrity", "harden agent runtime security and red-team governance", "2026-10-12", "Workspace memory integrity manifest, outside the agent-writable carve-out."),
     _registration("memory_safety", "eighty-second", "2026-10-04", "Memory write-time safety gates (eighty-second batch)."),
+    _registration("merged_tree_review", "merged-tree-review", "2026-11-16", "Merged-tree adversarial review: cross-slice conflicts that only appear when every slice is merged into one tree."),
     _registration("merkle_tree", "runtime", "2026-10-07", "Merkle tree inclusion proofs: tamper-evident anchoring for audit logs."),
     _registration("mesa_optimization", "runtime", "2026-10-08", "MesaOptimization: mesa-optimizer detection / constraint bookkeeping for agents."),
     _registration("message_broker", "runtime", "2026-10-08", "Kafka/RabbitMQ-shaped message broker bookkeeping."),
