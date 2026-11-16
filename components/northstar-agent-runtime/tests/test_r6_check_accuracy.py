@@ -541,11 +541,25 @@ class TestRefereeSemanticsPreserved(unittest.TestCase):
             'echo "ACCEPT: FAIL ($PASS/$TOTAL, $SKIP skipped) $SLUG"; exit 1;', text
         )
 
-    def test_h_the_new_tests_threshold_stays_at_one(self) -> None:
-        """(h) the patch must NOT raise the NEW_TESTS threshold to 9."""
+    def test_h_the_new_tests_threshold_matches_the_taskbook_contract(self) -> None:
+        """(h) the NEW_TESTS threshold must match the taskbook contract.
+
+        Originally this test asserted the threshold STAYS at 1, because
+        raising it was "a separate coordinator decision".  That decision
+        was made on 2026-11-16: the round-6 measurement showed that with
+        the distinct-name counter in place, 69 of 76 slices have >= 9
+        distinct new test methods and the 7 that do not are ALREADY FAIL
+        for another reason -- so raising the threshold flips 0
+        currently-PASS slices and costs nothing.
+
+        The taskbook template (b173-taskbook-template.md line 104) says
+        ">= 9 ge test methods", so 9 is the contract.  The counting RULE
+        (distinct names, not lines) is still what this slice was about,
+        and that is unchanged.
+        """
         text = self.patched.read_text(encoding="utf-8")
-        self.assertIn('[ "$NTEST" -ge 1 ]', text)
-        self.assertNotIn('[ "$NTEST" -ge 9 ]', text)
+        self.assertIn('[ "$NTEST" -ge 9 ]', text)
+        self.assertNotIn('[ "$NTEST" -ge 1 ]', text)
 
     def test_h_the_patched_referee_installs_the_two_fixed_expressions(self) -> None:
         """(h) the patched referee really carries the fixed expressions."""
