@@ -556,10 +556,18 @@ class TestRefereeSemanticsPreserved(unittest.TestCase):
         ">= 9 ge test methods", so 9 is the contract.  The counting RULE
         (distinct names, not lines) is still what this slice was about,
         and that is unchanged.
+
+        ROUND 7 UPDATE: the threshold is no longer a literal.  Seven slices
+        have no taskbook at all (runtime-registration, slice1..slice6);
+        they ran before the template's ">= 9" clause existed, so they were
+        never promised 9 test methods.  The referee therefore COMPUTES the
+        threshold from the taskbook's existence: 9 with a taskbook, 1
+        without.  This test reads the 9 off the taskbook branch.
         """
         text = self.patched.read_text(encoding="utf-8")
-        self.assertIn('[ "$NTEST" -ge 9 ]', text)
-        self.assertNotIn('[ "$NTEST" -ge 1 ]', text)
+        self.assertIn("NTEST_THRESHOLD=9", text)
+        self.assertIn("NTEST_THRESHOLD=1", text)
+        self.assertNotIn('[ "$NTEST" -ge 9 ]', text)
 
     def test_h_the_patched_referee_installs_the_two_fixed_expressions(self) -> None:
         """(h) the patched referee really carries the fixed expressions."""
