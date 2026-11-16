@@ -58,19 +58,21 @@ def _extract_module_list_code(text: str) -> str:
     lines = text.splitlines()
     start = None
     for i, ln in enumerate(lines):
-        if ln.strip().startswith("for compdir in"):
+        # The loop variable was renamed from `compdir` to `testdir` when the
+        # run directory was split out from the test directory; accept both.
+        if re.search(r"for (compdir|testdir) in", ln):
             start = i
             break
     if start is None:
-        raise AssertionError("no compdir loop found in b173-accept.sh")
+        raise AssertionError("no testdir/compdir loop found in b173-accept.sh")
     # The module-list computation is the small block right after the loop
     # header: the compdir header itself, then MODS, then TFILES.
     header = ""
     mods_line = ""
     tfiles_line = ""
-    for ln in lines[start : start + 8]:
+    for ln in lines[start : start + 40]:
         stripped = ln.strip()
-        if stripped.startswith("for compdir in") and not header:
+        if re.search(r"for (compdir|testdir) in", stripped) and not header:
             header = stripped
         elif stripped.startswith("MODS=") and not mods_line:
             mods_line = stripped
@@ -176,7 +178,7 @@ class TestsRanCompdirTests(unittest.TestCase):
             "the component-level module list regressed: %r" % res["mods"],
         )
 
-    def test_a_mixed_set_yields_every_module_and_none_other(self):
+    def test_the_mixed_set_yields_every_module_and_none_other(self):
         """Both shapes together must list both modules and nothing else.
 
         The referee groups the test files by their own directory, so a mixed
@@ -194,10 +196,42 @@ class TestsRanCompdirTests(unittest.TestCase):
             "the mixed module list is %r; it must name exactly the two "
             "slice test modules" % res["mods"],
         )
+
+    def test_the_file_list_is_relative_to_the_run_directory(self):
+        """TFILES must be relative to the RUN directory, not the test directory.
+
+        MEASURED REGRESSION (2026-11-16): the module-list fix grouped the
+        test files by their own directory and derived TFILES from that
+        group, which produced `test_agent_handoff.py` instead of
+        `tests/test_agent_handoff.py`.  pytest is invoked FROM THE RUN
+        DIRECTORY, so it was handed a path that does not exist there:
+
+            FAIL TESTS_RAN  [components/northstar-agent-runtime pytest:
+                             no tests ran in 0.04s ]
+
+        The file list must therefore be relative to the run directory:
+        `tests/test_agent_handoff.py` for a component, and
+        `tests/test_delivery_seal.py` for the repo-root group.
+        """
+        res = _run_module_list(
+            self.code,
+            "components/northstar-agent-runtime/tests/test_agent_handoff.py",
+        )
         self.assertEqual(
-            ["test_delivery_seal.py", "test_runtime_registration.py"],
-            sorted(res["tfiles"]),
-            "the mixed file list is %r" % res["tfiles"],
+            ["tests/test_agent_handoff.py"],
+            res["tfiles"],
+            "the pytest file list is %r; it must be relative to the run "
+            "directory (the component root), or pytest is handed a path "
+            "that does not exist there" % res["tfiles"],
+        )
+
+    def test_the_repo_root_group_keeps_its_tests_prefix(self):
+        """The repo-root group's file list is relative to the repo root."""
+        res = _run_module_list(self.code, "tests/test_delivery_seal.py")
+        self.assertEqual(
+            ["tests/test_delivery_seal.py"],
+            res["tfiles"],
+            "the repo-root file list is %r" % res["tfiles"],
         )
 
     def test_the_module_list_is_never_empty_for_a_non_empty_test_set(self):
@@ -217,6 +251,104 @@ class TestsRanCompdirTests(unittest.TestCase):
                     res["mods"],
                     "module list is EMPTY for %s -- unittest would then "
                     "discover the whole directory" % path,
+                )
+
+
+class TestsRanRunDirectoryTests(unittest.TestCase):
+    """The tests must be RUN from the component root, not the tests dir.
+
+    MEASURED REGRESSION (2026-11-16, caught by the batch ledger right
+    after the module-list fix landed):
+
+        FAIL TESTS_RAN  [components/northstar-agent-runtime/tests unittest:
+                         Ran 1 test in 0.000s FAILED (errors=1) ]
+
+    36 slices regressed at once.  The modules under test live NEXT TO the
+    tests' parent directory -- `components/northstar-agent-runtime/xyz.py`
+    next to `components/northstar-agent-runtime/tests/test_xyz.py` -- and
+    `PYTHONPATH=.:tests` resolves them from the COMPONENT ROOT.  Running
+    from inside `.../tests/` cannot import them, so every test errors on
+    import.
+
+    So the referee needs TWO directories, not one:
+
+      * `testdir`  -- where the test FILES are (for the module list);
+      * `compdir`  -- where to RUN from (the component root).
+
+    For a repo-root-level `tests/` there is no component root, so the repo
+    root is used.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        if not ACCEPT.is_file():
+            raise unittest.SkipTest("live referee not installed: %s" % ACCEPT)
+        cls.text = ACCEPT.read_text(encoding="utf-8")
+
+    def _run_dir(self, testdir: str) -> str:
+        """Evaluate the referee's own run-directory expression."""
+        script = (
+            "set -u\n"
+            "testdir=%s\n"
+            "case \"$testdir\" in\n"
+            "  */tests) compdir=\"${testdir%%/tests}\";;\n"
+            "  tests)    compdir=\".\";;\n"
+            "  *)        compdir=\"$testdir\";;\n"
+            "esac\n"
+            'echo "COMPDIR=$compdir"\n' % _shq(testdir)
+        )
+        out = subprocess.run(
+            ["bash", "-c", script], capture_output=True, text=True, timeout=60
+        )
+        self.assertEqual(0, out.returncode, out.stderr)
+        for ln in out.stdout.splitlines():
+            if ln.startswith("COMPDIR="):
+                return ln[len("COMPDIR=") :]
+        raise AssertionError("no COMPDIR output")
+
+    def test_a_component_test_directory_runs_from_the_component_root(self):
+        self.assertEqual(
+            "components/northstar-agent-runtime",
+            self._run_dir("components/northstar-agent-runtime/tests"),
+        )
+
+    def test_a_repo_root_test_directory_runs_from_the_repo_root(self):
+        self.assertEqual(".", self._run_dir("tests"))
+
+    def test_the_referee_distinguishes_the_test_directory_from_the_run_directory(self):
+        """The referee must compute a run directory separate from the test dir.
+
+        Running from the tests directory cannot import the modules under
+        test -- `PYTHONPATH=.:tests` resolves them from the component root.
+        """
+        self.assertRegex(
+            self.text,
+            r'for testdir in \$\(echo "\$ADDED_TESTS" \| xargs -n1 dirname \| sort -u\)',
+            "the referee must group the test files by their own directory",
+        )
+        self.assertRegex(
+            self.text,
+            r"\*/tests\) compdir=",
+            "the referee must derive the RUN directory from the test directory",
+        )
+        self.assertRegex(
+            self.text,
+            r"cd \"\$REPO/\$compdir\"",
+            "the referee must cd into the run directory",
+        )
+
+    def test_the_run_directory_is_never_the_tests_directory(self):
+        """The invariant that would have caught the 36-slice regression."""
+        for testdir in (
+            "components/northstar-agent-runtime/tests",
+            "tests",
+        ):
+            with self.subTest(testdir=testdir):
+                self.assertNotEqual(
+                    testdir,
+                    self._run_dir(testdir),
+                    "the referee would cd into the tests directory; the "
+                    "modules under test are not importable from there",
                 )
 
 

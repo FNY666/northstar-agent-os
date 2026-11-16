@@ -119,12 +119,83 @@ GREEN (after the fix) — `Ran 4 tests ... OK`.
 block was restored in place, the test was re-run (4 failures), and the fixed
 referee was restored.
 
-### 1.5 Effect
+### 1.5 Two regressions the fix itself caused — and how they were caught
+
+The module-list fix was **not** right the first time. The batch ledger
+caught both regressions within one run, and each one is now pinned.
+
+#### Regression 1 — the run directory (36 slices at once)
+
+The first version of the fix grouped the test files by their own directory
+and then ran the tests **from that directory**:
+
+```
+FAIL TESTS_RAN  [components/northstar-agent-runtime/tests unittest:
+                 Ran 1 test in 0.000s FAILED (errors=1) ]
+```
+
+The modules under test live *next to* the tests' parent directory
+(`components/northstar-agent-runtime/xyz.py` next to
+`components/northstar-agent-runtime/tests/test_xyz.py`), and
+`PYTHONPATH=.:tests` resolves them from the **component root**. Running from
+inside `.../tests/` cannot import them, so every test errored on import.
+
+The referee therefore needs **two** directories, not one:
+
+| name | what it is |
+|---|---|
+| `testdir` | where the test FILES are — used to build the module list |
+| `compdir` | where to RUN from — the component root |
+
+```bash
+case "$testdir" in
+  */tests) compdir="${testdir%/tests}";;
+  tests)    compdir=".";;          # repo-root-level tests/
+  *)        compdir="$testdir";;
+esac
+```
+
+#### Regression 2 — the pytest file list (1 slice)
+
+Splitting the two directories broke `TFILES`. The old code produced
+`tests/test_agent_handoff.py` (relative to the repo root); the new code
+produced `test_agent_handoff.py` (relative to the test directory). pytest is
+invoked **from the run directory**, so it was handed a path that does not
+exist there:
+
+```
+FAIL TESTS_RAN  [components/northstar-agent-runtime pytest:
+                 no tests ran in 0.04s ]
+```
+
+The test file always lives in a directory named `tests`, and the run
+directory is that directory's parent — so the path relative to the run
+directory is always `tests/<name>.py`, for the repo-root group and for a
+component group alike. `test_agent_handoff.py` is pytest-style (0 unittest
+tests, 40 pytest tests), which is why only this slice showed the symptom:
+the unittest fallback ran 0 tests, the pytest fallback got a bad path.
+
+#### The catch mechanism
+
+Neither regression was found by reading the diff. Both were found by
+**re-running the whole batch ledger** and comparing verdicts item by item —
+the ledger went from `PASS=69 FAIL=7` (76 slices) to `PASS=40 FAIL=43`
+(83 slices), and 36 of the new failures had the same signature.
+
+> This is the second time in two rounds that a referee change which looked
+> correct in isolation broke 30+ slices at once. **The ledger is the only
+> instrument that catches this class of defect**, and it is cheap
+> (~4 minutes for 83 slices).
+
+### 1.6 Effect
 
 ```
 $ bash b173-accept.sh seal-slice6
 PASS TESTS_RAN  [tests unittest: Ran 37 tests in 2.040s OK ]
 ACCEPT: PASS (9/9, 3 skipped) seal-slice6
+
+$ bash b173-accept.sh agent-handoff
+ACCEPT: PASS (12/12, 0 skipped) agent-handoff
 ```
 
 ---
@@ -208,7 +279,46 @@ The threshold now says so.
 
 ---
 
-## 3. Full-suite verification
+## 3. The behavioural tests
+
+Three test files pin this round's referee behaviour. All three are
+**behavioural**: they extract the live referee's own shell code and run it,
+so a comment that merely mentions the right words cannot satisfy them.
+
+| file | methods | what it pins |
+|---|---|---|
+| `tests/test_r7_tests_ran_compdir.py` | 10 | the TESTS_RAN module list, the run directory, and the pytest file list |
+| `tests/test_r7_referee_behaviour.py` | 13 | BENCH_DIFF comment stripping, the CANARY SKIP, the FULL_SUITE pattern, the baseline pointer, the twelve-check denominator |
+| `tests/test_r7_new_tests_threshold.py` | 1 | the NEW_TESTS threshold at 9 |
+
+### 3.1 RED was verified against a reverted referee, not assumed
+
+The referee was reverted in place, the tests re-run, and the referee
+restored. Results:
+
+| test file | against the reverted referee | against the fixed referee |
+|---|---|---|
+| `test_r7_tests_ran_compdir.py` | 4 failures | OK |
+| `test_r7_referee_behaviour.py` | 6 failures | OK |
+| `test_r7_new_tests_threshold.py` | 1 failure (`9 != 1`) | OK |
+
+The `test_r7_referee_behaviour.py` count went from 4 to 6 after the BENCH_DIFF
+helper was changed to **extract** the referee's expression instead of
+restating it. The restated copy had been passing against a broken referee —
+which is exactly the failure mode that made the round-6 test files silently
+stop testing once their patches were applied.
+
+### 3.2 All round-6 and round-7 referee tests together
+
+```
+$ python3 -m unittest test_r7_tests_ran_compdir test_r7_referee_behaviour \
+    test_r7_new_tests_threshold test_r6_check_accuracy test_r6_worktree_rename \
+    test_r6_manifest_subject test_r6_baseline_unify test_judge_hygiene
+Ran 127 tests in 6.880s
+OK
+```
+
+## 4. Full-suite verification
 
 Run after the change, from the repo root, `make test`:
 
@@ -236,12 +346,13 @@ Net: the failure set got **strictly smaller**, with **no new failures**.
 
 ---
 
-## 4. Files
+## 5. Files
 
 | file | change |
 |---|---|
 | `components/northstar-agent-runtime/tests/test_r7_new_tests_threshold.py` | new — pins the NEW_TESTS threshold at 9 |
-| `components/northstar-agent-runtime/tests/test_r7_tests_ran_compdir.py` | new — pins the TESTS_RAN module-list behaviour |
+| `components/northstar-agent-runtime/tests/test_r7_tests_ran_compdir.py` | new — pins the TESTS_RAN module list, the run directory and the pytest file list |
+| `components/northstar-agent-runtime/tests/test_r7_referee_behaviour.py` | new — pins the BENCH_DIFF / CANARY / FULL_SUITE / baseline-pointer behaviour |
 | `components/northstar-agent-runtime/tests/test_r6_check_accuracy.py` | the deferred-threshold assertion replaced by the contract assertion |
 | `docs/design/r7-referee-corrections.md` | this document |
 
@@ -249,11 +360,11 @@ Outside the repo (referee scripts, not committed):
 
 | file | change |
 |---|---|
-| `/home/muse-newapi/b173-accept.sh` | TESTS_RAN module-list fix; NEW_TESTS threshold 1 → 9 |
+| `/home/muse-newapi/b173-accept.sh` | TESTS_RAN module-list + run-directory + pytest-path fix; NEW_TESTS threshold 1 → 9 |
 
 ---
 
-## 5. Open items this round did NOT close
+## 6. Open items this round did NOT close
 
 These remain FAIL and are **not** in scope for a referee correction — they are
 missing work, and the round-7 measurement is the first time the judge has
