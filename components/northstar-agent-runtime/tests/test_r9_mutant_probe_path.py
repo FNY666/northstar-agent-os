@@ -148,6 +148,131 @@ class MutantProbePathPatternTests(unittest.TestCase):
         self.assertIn("TMOD=test_shipped_module_docs", out.stdout)
         self.assertIn("COMPDIR=", out.stdout)
 
+    def test_a_root_level_test_file_yields_the_repository_root_as_the_run_directory(self):
+        # A root-level `tests/` has no component root, so the run directory
+        # must be the repository root itself.  The probe's derivation strips a
+        # trailing `/tests`; for a root-level path that leaves the literal
+        # `tests`, which is NOT the repository root -- the test's siblings
+        # (the module it exercises) live at the root, and a run from inside
+        # `tests/` cannot import them.
+        out = _run_bash(
+            "TESTF=tests/test_shipped_module_docs.py; "
+            "COMPDIR=$(dirname \"$TESTF\" | sed 's|/tests$||'); "
+            "[ \"$COMPDIR\" = tests ] && COMPDIR=.; "
+            "echo \"COMPDIR=$COMPDIR\""
+        )
+        self.assertIn("COMPDIR=.", out.stdout)
+
+    def test_a_component_level_test_file_yields_the_component_root(self):
+        # The other half of the derivation: a component-level test file must
+        # still give the component root, so the fix did not move it.
+        out = _run_bash(
+            "TESTF=components/northstar-agent-runtime/tests/test_x.py; "
+            "COMPDIR=$(dirname \"$TESTF\" | sed 's|/tests$||'); "
+            "echo \"COMPDIR=$COMPDIR\""
+        )
+        self.assertIn(
+            "COMPDIR=components/northstar-agent-runtime", out.stdout
+        )
+
+    def test_the_test_file_selector_rejects_a_non_test_python_file(self):
+        # The selector must select TEST files, not every python file.  A
+        # widened pattern that also matched `scripts/seal-delivery.py` would
+        # make the probe mutate a module and "run" it as a test.
+        for pattern in self.patterns:
+            with self.subTest(pattern=pattern):
+                matched = _run_bash(
+                    "printf '%s\\n' 'scripts/seal-delivery.py' | grep -E "
+                    + _shq(pattern)
+                )
+                self.assertEqual(
+                    matched.stdout.strip(),
+                    "",
+                    "the probe's pattern %r selects a non-test python file" % pattern,
+                )
+
+    def test_the_test_file_selector_rejects_a_design_document(self):
+        # The manifest also names design documents.  A pattern that matched
+        # those would make the probe try to run a markdown file as a test.
+        for pattern in self.patterns:
+            with self.subTest(pattern=pattern):
+                matched = _run_bash(
+                    "printf '%s\\n' 'docs/design/x.md' | grep -E " + _shq(pattern)
+                )
+                self.assertEqual(
+                    matched.stdout.strip(),
+                    "",
+                    "the probe's pattern %r selects a design document" % pattern,
+                )
+
+    def test_the_module_selector_still_excludes_test_files(self):
+        # The module selector is out of scope for the fix, but it must keep
+        # working: the probe mutates a MODULE, and picking a test file as
+        # the module would mutate the tests.
+        #
+        # The rule is "not a test file", by NAME.  The old rule excluded a
+        # test file by its DIRECTORY (`grep -v '/tests/'`), which did not
+        # exclude a ROOT-LEVEL test file -- `tests/test_x.py` starts with
+        # `tests/`, not `/tests/`.  Measured 2026-11-16: two slices name
+        # both a root-level test file and a module, and under the old rule
+        # the probe would have mutated the test file.
+        out = _run_bash(
+            "printf '%s\\n' 'tests/docbuild.py' 'tests/test_x.py' "
+            "'components/x/tests/test_y.py' "
+            "| grep -E '\\.py$' | grep -vE '(^|/)test_[^/]*\\.py$'"
+        )
+        self.assertEqual(out.stdout.strip(), "tests/docbuild.py")
+
+    def test_the_live_probe_excludes_a_root_level_test_file_from_the_module(self):
+        # The same property, read from the LIVE probe's own module selector
+        # rather than from a restatement of it.
+        match = re.search(
+            r"MOD=\$\(grep\s+-E\s+'([^']*)'\s+\"\$MANIFEST\"\s*\|\s*"
+            r"grep\s+-vE?\s+'([^']*)'",
+            self.text,
+        )
+        self.assertIsNotNone(
+            match,
+            "the probe's module selector was not found in %s" % PROBE,
+        )
+        _, exclusion = match.groups()
+        out = _run_bash(
+            "printf '%s\\n' 'tests/test_x.py' | grep -E '\\.py$' | grep -vE "
+            + _shq(exclusion)
+        )
+        self.assertEqual(
+            out.stdout.strip(),
+            "",
+            "the live probe's module selector admits a root-level test file",
+        )
+
+    def test_the_probe_script_is_syntactically_valid_bash(self):
+        # The probe lives outside the repository, so nothing else would catch
+        # a syntax error in it until it ran -- and it runs inside the
+        # referee, where a syntax error reads as a skipped check.
+        out = _run_bash("bash -n " + _shq(str(PROBE)))
+        self.assertEqual(
+            out.returncode,
+            0,
+            "the probe does not parse as bash: %s" % out.stderr.strip(),
+        )
+
+    def test_the_probe_still_declares_both_the_module_and_the_test_selection(self):
+        # The fix changed two grep selectors.  If either had been dropped
+        # rather than corrected, the probe would silently stop selecting a
+        # test file.  Both must be present.
+        self.assertIn(
+            "grep -v '/tests/'",
+            self.text,
+            "the probe no longer excludes test files when choosing the module",
+        )
+        self.assertGreaterEqual(
+            len(self.patterns),
+            2,
+            "the probe should select a test file in both the pairing loop and "
+            "the fallback; found %d pattern(s)" % len(self.patterns),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
