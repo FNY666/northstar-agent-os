@@ -190,23 +190,18 @@ class CommitSubjectRuleTests(unittest.TestCase):
             commits, or introduced by a commit whose subject names a slice.
 
         Measured 2026-11-16 over the batch's 84 slices: exactly ONE file
-        fails this rule -- `docs/design/merged-tree-review.md`, introduced
-        by the commit `71b606b8` whose subject is the literal string `c1`.
-        That commit is a bundle-delivery commit (it adds 16 `.bundle`
-        files) with a malformed subject; it names no slice at all, so the
-        file it introduced is invisible to the referee by name.  It is
-        listed below as the one known exception, with the reason.
+        failed this rule -- `docs/design/merged-tree-review.md`, introduced
+        by a bundle-delivery commit whose subject was the literal string
+        `c1`.  That commit named no slice at all, so the file it introduced
+        was invisible to the referee by name, and it had to be listed as a
+        known exception.
+
+        The `delivery-bundle-hygiene` slice (2026-11-16) reworded that
+        commit, so it now names the slice it carried.  The exception is
+        gone, and the rule is unconditional: **every** manifest file must
+        be accounted for.
         """
-        known_exceptions = {
-            (
-                "merged-tree-review",
-                "docs/design/merged-tree-review.md",
-            ): "introduced by 71b606b8, a bundle-delivery commit whose "
-            "subject is the literal string 'c1' -- it names no slice, so "
-            "the file it introduced is invisible by name.  The slice's own "
-            "commits (72f351cf, dbaff0ad) carry the module and its tests; "
-            "only this design doc rode in on the bundle commit.",
-        }
+        known_exceptions = {}
         unaccounted = []
         for slug in _slice_slugs():
             paths = _manifest_paths(slug)
@@ -234,10 +229,15 @@ class CommitSubjectRuleTests(unittest.TestCase):
         )
 
     def test_the_known_exceptions_are_still_exceptions(self):
-        """A known exception must not quietly become a normal case."""
-        known = {
-            ("merged-tree-review", "docs/design/merged-tree-review.md"),
-        }
+        """A known exception must not quietly become a normal case.
+
+        The list is empty: the `delivery-bundle-hygiene` slice reworded the
+        commit that used to carry the one exception, so the rule is now
+        unconditional.  This test remains so that a future exception cannot
+        be added silently -- if one is added, this test fails until it is
+        listed here with its reason.
+        """
+        known = {}
         for slug, path in known:
             self.assertIn(
                 path,
