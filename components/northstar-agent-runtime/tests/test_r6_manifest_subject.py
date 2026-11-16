@@ -48,6 +48,15 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 LIVE_ACCEPT = Path("/home/muse-newapi/b173-accept.sh")
+
+# The referee as it was BEFORE the round-6 patches.  The integrated referee
+# is built from this, not from the live script, so these tests keep their
+# coverage whether or not the coordinator has applied the patches yet.
+# (2026-11-16: building from the live script made every test in the class
+# skip once the patches were applied, because `patch` then correctly reports
+# "Reversed (or previously applied)".  A test that silently stops testing is
+# worse than no test.)
+BASE_ACCEPT = Path("/home/muse-newapi/b173-accept.sh.preround6")
 PATCH_FILES = [
     Path("/home/muse-newapi/b173-r6-manifest-integrity-fix.patch"),
     Path("/home/muse-newapi/b173-r6-check-accuracy-fix.patch"),
@@ -162,7 +171,15 @@ def _integrated_copy(workdir: Path) -> Path:
     target_dir = workdir / "integrated"
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / "b173-accept.sh"
-    shutil.copyfile(LIVE_ACCEPT, target)
+    # Build from the PRE-round-6 referee when it is available, so these
+    # tests keep their coverage whether or not the coordinator has applied
+    # the round-6 patches to the live script yet.  (2026-11-16: building
+    # from the live script made 10 of 12 tests skip once the patches were
+    # applied, because `patch` then reports "Reversed (or previously
+    # applied)" -- a test that silently stops testing is worse than no
+    # test.)  Fall back to the live script when the base is absent.
+    source = BASE_ACCEPT if BASE_ACCEPT.is_file() else LIVE_ACCEPT
+    shutil.copyfile(source, target)
     for pf in PATCH_FILES:
         res = subprocess.run(
             ["patch", "-p1", "-d", str(target_dir)],
@@ -354,7 +371,12 @@ class TestIntegratedScriptShape(SubjectBase):
         target_dir = self.workdir / "seq"
         target_dir.mkdir(parents=True, exist_ok=True)
         target = target_dir / "b173-accept.sh"
-        shutil.copyfile(LIVE_ACCEPT, target)
+        # From the PRE-round-6 referee when available: the live script may
+        # already carry the patches, and then `patch` correctly reports
+        # "Reversed (or previously applied)" and this test would fail for
+        # a reason that has nothing to do with what it is testing.
+        source = BASE_ACCEPT if BASE_ACCEPT.is_file() else LIVE_ACCEPT
+        shutil.copyfile(source, target)
         applied = []
         for pf in PATCH_FILES:
             res = subprocess.run(
