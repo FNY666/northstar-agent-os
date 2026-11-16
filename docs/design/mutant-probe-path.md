@@ -110,6 +110,13 @@ probe simply never ran them.
 
 ## 2. The fix
 
+Three changes, all in `b173-mutant.sh`.  The first is the defect the slice
+was opened for; the second and third were found by **reading the probe's own
+code** once the first defect was understood — they are the same blindness,
+one step further on.
+
+### 2.1 The test-file selector
+
 One pattern, in two places (the pairing loop and the fallback):
 
 ```diff
@@ -123,11 +130,43 @@ One pattern, in two places (the pairing loop and the fallback):
 `(^|/)` makes the leading separator **optional**: the component-level shape
 matches exactly as before, and the root-level shape now matches too.
 
-The `COMPDIR` derivation (`dirname "$TESTF" | sed 's|/tests$||'`) already
-handles a root-level `tests/` correctly — it leaves the literal `.`, which is
-the right run directory for a repository-level test.
+### 2.2 The module selector admitted a root-level test file
 
-### 2.1 Why the fix is in the probe and not in the manifests
+```diff
+-MOD=$(grep -E '\.py$' "$MANIFEST" | grep -v '/tests/' | head -n1)
++MOD=$(grep -E '\.py$' "$MANIFEST" | grep -vE '(^|/)test_[^/]*\.py$' | head -n1)
+```
+
+`grep -v '/tests/'` excludes a test file **by its directory**.  A test file at
+the repository root — `tests/test_x.py` — has no `/tests/` in it (the path
+starts with `tests/`, not `/tests/`), so the rule **admitted it**, and the
+probe would mutate a **test file** instead of a module.
+
+Measured over all 85 slices: the two rules pick the **same module** for every
+one of them.  They differ only when a manifest names **both** a root-level
+test file and a module — which two slices do (`seal-slice6`,
+`shipped-module-docs`) — and there the old rule would have mutated the test
+file.
+
+The rule is now "not a test file", by **name**.
+
+### 2.3 The run directory was wrong for a root-level test file
+
+```diff
+ COMPDIR=$(dirname "$TESTF" | sed 's|/tests$||')
++[ "$COMPDIR" = "tests" ] && COMPDIR="."
+```
+
+`dirname` of a root-level test file is `tests`, and the derivation stripped a
+trailing `/tests` — which a bare `tests` does not have.  The result was the
+literal string `tests`, and the probe ran the test module from **inside** the
+tests directory, where the module it exercises (at the repository root) is
+**not importable**.
+
+The derivation now handles the root-level case explicitly: a `tests`
+directory with no parent is the repository root.
+
+### 2.4 Why the fix is in the probe and not in the manifests
 
 The alternative would be to move the two slices' test files under a
 component.  That is worse on every axis:
@@ -140,7 +179,7 @@ component.  That is worse on every axis:
   part of the population it measures is defective; the population should not
   have to be shaped to suit the instrument.
 
-## 3. The tests (5 methods)
+## 3. The tests (13 methods)
 
 `components/northstar-agent-runtime/tests/test_r9_mutant_probe_path.py` —
 **behavioural**: they extract the live probe's own patterns and run them, so a
@@ -150,14 +189,22 @@ hardcoded copy in the test would pass while the probe regressed.
 | test | what it pins |
 |---|---|
 | `test_the_probe_has_at_least_one_test_file_pattern` | the extractor found the selectors at all |
-| `test_every_test_file_pattern_matches_a_repository_root_test_file` | **the defect**: a root-level test file must be selectable |
+| `test_every_test_file_pattern_matches_a_repository_root_test_file` | **defect 1**: a root-level test file must be selectable |
 | `test_every_test_file_pattern_still_matches_a_component_test_file` | the fix must not break the shape that already worked |
-| `test_no_test_file_pattern_requires_a_leading_directory_separator` | the defect's exact shape, as a property of the pattern |
+| `test_no_test_file_pattern_requires_a_leading_directory_separator` | defect 1's exact shape, as a property of the pattern |
 | `test_a_repository_root_test_file_is_selectable_end_to_end` | the whole selection path: file → module name → run directory |
+| `test_a_root_level_test_file_yields_the_repository_root_as_the_run_directory` | **defect 3**: the run directory for a root-level file |
+| `test_a_component_level_test_file_yields_the_component_root` | the run directory for a component-level file |
+| `test_the_test_file_selector_rejects_a_non_test_python_file` | the selector selects **test** files, not every python file |
+| `test_the_test_file_selector_rejects_a_design_document` | the selector does not match the manifest's design documents |
+| `test_the_module_selector_still_excludes_test_files` | **defect 2**: the module selector excludes test files |
+| `test_the_live_probe_excludes_a_root_level_test_file_from_the_module` | the same, read from the **live** probe's own text |
+| `test_the_probe_script_is_syntactically_valid_bash` | the probe parses as bash (it lives outside the repository, so nothing else would catch a syntax error until the referee ran it) |
+| `test_the_probe_still_declares_both_the_module_and_the_test_selection` | neither selector was dropped rather than corrected |
 
 The extractor deliberately picks only the patterns that mention `test_`, so
-the probe's *module* selector (`grep -E '\.py$' | grep -v '/tests/'`) is not
-in scope — that one is correct.
+the probe's *module* selector is not in scope for the first group — that one
+has its own two tests.
 
 ## 4. Verification
 
