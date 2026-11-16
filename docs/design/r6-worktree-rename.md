@@ -233,11 +233,12 @@ background's, not because the referee behaves differently:
 | all 83 manifests (measured here) | **52** | **31** | **54** | **29** |
 | the 74 slices that have BOTH a taskbook and a report | **52** | **22** | **54** | **20** |
 
-The 9-slug difference between the two populations is slices with a
-manifest but no taskbook and/or no report — `slice1`–`slice6`,
-`runtime-registration`, and the two not-yet-committed slices
-`r6-test-count` and `r6-worktree-rename`. The PASS count is identical in
-both populations because those 9 are all FAIL either way.
+The 9-slug difference between the two populations is `slice1`, `slice2`,
+`slice3`, `slice4`, `slice5`, `slice6`, `runtime-registration`,
+`r6-test-count` and `r6-worktree-rename` — slices with a manifest but no
+taskbook and/or no report (the last two had not committed when the run was
+made). The PASS count is identical in both populations because those 9 are
+all FAIL either way.
 
 **Net change: +2 PASS / −2 FAIL** over all 83; the four changed slices are
 attributed one by one in §5. The background's "net +1 PASS" was measured
