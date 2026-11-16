@@ -1,13 +1,25 @@
 """Single source of truth for runtime module registration.
 
-Every top-level module of this component must be listed in
-``pyproject.toml``'s ``[tool.setuptools] py-modules`` array, otherwise it
-works in the checkout and disappears after ``pip install .``.  The guarantee
-is asserted by ``tests/test_module_layout.py``; this module is the other
-half: a declarative registry that names every registered module, its owning
-slice, its registration date and a one-sentence description, plus a
-three-way check that the registry, ``pyproject.toml`` and the files on disk
-all agree.
+Every module of this component must be *installed* -- otherwise it works in
+the checkout and disappears after ``pip install .``.  There are two
+installation mechanisms, and the registry covers both:
+
+  * the flat modules, through ``pyproject.toml``'s
+    ``[tool.setuptools] py-modules`` array;
+  * the package members, through ``[tool.setuptools.packages.find]``'s
+    ``include`` patterns -- a package's members cannot appear in
+    ``py-modules`` at all, because that array lists flat names only.
+
+The guarantee is asserted by ``tests/test_module_layout.py``; this module
+is the other half: a declarative registry that names every registered
+module, its owning slice, its registration date and a one-sentence
+description, plus a check that the registry, the installed surface and the
+files on disk all agree.
+
+A registered module's name is its *importable* name -- ``cli`` for a flat
+module, ``tools.shell`` for a package member.  The check is structural (it
+never imports the module), so a name can never smuggle a path, a keyword or
+an empty segment.
 
 The registry is data, not code: it is a tuple of frozen records.  Mutating
 one raises ``TypeError`` -- the records are immutable -- so the list cannot
@@ -68,10 +80,11 @@ class RegistrationError(AssertionError):
 class Registration:
     """One registered runtime module.
 
-    ``module`` is the importable top-level name (the file stem).
+    ``module`` is the importable name: the file stem for a flat module
+    (``cli``), the dotted name for a package member (``tools.shell``).
     ``slice_slug`` names the slice that introduced the module.
-    ``registered_on`` is the ISO date the module entered ``py-modules`` --
-    supplied by the caller, never read from the wall clock here.
+    ``registered_on`` is the ISO date the module entered the installed
+    surface -- supplied by the caller, never read from the wall clock here.
     ``description`` is one sentence saying what the module is for.
 
     Instances are immutable: every attribute is read-only, and assigning to

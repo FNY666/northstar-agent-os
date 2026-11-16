@@ -362,3 +362,39 @@ OK
 
 Both entangled slices close together: `runtime-registration-closure` and
 `runtime-registration` both PASS.
+
+---
+
+## Correction (2026-11-16) — this document described a three-way check that was blind
+
+The `installed-surface-registration` slice found that the "three-way
+agreement" this document describes was complete over **1613 of the 1635
+installed modules**, and that the framing below excluded the other 22 by
+definition.
+
+> **`module`** | the importable top-level name | the file stem
+
+> Three sets must be equal:
+> 1. the module names in the registry,
+> 2. the module names declared in `pyproject.toml`'s `py-modules`,
+> 3. the `*.py` files in the component directory.
+
+A package member is importable, and it is a runtime module, but it is not
+**top-level** — and `py-modules` lists flat names only, so a package member
+cannot appear in set 2 either. The 22 missed modules include
+`tools.shell`, `tools.sandbox`, `tools.seccomp`, `tools.pledge` and
+`providers.base`.
+
+Measured before the fix:
+
+    registry: 1613   flat py-modules: 1613   package members: 22
+    installed surface: 1635
+    installed but not registered: 22
+
+The check is now a **four-way** agreement over the *installed* surface
+(flat modules **∪** package members), the registry can name a dotted
+module, and `assert_registration_matches_installed()` states the invariant
+directly. See `docs/design/installed-surface-registration.md`.
+
+Nothing above is wrong about the flat modules; it is incomplete, and the
+omission was structural rather than accidental.
