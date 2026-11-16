@@ -91,7 +91,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 /home/muse-newapi/b173-mutant.py \
   --workdir /tmp/jh-repro/components/northstar-agent-runtime
 ```
 
-**Measured here** (pinned commit `f1f46a28`, module `refusal_row.py`):
+**Measured here** (pinned commit `190d9198`, module `refusal_row.py`):
 
 | run | result |
 |---|---|
@@ -180,8 +180,8 @@ worktree, and the probe reports "all mutants survived" forever.
 
 ```bash
 REPO=/home/muse-newapi/northstar-agent-os
-for spec in "vina:artifact_authority:test_artifact_authority:85587a09" \
-            "tombstone:cancellation_tombstone:test_cancellation_tombstone:9c88902a"; do
+for spec in "vina:artifact_authority:test_artifact_authority:831b0312" \
+            "tombstone:cancellation_tombstone:test_cancellation_tombstone:695a25b7"; do
   IFS=: read slug mod tmod sha <<< "$spec"
   for target in "$sha" HEAD; do
     git -C "$REPO" worktree add --detach /tmp/jh-$slug "$target"
@@ -198,17 +198,17 @@ does not confound the measurement):
 
 | slice | module | pinned commit | HEAD |
 |---|---|---|---|
-| `vina` | `artifact_authority.py` | `85587a09` → **killed 0/3** | **killed 3/3** |
-| `tombstone` | `cancellation_tombstone.py` | `9c88902a` → **killed 0/3** | **killed 3/3** |
+| `vina` | `artifact_authority.py` | `831b0312` → **killed 0/3** | **killed 3/3** |
+| `tombstone` | `cancellation_tombstone.py` | `695a25b7` → **killed 0/3** | **killed 3/3** |
 
 The fixes do exist — under prefixes `B173 vina-mutant-blindspots:`
-(`8aee15ee`) and `B173 tombstone-mutant-blindspots:` (`82bdcee9`):
+(`2f89b154`) and `B173 tombstone-mutant-blindspots:` (`f8562b87`):
 
 ```bash
-git -C "$REPO" log --format="%H %s" 85587a09..HEAD -- \
+git -C "$REPO" log --format="%H %s" 831b0312..HEAD -- \
   components/northstar-agent-runtime/artifact_authority.py \
   components/northstar-agent-runtime/tests/test_artifact_authority.py
-# 8aee15eebb8065c5b30f754f532eac9c96b924c5 B173 vina-mutant-blindspots: kill or@150, or@184, gt@186 ...
+# 2f89b154bb8065c5b30f754f532eac9c96b924c5 B173 vina-mutant-blindspots: kill or@150, or@184, gt@186 ...
 ```
 
 ### 3.3 The fix (conservative version)
@@ -568,8 +568,8 @@ The verdict therefore only flips where the killed count crosses zero.
 
 | slice | before | after | why |
 |---|---|---|---|
-| `vina` | 0/3 | **3/3** | D-23: the fix lives in `8aee15ee` (`B173 vina-mutant-blindspots:`), which the pinned grep could not find |
-| `tombstone` | 0/3 | **3/3** | D-23: the fix lives in `82bdcee9` (`B173 tombstone-mutant-blindspots:`), same cause |
+| `vina` | 0/3 | **3/3** | D-23: the fix lives in `2f89b154` (`B173 vina-mutant-blindspots:`), which the pinned grep could not find |
+| `tombstone` | 0/3 | **3/3** | D-23: the fix lives in `f8562b87` (`B173 tombstone-mutant-blindspots:`), same cause |
 | `acceptance-conformance` | 0/3 | **1/3** | D-22: the default run reused a stale `.pyc` and reported a false 0/3 |
 | `deterministic-gate-score` | 0/3 | **1/3** | D-22, same cause |
 | `event-condenser` | 0/3 | **1/3** | D-22, same cause |

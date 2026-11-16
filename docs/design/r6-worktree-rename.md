@@ -341,10 +341,10 @@ the arithmetic differs because the population differs.
 
 This is the case that proves the new counter is right.
 
-The slice's commit is `1c947e7b`:
+The slice's commit is `53640d0e`:
 
 ```
-$ git show --name-only --format= 1c947e7b
+$ git show --name-only --format= 53640d0e
 docs/design/annotation-pin.md
 docs/design/orphan-adoption.md
 ```
@@ -355,10 +355,10 @@ The old counter found exactly one line in the whole diff matching
 `^\+.*def test_`, and it is **prose inside a markdown table**:
 
 ```
-$ git show 1c947e7b | grep -c '^\+.*def test_'
+$ git show 53640d0e | grep -c '^\+.*def test_'
 1
 
-$ git show 1c947e7b | grep -n '^\+.*def test_'
+$ git show 53640d0e | grep -n '^\+.*def test_'
 122:+| 1 | `tests/test_revision_checked_tool_results.py` | 6 new test methods (`test_result_as_dict_carries_the_schema_pin`, `test_with_result_revision_returns_a_copy_and_leaves_the_original`, `test_with_result_revision_validates_its_argument`, `test_evidence_entries_lists_retained_results_in_order`, `test_outcome_record_names_both_revisions_and_the_verdict`, `test_ledger_records_every_outcome_in_order`) | **keep** | Each method asserts behaviour that HEAD does not have: `git show HEAD:...\|grep -c 'def test_'` returns 0 for all six names. They cover the schema pin on `as_dict`, ...
 ```
 
@@ -392,7 +392,7 @@ check and the exact cause. The four changed verdicts:
 | `artifact-completion` | `REPORT_NUMBERS` | `FAIL REPORT_NUMBERS see detail above` | `PASS REPORT_NUMBERS jsonl=3c2b6040-….jsonl` | **R6-12** — the old `grep -rl <canary> … \| head -n1` picked the wrong session; the deterministic resolver picks the right one, so the numbers now cross-check |
 | `r6-12-session-resolution` | `REPORT_NUMBERS` | `FAIL REPORT_NUMBERS see detail above` | `SKIP REPORT_NUMBERS no session resolved for canary iOgF8SrRoZvaqxTG7HFg` | **R6-12** — the resolver finds **no** session for this canary; `SKIP` is the honest answer ("no session / ambiguous"), never a guess |
 | `tombstone` | `REPORT_NUMBERS` | `FAIL REPORT_NUMBERS see detail above` | `SKIP REPORT_NUMBERS no session resolved for canary 9lULp0MNufmuQZ6OGlNL` | **R6-12** — same: no session resolved, `SKIP` |
-| `capability-ceiling-probe` | `COMMIT` | `PASS COMMIT 9ea57f23 (1 commit(s))` | `FAIL COMMIT none` | **R6-1b/R6-4** — the slice owns **no** commit whose subject is `B173 capability-ceiling-probe:`. The old referee borrowed `9ea57f23` (`B173 scorer-disagreement: …`) because that commit happened to touch a path in the manifest. The patched `COMMIT` refuses to borrow another slice's commit |
+| `capability-ceiling-probe` | `COMMIT` | `PASS COMMIT 4e5a9657 (1 commit(s))` | `FAIL COMMIT none` | **R6-1b/R6-4** — the slice owns **no** commit whose subject is `B173 capability-ceiling-probe:`. The old referee borrowed `4e5a9657` (`B173 scorer-disagreement: …`) because that commit happened to touch a path in the manifest. The patched `COMMIT` refuses to borrow another slice's commit |
 
 `capability-ceiling-probe` is the one slice that gets **worse**. It was
 "crediting" another slice's commit; the patch exposes that. This is

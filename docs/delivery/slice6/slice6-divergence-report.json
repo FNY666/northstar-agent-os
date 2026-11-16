@@ -2,7 +2,7 @@
   "auditor_available": true,
   "auditor_only": [
     {
-      "command": "test \"$(git rev-parse --verify '38d175e9565c8ae46ee5ef7a8be8d874ea3038f0^{tree}')\" = 6bc4388db4064a4ef0abfbb045cfa4f6add0203f",
+      "command": "test \"$(git rev-parse --verify '7faa3e43f08e137f59944010fa5e91a8ff203671^{tree}')\" = 6bc4388db4064a4ef0abfbb045cfa4f6add0203f",
       "description": "Assert the start commit tree has the pinned Git tree id 6bc4388db4064a4ef0abfbb045cfa4f6add0203f.",
       "id": "pinned-start-tree"
     },

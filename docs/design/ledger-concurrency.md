@@ -274,7 +274,7 @@ executor's own failure.
   list (`artifact_authority`, `cancellation_tombstone`,
   `ledger_concurrency`, `retry_config`, `strands_checkpoint`), so this
   slice adds no new failure — but the declaration is owed. Same open item
-  as the `vina` slice (commit `85587a09`).
+  as the `vina` slice (commit `831b0312`).
 * **No cross-process test in this slice.** The gapless-sequence and
   idempotency guarantees are exercised with concurrent *threads* in one
   process. The sidecar lock is an `fcntl` lock, so the cross-process

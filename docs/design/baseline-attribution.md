@@ -1,7 +1,7 @@
 # Baseline attribution — what the 30 full-suite failures actually are
 
 **Date:** 2026-11-14
-**Branch:** `batch-173-moltbook-absorb` (HEAD `27dad86b`)
+**Branch:** `batch-173-moltbook-absorb` (HEAD `d08958d6`)
 **Measured on:** 140 (`muse-newapi@140.245.125.82`), kernel `7.0.0-1009-oracle`
 (Oracle UEK), **aarch64**, Python 3.14.4, bubblewrap 0.11.1, Landlock ABI v8.
 
@@ -48,8 +48,8 @@ Each was reproduced in isolation (see §4 for the measurement method):
 |---|---|---|---|
 | **D-1** | the bwrap seccomp filter fd is never rewound, so bwrap reads an **empty** BPF program and the kernel rejects it with `EINVAL` | `components/northstar-agent-runtime/tools/os_sandbox.py:316-319` (probe) and `:1007-1013` (production) | 4 test items + 2 bench items |
 | **D-2** | `_runtime_read_paths()` returns `/lib64`, which does not exist on this aarch64 host; the pledge loader opens every rule path with `O_DIRECTORY` and dies on the missing one | `components/northstar-agent-runtime/tools/sandbox.py:158,171` + `tools/pledge.py:417` | 8 test items + 2 bench items |
-| **D-3** | the `bash_parser` fail-closed AST gate (merged in from batch-172, commit `7defa29f`) **denies the governance bench's own live commands** — `for` loops, heredocs and tabs — so the bench's live legs can never produce their marker files | `components/northstar-agent-runtime/bash_parser.py:80,139,171-172,823` wired in at `governed_action_runner.py:589-611` | 5 bench items |
-| **D-4** | `merged_tree_review.py` was added to the runtime **after** the `runtime-registration-closure` slice and was never registered in `py-modules` or the registry | `components/northstar-agent-runtime/merged_tree_review.py` (commits `72f351cf`, `dbaff0ad`) | 4 test items |
+| **D-3** | the `bash_parser` fail-closed AST gate (merged in from batch-172, commit `35a66b24`) **denies the governance bench's own live commands** — `for` loops, heredocs and tabs — so the bench's live legs can never produce their marker files | `components/northstar-agent-runtime/bash_parser.py:80,139,171-172,823` wired in at `governed_action_runner.py:589-611` | 5 bench items |
+| **D-4** | `merged_tree_review.py` was added to the runtime **after** the `runtime-registration-closure` slice and was never registered in `py-modules` or the registry | `components/northstar-agent-runtime/merged_tree_review.py` (commits `ed06b163`, `4e43c32a`) | 4 test items |
 
 D-1 and D-2 are the same pair of defects the brief predicted would be
 "kernel capability missing". They are not: **this host supports seccomp and
@@ -142,13 +142,13 @@ holds **27** items. It was taken before two later slices landed:
 | Step | What happened | Baseline size |
 |---|---|---|
 | 1 | the old baseline was taken | 27 |
-| 2 | `runtime-registration` + `runtime-registration-closure` (commits `82e01194`, `e4236448`, `4747bf54`, `50431914`, `b6e399cc`, 2026-11-14 05:32–05:37) registered the 42 undeclared modules; the item `FAIL: test_every_module_is_installed` **shrank away** | 26 |
-| 3 | `merged-tree-review` (commits `72f351cf`, `dbaff0ad`, 2026-11-14 07:02–07:14) added `merged_tree_review.py` **without** registering it; the item came back, and the stricter registry test added **two** more | 30 |
+| 2 | `runtime-registration` + `runtime-registration-closure` (commits `5708edb3`, `77332a31`, `f197c6f2`, `adcaad02`, `eebb2a70`, 2026-11-14 05:32–05:37) registered the 42 undeclared modules; the item `FAIL: test_every_module_is_installed` **shrank away** | 26 |
+| 3 | `merged-tree-review` (commits `ed06b163`, `4e43c32a`, 2026-11-14 07:02–07:14) added `merged_tree_review.py` **without** registering it; the item came back, and the stricter registry test added **two** more | 30 |
 
 Step 2 is verified directly: at the closure commit the layout test is green.
 
 ```
-$ git worktree add /tmp/wt-closure b6e399cc
+$ git worktree add /tmp/wt-closure eebb2a70
 $ cd /tmp/wt-closure/components/northstar-agent-runtime
 $ PYTHONPATH=.:tests python3 -m unittest test_module_layout
 Ran 8 tests in 0.078s
@@ -156,7 +156,7 @@ OK
 ```
 
 Step 3 is verified by commit ordering (`git merge-base --is-ancestor`):
-`b6e399cc` (closure) is an ancestor of `72f351cf` (merged-tree-review), i.e.
+`eebb2a70` (closure) is an ancestor of `ed06b163` (merged-tree-review), i.e.
 the closure ran **before** the module was added. At HEAD the layout test
 fails again, with the module named:
 
@@ -331,7 +331,7 @@ inconsistency, not a design decision.
 
 **D-3 — the `bash_parser` gate denies the governance bench's own live commands.**
 
-`bash_parser` was merged into this branch from batch-172 (commit `7defa29f`,
+`bash_parser` was merged into this branch from batch-172 (commit `35a66b24`,
 2026-11-06) and wired into the Shell gate at
 `governed_action_runner.py:589-611` as a fail-closed AST allowlist. Its
 pre-parse check rejects **any** control character

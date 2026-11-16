@@ -213,7 +213,7 @@ class TestCheckComparison:
 
     def test_slice6_blind_acceptance_checks_and_missing_seal_are_reported(self, tmp_path):
         repo = Path(__file__).resolve().parents[3]
-        end_commit = _git(repo, "rev-parse", "a49d073f^{commit}")
+        end_commit = _git(repo, "rev-parse", "a08c983a85acb7175b3987291138653b04f79522^{commit}")
         start_commit = _git(repo, "rev-parse", f"{end_commit}^")
         claim = (
             "This delivery revokes live sockets when authorization leases are withdrawn "

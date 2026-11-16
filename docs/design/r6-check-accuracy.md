@@ -553,7 +553,7 @@ The 4 extra items are **not caused by this slice** — all four reproduce at
 
 | item | reproduces at `HEAD~2`? | root cause |
 |------|--------------------------|------------|
-| `FAIL: test_the_check_agrees_with_the_layout_test (test_runtime_registration.RealRepositoryCheckTests...)` | **yes** | `merged_tree_review.py` is on disk and tracked but is **not registered** in `runtime_registration.py` (`grep -c merged_tree_review runtime_registration.py` → 0). The module was added by `dbaff0ad (B173 merged-tree-review)`, which never updated the registry. |
+| `FAIL: test_the_check_agrees_with_the_layout_test (test_runtime_registration.RealRepositoryCheckTests...)` | **yes** | `merged_tree_review.py` is on disk and tracked but is **not registered** in `runtime_registration.py` (`grep -c merged_tree_review runtime_registration.py` → 0). The module was added by `4e43c32a (B173 merged-tree-review)`, which never updated the registry. |
 | `FAIL: test_the_check_passes_on_the_current_repository (test_runtime_registration.RealRepositoryCheckTests...)` | **yes** | same root cause |
 | `FAIL: test_the_registry_covers_every_module_on_disk (test_runtime_registration.RegistryShapeTests...)` | **yes** | same root cause |
 | `FAIL: test_shell_handler_timeout_is_is_error (test_os_sandbox.ShellToolTests...)` | **yes** (and it is **flaky**) | see below |

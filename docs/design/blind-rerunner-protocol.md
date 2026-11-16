@@ -63,8 +63,8 @@ are retained as asked:
 
 ## Slice 6 acceptance run
 
-Target: commit `a49d073f` (`B173 slice6: live-socket revocation -- lease table, push+backstop withdrawal, terminate, network-error surfacing`), starting
-at parent `38d175e9`. Blind claim: "This delivery revokes live sockets when
+Target: commit `a08c983a` (`B173 slice6: live-socket revocation -- lease table, push+backstop withdrawal, terminate, network-error surfacing`), starting
+at parent `7faa3e43`. Blind claim: "This delivery revokes live sockets when
 authorization leases are withdrawn and surfaces termination and network
 errors." The blind checks were derived from the start-state source/tests, without
 opening a Slice 6 receipt, seal, or delivery summary:

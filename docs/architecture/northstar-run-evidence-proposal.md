@@ -1,7 +1,7 @@
 # Northstar Run Evidence 模块设计方案
 
 **状态：** 提案（Proposed；尚未实现）
-**源码基线：** `origin/main`，提交 `cef3607`（session replay UI 合并版）
+**源码基线：** `origin/main`，提交 `5bc9441`（session replay UI 合并版）
 **建议组件名：** `northstar-run-evidence`
 **设计目标：** 为一次 Northstar run 建立可离线复核、可识别篡改、并可由受信任宿主签封的证据包。
 

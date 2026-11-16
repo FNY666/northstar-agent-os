@@ -2,7 +2,7 @@
 
 *Module:* `components/northstar-agent-runtime/stale_checkpoint_gate.py`
 *Tests:* `components/northstar-agent-runtime/tests/test_stale_checkpoint_gate.py`
-*Slice:* B173, branch `batch-173-moltbook-absorb`, commit `96ee730b`
+*Slice:* B173, branch `batch-173-moltbook-absorb`, commit `4041fdf3`
 
 ## The gap, read from the code
 

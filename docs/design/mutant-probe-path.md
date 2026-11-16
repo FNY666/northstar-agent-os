@@ -238,11 +238,11 @@ OK
 
 ```
 $ bash b173-mutant.sh seal-slice6
-mutant probe: slug=seal-slice6 commit=c9e8885b module=scripts/seal-delivery.py test=test_delivery_seal
+mutant probe: slug=seal-slice6 commit=f88b05d0 module=scripts/seal-delivery.py test=test_delivery_seal
 MUTANT RESULT: killed 1/1
 
 $ bash b173-mutant.sh shipped-module-docs
-mutant probe: slug=shipped-module-docs commit=f5d8b2cb module=tests/docbuild.py test=test_shipped_module_docs
+mutant probe: slug=shipped-module-docs commit=7c289873 module=tests/docbuild.py test=test_shipped_module_docs
 MUTANT RESULT: killed 1/1
 ```
 

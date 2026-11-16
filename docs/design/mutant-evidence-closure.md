@@ -152,70 +152,70 @@ construct list plus the notes in §6.
 Measured with the cache-free probe, at the pinned commit and at HEAD.
 | slice | module | test | pinned k/3 | pinned commit | HEAD k/3 | first-3 constructs |
 |---|---|---|---|---|---|---|
-| `actionable-digest` | `actionable_digest.py` | `test_actionable_digest.py` | **3/3** | `a1f474bb` | 3/3 | lt@118 lt@119 or@120 |
-| `agent-handoff` | `agent_handoff.py` | `test_agent_handoff.py` | **3/3** | `4a8bc06a` | 3/3 | gt@214 gt@226 gt@236 |
-| `ageofagents` | `ledger_concurrency.py` | `test_ledger_concurrency.py` | **1/3** | `0471f09a` | 1/3 | or@302 eq@390 or@475 |
-| `anthropic-effort-scaling` | `effort_scaling.py` | `test_effort_scaling.py` | **1/3** | `c22928e6` | 1/3 | lt@174 or@174 lt@180 |
-| `asinhhc` | `key_custody.py` | `test_key_custody.py` | **1/3** | `27d9aff3` | 1/3 | lt@193 eq@286 or@336 |
-| `audit-head` | `audit_head_holder.py` | `test_audit_head_holder.py` | **0/3** | `9ed4873e` | 0/3 | or@176 or@178 or@184 |
-| `autogen-speaker-selector` | `speaker_selector.py` | `test_speaker_selector.py` | **2/3** | `0514c8cc` | 2/3 | gt@125 gt@132 or@141 |
-| `c52` | `grant_pin_ledger.py` | `test_grant_pin_ledger.py` | **1/3** | `866004bb` | 1/3 | eq@139 eq@142 gt@143 |
-| `c54` | `deny_hotpath.py` | `test_deny_hotpath.py` | **2/3** | `8b4ece99` | 2/3 | retF@117 or@247 gt@249 |
-| `c58` | `bash_parser.py` | `test_bash_parser.py` | **3/3** | `5f2d6cbb` | 3/3 | gt@127 retT@128 gt@129 |
-| `cost-per-delivery` | `cost_per_delivery.py` | `test_cost_per_delivery.py` | **2/3** | `ba11d3c2` | 2/3 | or@208 or@215 lt@220 |
-| `cwl-episode-eviction` | `episode_eviction.py` | `test_episode_eviction.py` | **3/3** | `6f55a483` | 3/3 | eq@182 eq@186 eq@219 |
-| `deterministic-gate-score` | `deterministic_gate_score.py` | `test_deterministic_gate_score.py` | **3/3** | `50bda24f` | 3/3 | or@155 or@159 or@197 |
-| `diviner` | `scope_qualifier.py` | `test_scope_qualifier.py` | **0/3** | `37c25a6f` | 0/3 | or@190 or@192 gt@194 |
-| `dynamiq` | `retry_config.py` | `test_retry_config.py` | **1/3** | `a67caf45` | 1/3 | or@165 lt@167 or@171 |
-| `e2b` | `egress_client.py` | `test_egress_client.py` | **0/3** | `b3c3551f` | 0/3 | eq@63 eq@65 eq@68 |
-| `effect-directive` | `effect_directive.py` | `test_effect_directive.py` | **3/3** | `4be4ed52` | 3/3 | or@173 or@177 or@224 |
-| `event-condenser` | `event_condenser.py` | `test_event_condenser.py` | **3/3** | `85ab158b` | 3/3 | or@127 or@132 or@146 |
-| `evidence-independence` | `evidence_independence.py` | `test_evidence_independence.py` | **1/3** | `377775ff` | 1/3 | or@226 and@284 and@288 |
+| `actionable-digest` | `actionable_digest.py` | `test_actionable_digest.py` | **3/3** | `6c894ba9` | 3/3 | lt@118 lt@119 or@120 |
+| `agent-handoff` | `agent_handoff.py` | `test_agent_handoff.py` | **3/3** | `249f9a5c` | 3/3 | gt@214 gt@226 gt@236 |
+| `ageofagents` | `ledger_concurrency.py` | `test_ledger_concurrency.py` | **1/3** | `b970b457` | 1/3 | or@302 eq@390 or@475 |
+| `anthropic-effort-scaling` | `effort_scaling.py` | `test_effort_scaling.py` | **1/3** | `9b00638e` | 1/3 | lt@174 or@174 lt@180 |
+| `asinhhc` | `key_custody.py` | `test_key_custody.py` | **1/3** | `ddbd2c5a` | 1/3 | lt@193 eq@286 or@336 |
+| `audit-head` | `audit_head_holder.py` | `test_audit_head_holder.py` | **0/3** | `265ff349` | 0/3 | or@176 or@178 or@184 |
+| `autogen-speaker-selector` | `speaker_selector.py` | `test_speaker_selector.py` | **2/3** | `8a3bfbc5` | 2/3 | gt@125 gt@132 or@141 |
+| `c52` | `grant_pin_ledger.py` | `test_grant_pin_ledger.py` | **1/3** | `0dc81ceb` | 1/3 | eq@139 eq@142 gt@143 |
+| `c54` | `deny_hotpath.py` | `test_deny_hotpath.py` | **2/3** | `a1c7e688` | 2/3 | retF@117 or@247 gt@249 |
+| `c58` | `bash_parser.py` | `test_bash_parser.py` | **3/3** | `37c0a2f3` | 3/3 | gt@127 retT@128 gt@129 |
+| `cost-per-delivery` | `cost_per_delivery.py` | `test_cost_per_delivery.py` | **2/3** | `288799f2` | 2/3 | or@208 or@215 lt@220 |
+| `cwl-episode-eviction` | `episode_eviction.py` | `test_episode_eviction.py` | **3/3** | `5e4e66d4` | 3/3 | eq@182 eq@186 eq@219 |
+| `deterministic-gate-score` | `deterministic_gate_score.py` | `test_deterministic_gate_score.py` | **3/3** | `c08a86ad` | 3/3 | or@155 or@159 or@197 |
+| `diviner` | `scope_qualifier.py` | `test_scope_qualifier.py` | **0/3** | `54e5c8dd` | 0/3 | or@190 or@192 gt@194 |
+| `dynamiq` | `retry_config.py` | `test_retry_config.py` | **1/3** | `920dc41d` | 1/3 | or@165 lt@167 or@171 |
+| `e2b` | `egress_client.py` | `test_egress_client.py` | **0/3** | `c9b1fc4f` | 0/3 | eq@63 eq@65 eq@68 |
+| `effect-directive` | `effect_directive.py` | `test_effect_directive.py` | **3/3** | `a117a03d` | 3/3 | or@173 or@177 or@224 |
+| `event-condenser` | `event_condenser.py` | `test_event_condenser.py` | **3/3** | `ffd3eb08` | 3/3 | or@127 or@132 or@146 |
+| `evidence-independence` | `evidence_independence.py` | `test_evidence_independence.py` | **1/3** | `70288f1b` | 1/3 | or@226 and@284 and@288 |
 | `fable` | `—` | `—` | **SKIP** | `—` | SKIP | — |
-| `false-green-detector` | `false_green_detector.py` | `test_false_green_detector.py` | **3/3** | `cb00db80` | 3/3 | or@198 lt@201 and@201 |
-| `fieldnotes` | `planted_fault.py` | `test_planted_fault.py` | **3/3** | `3b5c482a` | 3/3 | or@283 and@293 eq@341 |
-| `horizon` | `long_horizon.py` | `test_long_horizon.py` | **1/3** | `72d0aff4` | 1/3 | or@114 or@192 lt@194 |
-| `horizon-gate` | `horizon_gate.py` | `test_horizon_gate.py` | **2/3** | `69c64164` | 2/3 | or@245 lt@250 or@257 |
-| `intent-bound-retry` | `intent_bound_retry.py` | `test_intent_bound_retry.py` | **2/3** | `66eb3c9f` | 2/3 | retT@157 retF@173 and@204 |
-| `jido-statebudget` | `state_budget.py` | `test_state_budget.py` | **2/3** | `2c48ef0a` | 2/3 | or@177 or@183 lt@185 |
-| `langgraph` | `durable_resume.py` | `test_durable_resume.py` | **2/3** | `99afa4e9` | 2/3 | or@156 or@164 lt@203 |
-| `langgraph-durability` | `checkpoint_durability.py` | `test_checkpoint_durability.py` | **1/3** | `ffb14101` | 1/3 | eq@141 retF@382 retT@383 |
-| `langgraph-retry-clears-writes` | `retry_clears_writes.py` | `test_retry_clears_writes.py` | **2/3** | `6e9c4f7f` | 2/3 | retF@152 retT@155 eq@170 |
-| `leased-task-claim` | `leased_task_claim.py` | `test_leased_task_claim.py` | **3/3** | `1c7e44b1` | 3/3 | gt@206 or@336 or@342 |
-| `lightningzero` | `coverage_manifest.py` | `test_coverage_manifest.py` | **3/3** | `ceedc942` | 3/3 | or@139 or@145 and@202 |
-| `msaf-lineage` | `approval_rules.py` | `test_approval_rules.py` | **3/3** | `5f336c9f` | 3/3 | or@70 and@76 retF@82 |
-| `neo-konsi-s2bw` | `endpoint_identity.py` | `test_endpoint_identity.py` | **3/3** | `12f5827f` | 3/3 | or@81 or@86 gt@131 |
-| `openhands-stuck-detector` | `stuck_detector.py` | `test_stuck_detector.py` | **3/3** | `29ba0e33` | 3/3 | or@251 eq@252 and@252 |
-| `outsideloop` | `annotation_pin.py` | `test_annotation_pin.py` | **3/3** | `acf9621d` | 3/3 | and@145 retF@159 and@160 |
-| `refusal-row` | `refusal_row.py` | `test_refusal_row.py` | **1/3** | `f1f46a28` | 1/3 | or@148 or@163 or@177 |
-| `resume-validation` | `resume_validation.py` | `test_resume_validation.py` | **3/3** | `f393c28c` | 3/3 | or@198 eq@209 eq@213 |
-| `reversible-compaction` | `reversible_compaction.py` | `test_reversible_compaction.py` | **3/3** | `eba8a5ca` | 3/3 | or@116 retF@117 retF@120 |
-| `revision-checked-tool-results` | `revision_checked_tool_results.py` | `test_revision_checked_tool_results.py` | **1/3** | `35956952` | 1/3 | or@114 lt@118 gt@120 |
-| `scope-verbatim-compaction` | `scope_verbatim_compaction.py` | `test_scope_verbatim_compaction.py` | **3/3** | `cd3b9fab` | 3/3 | and@202 lt@297 or@306 |
-| `scorer-disagreement` | `scorer_disagreement.py` | `test_scorer_disagreement.py` | **3/3** | `9ea57f23` | 3/3 | eq@171 lt@183 lt@202 |
+| `false-green-detector` | `false_green_detector.py` | `test_false_green_detector.py` | **3/3** | `a4d2142d` | 3/3 | or@198 lt@201 and@201 |
+| `fieldnotes` | `planted_fault.py` | `test_planted_fault.py` | **3/3** | `33eb7cd9` | 3/3 | or@283 and@293 eq@341 |
+| `horizon` | `long_horizon.py` | `test_long_horizon.py` | **1/3** | `6d21efd7` | 1/3 | or@114 or@192 lt@194 |
+| `horizon-gate` | `horizon_gate.py` | `test_horizon_gate.py` | **2/3** | `4baa7999` | 2/3 | or@245 lt@250 or@257 |
+| `intent-bound-retry` | `intent_bound_retry.py` | `test_intent_bound_retry.py` | **2/3** | `0a550532` | 2/3 | retT@157 retF@173 and@204 |
+| `jido-statebudget` | `state_budget.py` | `test_state_budget.py` | **2/3** | `28f5068c` | 2/3 | or@177 or@183 lt@185 |
+| `langgraph` | `durable_resume.py` | `test_durable_resume.py` | **2/3** | `a3ba033a` | 2/3 | or@156 or@164 lt@203 |
+| `langgraph-durability` | `checkpoint_durability.py` | `test_checkpoint_durability.py` | **1/3** | `04391897` | 1/3 | eq@141 retF@382 retT@383 |
+| `langgraph-retry-clears-writes` | `retry_clears_writes.py` | `test_retry_clears_writes.py` | **2/3** | `a3aa7007` | 2/3 | retF@152 retT@155 eq@170 |
+| `leased-task-claim` | `leased_task_claim.py` | `test_leased_task_claim.py` | **3/3** | `4e304fab` | 3/3 | gt@206 or@336 or@342 |
+| `lightningzero` | `coverage_manifest.py` | `test_coverage_manifest.py` | **3/3** | `896bc923` | 3/3 | or@139 or@145 and@202 |
+| `msaf-lineage` | `approval_rules.py` | `test_approval_rules.py` | **3/3** | `a8306073` | 3/3 | or@70 and@76 retF@82 |
+| `neo-konsi-s2bw` | `endpoint_identity.py` | `test_endpoint_identity.py` | **3/3** | `2a8ed2a1` | 3/3 | or@81 or@86 gt@131 |
+| `openhands-stuck-detector` | `stuck_detector.py` | `test_stuck_detector.py` | **3/3** | `190b000c` | 3/3 | or@251 eq@252 and@252 |
+| `outsideloop` | `annotation_pin.py` | `test_annotation_pin.py` | **3/3** | `b7a01e59` | 3/3 | and@145 retF@159 and@160 |
+| `refusal-row` | `refusal_row.py` | `test_refusal_row.py` | **1/3** | `190d9198` | 1/3 | or@148 or@163 or@177 |
+| `resume-validation` | `resume_validation.py` | `test_resume_validation.py` | **3/3** | `b8b6074a` | 3/3 | or@198 eq@209 eq@213 |
+| `reversible-compaction` | `reversible_compaction.py` | `test_reversible_compaction.py` | **3/3** | `8f3e1496` | 3/3 | or@116 retF@117 retF@120 |
+| `revision-checked-tool-results` | `revision_checked_tool_results.py` | `test_revision_checked_tool_results.py` | **1/3** | `8b9bf616` | 1/3 | or@114 lt@118 gt@120 |
+| `scope-verbatim-compaction` | `scope_verbatim_compaction.py` | `test_scope_verbatim_compaction.py` | **3/3** | `1649c89c` | 3/3 | and@202 lt@297 or@306 |
+| `scorer-disagreement` | `scorer_disagreement.py` | `test_scorer_disagreement.py` | **3/3** | `4e5a9657` | 3/3 | eq@171 lt@183 lt@202 |
 | `seal-slice6` | `—` | `—` | **SKIP** | `—` | SKIP | — |
-| `session-memory` | `session_memory.py` | `test_session_memory.py` | **3/3** | `6cb47143` | 3/3 | or@181 or@199 lt@203 |
-| `silent-failure-detector` | `silent_failure_detector.py` | `test_silent_failure_detector.py` | **2/3** | `98b2f949` | 2/3 | eq@157 and@159 retT@188 |
+| `session-memory` | `session_memory.py` | `test_session_memory.py` | **3/3** | `6815f1a0` | 3/3 | or@181 or@199 lt@203 |
+| `silent-failure-detector` | `silent_failure_detector.py` | `test_silent_failure_detector.py` | **2/3** | `8caf8742` | 2/3 | eq@157 and@159 retT@188 |
 | `slice1` | `—` | `—` | **SKIP** | `—` | SKIP | — |
-| `slice2` | `code_task.py` | `test_code_task.py` | **0/3** | `38d175e9` | 0/3 | or@133 or@142 or@144 |
-| `slice3` | `bash_parser.py` | `test_bash_parser.py` | **3/3** | `f0a68876` | 3/3 | gt@117 retT@118 gt@119 |
+| `slice2` | `code_task.py` | `test_code_task.py` | **0/3** | `7faa3e43` | 0/3 | or@133 or@142 or@144 |
+| `slice3` | `bash_parser.py` | `test_bash_parser.py` | **3/3** | `986d7892` | 3/3 | gt@117 retT@118 gt@119 |
 | `slice4` | `—` | `—` | **SKIP** | `—` | SKIP | — |
-| `slice5` | `blind_rerunner.py` | `test_blind_rerunner.py` | **3/3** | `7a4ddd37` | 3/3 | or@47 or@150 retT@158 |
-| `slice6` | `egress_client.py` | `test_egress_client.py` | **0/3** | `a49d073f` | 0/3 | eq@61 eq@63 eq@66 |
-| `stale-checkpoint-gate` | `stale_checkpoint_gate.py` | `test_stale_checkpoint_gate.py` | **3/3** | `814df5c3` | 3/3 | or@234 retF@235 eq@237 |
-| `step-reliability-budget` | `step_reliability_budget.py` | `test_step_reliability_budget.py` | **2/3** | `1f9cf96a` | 2/3 | or@80 or@83 lt@85 |
-| `strands` | `strands_checkpoint.py` | `test_strands_checkpoint.py` | **2/3** | `d4880209` | 2/3 | or@101 retF@212 retT@215 |
-| `swe-failure-modes` | `swe_failure_modes.py` | `test_swe_failure_modes.py` | **3/3** | `483100b0` | 3/3 | or@137 or@141 lt@143 |
-| `tombstone` | `cancellation_tombstone.py` | `test_cancellation_tombstone.py` | **3/3** | `dd3746a3` | 3/3 | or@87 gt@89 retF@101 |
-| `tombstone-mutant-blindspots` | `cancellation_tombstone.py` | `test_cancellation_tombstone.py` | **3/3** | `82bdcee9` | 3/3 | or@87 gt@89 retF@101 |
-| `tool-output-filter` | `tool_output_filter.py` | `test_tool_output_filter.py` | **2/3** | `4d72320b` | 2/3 | or@165 and@172 eq@243 |
-| `toolfail` | `tool_failure.py` | `test_tool_failure.py` | **3/3** | `b4e7dadc` | 3/3 | and@181 retT@193 eq@292 |
-| `turn-truncation` | `turn_truncation.py` | `test_turn_truncation.py` | **3/3** | `acd242ee` | 3/3 | eq@129 or@163 lt@165 |
-| `unwind` | `shutdown_unwind.py` | `test_shutdown_unwind.py` | **1/3** | `8309bab3` | 1/3 | eq@74 eq@110 and@157 |
-| `verifiability-tier` | `verifiability_tier.py` | `test_verifiability_tier.py` | **2/3** | `4144309a` | 2/3 | or@154 or@161 retF@275 |
-| `vina` | `artifact_authority.py` | `test_artifact_authority.py` | **3/3** | `ebc66910` | 3/3 | or@150 or@184 gt@186 |
-| `vina-mutant-blindspots` | `artifact_authority.py` | `test_artifact_authority.py` | **3/3** | `8aee15ee` | 3/3 | or@150 or@184 gt@186 |
-| `vina-receipt-signing` | `signed_receipt.py` | `test_signed_receipt.py` | **3/3** | `e95356e9` | 3/3 | or@179 or@280 or@317 |
+| `slice5` | `blind_rerunner.py` | `test_blind_rerunner.py` | **3/3** | `9955f1dc` | 3/3 | or@47 or@150 retT@158 |
+| `slice6` | `egress_client.py` | `test_egress_client.py` | **0/3** | `a08c983a` | 0/3 | eq@61 eq@63 eq@66 |
+| `stale-checkpoint-gate` | `stale_checkpoint_gate.py` | `test_stale_checkpoint_gate.py` | **3/3** | `d09c1809` | 3/3 | or@234 retF@235 eq@237 |
+| `step-reliability-budget` | `step_reliability_budget.py` | `test_step_reliability_budget.py` | **2/3** | `21e14e50` | 2/3 | or@80 or@83 lt@85 |
+| `strands` | `strands_checkpoint.py` | `test_strands_checkpoint.py` | **2/3** | `b2cd46a6` | 2/3 | or@101 retF@212 retT@215 |
+| `swe-failure-modes` | `swe_failure_modes.py` | `test_swe_failure_modes.py` | **3/3** | `30133c50` | 3/3 | or@137 or@141 lt@143 |
+| `tombstone` | `cancellation_tombstone.py` | `test_cancellation_tombstone.py` | **3/3** | `176e10fc` | 3/3 | or@87 gt@89 retF@101 |
+| `tombstone-mutant-blindspots` | `cancellation_tombstone.py` | `test_cancellation_tombstone.py` | **3/3** | `f8562b87` | 3/3 | or@87 gt@89 retF@101 |
+| `tool-output-filter` | `tool_output_filter.py` | `test_tool_output_filter.py` | **2/3** | `5c0eca12` | 2/3 | or@165 and@172 eq@243 |
+| `toolfail` | `tool_failure.py` | `test_tool_failure.py` | **3/3** | `4cc54812` | 3/3 | and@181 retT@193 eq@292 |
+| `turn-truncation` | `turn_truncation.py` | `test_turn_truncation.py` | **3/3** | `9a2bf2c9` | 3/3 | eq@129 or@163 lt@165 |
+| `unwind` | `shutdown_unwind.py` | `test_shutdown_unwind.py` | **1/3** | `9925a94c` | 1/3 | eq@74 eq@110 and@157 |
+| `verifiability-tier` | `verifiability_tier.py` | `test_verifiability_tier.py` | **2/3** | `589445d0` | 2/3 | or@154 or@161 retF@275 |
+| `vina` | `artifact_authority.py` | `test_artifact_authority.py` | **3/3** | `68c66f28` | 3/3 | or@150 or@184 gt@186 |
+| `vina-mutant-blindspots` | `artifact_authority.py` | `test_artifact_authority.py` | **3/3** | `2f89b154` | 3/3 | or@150 or@184 gt@186 |
+| `vina-receipt-signing` | `signed_receipt.py` | `test_signed_receipt.py` | **3/3** | `095bd24a` | 3/3 | or@179 or@280 or@317 |
 
 **Reading the table.**  The four `SKIP` rows are the docs-only slices
 (§4.2).  The five rows whose pinned k/3 is **0/3** are the newly
@@ -423,8 +423,8 @@ These two needed **no test rewrite**.  The fixes already existed:
 
 | slice | the probe pinned | the fix actually lived at | k/3 at the pinned commit | k/3 at HEAD |
 |---|---|---|---|---|
-| `vina` | `85587a09` (`B173 vina:`) | `8aee15ee` (`B173 vina-mutant-blindspots:`) | 0/3 | 3/3 |
-| `tombstone` | `9c88902a` (`B173 tombstone:`) | `82bdcee9` (`B173 tombstone-mutant-blindspots:`) | 0/3 | 3/3 |
+| `vina` | `831b0312` (`B173 vina:`) | `2f89b154` (`B173 vina-mutant-blindspots:`) | 0/3 | 3/3 |
+| `tombstone` | `695a25b7` (`B173 tombstone:`) | `f8562b87` (`B173 tombstone-mutant-blindspots:`) | 0/3 | 3/3 |
 
 Both were measured twice at both commits; the numbers are identical
 across runs.
@@ -441,14 +441,14 @@ own* prefix.  Each re-land is therefore two commits:
 
 Step 1 exists only so that step 2's diff is real: without it the
 content is already in the tree and step 2 would be an empty commit.
-The test content is **byte-identical** between `8aee15ee` and the
-re-land for `vina`, and between `82bdcee9` and the re-land for
+The test content is **byte-identical** between `2f89b154` and the
+re-land for `vina`, and between `f8562b87` and the re-land for
 `tombstone` -- verified with `md5sum` over the file at each commit.
 
 | slice | re-land commits | resulting pinned commit | k/3 |
 |---|---|---|---|
-| `vina` | `b9aefc06` (lift out), `ebc66910` (re-land) | `ebc66910` | **3/3** |
-| `tombstone` | `17f92733` (lift out), `dd3746a3` (re-land) | `dd3746a3` | **3/3** |
+| `vina` | `e6823408` (lift out), `68c66f28` (re-land) | `68c66f28` | **3/3** |
+| `tombstone` | `a83a9d52` (lift out), `176e10fc` (re-land) | `176e10fc` | **3/3** |
 
 The module bodies (`artifact_authority.py`,
 `cancellation_tombstone.py`) have **zero diff** in both re-lands.

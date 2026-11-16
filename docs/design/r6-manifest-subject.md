@@ -36,12 +36,12 @@ deleted. But it must not be used as *attribution*.
 # which commit does the referee credit to this slice?
 $ git log --format=%H --grep="^B173 acceptance-conformance:" -i | wc -l
 0
-$ git log --format=%s -1 50bda24f
+$ git log --format=%s -1 c08a86ad
 B173 deterministic-gate-score: kill or@155/or@159/or@197 in deterministic-gate-score
 
 $ git log --format=%H --grep="^B173 capability-ceiling-probe:" -i | wc -l
 0
-$ git log --format=%s -1 9ea57f23
+$ git log --format=%s -1 4e5a9657
 B173 scorer-disagreement: disagreement detector over multi-scorer verdicts
 ```
 
@@ -50,8 +50,8 @@ them with a foreign commit:
 
 | slice | own commits | old referee credited | that commit really belongs to |
 |---|---|---|---|
-| `acceptance-conformance` | **0** | `50bda24f` | `deterministic-gate-score` |
-| `capability-ceiling-probe` | **0** | `9ea57f23` | `scorer-disagreement` |
+| `acceptance-conformance` | **0** | `c08a86ad` | `deterministic-gate-score` |
+| `capability-ceiling-probe` | **0** | `4e5a9657` | `scorer-disagreement` |
 
 `acceptance-conformance` had been passing 12/12 while being judged on
 `deterministic-gate-score`'s commit.
@@ -95,7 +95,7 @@ fi
 reason, not just a hash:
 
 ```
-PASS COMMIT 1c947e7b (1 commit(s))
+PASS COMMIT 53640d0e (1 commit(s))
 FAIL COMMIT none
 FAIL COMMIT none; manifest: docs/design/acceptance-conformance.md: missing
 ```
@@ -295,11 +295,11 @@ git evidence, not an inference.
 
 | slice | check | OLD | NEW | cause |
 |---|---|---|---|---|
-| `acceptance-conformance` | `COMMIT` | `PASS COMMIT 50bda24f (1 commit(s))` | `FAIL COMMIT none; manifest: docs/design/acceptance-conformance.md: missing` | The slice owns **0** commits (`git log --grep="^B173 acceptance-conformance:" -i` is empty). The old path fallback credited it `50bda24f`, whose subject is `B173 deterministic-gate-score: kill or@155/or@159/or@197 in deterministic-gate-score`. The new subject check rejects it; the `manifest:` half of the detail comes from `b173-r6-manifest-integrity-fix.patch`: the manifest names `docs/design/acceptance-conformance.md`, which is not in the tree. |
+| `acceptance-conformance` | `COMMIT` | `PASS COMMIT c08a86ad (1 commit(s))` | `FAIL COMMIT none; manifest: docs/design/acceptance-conformance.md: missing` | The slice owns **0** commits (`git log --grep="^B173 acceptance-conformance:" -i` is empty). The old path fallback credited it `c08a86ad`, whose subject is `B173 deterministic-gate-score: kill or@155/or@159/or@197 in deterministic-gate-score`. The new subject check rejects it; the `manifest:` half of the detail comes from `b173-r6-manifest-integrity-fix.patch`: the manifest names `docs/design/acceptance-conformance.md`, which is not in the tree. |
 | `acceptance-conformance` | `REPORT_NUMBERS` | `PASS REPORT_NUMBERS jsonl=2d469aa9-…jsonl` | `FAIL REPORT_NUMBERS see detail above` | `b173-r6-12-session-resolution-fix.patch` resolves the session deterministically instead of `grep -rl … \| head -n1`. The resolved session is `ddcf50b8-8bde-43b9-9c34-7efba64add54.jsonl`, whose real peak is 88565; the report claims 97754 (the number the *wrong* session carried). The old referee passed it against the poisoned session `2d469aa9-…`. Detail: `PEAK FAIL: report claims 97754 but JSONL max is 88565`. |
-| `capability-ceiling-probe` | `COMMIT` | `PASS COMMIT 9ea57f23 (1 commit(s))` | `FAIL COMMIT none` | The slice owns **0** commits. The old fallback credited it `9ea57f23`, whose subject is `B173 scorer-disagreement: disagreement detector over multi-scorer verdicts`. The new subject check rejects it. |
+| `capability-ceiling-probe` | `COMMIT` | `PASS COMMIT 4e5a9657 (1 commit(s))` | `FAIL COMMIT none` | The slice owns **0** commits. The old fallback credited it `4e5a9657`, whose subject is `B173 scorer-disagreement: disagreement detector over multi-scorer verdicts`. The new subject check rejects it. |
 | `capability-ceiling-probe` | `REPORT_NUMBERS` | `PASS REPORT_NUMBERS jsonl=2d469aa9-…jsonl` | `PASS REPORT_NUMBERS jsonl=e7e675c4-…jsonl` | Same patch, same slice: the deterministic resolver now picks the slice's own session `e7e675c4-cefa-4762-ab17-0746d5e9f1c5.jsonl` instead of the shared poison session. The verdict stays PASS but the **numbers cross-checked** are now the slice's own. |
-| `orphan-adoption` | `NEW_TESTS` | `PASS NEW_TESTS 1 new test methods across 1 commit(s)` | `FAIL NEW_TESTS 0` | Its single commit `1c947e7b` adds **only two markdown documents** (`git show --name-only --format= 1c947e7b` → `docs/design/annotation-pin.md`, `docs/design/orphan-adoption.md`). The old check counted a **prose mention** inside a markdown table as a test method — the offending diff line is `+\| 1 \| \`tests/test_revision_checked_tool_results.py\` \| 6 new test methods (\`test_result_as_dict_carries_the_schema_pin\`, …) \| **keep** \| …`. `b173-r6-check-accuracy-fix.patch` counts only lines that actually define a method (`^[+][[:space:]]*(async[[:space:]]+)?def[[:space:]]+test_…`), so the prose yields 0. |
+| `orphan-adoption` | `NEW_TESTS` | `PASS NEW_TESTS 1 new test methods across 1 commit(s)` | `FAIL NEW_TESTS 0` | Its single commit `53640d0e` adds **only two markdown documents** (`git show --name-only --format= 53640d0e` → `docs/design/annotation-pin.md`, `docs/design/orphan-adoption.md`). The old check counted a **prose mention** inside a markdown table as a test method — the offending diff line is `+\| 1 \| \`tests/test_revision_checked_tool_results.py\` \| 6 new test methods (\`test_result_as_dict_carries_the_schema_pin\`, …) \| **keep** \| …`. `b173-r6-check-accuracy-fix.patch` counts only lines that actually define a method (`^[+][[:space:]]*(async[[:space:]]+)?def[[:space:]]+test_…`), so the prose yields 0. |
 | `orphan-adoption` | `REPORT_NUMBERS` | `PASS REPORT_NUMBERS jsonl=0976bbc5-…jsonl` | `PASS REPORT_NUMBERS jsonl=a7f805f9-…jsonl` | The deterministic resolver picks the slice's own session instead of the shared one. |
 | `artifact-completion` | `REPORT_NUMBERS` | `FAIL REPORT_NUMBERS see detail above` | `PASS REPORT_NUMBERS jsonl=3c2b6040-…jsonl` | The old referee resolved the **wrong** session and the cross-check failed; the deterministic resolver finds the slice's own session `3c2b6040-5c84-43e8-8bcf-4dea627d7135.jsonl`, whose numbers match the report. This is the slice that becomes **PASS (11/11)**. |
 | `artifact-completion` | `NEW_TESTS` | `PASS NEW_TESTS 14 new test methods across 3 commit(s)` | `PASS NEW_TESTS 12 distinct new test methods across 3 commit(s)` | The count-accuracy patch counts **distinct method names** across the slice's 3 commits (14 added lines, 12 distinct methods — 2 methods were re-added by a later commit). The verdict does not move; the number becomes honest. |
@@ -322,26 +322,26 @@ git evidence, not an inference.
 1. **`capability-ceiling-probe` — `COMMIT` PASS → FAIL.** Verified: the
    slice's own-commit search is empty
    (`git log --format=%H --grep="^B173 capability-ceiling-probe:" -i | wc -l`
-   → `0`), and the old fallback's candidate `9ea57f23` carries the subject
+   → `0`), and the old fallback's candidate `4e5a9657` carries the subject
    `B173 scorer-disagreement: …`.
 2. **`acceptance-conformance` — `COMMIT` PASS → FAIL.** Verified: own-commit
-   search empty (`0`), old candidate `50bda24f` carries the subject
+   search empty (`0`), old candidate `c08a86ad` carries the subject
    `B173 deterministic-gate-score: …`. This slice **never committed
    anything at all**.
 3. **`orphan-adoption` — `NEW_TESTS` PASS → FAIL.** Verified: the single
-   commit `1c947e7b` adds two `.md` files only, and the sole `def test_`
+   commit `53640d0e` adds two `.md` files only, and the sole `def test_`
    match is a prose mention in a markdown table (quoted above).
 
 ### Side-by-side COMMIT lines
 
 ```
 $ /bin/grep -E '^(PASS|FAIL) COMMIT' per-slice/acceptance-conformance.old.txt
-PASS COMMIT 50bda24f (1 commit(s))
+PASS COMMIT c08a86ad (1 commit(s))
 $ /bin/grep -E '^(PASS|FAIL) COMMIT' per-slice/acceptance-conformance.new.txt
 FAIL COMMIT none; manifest: docs/design/acceptance-conformance.md: missing
 
 $ /bin/grep -E '^(PASS|FAIL) COMMIT' per-slice/capability-ceiling-probe.old.txt
-PASS COMMIT 9ea57f23 (1 commit(s))
+PASS COMMIT 4e5a9657 (1 commit(s))
 $ /bin/grep -E '^(PASS|FAIL) COMMIT' per-slice/capability-ceiling-probe.new.txt
 FAIL COMMIT none
 ```

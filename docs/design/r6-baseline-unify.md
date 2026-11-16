@@ -72,7 +72,7 @@ branch.
 Content:
 
 ```
-# baseline of 2db42e939477bc2ceca9f20d35384dfc7731e972 -- northstar-agent-runtime full suite, sorted FAIL:/ERROR: items
+# baseline of 818363209477bc2ceca9f20d35384dfc7731e972 -- northstar-agent-runtime full suite, sorted FAIL:/ERROR: items
 ERROR: test_bwrap_cannot_persist_changes_to_workspace_governance (test_os_sandbox.OsSandboxBwrapBackendTests.test_bwrap_cannot_persist_changes_to_workspace_governance)
 FAIL: test_the_check_passes_on_the_current_repository (test_runtime_registration.RealRepositoryCheckTests.test_the_check_passes_on_the_current_repository)
 ```
@@ -103,7 +103,7 @@ One line, holding the **file name** of the baseline that is currently in
 force:
 
 ```
-b173-baseline-2db42e939477bc2ceca9f20d35384dfc7731e972.failures.txt
+b173-baseline-818363209477bc2ceca9f20d35384dfc7731e972.failures.txt
 ```
 
 It is a plain text file, **not a symlink**. A symlink breaks when the file
@@ -298,7 +298,7 @@ name:
 and makes both verdict lines **name the baseline's sha**, e.g.
 
 ```
-PASS BENCH_DIFF failing-item set identical to baseline 2db42e93 (8 items), 161/169
+PASS BENCH_DIFF failing-item set identical to baseline 81836320 (8 items), 161/169
 ```
 
 instead of the current
@@ -329,7 +329,7 @@ problem is invisible without it. Every file matching
 2026-11-15.
 
 The comparison columns are against the new main baseline,
-`b173-baseline-2db42e939477bc2ceca9f20d35384dfc7731e972.failures.txt`
+`b173-baseline-818363209477bc2ceca9f20d35384dfc7731e972.failures.txt`
 (33 items). "new vs main" = items in that file but not in the main
 baseline; "fixed vs main" = items in the main baseline that the file
 does **not** have.
@@ -457,8 +457,8 @@ from.
 
 | file | belongs to | verdict |
 |---|---|---|
-| `b173-baseline-2db42e93….failures.txt` | **main @ `2db42e93`** | **the baseline.** Keep. |
-| `b173-baseline-CURRENT` | **main @ `2db42e93`** | **the pointer.** Keep. |
+| `b173-baseline-81836320….failures.txt` | **main @ `81836320`** | **the baseline.** Keep. |
+| `b173-baseline-CURRENT` | **main @ `81836320`** | **the pointer.** Keep. |
 | `b173-baseline-failures-2026-11-14.txt` (30) | merged tree, 2026-11-14 | superseded; a *slice-tree* baseline that drifted from main. Delete or archive. |
 | `b173-baseline-failures-attributed-2026-11-14.txt` | baseline-attribution slice | an *attribution* of the 30, not a baseline. |
 | `b173-baseline-attribution-cc-final.txt`, `-bench-final.txt` | baseline-attribution slice | reports, not baselines. |
@@ -478,9 +478,9 @@ three more files outside the repository:
 
 | file | what it is |
 |---|---|
-| `b173-baseline-2db42e93….failures.txt` | the runtime baseline in force (main @ `2db42e93`) |
-| `b173-baseline-2db42e93….suite.log` | the raw suite log the baseline was taken from |
-| `b173-bench-baseline-2db42e93….failures.txt` | the bench baseline in force (the 8 failing bench items) |
+| `b173-baseline-81836320….failures.txt` | the runtime baseline in force (main @ `81836320`) |
+| `b173-baseline-81836320….suite.log` | the raw suite log the baseline was taken from |
+| `b173-bench-baseline-81836320….failures.txt` | the bench baseline in force (the 8 failing bench items) |
 | `b173-baseline-CURRENT`, `b173-bench-baseline-CURRENT` | the two pointers |
 
 (That is five paths, four of which are artifacts of one baseline plus its
@@ -492,7 +492,7 @@ log; the two pointers are one line each.)
 > format** and it **names the sha** it was taken at.
 
 Under that rule, exactly one of the 39 files (38 legacy + the new one)
-qualifies today: `b173-baseline-2db42e939477bc2ceca9f20d35384dfc7731e972.failures.txt`.
+qualifies today: `b173-baseline-818363209477bc2ceca9f20d35384dfc7731e972.failures.txt`.
 
 ## 9. What the measurement exposed: the suite is not deterministic
 
@@ -502,7 +502,7 @@ what a baseline can honestly claim to be.
 ### 9.1 The measurement
 
 The generator was run **four times against the same sha**
-(`2db42e939477bc2ceca9f20d35384dfc7731e972`, `main`'s HEAD), each in a
+(`818363209477bc2ceca9f20d35384dfc7731e972`, `main`'s HEAD), each in a
 fresh detached worktree, each with the same command:
 
 ```bash

@@ -60,7 +60,7 @@ committed by later slices of the same batch:
 
 | task book's claim | current state (measured) |
 |---|---|
-| `components/northstar-agent-runtime/refusal_hold_wiring.py` missing | **exists and tracked** — added by `b2086587` (`B173 refusal-hold-wiring: a recorded refusal blocks the re-seal of the same grant pin, fail closed on an unusable gate`, 849 lines) |
+| `components/northstar-agent-runtime/refusal_hold_wiring.py` missing | **exists and tracked** — added by `782412c0` (`B173 refusal-hold-wiring: a recorded refusal blocks the re-seal of the same grant pin, fail closed on an unusable gate`, 849 lines) |
 | `components/northstar-agent-runtime/tests/test_refusal_hold_wiring.py` missing | **exists and tracked** — added by the same commit (680 lines) |
 | `docs/design/refusal-hold-wiring.md` missing | **exists and tracked** |
 | `docs/design/artifact-completion.md` missing | **exists and tracked** |
@@ -105,7 +105,7 @@ the module-name mismatch as such. Either way the outcome is the same in kind:
 the mutation evidence for the slice was **not** produced.
 
 The same mismatch was confirmed against the real history: at
-`b2086587^` the tree has `refusal_hold.py` but no `refusal_hold_wiring.py`,
+`782412c0^` the tree has `refusal_hold.py` but no `refusal_hold_wiring.py`,
 and the probe against that tree aborts exactly as above.
 
 **What the check would do under the proposed rule.** `COMMIT` FAILS and names
@@ -171,15 +171,15 @@ distinction so that the failure detail says which condition failed:
 cd /home/muse-newapi/northstar-agent-os
 git log --format='%h %s' --grep="^B173 acceptance-conformance:" -i   # empty
 git log --format='%h %s' -1 -- $(cat /home/muse-newapi/b173-acceptance-conformance.files | tr '\n' ' ')
-#   50bda24f B173 deterministic-gate-score: kill or@155/or@159/or@197 in deterministic-gate-score
+#   c08a86ad B173 deterministic-gate-score: kill or@155/or@159/or@197 in deterministic-gate-score
 bash /home/muse-newapi/b173-accept.sh acceptance-conformance | grep '^PASS COMMIT'
-#   PASS COMMIT 50bda24f (1 commit(s))
+#   PASS COMMIT c08a86ad (1 commit(s))
 ```
 
 | slice | own commits (`--grep "^B173 <slug>:"`) | commit the fallback picks |
 |---|---|---|
-| `acceptance-conformance` | **none** | `50bda24f` — `B173 deterministic-gate-score: …` |
-| `capability-ceiling-probe` | **none** | `9ea57f23` — `B173 scorer-disagreement: disagreement detector over multi-scorer verdicts` |
+| `acceptance-conformance` | **none** | `c08a86ad` — `B173 deterministic-gate-score: …` |
+| `capability-ceiling-probe` | **none** | `4e5a9657` — `B173 scorer-disagreement: disagreement detector over multi-scorer verdicts` |
 
 Both slices are **credited with another slice's commit**. `acceptance-conformance`
 is the important one: it has zero commits of its own, yet `COMMIT` prints
@@ -317,12 +317,12 @@ spurious `MUTANT` differences that have nothing to do with the patch.
 
 | slice | before | after | what moved |
 |---|---|---|---|
-| `acceptance-conformance` | `PASS COMMIT 50bda24f (1 commit(s))` | `FAIL COMMIT none; manifest: docs/design/acceptance-conformance.md: missing` | foreign-commit fallback **and** a missing manifest path |
-| `capability-ceiling-probe` | `PASS COMMIT 9ea57f23 (1 commit(s))` | `FAIL COMMIT none` | foreign-commit fallback (`9ea57f23` is `scorer-disagreement`'s commit) |
-| `refusal-hold-wiring` | `PASS COMMIT 27dad86b (2 commit(s))` | `PASS COMMIT 27dad86b (2 commit(s))` | nothing — the module the manifest names now exists and is tracked |
-| `merged-tree-review` | `PASS COMMIT dbaff0ad (2 commit(s))` | `FAIL COMMIT dbaff0ad manifest: docs/design/merged-tree-review.md: untracked` | the 35 KB design doc is named in the manifest but was never committed |
-| `judge-hygiene` | `PASS COMMIT ed49811d (3 commit(s))` | `PASS COMMIT ed49811d (3 commit(s))` | nothing — clean manifest |
-| `r6-12-session-resolution` | `PASS COMMIT 172b1986 (2 commit(s))` | `PASS COMMIT 172b1986 (2 commit(s))` | nothing — the manifest's own files exist and are tracked |
+| `acceptance-conformance` | `PASS COMMIT c08a86ad (1 commit(s))` | `FAIL COMMIT none; manifest: docs/design/acceptance-conformance.md: missing` | foreign-commit fallback **and** a missing manifest path |
+| `capability-ceiling-probe` | `PASS COMMIT 4e5a9657 (1 commit(s))` | `FAIL COMMIT none` | foreign-commit fallback (`4e5a9657` is `scorer-disagreement`'s commit) |
+| `refusal-hold-wiring` | `PASS COMMIT d08958d6 (2 commit(s))` | `PASS COMMIT d08958d6 (2 commit(s))` | nothing — the module the manifest names now exists and is tracked |
+| `merged-tree-review` | `PASS COMMIT 4e43c32a (2 commit(s))` | `FAIL COMMIT 4e43c32a manifest: docs/design/merged-tree-review.md: untracked` | the 35 KB design doc is named in the manifest but was never committed |
+| `judge-hygiene` | `PASS COMMIT 825ea66b (3 commit(s))` | `PASS COMMIT 825ea66b (3 commit(s))` | nothing — clean manifest |
+| `r6-12-session-resolution` | `PASS COMMIT 4525ca31 (2 commit(s))` | `PASS COMMIT 4525ca31 (2 commit(s))` | nothing — the manifest's own files exist and are tracked |
 
 For the three slices whose `COMMIT` verdict does not move, **all 12 verdict
 lines are identical** before and after (the `TESTS_RAN` detail line carries

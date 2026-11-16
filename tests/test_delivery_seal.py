@@ -407,8 +407,8 @@ class Slice6DeliveryEvidenceTests(unittest.TestCase):
     """
 
     EVIDENCE = ROOT / "docs" / "delivery" / "slice6"
-    START_COMMIT = "38d175e9565c8ae46ee5ef7a8be8d874ea3038f0"
-    DELIVERY_COMMIT = "a49d073f0b4039d4171676bb5af54df47ede68f4"
+    START_COMMIT = "7faa3e43f08e137f59944010fa5e91a8ff203671"
+    DELIVERY_COMMIT = "a08c983a85acb7175b3987291138653b04f79522"
     CLAIM = (
         "This delivery revokes live sockets when authorization leases are withdrawn "
         "and surfaces termination and network errors."
@@ -532,7 +532,7 @@ class Slice6BlindComparisonTests(unittest.TestCase):
     """The real comparison: blind checks against the real seal's auditor set."""
 
     EVIDENCE = ROOT / "docs" / "delivery" / "slice6"
-    START_COMMIT = "38d175e9565c8ae46ee5ef7a8be8d874ea3038f0"
+    START_COMMIT = "7faa3e43f08e137f59944010fa5e91a8ff203671"
     CLAIM = (
         "This delivery revokes live sockets when authorization leases are withdrawn "
         "and surfaces termination and network errors."

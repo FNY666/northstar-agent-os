@@ -122,7 +122,7 @@ class DesignDocTableTests(unittest.TestCase):
         text = DESIGN_DOC.read_text(encoding="utf-8")
         # The baseline reset must be explained, not just asserted.
         self.assertIn("merged_tree_review", text)
-        self.assertIn("b6e399cc", text)
+        self.assertIn("eebb2a70", text)
         # The "is 161/169 an environment artifact?" question must be answered
         # honestly: the doc says which way it went and by what measurement.
         self.assertIn("161/169", text)

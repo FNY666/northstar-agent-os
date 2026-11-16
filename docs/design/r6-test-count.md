@@ -211,13 +211,13 @@ because of `REPORT_NUMBERS` (R6-12), not because of the count.
 
 ### 3.2 The biggest discrepancy: `r6-check-accuracy`, 58 → 20
 
-Its two commits are `6691b1c4` (the conformance test) and `f7824dc5`
+Its two commits are `f572f004` (the conformance test) and `0b1e48e7`
 (the design doc). The OLD counter:
 
 ```
-$ git show 6691b1c4 | grep -c '^\+.*def test_'
+$ git show f572f004 | grep -c '^\+.*def test_'
 38
-$ git show f7824dc5 | grep -c '^\+.*def test_'
+$ git show 0b1e48e7 | grep -c '^\+.*def test_'
 20
 $ # 38 + 20 = 58
 ```
@@ -225,7 +225,7 @@ $ # 38 + 20 = 58
 The NEW counter:
 
 ```
-$ for h in 6691b1c4 f7824dc5; do git show $h \
+$ for h in f572f004 0b1e48e7; do git show $h \
     | grep -oE '^[+][[:space:]]*(async[[:space:]]+)?def[[:space:]]+test_[A-Za-z0-9_]*' \
     | sed -E 's/^[+][[:space:]]*(async[[:space:]]+)?def[[:space:]]+//'; done | sort -u | wc -l
 20
@@ -446,9 +446,9 @@ byte-identical in every check line.
 | `tombstone` | `REPORT_NUMBERS` | `FAIL REPORT_NUMBERS see detail above` | `SKIP REPORT_NUMBERS no session resolved for canary 9lULp0MNufmuQZ6OGlNL` | **R6-12** — same: no session resolved, `SKIP` |
 | `anthropic-effort-scaling` | `REPORT_NUMBERS` | `PASS REPORT_NUMBERS jsonl=1584ff04-….jsonl` | `SKIP REPORT_NUMBERS ambiguous session for canary WpEwcNwoMwHA9VLDmkcM -- not guessed` | **R6-12** — the old pick was a coin flip; the resolver reports **AMBIGUOUS** and refuses to guess. The slice's overall verdict is unchanged (PASS) |
 | `r6-baseline-unify` | `REPORT_NUMBERS` | `PASS REPORT_NUMBERS jsonl=1584ff04-….jsonl` | `SKIP REPORT_NUMBERS no session resolved for canary iTQaVDBjY6YkvNAkfB8Y` | **R6-12** — the old pick was a coin flip onto a foreign session; the resolver finds none. Verdict unchanged (FAIL) |
-| `acceptance-conformance` | `COMMIT` | `PASS COMMIT 50bda24f (1 commit(s))` | `FAIL COMMIT none; manifest: docs/design/acceptance-conformance.md: missing` | **R6-1b/R6-4** — the manifest names `docs/design/acceptance-conformance.md`, which is **not in the tree**; the attribution gate now refuses the borrowed commit |
+| `acceptance-conformance` | `COMMIT` | `PASS COMMIT c08a86ad (1 commit(s))` | `FAIL COMMIT none; manifest: docs/design/acceptance-conformance.md: missing` | **R6-1b/R6-4** — the manifest names `docs/design/acceptance-conformance.md`, which is **not in the tree**; the attribution gate now refuses the borrowed commit |
 | `acceptance-conformance` | `REPORT_NUMBERS` | `PASS REPORT_NUMBERS jsonl=2d469aa9-….jsonl` | `FAIL REPORT_NUMBERS see detail above` | **R6-12** — the deterministic resolver now picks a session whose numbers do **not** match the report, so the cross-check correctly fails. Verdict unchanged (FAIL) |
-| `capability-ceiling-probe` | `COMMIT` | `PASS COMMIT 9ea57f23 (1 commit(s))` | `FAIL COMMIT none` | **R6-1b/R6-4** — the slice owns **no** commit whose subject is `B173 capability-ceiling-probe:`. The old referee borrowed `9ea57f23` (`B173 scorer-disagreement: …`) because that commit happened to touch a path in the manifest. The patched `COMMIT` refuses to borrow another slice's commit |
+| `capability-ceiling-probe` | `COMMIT` | `PASS COMMIT 4e5a9657 (1 commit(s))` | `FAIL COMMIT none` | **R6-1b/R6-4** — the slice owns **no** commit whose subject is `B173 capability-ceiling-probe:`. The old referee borrowed `4e5a9657` (`B173 scorer-disagreement: …`) because that commit happened to touch a path in the manifest. The patched `COMMIT` refuses to borrow another slice's commit |
 | `orphan-adoption` | `NEW_TESTS` | `PASS NEW_TESTS 1 new test methods across 1 commit(s)` | `FAIL NEW_TESTS 0` | **R6-7** — the slice wrote **zero** lines of test code; the old counter counted one **prose** line. See §6 |
 
 `capability-ceiling-probe` is the one slice whose **verdict** gets
@@ -468,7 +468,7 @@ verdict flip caused by R6-7.
 ### 6.1 The commit adds two markdown documents and nothing else
 
 ```
-$ git show --name-only --format= 1c947e7b
+$ git show --name-only --format= 53640d0e
 docs/design/annotation-pin.md
 docs/design/orphan-adoption.md
 ```
@@ -478,10 +478,10 @@ No `.py` file, no test file. The slice wrote **zero** lines of test code.
 ### 6.2 The offending line is prose inside a markdown table
 
 ```
-$ git show 1c947e7b | grep -c '^\+.*def test_'
+$ git show 53640d0e | grep -c '^\+.*def test_'
 1
 
-$ git show 1c947e7b | grep -n '^\+.*def test_'
+$ git show 53640d0e | grep -n '^\+.*def test_'
 122:+| 1 | `tests/test_revision_checked_tool_results.py` | 6 new test methods (`test_result_as_dict_carries_the_schema_pin`, `test_with_result_revision_returns_a_copy_and_leaves_the_original`, `test_with_result_revision_validates_its_argument`, `test_evidence_entries_lists_retained_results_in_order`, `test_outcome_record_names_both_revisions_and_the_verdict`, `test_ledger_records_every_outcome_in_order`) | **keep** | Each method asserts behaviour that HEAD does not have: `git show HEAD:...|grep -c 'def test_'` returns 0 for all six names. They cover the schema pin on `as_dict`, ...
 ```
 
@@ -507,7 +507,7 @@ referee says so.
 The new pattern finds nothing in that diff:
 
 ```
-$ git show 1c947e7b | grep -oE '^[+][[:space:]]*(async[[:space:]]+)?def[[:space:]]+test_[A-Za-z0-9_]*' | wc -l
+$ git show 53640d0e | grep -oE '^[+][[:space:]]*(async[[:space:]]+)?def[[:space:]]+test_[A-Za-z0-9_]*' | wc -l
 0
 ```
 

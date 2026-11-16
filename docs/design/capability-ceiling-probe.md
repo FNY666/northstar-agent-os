@@ -177,19 +177,19 @@ This slice's deliverable was committed on 2026-11-13 under the **wrong
 subject**:
 
 ```
-9ea57f23  B173 scorer-disagreement: disagreement detector over multi-scorer verdicts
+4e5a9657  B173 scorer-disagreement: disagreement detector over multi-scorer verdicts
 ```
 
 The commit carried all three of this slice's files.  The correctly-subjected
 twin still exists in the reflog — `f85282fb`, `B173 capability-ceiling-probe:
 fail-first admission + calibration error + ceiling routing` — with the **same
-parent** (`0a2f3f42`) and the **same author date** (`2026-11-13 19:30:34
+parent** (`6c5fa00a`) and the **same author date** (`2026-11-13 19:30:34
 +0000`); the reflog records `commit` → `commit (amend)`, so the commit was
 amended in place and its subject was overwritten.  The two trees differ by one
 file, `scorer_disagreement.py`, and that difference is **three comment-header
 lines rotated** (`# helpers` ↔ `# records` ↔ `# pure computation`) with **no
 code change** — `scorer_disagreement.py` was introduced by a different commit
-(`965c376f`), so an amend elsewhere in the tree swept it in.
+(`0bd27ade`), so an amend elsewhere in the tree swept it in.
 
 The consequence was that the referee, which attributes a slice by subject
 prefix, could not see this slice at all:
@@ -204,7 +204,7 @@ Three things were fixed, all of them this slice's own business:
 
 1. **The subject.**  The slice's files are now carried by a commit whose
    subject names this slice.  Nothing was rewritten and nothing was deleted:
-   `9ea57f23` still stands, and the commit that carries this note is the one
+   `4e5a9657` still stands, and the commit that carries this note is the one
    the referee sees.
 2. **The registry.**  `runtime_registration.py` named `scorer-disagreement` as
    the slice that introduced `capability_ceiling_probe`.  The `slice_slug`
@@ -231,7 +231,7 @@ by name — and the slice's test count went from 59 to 63.
 
 ### 6.1 The one thing this slice did not do
 
-`9ea57f23` also carries the comment-header rotation in
+`4e5a9657` also carries the comment-header rotation in
 `scorer_disagreement.py`.  That edit is a **no-op** (comments only) and it
 belongs to another slice's file, which this slice's scope forbids touching —
 so it stands, recorded here as the fingerprint of the fault rather than

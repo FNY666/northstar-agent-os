@@ -1,7 +1,7 @@
 # Landlock loader evaluation (batch-172)
 
 Date: 2026-11-06. Host: 140 (Oracle Cloud Singapore, aarch64, Ubuntu 26.04).
-Repo: `northstar-agent-os`, branch `batch-172-claude-absorb-p1p2` (from main `2db42e93`).
+Repo: `northstar-agent-os`, branch `batch-172-claude-absorb-p1p2` (from main `81836320`).
 Question (from batch-171): the 8 live legs fail because the Landlock loader breaks
 nested Python. Two candidate fixes were to be evaluated, not applied:
 

@@ -114,9 +114,9 @@ subject prefix, and the reason is structural, not an omission.
 
 | promised methods | landed under | commit | why not under `B173 orphan-adoption:` |
 |---|---|---|---|
-| the 7 adopted revision-checked methods + 6 new `OrphanAdoptionTests` methods | `revision-checked-tool-results` | `35956952` | the adoption work was *done by* that slice, under its prefix; this slice adjudicated it and recorded the decision |
-| the 3 new scope methods (message pin, length prefix, end marker) | `scope-verbatim-compaction` | `cd3b9fab` | the same: the methods were written and landed by the slice that owns the module |
-| this slice's own commit | `orphan-adoption` | `1c947e7b` | two markdown documents only — the adjudication record and the `annotation-pin.md` corrections |
+| the 7 adopted revision-checked methods + 6 new `OrphanAdoptionTests` methods | `revision-checked-tool-results` | `8b9bf616` | the adoption work was *done by* that slice, under its prefix; this slice adjudicated it and recorded the decision |
+| the 3 new scope methods (message pin, length prefix, end marker) | `scope-verbatim-compaction` | `1649c89c` | the same: the methods were written and landed by the slice that owns the module |
+| this slice's own commit | `orphan-adoption` | `53640d0e` | two markdown documents only — the adjudication record and the `annotation-pin.md` corrections |
 
 **The discharge, stated plainly:** the promise was discharged in the
 repository, under the slices that own the modules, and this slice's own

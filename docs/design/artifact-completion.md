@@ -105,13 +105,13 @@ script can print.
 
 | slice | original verdict | which items were missing | what was added | verdict after completion |
 |---|---|---|---|---|
-| `slice1` | FAIL (4/9, 3 skipped) | REPORT, CANARY, FABLE_VERIF, FULL_SUITE, BENCH | full report written from the slice's own commits `79bf11f6`/`0232157f` + session `cda665a1`; FABLE VERIFICATION section; sourced `Ran 19388` line; `161/169` line; bench product; manifest + mutant probe (2/3) | **FAIL** (10/11, 1 skipped) — only CANARY left (pending coordinator canary) |
-| `slice2` | FAIL (4/10, 2 skipped) | REPORT, CANARY, FABLE_VERIF, FULL_SUITE, BENCH, MUTANT | full report written from commit `38d175e9`; FABLE VERIFICATION section (Codex-implemented: no CC session exists, stated as such); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (0/3) | **FAIL** (9/11, 1 skipped) — CANARY (pending coordinator canary) + MUTANT (0/3 survived) |
-| `slice3` | FAIL (5/10, 2 skipped) | REPORT, CANARY, FABLE_VERIF, FULL_SUITE, BENCH | full report written from commit `f0a68876`; FABLE VERIFICATION section (session `ca78c9dd`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (3/3) | **FAIL** (10/11, 1 skipped) — only CANARY left (pending coordinator canary) |
+| `slice1` | FAIL (4/9, 3 skipped) | REPORT, CANARY, FABLE_VERIF, FULL_SUITE, BENCH | full report written from the slice's own commits `c780c6db`/`985d9efa` + session `cda665a1`; FABLE VERIFICATION section; sourced `Ran 19388` line; `161/169` line; bench product; manifest + mutant probe (2/3) | **FAIL** (10/11, 1 skipped) — only CANARY left (pending coordinator canary) |
+| `slice2` | FAIL (4/10, 2 skipped) | REPORT, CANARY, FABLE_VERIF, FULL_SUITE, BENCH, MUTANT | full report written from commit `7faa3e43`; FABLE VERIFICATION section (Codex-implemented: no CC session exists, stated as such); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (0/3) | **FAIL** (9/11, 1 skipped) — CANARY (pending coordinator canary) + MUTANT (0/3 survived) |
+| `slice3` | FAIL (5/10, 2 skipped) | REPORT, CANARY, FABLE_VERIF, FULL_SUITE, BENCH | full report written from commit `986d7892`; FABLE VERIFICATION section (session `ca78c9dd`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (3/3) | **FAIL** (10/11, 1 skipped) — only CANARY left (pending coordinator canary) |
 | `slice4` | FAIL (0/9, 3 skipped) | COMMIT, REPORT, CANARY, FABLE_VERIF, FULL_SUITE, BENCH, NEW_TESTS, WORKTREE_CLEAN, TESTS_RAN | standalone empty commit `c42bae66` `B173 slice4: consolidate the slice-4 commits under one slug prefix`; full report from the slice-4 commits + the coordinator's follow-up summary; FABLE VERIFICATION section; sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (3/3) | **FAIL** (8/10, 2 skipped) — CANARY (pending coordinator canary) + NEW_TESTS (the ten test methods live in the `(part 2)` commit, which the script's slug-scoped aggregation does not reach) |
 | `slice5` | FAIL (6/10, 2 skipped) | CANARY, FABLE_VERIF, FULL_SUITE, BENCH | FABLE VERIFICATION section (session `4d909e3b`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (3/3) | **FAIL** (10/11, 1 skipped) — only CANARY left (pending coordinator canary) |
 | `slice6` | FAIL (4/10, 2 skipped) | REPORT, CANARY, FABLE_VERIF, FULL_SUITE, BENCH, MUTANT | full report written from the slice-6 commits; FABLE VERIFICATION section (Codex-implemented: no CC session exists, stated as such); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (0/3) | **FAIL** (9/11, 1 skipped) — CANARY (pending coordinator canary) + MUTANT (0/3 survived) |
-| `runtime-registration` | FAIL (3/9, 3 skipped) | REPORT, CANARY, FABLE_VERIF, FULL_SUITE, BENCH, TESTS_RAN | full report written from commits `82e01194`/`4747bf54`/`e4236448`/`50431914`; FABLE VERIFICATION section (session `60a92cf5`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (3/3) | **FAIL** (9/11, 1 skipped) — CANARY (pending coordinator canary) + TESTS_RAN (the suite is red on 3 pre-existing `merged-tree-review` failures, not this slice's) |
+| `runtime-registration` | FAIL (3/9, 3 skipped) | REPORT, CANARY, FABLE_VERIF, FULL_SUITE, BENCH, TESTS_RAN | full report written from commits `5708edb3`/`f197c6f2`/`77332a31`/`adcaad02`; FABLE VERIFICATION section (session `60a92cf5`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (3/3) | **FAIL** (9/11, 1 skipped) — CANARY (pending coordinator canary) + TESTS_RAN (the suite is red on 3 pre-existing `merged-tree-review` failures, not this slice's) |
 | `audit-head` | FAIL (5/10, 2 skipped) | CANARY, FABLE_VERIF, FULL_SUITE, BENCH, MUTANT | FABLE VERIFICATION section (session `b923bdb8`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (0/3) | **FAIL** (9/11, 1 skipped) — CANARY (pending coordinator canary) + MUTANT (0/3 survived) |
 | `c52` | FAIL (7/10, 2 skipped) | CANARY, FABLE_VERIF, FULL_SUITE | FABLE VERIFICATION section (session `6fdf83a2`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (1/3) | **FAIL** (10/11, 1 skipped) — only CANARY left (pending coordinator canary) |
 | `c54` | FAIL (8/11, 1 skipped) | CANARY, FABLE_VERIF, FULL_SUITE | FABLE VERIFICATION section (session `6db4dda9`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (2/3) | **FAIL** (10/11, 1 skipped) — only CANARY left (pending coordinator canary) |
@@ -450,7 +450,7 @@ was to add a sourced line where none existed.
 5. **Three pre-existing failures that belong to other slices.**
    `merged-tree-review` registered no module, which turns
    `test_runtime_registration` red on three tests (verified pre-existing: at
-   `72f351cf~1` the same suite is `Ran 37 tests -- OK`); and `seal-slice6`'s
+   `ed06b163~1` the same suite is `Ran 37 tests -- OK`); and `seal-slice6`'s
    own suite carries four pre-existing sandbox socket `PermissionError`s.
 
 ## What this slice measured, on 2026-11-14
@@ -526,7 +526,7 @@ All three are `test_runtime_registration` failures caused by the
 `merged-tree-review` slice's module `merged_tree_review`, which is on disk
 but in neither `runtime_registration.REGISTRY` nor `pyproject.toml`'s
 `py-modules` (both greps: 0 hits).  `merged-tree-review` landed at
-`dbaff0ad` on 2026-11-14 07:14, **after** the baseline was measured.
+`4e43c32a` on 2026-11-14 07:14, **after** the baseline was measured.
 
 Verified pre-existing: a fresh clone checked out at `c42bae66` (this
 slice's third commit, before the two of its own) reports

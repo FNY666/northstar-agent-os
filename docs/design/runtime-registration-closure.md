@@ -47,7 +47,7 @@ stale:
 
 | Extra module | Why it is not in the taskbook's list of 42 |
 | --- | --- |
-| `refusal_hold` | landed in commit `0cae6f95` (`B173 refusal-hold`), after the taskbook was written |
+| `refusal_hold` | landed in commit `f0ef8526` (`B173 refusal-hold`), after the taskbook was written |
 | `runtime_registration` | this slice's own module; a registry that does not register itself has a hole in it |
 
 The taskbook's list of 42 was correct when it was written. The brief's
@@ -241,7 +241,7 @@ closed by the earlier work; the list in the taskbook was measured before
 that work and is now stale.
 
 `merged_tree_review.py` was delivered by the `merged-tree-review` slice
-(`dbaff0ad`) and was never registered, because that slice's writable list
+(`4e43c32a`) and was never registered, because that slice's writable list
 did not include `pyproject.toml` — the same structural reason this slice
 exists.
 

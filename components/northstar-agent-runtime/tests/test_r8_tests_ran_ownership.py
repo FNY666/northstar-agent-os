@@ -17,7 +17,7 @@ side-effect was measured on `capability-ceiling-probe`:
 
 **4** tests.  The slice's own test file has **63** methods.  The filter threw
 them away, because the commit that introduced
-`tests/test_capability_ceiling_probe.py` is `9ea57f23`, whose subject names
+`tests/test_capability_ceiling_probe.py` is `4e5a9657`, whose subject names
 `scorer-disagreement` -- the amend that cost the slice its own name.  The
 slice's test file is named in the slice's own MANIFEST, and the filter threw
 that away too.

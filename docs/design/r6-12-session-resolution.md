@@ -643,10 +643,10 @@ The brief for this slice points at
 `/home/muse-newapi/b173-refusal-row-baseline-failures.txt` (27 items,
 mtime 2026-11-13 23:40) as "the baseline". That file is **stale**: it was
 taken before the `merged-tree-review` slice landed
-(`72f351cf`, `dbaff0ad`, 2026-11-14 07:02-07:14), which added
+(`ed06b163`, `4e43c32a`, 2026-11-14 07:02-07:14), which added
 `components/northstar-agent-runtime/merged_tree_review.py` **without
 registering it** in `py-modules` or in `runtime_registration`. The
-`baseline-attribution` slice (commit `af1c950f`, 2026-11-14 14:10) reset the
+`baseline-attribution` slice (commit `ede426e0`, 2026-11-14 14:10) reset the
 baseline to **30 items** and recorded the reset in
 `docs/design/baseline-attribution.md` §3.
 

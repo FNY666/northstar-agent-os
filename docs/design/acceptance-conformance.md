@@ -44,8 +44,8 @@ the round-5/6/7 referee patches landed.
 | `cwl-episode-eviction` | FAIL — `FULL_SUITE` | the `FULL_SUITE` check required a historical `Ran 19xxx tests` line, which the slice's report did not carry; the round-6/7 referee reads the **computed** count and the baseline pointer instead | **PASS (12/12, 0 skipped)** |
 | `langgraph-retry-clears-writes` | FAIL — `FULL_SUITE`, `REPORT_NUMBERS` | the same `FULL_SUITE` relaxation, plus `REPORT_NUMBERS`: the referee was extracting the peak token count and the session id from the wrong JSONL, because the slice's report named a session the resolver could not match | **PASS (12/12, 0 skipped)** |
 | `refusal-row` | FAIL — `FULL_SUITE`, `REPORT_NUMBERS` | the same two fixes; the "dead JSONL" the taskbook warned about was resolved by the deterministic session-resolution rule (the slice's first user message declares the canary **and** the first record's timestamp is at or after the slice's last watch start minus 5 s) | **PASS (12/12, 0 skipped)** |
-| `deterministic-gate-score` | FAIL — `FULL_SUITE`, `REPORT_NUMBERS` | the same two fixes, **plus** the three mutant-kill test classes re-landed under the slice's own prefix (`50bda24f`) so the probe can see them | **PASS (12/12, 0 skipped)** |
-| `vina-receipt-signing` | FAIL — `FULL_SUITE`, `MUTANT` | the `FULL_SUITE` relaxation, **plus** the three mutant-kill test classes re-landed under the slice's own prefix (`e95356e9`): the probe had reported 0/3 because its worktree pinned a commit that predated the fixes | **PASS (12/12, 0 skipped)** |
+| `deterministic-gate-score` | FAIL — `FULL_SUITE`, `REPORT_NUMBERS` | the same two fixes, **plus** the three mutant-kill test classes re-landed under the slice's own prefix (`c08a86ad`) so the probe can see them | **PASS (12/12, 0 skipped)** |
+| `vina-receipt-signing` | FAIL — `FULL_SUITE`, `MUTANT` | the `FULL_SUITE` relaxation, **plus** the three mutant-kill test classes re-landed under the slice's own prefix (`095bd24a`): the probe had reported 0/3 because its worktree pinned a commit that predated the fixes | **PASS (12/12, 0 skipped)** |
 
 ### 2.1 No whitewashing
 
@@ -121,9 +121,9 @@ whose subject is `B173 <slug>: ...`, and it will **not** borrow another slice's 
 through the path-based fallback.  `acceptance-conformance` owned no such commit, because:
 
 * the 12 `deterministic-gate-score` mutant-kill methods landed under
-  `50bda24f` — `B173 deterministic-gate-score: kill or@155/or@159/or@197 in deterministic-gate-score`;
+  `c08a86ad` — `B173 deterministic-gate-score: kill or@155/or@159/or@197 in deterministic-gate-score`;
 * the 14 `signed_receipt` mutant-kill methods landed under
-  `e95356e9` — `B173 vina-receipt-signing: kill or@179/or@280/or@317 in vina-receipt-signing`.
+  `095bd24a` — `B173 vina-receipt-signing: kill or@179/or@280/or@317 in vina-receipt-signing`.
 
 That was deliberate on the mutant side (§1) — the probe pins the slice's own commit, so
 the fixes had to be under the target slices' prefixes to be seen at all.

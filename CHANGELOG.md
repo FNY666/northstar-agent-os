@@ -2957,7 +2957,7 @@ Cloudflare endorsement):
   `rejected`.
 
 **First self-audit** (`skills/security-audit/self-audit-2026-10-03/`,
-quick profile, 10 coverage units, run against `c2ec7a9`): 10 units covered,
+quick profile, 10 coverage units, run against `70b0441`): 10 units covered,
 2 confirmed findings — both informational (sandbox `auto` backend silently
 downgrades to `process` without bwrap; `digest_arguments` silently coerces
 non-dict payloads to the `{}` digest) — and 1 rejected hypothesis

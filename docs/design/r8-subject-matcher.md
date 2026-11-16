@@ -31,9 +31,9 @@ But `slice4`'s work is in the branch:
 
 ```bash
 $ git log --format='%h %s' -- components/northstar-agent-runtime/tests/test_alert_trigger_registry.py
-4fe1ff28 B173 slice4 (part 2): check-input seal pinning + regression tests + idempotent scan
+8c3001a2 B173 slice4 (part 2): check-input seal pinning + regression tests + idempotent scan
 
-$ git show 4fe1ff28 | grep -cE '^\+.*def test_'
+$ git show 8c3001a2 | grep -cE '^\+.*def test_'
 10
 ```
 
@@ -55,9 +55,9 @@ have a `B173 <slug>` subject this pattern cannot see:
 
 | commit | subject | slice |
 |---|---|---|
-| `ffc5dfe2` | `B173 slice4 (part 1): alert trigger registry + audit-sink reader + transcript landing` | `slice4` |
-| `4fe1ff28` | `B173 slice4 (part 2): check-input seal pinning + regression tests + idempotent scan` | `slice4` |
-| `95038ecb` | `B173 r6-worktree-rename, r6-manifest-subject: keep the referee tests testing after the patches land` | two slices |
+| `2aecff56` | `B173 slice4 (part 1): alert trigger registry + audit-sink reader + transcript landing` | `slice4` |
+| `8c3001a2` | `B173 slice4 (part 2): check-input seal pinning + regression tests + idempotent scan` | `slice4` |
+| `c79350d3` | `B173 r6-worktree-rename, r6-manifest-subject: keep the referee tests testing after the patches land` | two slices |
 
 The first two are `slice4`'s **entire deliverable**. The third names two slices.
 

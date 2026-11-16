@@ -102,7 +102,7 @@ Read from the code, not assumed:
 * A repo-wide grep for `class .*Directive` returned nothing: there was no
   typed effect envelope, no host-only minting path, and no interpreter
   that is the sole source of external effects.
-* `state_budget.py` (the `jido-statebudget` slice, commit `2c48ef0a`) is a
+* `state_budget.py` (the `jido-statebudget` slice, commit `28f5068c`) is a
   hard cap on state *size* — a different layer. It is read-only here and
   is not touched.
 

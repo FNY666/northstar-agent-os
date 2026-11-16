@@ -41,30 +41,30 @@ The slice's entire deliverable — a 695-line module, a 458-line test file with 
 methods, an 8.6 KB design doc — was committed as:
 
 ```
-9ea57f23  B173 scorer-disagreement: disagreement detector over multi-scorer verdicts
+4e5a9657  B173 scorer-disagreement: disagreement detector over multi-scorer verdicts
 ```
 
 The correctly-subjected twin exists in the reflog:
 
 ```
 f85282fb  B173 capability-ceiling-probe: fail-first admission + calibration error + ceiling routing
-9ea57f23  B173 scorer-disagreement: disagreement detector over multi-scorer verdicts
+4e5a9657  B173 scorer-disagreement: disagreement detector over multi-scorer verdicts
 ```
 
-Both have the **same parent** (`0a2f3f42`) and the **same author date**
+Both have the **same parent** (`6c5fa00a`) and the **same author date**
 (`2026-11-13 19:30:34 +0000`).  The reflog records `commit` → `commit (amend)`: the
 commit was amended in place and its subject was overwritten.
 
 The two trees differ by one file:
 
 ```
-$ git diff --stat f85282fb 9ea57f23
+$ git diff --stat f85282fb 4e5a9657
  components/northstar-agent-runtime/scorer_disagreement.py | 6 +++---
 ```
 
 and that difference is **three comment-header lines rotated** (`# helpers` ↔ `# records`
 ↔ `# pure computation`) with **no code change**.  `scorer_disagreement.py` was
-introduced by a different commit (`965c376f`), so an amend elsewhere in the tree swept
+introduced by a different commit (`0bd27ade`), so an amend elsewhere in the tree swept
 it in.
 
 The commit subject is the repo's convention and the referee's matcher.  A commit that
@@ -80,7 +80,7 @@ _registration("capability_ceiling_probe", "scorer-disagreement", "2026-11-14", .
 
 The `slice_slug` field is documented as *"the slice that introduced the module"*.
 `capability_ceiling_probe` was introduced by the `capability-ceiling-probe` slice;
-`scorer_disagreement.py` was introduced by `965c376f` (`scorer-disagreement`).  The
+`scorer_disagreement.py` was introduced by `0bd27ade` (`scorer-disagreement`).  The
 same mis-attribution as the commit subject, in the runtime registry itself.
 
 ### 2.3 The referee made correctness destructive
@@ -113,18 +113,18 @@ A 51-method loss, caused by making the slice's history **more honest**.
 
 | slice | manifest file | introduced by |
 |---|---|---|
-| `orphan-adoption` | `scope_verbatim_compaction.py` | `66ceda88` — `B173 scope-verbatim-compaction:` |
-| | `test_scope_verbatim_compaction.py` | `66ceda88` |
-| | `event_condenser.py` | `344d33c2` — `B173 event-condenser:` |
-| | `test_revision_checked_tool_results.py` | `859ddf32` — `B173 revision-checked-tool-results:` |
-| | `annotation-pin.md` | `acf9621d` — `B173 outsideloop:` |
-| | `orphan-adoption.md` | `1c947e7b` — `B173 orphan-adoption:` |
-| `mutant-evidence-closure` | `test_event_condenser.py` | `344d33c2` — `B173 event-condenser:` |
-| | `test_endpoint_identity.py` | `a0c88468` — `B173 neo-konsi-s2bw:` |
-| | `test_cancellation_tombstone.py` | `9c88902a` — `B173 tombstone:` |
-| | `test_artifact_authority.py` | `b97e6a45` — `B173 vina:` |
-| | `test_deterministic_gate_score.py` | `45464f78` — `B173 deterministic-gate-score:` |
-| | `test_signed_receipt.py` | `63509a65` — `B173 vina-receipt-signing:` |
+| `orphan-adoption` | `scope_verbatim_compaction.py` | `b53b71c6` — `B173 scope-verbatim-compaction:` |
+| | `test_scope_verbatim_compaction.py` | `b53b71c6` |
+| | `event_condenser.py` | `e7ca19d4` — `B173 event-condenser:` |
+| | `test_revision_checked_tool_results.py` | `93082890` — `B173 revision-checked-tool-results:` |
+| | `annotation-pin.md` | `b7a01e59` — `B173 outsideloop:` |
+| | `orphan-adoption.md` | `53640d0e` — `B173 orphan-adoption:` |
+| `mutant-evidence-closure` | `test_event_condenser.py` | `e7ca19d4` — `B173 event-condenser:` |
+| | `test_endpoint_identity.py` | `ddf86494` — `B173 neo-konsi-s2bw:` |
+| | `test_cancellation_tombstone.py` | `695a25b7` — `B173 tombstone:` |
+| | `test_artifact_authority.py` | `6026b3e3` — `B173 vina:` |
+| | `test_deterministic_gate_score.py` | `f4a1413e` — `B173 deterministic-gate-score:` |
+| | `test_signed_receipt.py` | `ef748b93` — `B173 vina-receipt-signing:` |
 
 Every one of those commits carries test methods.  The exclusive fallback counted them
 for these two slices only because they had **no** subject commit of their own to shadow
@@ -241,7 +241,7 @@ Over all 84 slices of the batch, under the union rule:
    in neither `tests/docbuild.py`'s manifest nor its exclusion list, and the
    `northstar-agent-interop` page is stale against `handoff.py`'s new `tombstones`
    parameter.  `tests/test_docbuild.py` fails on both — **and it fails at the baseline
-   commit too** (verified in a detached worktree at `2db42e93`), so this is a batch
+   commit too** (verified in a detached worktree at `81836320`), so this is a batch
    regression that predates round 8, not a round-8 defect.  It needs its own slice.
 2. `slice1` and `slice2` fail `TESTS_RAN` on `benchmarks/code-tasks/v1/fixtures/*` —
    the code-task fixtures, which fail on their own.  Same question: batch regression or

@@ -472,7 +472,7 @@ class InRepoDocumentationTests(unittest.TestCase):
         self.assertTrue(DESIGN_DOC.exists(), f"missing design doc: {DESIGN_DOC}")
         text = DESIGN_DOC.read_text(encoding="utf-8")
         self.assertIn("orphan-adoption", text)
-        self.assertIn("1c947e7b", text)
+        self.assertIn("53640d0e", text)
 
     def test_the_live_referee_is_untouched_by_this_slice(self) -> None:
         """The live script is the judge's own file; this slice must not
