@@ -273,7 +273,8 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "procurement_agents", "product_path", "profiler", "prom_metrics",
         "prompt_injection", "prompt_stealing_detector", "prompt_template", "proof_assistant",
         "property_tester", "proptech_agents", "provenance", "provenance_attestor",
-        "provenance_tagging", "provenance_taint", "provider_retry", "providers.__init__",
+        "provenance_tagging", "provenance_taint", "provider_retry", "policy.__init__",
+        "providers.__init__",
         "providers.anthropic", "providers.base", "providers.openai_compat", "providers.scripted",
         "pubsub_broker", "pulsar_broker", "push_service", "quantum_timeline",
         "query_planner", "raft_interface", "raft_log", "rag_pipeline",
@@ -1095,6 +1096,105 @@ def uninstalled_modules(component: str) -> list[str]:
     """
     installed = installed_modules(component)
     return sorted(flat_modules_on_disk(component) - installed)
+
+
+# --- data files: what a module reads at runtime ----------------------------
+
+#: Suffixes of the files a module can read at runtime, as opposed to the
+#: modules it imports.  A module's ``.py`` source is installed by
+#: ``py-modules``; a ``.json`` or ``.toml`` beside it is not, unless the
+#: packaging configuration names it.
+DATA_SUFFIXES = (".json", ".toml")
+
+#: Directories that hold build or development configuration rather than
+#: runtime data.  A ``pyproject.toml`` is packaging configuration; the
+#: TypeScript face's ``package.json`` is a build manifest.  Neither is read
+#: by a Python module at runtime, so neither is a runtime data file.
+NOT_DATA_DIRS = frozenset({"build", "dist", "sdk-ts", "tests", ".pytest_cache"})
+
+
+def _package_data_patterns(component: str) -> dict[str, list[str]]:
+    """The ``package-data`` globs a component declares, per package name."""
+    pyproject = ROOT / "components" / component / "pyproject.toml"
+    if not pyproject.is_file():
+        return {}
+    try:
+        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    except (tomllib.TOMLDecodeError, OSError):
+        return {}
+    raw = data.get("tool", {}).get("setuptools", {}).get("package-data", {})
+    return {
+        name: list(patterns)
+        for name, patterns in raw.items()
+        if isinstance(patterns, list)
+    }
+
+
+def data_files_on_disk(component: str) -> set[str]:
+    """The data files a component's modules read at runtime.
+
+    Paths are relative to the component directory and use ``/`` separators,
+    so a file in ``policy/`` is ``policy/dataflow.toml``.
+
+    The scan covers the WHOLE component directory, not just its package
+    directories: a data file in the component root is in neither
+    installation mechanism, and that is precisely the shape that slipped
+    through -- the deny-monotonicity baseline sat next to its module in the
+    component root, so no ``package-data`` entry could reach it.
+    """
+    root = ROOT / "components" / component
+    if not root.is_dir():
+        return set()
+    found: set[str] = set()
+    for path in root.rglob("*"):
+        if not path.is_file() or path.suffix not in DATA_SUFFIXES:
+            continue
+        relative = path.relative_to(root)
+        parts = relative.parts
+        # Packaging configuration and the TypeScript face's build manifests
+        # are not runtime data: no Python module reads them at runtime.
+        if parts[0] == "pyproject.toml":
+            continue
+        if any(part in NOT_DATA_DIRS for part in parts):
+            continue
+        if any(part.endswith(".egg-info") for part in parts):
+            continue
+        found.add("/".join(parts))
+    return found
+
+
+def installed_data_files(component: str) -> set[str]:
+    """The data files ``pip install .`` puts on the path.
+
+    A data file is installed by ``package-data``, which names a package and
+    the globs inside it.  ``py-modules`` cannot do it: that array lists
+    flat module names, and setuptools copies only ``.py`` files for them.
+    """
+    root = ROOT / "components" / component
+    if not root.is_dir():
+        return set()
+    found: set[str] = set()
+    for package, patterns in _package_data_patterns(component).items():
+        package_dir = root / package
+        if not package_dir.is_dir():
+            continue
+        for pattern in patterns:
+            for path in package_dir.glob(pattern):
+                if path.is_file():
+                    found.add("%s/%s" % (package, path.name))
+    return found
+
+
+def missing_data_files(component: str) -> list[str]:
+    """Data files a component reads at runtime that its wheel would not ship.
+
+    Measured 2026-11-16: this found two files in the runtime component --
+    the deny-monotonicity baseline and the dataflow policy -- neither of
+    which was in the wheel.  The dataflow policy had an embedded copy and
+    so behaved correctly anyway; the deny baseline had none and failed
+    closed on every installed surface.
+    """
+    return sorted(data_files_on_disk(component) - installed_data_files(component))
 
 
 def documented_but_absent() -> list[str]:

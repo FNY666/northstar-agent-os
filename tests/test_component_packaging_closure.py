@@ -295,12 +295,16 @@ class EveryComponentPackagingTests(unittest.TestCase):
                 )
 
     def test_the_runtime_package_members_are_not_reported_as_missing(self):
-        # The 22 package members are installed by `packages.find`, not by
+        # The 23 package members are installed by `packages.find`, not by
         # `py-modules`.  A guard that compared only against `py-modules`
-        # would report all 22 as missing -- a false alarm on the runtime
+        # would report all 23 as missing -- a false alarm on the runtime
         # component, which is exactly the shape of bug this slice fixes.
+        #
+        # RE-MEASURED 2026-11-16 by the `runtime-data-files` slice: 22 ->
+        # 23, because the runtime's data-file directory (`policy/`) became
+        # a package so that its data files could ship in the wheel.
         members = docbuild.package_members(RUNTIME)
-        self.assertEqual(len(members), 22, sorted(members))
+        self.assertEqual(len(members), 23, sorted(members))
         # The two halves are DISJOINT: a package member's name cannot appear
         # in `py-modules` (that array lists flat names only).
         self.assertEqual(members & docbuild.flat_modules(RUNTIME), set())
@@ -313,7 +317,9 @@ class EveryComponentPackagingTests(unittest.TestCase):
 
     def test_the_runtime_installed_surface_is_the_whole_surface(self):
         installed = docbuild.installed_modules(RUNTIME)
-        self.assertEqual(len(installed), 1635)
+        # 1636 = 1613 flat + 23 package members.  RE-MEASURED 2026-11-16 by
+        # the `runtime-data-files` slice (was 1635 = 1613 + 22).
+        self.assertEqual(len(installed), 1636)
         self.assertEqual(len(docbuild.flat_modules_on_disk(RUNTIME)), 1613)
 
     def test_the_interop_component_is_covered_by_the_sweep(self):

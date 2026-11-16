@@ -20,11 +20,15 @@ Design notes:
   that still denies but under a *different* code is a semantic change
   worth flagging: the old ``(probe, code)`` pair is reported as loosened
   and the new pair is reported as added.
-- The baseline is a plain JSON file pinned next to this module
-  (``deny_monotonicity_baseline.json``). Regenerating it is a deliberate,
-  reviewed act -- ``regenerate_baseline()`` -- never something the bench
-  does on its own. A missing baseline fails closed: without a pin there
-  is nothing to be monotone against.
+- The baseline is a plain JSON file pinned in the component's ``policy/``
+  directory (``policy/deny_monotonicity_baseline.json``), which the wheel
+  ships.  Regenerating it is a deliberate, reviewed act --
+  ``regenerate_baseline()`` -- never something the bench does on its own.
+  A missing baseline fails closed: without a pin there is nothing to be
+  monotone against.  The baseline must be *shipped*, not merely present in
+  the checkout: ``py-modules`` installs ``.py`` files only, so a data file
+  left outside the shipped package directory would work in the checkout and
+  fail closed on every installed surface.
 - ``gate_fn`` receives the raw probe dict and returns a
   ``PermissionDecision``. The bench wires the real gate; unit tests may
   wire fakes.
@@ -212,8 +216,17 @@ def check_monotonicity(
 
 
 def baseline_path() -> Path:
-    """Filesystem path of the pinned baseline JSON (next to this module)."""
-    return Path(__file__).with_name(BASELINE_FILENAME)
+    """Filesystem path of the pinned baseline JSON.
+
+    The baseline lives in the component's ``policy/`` directory, next to
+    the other data file the runtime reads (``policy/dataflow.toml``).
+    That directory is shipped in the wheel, so the installed surface can
+    read the baseline -- which it must, because a missing baseline fails
+    closed.  Keeping it out of the component root would have left it in
+    the checkout only: ``py-modules`` installs ``.py`` files, and a data
+    file in neither installation mechanism disappears on ``pip install .``.
+    """
+    return Path(__file__).resolve().parent / "policy" / BASELINE_FILENAME
 
 
 def save_baseline(

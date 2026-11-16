@@ -183,6 +183,13 @@ jobs:
           # No MCP server is launched here; CI kernels may lack Landlock ABI 10.
           northstar-agent-runtime doctor --workspace /tmp --mcp-network allowed | grep -q "ready to run"
           python -c "import cli, loop, tools, tools.verify_invariants, governance_bench, memory, product_path; print('northstar-agent-runtime core imports OK')"
+          # The DATA files the modules read must be in the wheel too: a
+          # module's .py source is installed by `py-modules`, but a .json or
+          # .toml beside it is in neither installation mechanism unless the
+          # packaging configuration names it.  The deny-monotonicity
+          # baseline has no embedded fallback and fails closed without it,
+          # so on an installed surface the check could never pass.
+          python -c "import deny_monotonicity as dm; assert dm.baseline_path().exists(), dm.baseline_path(); ok, msg = dm.deny_monotonicity_check(); assert ok, msg; print('northstar-agent-runtime data files OK')"
       - name: Installed full benchmark smoke
         # The optional bench includes durable/host/contract tracks. Resolve their
         # wheels from this checkout until the coordinated release is published.

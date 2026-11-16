@@ -1266,6 +1266,7 @@ REGISTRY = (
     _registration("pocketos_probe", "probes", "2026-10-07", "PocketOS-style end-to-end probe: no-attacker self-destruction chain."),
     _registration("poi_search", "runtime", "2026-10-08", "Points-of-interest search interface (Places-API shaped bookkeeping)."),
     _registration("poisoning_defense", "runtime", "2026-10-08", "Training-data poisoning defense lifecycle ledger."),
+    _registration("policy.__init__", "runtime-data-files", "2026-11-16", "Runtime data files: the package that ships them in the wheel."),
     _registration("policy_engine", "runtime", "2026-10-08", "OPA-style policy engine: Rego-like allow/deny rules over input documents."),
     _registration("policy_file", "workspace policy file and project context (agents.md) for the go", "2026-09-07", "Workspace policy file (``.northstar/config.toml``) and project context (``AGENTS.md``)."),
     _registration("policy_management", "runtime", "2026-10-08", "Policy document lifecycle governance (draft / approve / review bookkeeping, simulated)."),

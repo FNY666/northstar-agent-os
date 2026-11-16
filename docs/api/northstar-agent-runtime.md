@@ -36980,7 +36980,7 @@ True iff ``new`` keeps every denial in ``old``.
 
 #### `baseline_path()`
 
-Filesystem path of the pinned baseline JSON (next to this module).
+Filesystem path of the pinned baseline JSON.
 
 #### `save_baseline(deny_set: set[tuple[str, str]], path: str | Path | None=None)`
 
@@ -65453,6 +65453,12 @@ What a retry policy actually cost this turn.
 #### `merge_cli(policy: RetryPolicy | None, *, max_attempts: int | None=None, deadline_ms: int | None=None, retry_on: Iterable[str] | None=None, off: bool=False)`
 
 Apply the CLI's knobs on top of the workspace table, never loosening past it.
+
+### `policy`
+
+Source: `components/northstar-agent-runtime/policy/__init__.py`
+
+Runtime data files: the files a module reads that are not modules.
 
 ### `providers`
 

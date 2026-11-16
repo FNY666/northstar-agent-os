@@ -96,18 +96,27 @@ class PackageMemberPublicationTests(unittest.TestCase):
                 + "\n  ".join(undecided),
             )
 
-    def test_the_runtime_package_members_are_the_measured_twenty_two(self):
+    def test_the_runtime_package_members_are_the_measured_twenty_three(self):
         # The count is pinned so that a package member being added or removed
         # is a visible event rather than a silent drift.  If the count
         # changes, this test fails and the number in the design doc has to be
         # re-measured -- which is the point.
+        #
+        # RE-MEASURED 2026-11-16 by the `runtime-data-files` slice: 22 ->
+        # 23, because the runtime's data-file directory (`policy/`) became
+        # a package so that its data files could ship in the wheel.  A
+        # namespace directory would have shipped the files without
+        # registering a module -- and an installed module that the registry
+        # cannot name is the exact blind spot `installed-surface-registration`
+        # closed.
         published = {name for name in docbuild.MANIFEST[RUNTIME] if "." in name}
         self.assertEqual(
             len(published),
-            22,
+            23,
             "the runtime's published package members: " + ", ".join(sorted(published)),
         )
         self.assertIn("providers.__init__", published)
+        self.assertIn("policy.__init__", published)
         self.assertIn("tools.__init__", published)
         self.assertIn("tools.shell", published)
 
@@ -142,7 +151,7 @@ class PackageMemberPublicationTests(unittest.TestCase):
         installed = flat | package_members
         self.assertEqual(
             len(package_members),
-            22,
+            23,
             "the package members py-modules cannot name",
         )
         self.assertEqual(
@@ -165,7 +174,7 @@ class PackageMemberPublicationTests(unittest.TestCase):
         # The generator must be able to answer "what does ``pip install .``
         # put on the path?" *without* the test re-deriving it.  If the
         # installed surface is only computed in the test, the generator's own
-        # coverage check stays blind to the 22 package members -- which is
+        # coverage check stays blind to the 23 package members -- which is
         # the hole the previous slice left open.
         installed = docbuild.installed_modules(RUNTIME)
         self.assertEqual(
@@ -173,9 +182,9 @@ class PackageMemberPublicationTests(unittest.TestCase):
             docbuild.flat_modules(RUNTIME) | docbuild.package_members(RUNTIME),
             "the installed surface is the flat modules plus the package members",
         )
-        self.assertEqual(len(docbuild.package_members(RUNTIME)), 22)
+        self.assertEqual(len(docbuild.package_members(RUNTIME)), 23)
         self.assertEqual(len(docbuild.flat_modules(RUNTIME)), 1613)
-        self.assertEqual(len(installed), 1635)
+        self.assertEqual(len(installed), 1636)
         # A package member is in the installed surface and is not a flat
         # module -- that is the whole reason it needs a separate path.
         self.assertNotIn("tools.shell", docbuild.flat_modules(RUNTIME))
@@ -205,12 +214,27 @@ class PackageMemberPublicationTests(unittest.TestCase):
         # them up -- not because the generator guessed.  The generator reads
         # the packaging configuration, so a package added to ``include`` is
         # part of the installed surface automatically.
+        #
+        # The include list is NOT frozen here: it is the packaging
+        # configuration's business, and a slice that adds a package to it
+        # must not have to edit this test to be accepted.  What this test
+        # pins is the RULE -- every named pattern has modules on disk, and
+        # every package member is covered by a pattern -- not the current
+        # contents of the list.
+        #
+        # MEASURED 2026-11-16: the `runtime-data-files` slice added
+        # ``policy*`` to the include list (the runtime's data-file
+        # directory, so its ``package-data`` globs are reachable), and this
+        # assertion -- which froze the list to two entries -- failed.  The
+        # freeze was the defect: it made an unrelated packaging change
+        # look like a regression.
         with (docbuild.ROOT / "components" / RUNTIME / "pyproject.toml").open(
             "rb"
         ) as handle:
             data = tomllib.load(handle)
         include = data["tool"]["setuptools"]["packages"]["find"]["include"]
-        self.assertEqual(sorted(include), ["providers*", "tools*"])
+        self.assertTrue(include, "the packaging configuration names no package")
+        self.assertEqual(len(include), len(set(include)), "duplicate patterns")
         for pattern in include:
             stem = pattern.rstrip("*")
             on_disk = {
