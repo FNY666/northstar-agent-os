@@ -42,6 +42,14 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PROBE_PY = Path("/home/muse-newapi/b173-mutant.py")
 PROBE_SH = Path("/home/muse-newapi/b173-mutant.sh")
+# The probe as it was BEFORE the judge-hygiene patch was applied.  The
+# patch-application test below needs that version as its "before" side:
+# once the coordinator has applied the patch to the live probe, `patch`
+# correctly reports "Reversed (or previously applied)" and the test would
+# fail for a reason unrelated to what it checks.  The pre-round-6 copies
+# are kept for exactly this purpose (see b173-accept.sh.preround6).
+PROBE_PY_BASE = Path("/home/muse-newapi/b173-mutant.py.preround6")
+PROBE_SH_BASE = Path("/home/muse-newapi/b173-mutant.sh.preround6")
 PATCH_FILE = Path("/home/muse-newapi/b173-judge-hygiene-fix.patch")
 DESIGN_DOC = REPO_ROOT / "docs" / "design" / "judge-hygiene.md"
 
@@ -137,8 +145,17 @@ def _write_fixture(root: Path) -> Path:
     return root
 
 
-def _run_probe(probe: Path, workdir: Path, env_extra=None, tries=3):
-    """Run the probe against a throwaway workdir; return (rc, stdout)."""
+def _run_probe(probe: Path, workdir: Path, env_extra=None, tries=3,
+               no_early_stop=False):
+    """Run the probe against a throwaway workdir; return (rc, stdout).
+
+    ``no_early_stop`` asks the probe to try every candidate instead of
+    stopping at the first kill.  The behavioural tests below NEED more than
+    one verdict -- they assert that a KILLED and a SURVIVED verdict are both
+    reported, which is how they prove each round measured that round's code
+    and not a stale one.  The judge's own use of the probe stops at the
+    first kill, because its contract is only ">=1 killed".
+    """
     env = dict(os.environ)
     env["PYTHONPATH"] = ".:tests"
     env.pop("PYTHONDONTWRITEBYTECODE", None)
@@ -149,7 +166,7 @@ def _run_probe(probe: Path, workdir: Path, env_extra=None, tries=3):
          "--file", str(workdir / "probe_mod.py"),
          "--test-module", "test_probe_mod",
          "--workdir", str(workdir),
-         "--tries", str(tries)],
+         "--tries", str(tries)] + (["--no-early-stop"] if no_early_stop else []),
         cwd=str(workdir), env=env, timeout=300,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
     )
@@ -267,7 +284,7 @@ class JudgeHygieneProbeBehaviourTests(unittest.TestCase):
         and reports the previous round's verdict a second time.
         """
         wd = self._workdir()
-        rc, out = _run_probe(self.probe, wd)
+        rc, out = _run_probe(self.probe, wd, no_early_stop=True)
         self.assertIn("MUTANT RESULT:", out, out)
         lines = _mutant_lines(out)
         self.assertGreaterEqual(len(lines), 2, out)
@@ -407,11 +424,17 @@ class JudgeHygienePatchTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self._tmp, True)
 
     def test_patch_applies_cleanly_to_the_installed_probe(self):
-        if not PROBE_PY.exists():
-            self.skipTest(f"probe not installed at {PROBE_PY}")
-        shutil.copyfile(PROBE_PY, self._tmp / "b173-mutant.py")
-        if PROBE_SH.exists():
-            shutil.copyfile(PROBE_SH, self._tmp / "b173-mutant.sh")
+        # Use the PRE-patch probe as the "before" side when it is
+        # available, so this test keeps its meaning whether or not the
+        # coordinator has applied the patch yet.  Fall back to the live
+        # probe when the base is absent.
+        base_py = PROBE_PY_BASE if PROBE_PY_BASE.exists() else PROBE_PY
+        base_sh = PROBE_SH_BASE if PROBE_SH_BASE.exists() else PROBE_SH
+        if not base_py.exists():
+            self.skipTest(f"probe not installed at {base_py}")
+        shutil.copyfile(base_py, self._tmp / "b173-mutant.py")
+        if base_sh.exists():
+            shutil.copyfile(base_sh, self._tmp / "b173-mutant.sh")
         proc = subprocess.run(
             ["patch", "-p1", "--dry-run", "--batch", "-i", str(PATCH_FILE)],
             cwd=str(self._tmp), stdout=subprocess.PIPE,
