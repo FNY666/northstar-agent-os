@@ -18,8 +18,8 @@ nor deduplicated:
     the family sits at the very END of the array, after ``zw_remove``:
 
         $ grep -n '"ba_01"' pyproject.toml
-        318:    "ba_01",
-        1622:    "ba_01",
+        359:    "ba_01", "ba_02", "ba_03", "ba_04",
+        1626:    "ba_01",
 
     And the array is not sorted: there are **9 inversions**, pairs where a
     name is followed by a name that sorts before it:
