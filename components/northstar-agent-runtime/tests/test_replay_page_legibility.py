@@ -182,6 +182,36 @@ class GeneratedPageTests(unittest.TestCase):
         self.assertNotIn("description", data["records"][0])
         self.assertIn("do the thing", json.dumps(data))
 
+    def test_the_page_still_normalises_non_finite_numbers(self):
+        """The page copies a record to describe it; the copy must not
+        smuggle a NaN into the payload.
+
+        ``render_replay_page`` normalises non-finite floats to ``null``
+        before the JSON is encoded, because a browser's parser rejects
+        them.  This slice copies every record (to attach a description),
+        so the copy has to stay inside that normalisation.
+        """
+        page = page_for([{
+            "index": 0, "type": "user_prompt", "ts": "2026-09-09T00:00:00.000Z",
+            "content": [{"type": "text", "text": "inspect"}],
+            "metrics": {"score": float("nan"), "limit": float("inf")},
+        }])
+        self.assertEqual(page_data(page)["records"][0]["metrics"], {"score": None, "limit": None})
+        self.assertNotIn(":NaN", page)
+
+    def test_the_caller_s_records_are_not_mutated(self):
+        """A record the runtime wrote is an audit boundary.
+
+        The page describes a copy; the caller's record must come back
+        exactly as it went in.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            record = a_standing_record(directory, "page-no-mutation")
+        before = json.dumps(record, sort_keys=True)
+        page_for([record])
+        self.assertEqual(json.dumps(record, sort_keys=True), before)
+        self.assertNotIn("description", record)
+
 
 #: A node harness that loads the GENERATED page, stubs the DOM, and reports
 #: what the page's own JavaScript renders for each record.

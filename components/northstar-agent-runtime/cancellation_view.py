@@ -72,28 +72,45 @@ def describe_cancellation(record: Mapping[str, Any]) -> str:
     else:
         scope = "%s on %s" % (action, subject)
 
+    if standing:
+        state = "STANDING"
+        state_note = "the stop has not been lifted"
+    else:
+        state = "LIFTED"
+        state_note = "the stop was lifted"
+
     parts = [
-        "grant=%s" % grant,
-        "kind=%s" % kind,
         "declared by %s via %s" % (declarer, channel),
     ]
     if reason == "":
         parts.append("reason: (none given)")
     else:
         parts.append("reason: %s" % reason)
-
-    if standing:
-        state = "STANDING - the stop has not been lifted"
-    else:
-        state = "LIFTED by %s via %s" % (
+    parts.append("grant=%s" % grant)
+    parts.append("kind=%s" % kind)
+    if not standing:
+        parts.append("lifted by %s via %s" % (
             _text(lift.get("declarer")),
             _text(lift.get("declarer_channel")),
-        )
+        ))
         words = _text(lift.get("text"), "")
         if words != "":
-            state = "%s - %s" % (state, words)
+            parts.append("lift: %s" % words)
 
-    return "cancellation - %s (%s) - %s" % (scope, ", ".join(parts), state)
+    # The VERDICT COMES FIRST, then WHAT was revoked.
+    #
+    # Every read path that shows a single line eventually truncates it:
+    # the offline replay page's timeline line is 150 characters, and a real
+    # grant id is 36 of them.  With the verdict last, the truncation is
+    # exactly what drops it -- and the one word a reader must not miss is
+    # the one that falls off the end.  So the state leads, the scope
+    # follows immediately, and the bookkeeping trails.
+    return "cancellation - %s - %s - %s - %s" % (
+        state,
+        scope,
+        state_note,
+        " - ".join(parts),
+    )
 
 
 def _tombstone_of(record: Mapping[str, Any]) -> Mapping[str, Any]:

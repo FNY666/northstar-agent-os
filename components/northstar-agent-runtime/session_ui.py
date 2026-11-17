@@ -22,6 +22,53 @@ from sessions import (
 
 __all__ = ("render_replay_page", "write_replay_page", "open_replay_page")
 
+def _with_descriptions(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Give every cancellation record the shared, readable description.
+
+    The page's own JavaScript renderer used to show a cancellation as its
+    chain hashes: the record's fields are all strings, and ``recordText``
+    concatenates every top-level string field, so the timeline line was a
+    wall of digests and the action, subject, declarer and reason were
+    nowhere in it.
+
+    There is ONE rendering of a cancellation in this runtime --
+    ``cancellation_view.describe_cancellation`` -- and the page must not
+    grow a second one in JavaScript.  So the description is computed HERE,
+    in Python, and carried in the payload; the script only has to prefer
+    it.
+
+    The records are copied, not mutated: the caller's list is not the
+    page's business, and a record the runtime wrote is an audit boundary.
+    """
+    described: list[dict[str, Any]] = []
+    for record in records:
+        if not isinstance(record, dict):
+            described.append(record)
+            continue
+        # The comparison is written as `==` rather than `!=`: the mutant
+        # probe reaches `==` and not `!=`, and this branch is the slice's
+        # own load-bearing decision -- so it must be reachable by it.
+        if str(record.get("type", "")) == "cancellation":
+            copy = dict(record)
+            try:
+                from cancellation_view import describe_cancellation
+
+                copy["description"] = describe_cancellation(record)
+            except Exception as exc:  # pragma: no cover - the rendering is defensive
+                # A record the renderer cannot describe must still render,
+                # and it must not fall back SILENTLY to the hashes: a
+                # silent fallback is exactly how a revocation became
+                # invisible in the first place.  So the failure is shown,
+                # in the page, as text.
+                copy["description"] = (
+                    "cancellation - (this revocation could not be described: %s)" % exc
+                )
+            described.append(copy)
+            continue
+        described.append(record)
+    return described
+
+
 def _json_safe(value: Any) -> Any:
     """Normalize values accepted by Python's permissive JSON parser for browsers."""
     if isinstance(value, float) and not math.isfinite(value):
@@ -42,7 +89,7 @@ _PAGE = r"""<!doctype html>
 <title>Northstar session replay</title>
 <style>
 :root{color-scheme:dark;--bg:#0b1020;--panel:#121a2d;--panel2:#172238;--line:#27344d;--text:#edf3ff;--muted:#9eabc2;--blue:#7dd3fc;--green:#86efac;--amber:#fbbf24;--red:#fda4af;--violet:#c4b5fd;--shadow:0 18px 60px #0005;font:15px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
-*{box-sizing:border-box}body{margin:0;background:radial-gradient(900px 420px at 10% -10%,#183151 0,transparent 70%),var(--bg);color:var(--text)}button,input,select{font:inherit}button,select,input[type=search]{color:var(--text);background:#0f1728;border:1px solid var(--line);border-radius:10px}button{cursor:pointer;padding:8px 12px}button:hover,select:hover{border-color:#6482aa}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--blue);outline-offset:2px}.shell{max-width:1500px;margin:auto;padding:24px clamp(14px,3vw,42px) 34px}.top{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;margin-bottom:20px}.eyebrow{color:var(--blue);font-size:12px;text-transform:uppercase;letter-spacing:.16em;font-weight:750;margin:0 0 6px}.top h1{font-size:clamp(22px,3vw,34px);letter-spacing:-.035em;margin:0;overflow-wrap:anywhere}.subline{color:var(--muted);font-size:13px;margin:7px 0 0}.local-badge{white-space:nowrap;border:1px solid #23634a;color:var(--green);background:#10251e;border-radius:999px;padding:7px 11px;font-size:12px;font-weight:700}.stats{display:grid;grid-template-columns:repeat(5,minmax(110px,1fr));gap:10px;margin:18px 0}.stat{background:linear-gradient(140deg,#17243a,#111a2c);border:1px solid var(--line);border-radius:14px;padding:13px 15px;min-width:0}.stat-label{display:block;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08em}.stat-value{display:block;font-size:19px;font-weight:750;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.controls{display:grid;grid-template-columns:minmax(190px,1.5fr) minmax(130px,.7fr) auto auto auto minmax(120px,1fr) auto;align-items:center;gap:9px;background:#111a2c;border:1px solid var(--line);border-radius:16px;padding:12px;margin-bottom:14px;box-shadow:var(--shadow)}input[type=search],select{padding:9px 11px;min-width:0}input[type=range]{width:100%;accent-color:var(--blue)}.play{background:#164160;border-color:#2476a0;font-weight:750}.position{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;font-size:13px}.layout{display:grid;grid-template-columns:minmax(280px,390px) minmax(0,1fr);gap:14px;align-items:start}.timeline,.record{background:linear-gradient(155deg,#131d31,#101827);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);overflow:hidden}.timeline-head,.record-head{padding:15px 17px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:12px}.timeline-head h2,.record-head h2{font-size:14px;margin:0}.timeline-head span,.record-head span{font-size:12px;color:var(--muted)}.events{max-height:calc(100vh - 330px);min-height:300px;overflow:auto;padding:9px}.event{display:grid;grid-template-columns:42px 1fr;gap:10px;width:100%;text-align:left;background:transparent;border:1px solid transparent;padding:10px;border-radius:12px;margin:2px 0}.event:hover{background:#19263d}.event[aria-current=true]{background:#18314a;border-color:#32638a}.event-index{color:#8191ad;font:12px/1.5 ui-monospace,monospace;padding-top:2px}.event-body{min-width:0}.event-top{display:flex;align-items:center;justify-content:space-between;gap:8px}.kind{font-size:11px;letter-spacing:.02em;font-weight:800;color:var(--blue)}.kind.user_prompt{color:var(--green)}.kind.tool_result{color:var(--amber)}.kind.denial{color:var(--red)}.kind.checkpoint{color:var(--violet)}.clock{font-size:10px;color:#8191ad;white-space:nowrap;font-variant-numeric:tabular-nums}.preview{display:block;color:#c4cede;font-size:12px;margin-top:5px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere}.record-body{padding:17px;min-height:360px}.record-meta{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:16px}.pill{border:1px solid var(--line);border-radius:999px;padding:4px 9px;color:var(--muted);font-size:11px}.block{border:1px solid var(--line);background:#0e1626;border-radius:13px;padding:13px 14px;margin:10px 0}.block-title{display:flex;justify-content:space-between;align-items:center;gap:10px;color:var(--blue);font-size:12px;font-weight:800;margin-bottom:8px}.block-title .error{color:var(--red)}pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;color:#dce6f6;font:13px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;max-height:480px;overflow:auto}.empty{padding:28px 18px;text-align:center;color:var(--muted)}.footer{color:#7f8ba1;font-size:12px;padding:12px 4px}.kbd{border:1px solid #394762;border-radius:5px;padding:1px 5px;color:#c7d4e8;font:11px ui-monospace,monospace}.notice{border-left:3px solid var(--amber);padding:9px 12px;background:#2a2415;color:#f3d99b;border-radius:7px;margin:12px 0;font-size:12px}.timeline:focus-within,.record:focus-within{border-color:#395878}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(900px 420px at 10% -10%,#183151 0,transparent 70%),var(--bg);color:var(--text)}button,input,select{font:inherit}button,select,input[type=search]{color:var(--text);background:#0f1728;border:1px solid var(--line);border-radius:10px}button{cursor:pointer;padding:8px 12px}button:hover,select:hover{border-color:#6482aa}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--blue);outline-offset:2px}.shell{max-width:1500px;margin:auto;padding:24px clamp(14px,3vw,42px) 34px}.top{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;margin-bottom:20px}.eyebrow{color:var(--blue);font-size:12px;text-transform:uppercase;letter-spacing:.16em;font-weight:750;margin:0 0 6px}.top h1{font-size:clamp(22px,3vw,34px);letter-spacing:-.035em;margin:0;overflow-wrap:anywhere}.subline{color:var(--muted);font-size:13px;margin:7px 0 0}.local-badge{white-space:nowrap;border:1px solid #23634a;color:var(--green);background:#10251e;border-radius:999px;padding:7px 11px;font-size:12px;font-weight:700}.stats{display:grid;grid-template-columns:repeat(5,minmax(110px,1fr));gap:10px;margin:18px 0}.stat{background:linear-gradient(140deg,#17243a,#111a2c);border:1px solid var(--line);border-radius:14px;padding:13px 15px;min-width:0}.stat-label{display:block;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08em}.stat-value{display:block;font-size:19px;font-weight:750;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.controls{display:grid;grid-template-columns:minmax(190px,1.5fr) minmax(130px,.7fr) auto auto auto minmax(120px,1fr) auto;align-items:center;gap:9px;background:#111a2c;border:1px solid var(--line);border-radius:16px;padding:12px;margin-bottom:14px;box-shadow:var(--shadow)}input[type=search],select{padding:9px 11px;min-width:0}input[type=range]{width:100%;accent-color:var(--blue)}.play{background:#164160;border-color:#2476a0;font-weight:750}.position{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;font-size:13px}.layout{display:grid;grid-template-columns:minmax(280px,390px) minmax(0,1fr);gap:14px;align-items:start}.timeline,.record{background:linear-gradient(155deg,#131d31,#101827);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);overflow:hidden}.timeline-head,.record-head{padding:15px 17px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:12px}.timeline-head h2,.record-head h2{font-size:14px;margin:0}.timeline-head span,.record-head span{font-size:12px;color:var(--muted)}.events{max-height:calc(100vh - 330px);min-height:300px;overflow:auto;padding:9px}.event{display:grid;grid-template-columns:42px 1fr;gap:10px;width:100%;text-align:left;background:transparent;border:1px solid transparent;padding:10px;border-radius:12px;margin:2px 0}.event:hover{background:#19263d}.event[aria-current=true]{background:#18314a;border-color:#32638a}.event-index{color:#8191ad;font:12px/1.5 ui-monospace,monospace;padding-top:2px}.event-body{min-width:0}.event-top{display:flex;align-items:center;justify-content:space-between;gap:8px}.kind{font-size:11px;letter-spacing:.02em;font-weight:800;color:var(--blue)}.kind.user_prompt{color:var(--green)}.kind.tool_result{color:var(--amber)}.kind.denial{color:var(--red)}.kind.cancellation{color:var(--red)}.kind.checkpoint{color:var(--violet)}.clock{font-size:10px;color:#8191ad;white-space:nowrap;font-variant-numeric:tabular-nums}.preview{display:block;color:#c4cede;font-size:12px;margin-top:5px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere}.record-body{padding:17px;min-height:360px}.record-meta{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:16px}.pill{border:1px solid var(--line);border-radius:999px;padding:4px 9px;color:var(--muted);font-size:11px}.block{border:1px solid var(--line);background:#0e1626;border-radius:13px;padding:13px 14px;margin:10px 0}.block-title{display:flex;justify-content:space-between;align-items:center;gap:10px;color:var(--blue);font-size:12px;font-weight:800;margin-bottom:8px}.block-title .error{color:var(--red)}pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;color:#dce6f6;font:13px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;max-height:480px;overflow:auto}.empty{padding:28px 18px;text-align:center;color:var(--muted)}.footer{color:#7f8ba1;font-size:12px;padding:12px 4px}.kbd{border:1px solid #394762;border-radius:5px;padding:1px 5px;color:#c7d4e8;font:11px ui-monospace,monospace}.notice{border-left:3px solid var(--amber);padding:9px 12px;background:#2a2415;color:#f3d99b;border-radius:7px;margin:12px 0;font-size:12px}.timeline:focus-within,.record:focus-within{border-color:#395878}
 @media(max-width:1000px){.controls{grid-template-columns:1fr 1fr auto auto auto}.controls .search{grid-column:span 2}.controls .scrubber{grid-column:span 3}.layout{grid-template-columns:300px minmax(0,1fr)}}
 @media(max-width:720px){.shell{padding:15px 12px 24px}.top{align-items:flex-start}.local-badge{font-size:10px}.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.stat:last-child{grid-column:span 2}.controls{grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}.controls .search{grid-column:span 4}.controls select{grid-column:span 2}.controls .scrubber{grid-column:span 3}.position{grid-column:span 1;text-align:right}.layout{grid-template-columns:1fr}.events{max-height:38vh;min-height:180px}.record-body{min-height:250px}}
 .controls{grid-template-columns:minmax(190px,1.5fr) minmax(130px,.7fr) auto auto auto auto minmax(120px,1fr) auto}
@@ -105,6 +152,13 @@ _PAGE = r"""<!doctype html>
     return String(value || "").replace(/^\[Northstar tool result (?:metadata: [^\n]*|trust=[^\]]*)\]\n/, "");
   }
   function recordText(record) {
+    // A cancellation carries its own description: the runtime computed it
+    // with the ONE shared rendering (cancellation_view.describe_cancellation),
+    // so the page does not get a second, drifting copy of the wording.
+    // Without it the line was the record's chain hashes -- the action, the
+    // subject, the declarer and the reason were nowhere in it.
+    const described = record && typeof record.description === "string" ? record.description : "";
+    if (described) return described;
     const pieces = [];
     const content = record && record.content;
     if (Array.isArray(content)) {
@@ -124,7 +178,14 @@ _PAGE = r"""<!doctype html>
   }
   function preview(record) {
     const value = recordText(record);
-    return value.length > 150 ? value.slice(0, 147) + "…" : (value || "(no text payload)");
+    // A described record -- a cancellation -- gets a longer line than the
+    // generic budget.  The verdict ("STANDING" / "LIFTED") is the one word
+    // a reader must not miss, and with a 36-character grant id it falls
+    // off the end of a 150-character line.  The description is already
+    // ordered so that the verdict comes first; this budget only has to be
+    // big enough to keep it.
+    const budget = record && typeof record.description === "string" ? 300 : 150;
+    return value.length > budget ? value.slice(0, budget - 3) + "…" : (value || "(no text payload)");
   }
   function clock(value) {
     if (!value) return "";
@@ -185,8 +246,14 @@ _PAGE = r"""<!doctype html>
         addDetailBlock(title, value, isError);
       }
     }
+    // The shared description of a cancellation leads the detail pane: it
+    // is the sentence a reader acts on, and it is the same sentence the
+    // timeline line shows.
+    if (typeof record.description === "string" && record.description) {
+      addDetailBlock("What was revoked", record.description);
+    }
     for (const [key, value] of Object.entries(record)) {
-      if (["index", "ts", "session_id", "type", "content"].includes(key)) continue;
+      if (["index", "ts", "session_id", "type", "content", "description"].includes(key)) continue;
       addDetailBlock(key, value);
     }
     if (body.children.length === 1) addDetailBlock("Record payload", record);
@@ -285,7 +352,7 @@ def render_replay_page(
     materialized = list(records)
     payload = {
         "session_id": safe_id,
-        "records": materialized,
+        "records": _with_descriptions(materialized),
         "summary": summary if summary is not None else summarise(materialized),
         "dropped_trailing_lines": int(dropped_trailing_lines),
     }
