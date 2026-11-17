@@ -274,6 +274,28 @@ class StandingVersusLiftedTests(unittest.TestCase):
             lifted = self._describe(store.record_cancellation_lift(tombstone, a_lift(tombstone)))
             self.assertNotEqual(standing, lifted)
 
+    def test_the_reason_the_principal_gave_is_shown(self):
+        """The reason is the principal's own words, and they are shown.
+
+        This test exists because the mutation probe found the gap: the
+        reason check could be flipped and no test noticed, because the
+        description would then read "reason: (none given)" -- which is
+        wrong, and which no assertion was watching.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            store = SessionStore(directory=directory, session_id="cv-reason")
+            record = store.record_cancellation(a_tombstone())
+            text = self._describe(record)
+            self.assertIn("stop, do not publish", text)
+            self.assertNotIn("(none given)", text)
+
+    def test_a_record_with_no_reason_says_so_rather_than_inventing_one(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = SessionStore(directory=directory, session_id="cv-noreason")
+            record = store.record_cancellation(a_tombstone(reason=""))
+            text = self._describe(record)
+            self.assertIn("(none given)", text)
+
 
 class MalformedRecordTests(unittest.TestCase):
     """R7: the guard survives a record whose shape it did not expect."""
