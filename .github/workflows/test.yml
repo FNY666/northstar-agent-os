@@ -92,7 +92,12 @@ jobs:
         run: python -m pip install --quiet ../northstar-run-contract ../northstar-host ../northstar-run-evidence
       - name: Compile durable run component
         working-directory: components/northstar-durable-run
-        run: python -m py_compile durable_contract.py event_store.py action_gateway.py runner.py verifier.py trace_metrics.py evaluation.py durable_audit.py tests/test_*.py
+        # By glob, not by hand: the hand-maintained list was written when the
+        # component had eight modules, and eight more landed without the
+        # list being extended -- so half the component was never
+        # syntax-checked.  `tests/test_ci_compile_coverage.py` checks that
+        # every module the component ships is covered.
+        run: python -m py_compile *.py tests/test_*.py
       - name: Durable run component tests
         working-directory: components/northstar-durable-run
         run: python -m unittest discover -s tests -p 'test_*.py' -v
@@ -141,7 +146,14 @@ jobs:
           # Every module the component ships, by glob rather than by hand: a curated list
           # here silently stopped covering new modules the moment they landed, which is the
           # opposite of what a compile step is for.
-          python -m py_compile *.py providers/*.py tools/*.py \
+          #
+          # Every PACKAGE the component ships must be in the glob too, and that
+          # is a separate list from the flat modules -- `providers/` and
+          # `tools/` were here from the start, and `policy/` was added when
+          # the policy package became real.  A package missing from this line
+          # is a module whose syntax errors nobody would ever see.
+          # `tests/test_ci_compile_coverage.py` checks this from the outside.
+          python -m py_compile *.py providers/*.py tools/*.py policy/*.py \
             tests/support.py tests/fixtures/*.py tests/test_*.py
       - name: Unit tests
         # No API key and no network: the scripted provider is the only model, and
