@@ -9,10 +9,3 @@ def _tests():
 
 if __name__ == "__main__":
     _tests(); print('ok')
-
-def _tests():
-    assert cube(2) == 8
-    assert cube(-1) == -1
-
-if __name__ == "__main__":
-    _tests(); print('ok')

@@ -9,10 +9,3 @@ def _tests():
 
 if __name__ == "__main__":
     _tests(); print('ok')
-
-def _tests():
-    assert char_last('abc') == 'c'
-    assert char_last('z') == 'z'
-
-if __name__ == "__main__":
-    _tests(); print('ok')

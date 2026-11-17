@@ -9,10 +9,3 @@ def _tests():
 
 if __name__ == "__main__":
     _tests(); print('ok')
-
-def _tests():
-    assert reverse_int(123) == 321
-    assert reverse_int(-45) == -54
-
-if __name__ == "__main__":
-    _tests(); print('ok')

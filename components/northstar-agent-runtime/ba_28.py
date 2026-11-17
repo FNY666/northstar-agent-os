@@ -9,10 +9,3 @@ def _tests():
 
 if __name__ == "__main__":
     _tests(); print('ok')
-
-def _tests():
-    assert is_pal(121) == True
-    assert is_pal(123) == False
-
-if __name__ == "__main__":
-    _tests(); print('ok')

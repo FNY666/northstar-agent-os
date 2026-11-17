@@ -10,11 +10,3 @@ def _tests():
 
 if __name__ == "__main__":
     _tests(); print('ok')
-
-def _tests():
-    assert sign(5) == 1
-    assert sign(-5) == -1
-    assert sign(0) == 0
-
-if __name__ == "__main__":
-    _tests(); print('ok')

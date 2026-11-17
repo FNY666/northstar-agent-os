@@ -9,10 +9,3 @@ def _tests():
 
 if __name__ == "__main__":
     _tests(); print('ok')
-
-def _tests():
-    assert first_digit(123) == 1
-    assert first_digit(987) == 9
-
-if __name__ == "__main__":
-    _tests(); print('ok')

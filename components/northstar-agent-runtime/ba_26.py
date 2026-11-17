@@ -9,10 +9,3 @@ def _tests():
 
 if __name__ == "__main__":
     _tests(); print('ok')
-
-def _tests():
-    assert digit_sum(123) == 6
-    assert digit_sum(99) == 18
-
-if __name__ == "__main__":
-    _tests(); print('ok')

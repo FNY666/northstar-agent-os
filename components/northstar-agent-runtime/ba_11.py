@@ -9,10 +9,3 @@ def _tests():
 
 if __name__ == "__main__":
     _tests(); print('ok')
-
-def _tests():
-    assert is_odd(3) == True
-    assert is_odd(2) == False
-
-if __name__ == "__main__":
-    _tests(); print('ok')

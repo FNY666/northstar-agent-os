@@ -9,10 +9,3 @@ def _tests():
 
 if __name__ == "__main__":
     _tests(); print('ok')
-
-def _tests():
-    assert slug('A B') == 'a-b'
-    assert slug('X Y Z') == 'x-y-z'
-
-if __name__ == "__main__":
-    _tests(); print('ok')

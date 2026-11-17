@@ -9,10 +9,3 @@ def _tests():
 
 if __name__ == "__main__":
     _tests(); print('ok')
-
-def _tests():
-    assert reverse_str('abc') == 'cba'
-    assert reverse_str('x') == 'x'
-
-if __name__ == "__main__":
-    _tests(); print('ok')

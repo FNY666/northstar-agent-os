@@ -9,10 +9,3 @@ def _tests():
 
 if __name__ == "__main__":
     _tests(); print('ok')
-
-def _tests():
-    assert div10(123) == 12
-    assert div10(45) == 4
-
-if __name__ == "__main__":
-    _tests(); print('ok')

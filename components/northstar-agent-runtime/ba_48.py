@@ -9,10 +9,3 @@ def _tests():
 
 if __name__ == "__main__":
     _tests(); print('ok')
-
-def _tests():
-    assert bracket('a') == '[a]'
-    assert bracket('') == '[]'
-
-if __name__ == "__main__":
-    _tests(); print('ok')

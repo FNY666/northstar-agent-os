@@ -9,10 +9,3 @@ def _tests():
 
 if __name__ == "__main__":
     _tests(); print('ok')
-
-def _tests():
-    assert truncate('abcdefghijklmnop') == 'abcdefghij'
-    assert truncate('ab') == 'ab'
-
-if __name__ == "__main__":
-    _tests(); print('ok')

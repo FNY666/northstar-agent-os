@@ -9,10 +9,3 @@ def _tests():
 
 if __name__ == "__main__":
     _tests(); print('ok')
-
-def _tests():
-    assert lower('A') == 'a'
-    assert lower('BC') == 'bc'
-
-if __name__ == "__main__":
-    _tests(); print('ok')

@@ -9,10 +9,3 @@ def _tests():
 
 if __name__ == "__main__":
     _tests(); print('ok')
-
-def _tests():
-    assert is_even(2) == True
-    assert is_even(3) == False
-
-if __name__ == "__main__":
-    _tests(); print('ok')
