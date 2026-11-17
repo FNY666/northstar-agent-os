@@ -138,6 +138,27 @@ def duplicate_top_level_definitions(source: str) -> list[tuple[str, bool]]:
     return sorted(duplicates)
 
 
+#: The runtime component, whose ``ba_*`` family this slice repaired.
+RUNTIME = ROOT / "components" / "northstar-agent-runtime"
+
+
+def _ba_modules() -> list[Path]:
+    """The runtime's ``ba_01``..``ba_50`` family, in order."""
+    return [RUNTIME / ("ba_%02d.py" % index) for index in range(1, 51)]
+
+
+def _load(path: Path, name: str):
+    """Import a module from its file, by path."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+
 class DuplicateDefinitionTests(unittest.TestCase):
     """The repository must not define the same top-level name twice."""
 
@@ -180,6 +201,73 @@ class DuplicateDefinitionTests(unittest.TestCase):
             names,
             "the scan does not reach the repository's own tests",
         )
+
+
+class RepairedFamilyTests(unittest.TestCase):
+    """The repaired family must still work, and must work ONCE.
+
+    The fix removed a DUPLICATE, not a test.  These tests pin that the
+    ``ba_*`` modules still expose their public function, still pass
+    their own self-test, and now run it exactly once.
+
+    They IMPORT the modules rather than reading them as text, because a
+    test that only reads the source cannot tell a working module from a
+    broken one.
+    """
+
+    def test_every_ba_module_still_exposes_its_public_function(self):
+        for path in _ba_modules():
+            with self.subTest(module=path.name):
+                module = _load(path, "b173_ba_" + path.stem)
+                public = [
+                    name
+                    for name in vars(module)
+                    if not name.startswith("_") and callable(vars(module)[name])
+                ]
+                self.assertEqual(
+                    len(public),
+                    1,
+                    "%s should expose exactly one public callable, found %s"
+                    % (path.name, public),
+                )
+
+    def test_every_ba_module_still_passes_its_own_self_test(self):
+        for path in _ba_modules():
+            with self.subTest(module=path.name):
+                module = _load(path, "b173_ba_self_" + path.stem)
+                self.assertTrue(
+                    hasattr(module, "_tests"),
+                    "%s lost its _tests() self-test" % path.name,
+                )
+                module._tests()  # raises on failure
+
+    def test_running_a_ba_module_as_a_script_does_the_work_once(self):
+        # THE OBSERVABLE DEFECT.  Before the fix every one of these
+        # modules printed "ok" TWICE, because the self-test block was
+        # duplicated in the file.  After the fix it prints once.
+        import subprocess
+        import sys
+
+        for path in _ba_modules():
+            with self.subTest(module=path.name):
+                result = subprocess.run(
+                    [sys.executable, str(path)],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    timeout=60,
+                )
+                self.assertEqual(
+                    result.returncode,
+                    0,
+                    "%s exited %d: %s" % (path.name, result.returncode, result.stdout),
+                )
+                self.assertEqual(
+                    result.stdout.splitlines(),
+                    ["ok"],
+                    "%s did the work exactly once; it printed %r"
+                    % (path.name, result.stdout),
+                )
 
 
 class GuardHonestyTests(unittest.TestCase):
