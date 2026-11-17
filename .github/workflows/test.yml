@@ -51,9 +51,15 @@ jobs:
         # modules from any directory, with no PYTHONPATH tricks.
         working-directory: components/northstar-run-contract
         run: |
+          REPO="$(git rev-parse --show-toplevel)"
           python -m pip install --quiet .
           cd /tmp
-          python -c "import contract, binding, adapter; print('northstar-run-contract imports OK')"
+          # Every module the wheel ships, discovered from the installed
+          # distribution rather than listed by hand: a hand-written list
+          # goes stale the moment a module is added, and the modules it
+          # omits are exactly the ones nothing checks.  This step used to
+          # import three of the five shipped modules.
+          python "$REPO/scripts/check_installed_surface.py" northstar-run-contract
           python -c "import contract; assert contract.SCHEMA_VERSION; print('schema', contract.SCHEMA_VERSION)"
       - name: Compile run evidence
         working-directory: components/northstar-run-evidence
@@ -64,9 +70,15 @@ jobs:
       - name: Evidence packaging smoke
         working-directory: components/northstar-run-evidence
         run: |
+          REPO="$(git rev-parse --show-toplevel)"
           python -m pip install --quiet .
           cd /tmp
-          python -c "from evidence_chain import EvidenceChain, verify_chain; from evidence_contract import EvidenceEntry, EvidenceRef; print('northstar-run-evidence imports OK')"
+          # Every module the wheel ships, discovered from the installed
+          # distribution rather than listed by hand: a hand-written list
+          # goes stale the moment a module is added, and the modules it
+          # omits are exactly the ones nothing checks.  This step used to
+          # import four of the six shipped modules.
+          python "$REPO/scripts/check_installed_surface.py" northstar-run-evidence
           python -c "from sealed_receipt import CompletionEvidence, SealedRunReceipt, seal_run_receipt, verify_run_receipt; print('sealed run receipt imports OK')"
       - name: Install contract dependency
         # Every declared dependency is resolved from this repository until the
@@ -84,9 +96,15 @@ jobs:
         # dependency (installed above) and import from any directory.
         working-directory: components/northstar-host
         run: |
+          REPO="$(git rev-parse --show-toplevel)"
           python -m pip install --quiet .
           cd /tmp
-          python -c "import authorization, workspace; print('northstar-host imports OK')"
+          # Every module the wheel ships, discovered from the installed
+          # distribution rather than listed by hand: a hand-written list
+          # goes stale the moment a module is added, and the modules it
+          # omits are exactly the ones nothing checks.  This step used to
+          # import two of the four shipped modules.
+          python "$REPO/scripts/check_installed_surface.py" northstar-host
       - name: Install durable run dependencies
         working-directory: components/northstar-durable-run
         run: python -m pip install --quiet ../northstar-run-contract ../northstar-host ../northstar-run-evidence
@@ -104,9 +122,15 @@ jobs:
       - name: Durable run packaging smoke
         working-directory: components/northstar-durable-run
         run: |
+          REPO="$(git rev-parse --show-toplevel)"
           python -m pip install --quiet .
           cd /tmp
-          python -c "import durable_contract, action_gateway, event_store, durable_audit, runner, verifier, trace_metrics, evaluation; print('northstar-durable-run imports OK')"
+          # Every module the wheel ships, discovered from the installed
+          # distribution rather than listed by hand: a hand-written list
+          # goes stale the moment a module is added, and the modules it
+          # omits are exactly the ones nothing checks.  This step used to
+          # import eight of the sixteen shipped modules.
+          python "$REPO/scripts/check_installed_surface.py" northstar-durable-run
       - name: Install agent interop dependencies
         working-directory: components/northstar-agent-interop
         run: python -m pip install --quiet ../northstar-run-contract ../northstar-host
@@ -119,9 +143,15 @@ jobs:
       - name: Agent interop packaging smoke
         working-directory: components/northstar-agent-interop
         run: |
+          REPO="$(git rev-parse --show-toplevel)"
           python -m pip install --quiet .
           cd /tmp
-          python -c "import interop_contract, handoff, interop_adapter, canary, process_adapter, process_backend, remote_transport, remote_worker; print('northstar-agent-interop imports OK')"
+          # Every module the wheel ships, discovered from the installed
+          # distribution rather than listed by hand: a hand-written list
+          # goes stale the moment a module is added, and the modules it
+          # omits are exactly the ones nothing checks.  This step used to
+          # import all eight, by hand -- which is why the omission was invisible here and obvious everywhere else.
+          python "$REPO/scripts/check_installed_surface.py" northstar-agent-interop
       - name: Shell syntax
         working-directory: components/northstar-codex-sidecar
         run: sh -n install.sh rollback.sh
@@ -188,13 +218,20 @@ jobs:
         # `pip install .` must yield a working console script and importable
         # modules from any directory (lazy SDK imports keep this offline-safe).
         run: |
+          REPO="$(git rev-parse --show-toplevel)"
           python -m pip install --quiet --no-deps .
           cd /tmp
           northstar-agent-runtime --version
           northstar --version
           # No MCP server is launched here; CI kernels may lack Landlock ABI 10.
           northstar-agent-runtime doctor --workspace /tmp --mcp-network allowed | grep -q "ready to run"
-          python -c "import cli, loop, tools, tools.verify_invariants, governance_bench, memory, product_path; print('northstar-agent-runtime core imports OK')"
+          # Every module the wheel ships, discovered from the installed
+          # distribution rather than listed by hand: a hand-written list
+          # goes stale the moment a module is added, and the modules it
+          # omits are exactly the ones nothing checks.  This step used to
+          # import seven of the runtime's 1636 installed modules, so 96%
+          # of the installed surface was never checked at all.
+          python "$REPO/scripts/check_installed_surface.py" northstar-agent-runtime
           # The DATA files the modules read must be in the wheel too: a
           # module's .py source is installed by `py-modules`, but a .json or
           # .toml beside it is in neither installation mechanism unless the
