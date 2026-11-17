@@ -450,6 +450,7 @@ py-modules = [
     "canary_controller",
     "canary_tokens",
     "cancellation_tombstone",
+    "cancellation_view",
     "canonical_json",
     "capability_ceiling_probe",
     "capability_eval",

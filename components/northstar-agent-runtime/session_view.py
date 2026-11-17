@@ -677,6 +677,12 @@ def _record_text(record: dict[str, Any], kind: str) -> str:
         return f"{record.get('content') or ''} data={json.dumps(record.get('data') or {}, sort_keys=True)}"
     if kind == "denial":
         return str(record.get("data") or record.get("content") or "")
+    if kind == "cancellation":
+        # A revocation is not a payload blob: it says what was stopped,
+        # on what, and by whom.  The shared rendering owns that wording.
+        from cancellation_view import describe_cancellation
+
+        return describe_cancellation(record)
     # hook, subagent, informational, and anything new: show the payload compactly.
     payload = {key: value for key, value in record.items() if key not in ("index", "ts", "session_id", "type")}
     return json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)[:CONTENT_PREVIEW]

@@ -571,6 +571,7 @@ REGISTRY = (
     _registration("canary_controller", "runtime", "2026-10-07", "Canary deployment controller: deterministic traffic splitting for safe rollout."),
     _registration("canary_tokens", "canary-tokens", "2026-10-09", "Canary tokens: deception for exfiltration detection (D-OUT-005), Simulated."),
     _registration("cancellation_tombstone", "tombstone", "2026-11-14", "Cancellation tombstones: sticky revocation state that survives compaction."),
+    _registration("cancellation_view", "cancellation-visibility", "2026-11-17", "One rendering of a cancellation record, shared by every transcript read path."),
     _registration("canonical_json", "ninety-fifth", "2026-10-04", "JSON Canonicalization Scheme (RFC 8785) — the single canonicalizer."),
     _registration("capability_ceiling_probe", "capability-ceiling-probe", "2026-11-14", "Capability-ceiling probe: fail-first admission, calibration error, ceiling routing."),
     _registration("capability_eval", "runtime", "2026-10-08", "Capability testing (probe/measure/profile) interface, simulated."),

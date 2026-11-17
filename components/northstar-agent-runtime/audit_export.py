@@ -13,8 +13,8 @@ one audit line:
   ``tool_result``, ``denial``, ``result``, ...);
 * ``seq`` = the record's transcript index;
 * ``ts`` = the record's original RFC 3339 UTC timestamp (never re-stamped);
-* ``level`` = ``error`` for denials, failed tool results and ``error_*``
-  results, ``info`` otherwise;
+* ``level`` = ``error`` for denials, cancellations, failed tool results
+  and ``error_*`` results, ``info`` otherwise;
 * ``payload`` = everything the transcript record carried beyond the envelope.
 """
 from __future__ import annotations
@@ -41,7 +41,14 @@ AUDIT_SCHEMA_VERSION = "audit.ndjson/1"
 COMPONENT = "northstar-agent-runtime"
 
 _ENVELOPE_KEYS = ("index", "ts", "session_id", "type")
-_ERROR_TYPES = {"denial"}
+#: Record types that are errors by their very nature.
+#:
+#: A denial is a withheld authorization.  So is a cancellation: it is a
+#: revocation the principal declared ("stop, do not publish"), and a
+#: revocation that is filed as ``info`` is indistinguishable from an
+#: ordinary assistant turn in the feed -- which is how a stop ends up
+#: being filed and never read.
+_ERROR_TYPES = {"denial", "cancellation"}
 
 #: Envelope rules mirrored from ``northstar-run-contract/audit.py`` (the
 #: normative validator). The runtime stays dependency-free, so the rules are

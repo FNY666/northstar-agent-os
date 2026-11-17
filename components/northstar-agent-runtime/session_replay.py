@@ -224,6 +224,11 @@ class Replay:
             "tool_errors": sum(frame.tool_errors for frame in self.frames),
             "interrupted_tools": sum(frame.interrupted_tools for frame in self.frames),
             "denials": sum(frame.denials for frame in self.frames),
+            # A revocation is counted separately from a denial: one is a
+            # refusal the permission engine made, the other is a stop the
+            # principal declared.  A reader asking "was anything stopped?"
+            # needs the second number.
+            "cancellations": sum(1 for frame in self.frames if frame.kind == "cancellation"),
             "records": sum(len(frame.records) for frame in self.frames),
         }
 
@@ -235,7 +240,8 @@ class Replay:
         return (
             f"# {counts['turns']} turn(s), {counts['tool_calls']} tool call(s), {counts['tool_errors']} tool error(s), "
             f"{counts['interrupted_tools']} interrupted call(s), "
-            f"{counts['denials']} denial(s), {checkpoints}, result={self.result.get('subtype', '(no result)')}, "
+            f"{counts['denials']} denial(s), {counts['cancellations']} cancellation(s), "
+            f"{checkpoints}, result={self.result.get('subtype', '(no result)')}, "
             f"sealed={'yes' if self.sealed else 'NO'}, chain="
             f"{'verified' if self.chain_verified else 'BROKEN' if self.chain_verified is False else 'unsealed'}"
         )
@@ -512,6 +518,23 @@ def build_replay(
             continue
         if current is not None and kind in _TURN_ATTACHMENTS:
             current.absorb(record)
+            continue
+        if kind == "cancellation":
+            # A revocation gets its own frame.  It is not a note: a note is
+            # a record type this replay does not know, and a revocation is
+            # one it must not fail to show.
+            close_turn()
+            from cancellation_view import describe_cancellation
+
+            emit(
+                Frame(
+                    index=len(frames) + 1,
+                    kind="cancellation",
+                    records=(index,),
+                    label=describe_cancellation(record),
+                    agent=agent,
+                )
+            )
             continue
         if kind == "checkpoint":
             close_turn()
