@@ -20,6 +20,11 @@ import sys
 import unittest
 from pathlib import Path
 
+try:
+    import yaml
+except ImportError:  # pragma: no cover - PyYAML is not a repo dependency
+    yaml = None
+
 TESTS = Path(__file__).resolve().parent
 if str(TESTS) not in sys.path:
     sys.path.insert(0, str(TESTS))
@@ -70,6 +75,32 @@ class CiJobTimeoutTests(unittest.TestCase):
             len(ci_job_timeouts.job_names()),
             len(EXPECTED_JOBS),
         )
+
+    @unittest.skipIf(yaml is None, "PyYAML is not installed")
+    def test_the_detector_agrees_with_a_real_yaml_parser(self):
+        # The detector reads the workflow with its own indentation-aware
+        # reader, because the workflow's indentation is not uniform and a
+        # step-level `timeout-minutes` must not be read as a job-level
+        # one.  A real YAML parser is an INDEPENDENT implementation of
+        # the same question, so agreement between the two is evidence the
+        # reader is right rather than merely self-consistent.
+        with ci_job_timeouts.WORKFLOW.open(encoding="utf-8") as handle:
+            document = yaml.safe_load(handle)
+        parsed = {
+            name: job.get("timeout-minutes")
+            for name, job in document["jobs"].items()
+        }
+        self.assertEqual(ci_job_timeouts.job_timeout(), parsed)
+
+    @unittest.skipIf(yaml is None, "PyYAML is not installed")
+    def test_the_detector_agrees_with_a_real_yaml_parser_on_step_counts(self):
+        with ci_job_timeouts.WORKFLOW.open(encoding="utf-8") as handle:
+            document = yaml.safe_load(handle)
+        parsed = {
+            name: len(job.get("steps", []))
+            for name, job in document["jobs"].items()
+        }
+        self.assertEqual(ci_job_timeouts.job_step_count(), parsed)
 
     def test_the_slowest_job_has_a_limit_above_its_measured_workload(self):
         # The agent-runtime job's measured workload on this host is about

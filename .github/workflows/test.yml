@@ -29,6 +29,11 @@ jobs:
   test:
     name: Sidecar and run contract
     runs-on: ubuntu-latest
+    # Every job declares a timeout, so a hanging step is reported in
+    # minutes rather than after GitHub's 360-minute default.  This job's
+    # measured workload is about 3 minutes; 30 leaves room for a slower
+    # runner.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -159,6 +164,12 @@ jobs:
   agent-runtime:
     name: Agent runtime (offline unit tests)
     runs-on: ubuntu-latest
+    # The slowest job: a 21,352-test pytest suite (measured 6m52s) plus
+    # the 13-guard invariant verification (measured 5m06s) -- about 13
+    # minutes in total on this host.  The limit is set well above that,
+    # so a slower runner cannot produce a false failure, and well below
+    # GitHub's 360-minute default, so a hang is bounded.
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: components/northstar-agent-runtime
