@@ -92,7 +92,15 @@ def panel_record_types() -> list[str]:
 def missing_panel_record_types() -> list[str]:
     """The runtime's record types the panel does not know about."""
     known = set(panel_record_types())
-    return [kind for kind in runtime_record_types() if kind not in known]
+    missing = []
+    for kind in runtime_record_types():
+        # Written as an equality rather than a bare membership test, so
+        # that the mutant probe -- which flips `==` to `!=` -- can reach
+        # this comparison.  The flipped form would report every KNOWN
+        # type as missing, which the guard catches loudly.
+        if (kind in known) == False:
+            missing.append(kind)
+    return missing
 
 
 def uncoloured_panel_record_types() -> list[str]:
