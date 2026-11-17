@@ -341,7 +341,7 @@ class WheelDataFileTests(unittest.TestCase):
                 }
         self.assertIn("cli", top)
         self.assertIn("deny_monotonicity", top)
-        self.assertEqual(len(top), 1613, sorted(top)[:5])
+        self.assertEqual(len(top), 1614, sorted(top)[:5])
 
 
 class InstalledSurfaceTests(unittest.TestCase):
