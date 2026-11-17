@@ -90,6 +90,7 @@ import zipfile
 from pathlib import Path
 
 import docbuild
+import install_smoke_coverage
 
 ROOT = docbuild.ROOT
 COMPONENTS = ROOT / "components"
@@ -393,39 +394,43 @@ class CiSmokeTests(unittest.TestCase):
         # `remote_worker.py` but its install smoke check imported only the
         # other seven, so the module missing from the wheel was also the
         # module missing from the check.
+        #
+        # The install smoke check no longer names its modules by hand -- it
+        # asks the installed distribution which modules it ships and
+        # imports every one of them (see
+        # `tests/test_install_smoke_coverage.py`).  What this test still
+        # pins is the agreement itself: every module the interop compile
+        # step compiles must be one the install smoke check exercises.
         workflow = self._workflow()
         compile_line = ""
-        smoke_line = ""
         for line in workflow.splitlines():
             if "py_compile" in line and "remote_worker.py" in line:
                 compile_line = line
-            if "import" in line and "remote_transport" in line:
-                smoke_line = line
         self.assertTrue(
             compile_line,
             "the interop compile step no longer lists remote_worker.py",
         )
-        self.assertTrue(smoke_line, "the interop install smoke check is gone")
+        installed = docbuild.installed_modules(INTEROP)
+        covered = install_smoke_coverage.covered_modules(INTEROP, installed)
         for module in docbuild.flat_modules(INTEROP):
             with self.subTest(module=module):
                 self.assertIn(
                     module,
-                    smoke_line,
+                    covered,
                     "%s is declared for installation but the CI install smoke "
                     "check does not import it" % module,
                 )
 
     def test_the_ci_smoke_check_imports_the_scorecard(self):
-        workflow = self._workflow()
-        smoke_line = ""
-        for line in workflow.splitlines():
-            if "import" in line and "remote_transport" in line:
-                smoke_line = line
-                break
-        self.assertTrue(smoke_line, "the interop install smoke check is gone")
+        # `remote_worker` is the interop component's documented CI entry
+        # point.  The install smoke check exercises it on the INSTALLED
+        # surface -- which is what the surface check does: it imports every
+        # module the installed distribution ships.
+        installed = docbuild.installed_modules(INTEROP)
+        covered = install_smoke_coverage.covered_modules(INTEROP, installed)
         self.assertIn(
             "remote_worker",
-            smoke_line,
+            covered,
             "the CI install smoke check does not import remote_worker, so the "
             "documented CI entry point is never exercised on the installed "
             "surface",
