@@ -125,11 +125,11 @@ def sortedness_problems(component: Path, modules: list[str]) -> list[str]:
         inversion = first_inversion(modules)
         problems.append(
             "%s: the py-modules list must stay sorted; the first "
-            "out-of-order pair is %r" % (component.name, inversion)
+            "out-of-order pair is %r" % (component, inversion)
         )
     repeated = duplicates(modules)
     if repeated:
         problems.append(
-            "%s: duplicate entries in py-modules: %s" % (component.name, repeated)
+            "%s: duplicate entries in py-modules: %s" % (component, repeated)
         )
     return problems

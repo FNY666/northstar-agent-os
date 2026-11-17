@@ -61,6 +61,7 @@ set.
 """
 from __future__ import annotations
 
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -122,6 +123,128 @@ class EveryComponentPyModulesTests(unittest.TestCase):
         for name, modules in py_modules_guard.components_with_py_modules():
             with self.subTest(component=name):
                 self.assertGreater(len(modules), 0)
+
+
+class GuardUnitTests(unittest.TestCase):
+    """The guard's own logic, tested against crafted inputs.
+
+    The repository-wide checks above read the real files, which are all
+    clean -- so on their own they cannot tell a working detector from one
+    that never fires.  These tests give the detector something to fail on.
+
+    They are also what makes the mutant probe meaningful: the probe
+    mutates ``py_modules_guard.py`` and reruns this file, and a detector
+    whose every branch is exercised by the real (clean) data cannot be
+    distinguished from a broken one.
+    """
+
+    def test_first_inversion_names_the_out_of_order_pair(self):
+        self.assertEqual(
+            py_modules_guard.first_inversion(["b_module", "a_module"]),
+            ("b_module", "a_module"),
+        )
+
+    def test_first_inversion_is_none_for_a_sorted_list(self):
+        self.assertIsNone(
+            py_modules_guard.first_inversion(["a_module", "b_module", "c_module"])
+        )
+
+    def test_first_inversion_is_none_for_an_empty_list(self):
+        self.assertIsNone(py_modules_guard.first_inversion([]))
+
+    def test_first_inversion_is_none_for_a_single_element_list(self):
+        self.assertIsNone(py_modules_guard.first_inversion(["a_module"]))
+
+    def test_equal_adjacent_names_are_not_an_inversion(self):
+        # Two EQUAL names are not out of order -- they are a DUPLICATE,
+        # which is a different rule with a different detector
+        # (``duplicates``).  Conflating them would make the sortedness
+        # check report a duplicate as an ordering fault.
+        self.assertIsNone(
+            py_modules_guard.first_inversion(["a_module", "a_module"])
+        )
+
+    def test_duplicates_finds_a_repeated_name(self):
+        self.assertEqual(
+            py_modules_guard.duplicates(["a_module", "b_module", "a_module"]),
+            ["a_module"],
+        )
+
+    def test_duplicates_is_empty_for_a_clean_list(self):
+        self.assertEqual(
+            py_modules_guard.duplicates(["a_module", "b_module"]),
+            [],
+        )
+
+    def test_duplicates_reports_each_repeated_name_once(self):
+        self.assertEqual(
+            py_modules_guard.duplicates(["a", "a", "a", "b"]),
+            ["a"],
+        )
+
+    def test_repeated_lines_finds_a_repeated_quoted_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pyproject = Path(tmp) / "pyproject.toml"
+            pyproject.write_text(
+                'py-modules = [\n    "a_module",\n    "a_module",\n]\n',
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                py_modules_guard.repeated_lines(pyproject),
+                ['"a_module",'],
+            )
+
+    def test_repeated_lines_is_empty_for_a_clean_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pyproject = Path(tmp) / "pyproject.toml"
+            pyproject.write_text(
+                'py-modules = [\n    "a_module",\n    "b_module",\n]\n',
+                encoding="utf-8",
+            )
+            self.assertEqual(py_modules_guard.repeated_lines(pyproject), [])
+
+    def test_read_py_modules_returns_none_for_a_component_without_one(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            component = Path(tmp)
+            (component / "pyproject.toml").write_text(
+                '[project]\nname = "x"\n', encoding="utf-8"
+            )
+            self.assertIsNone(py_modules_guard.read_py_modules(component))
+
+    def test_read_py_modules_returns_none_for_a_component_without_a_pyproject(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertIsNone(py_modules_guard.read_py_modules(Path(tmp)))
+
+    def test_read_py_modules_returns_the_array_in_order(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            component = Path(tmp)
+            (component / "pyproject.toml").write_text(
+                '[tool.setuptools]\npy-modules = [\n    "b_module",\n'
+                '    "a_module",\n]\n',
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                py_modules_guard.read_py_modules(component),
+                ["b_module", "a_module"],
+            )
+
+    def test_sortedness_problems_names_the_component_and_the_fault(self):
+        problems = py_modules_guard.sortedness_problems(
+            Path("/some/component"),
+            ["b_module", "a_module", "a_module"],
+        )
+        self.assertEqual(len(problems), 2, problems)
+        self.assertIn("/some/component", problems[0])
+        self.assertIn("b_module", problems[0])
+        self.assertIn("a_module", problems[1])
+
+    def test_sortedness_problems_is_empty_for_a_clean_list(self):
+        self.assertEqual(
+            py_modules_guard.sortedness_problems(
+                Path("/some/component"), ["a_module", "b_module"]
+            ),
+            [],
+        )
 
 
 if __name__ == "__main__":
