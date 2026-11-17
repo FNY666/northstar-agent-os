@@ -88455,6 +88455,16 @@ The live tombstones of one session (or one ledger), in memory.
   - Renew a capacity denial with a bounded fresh measurement.
 - `to_list()`
 - `from_list(value: Any)`
+### `cancellation_view`
+
+Source: `components/northstar-agent-runtime/cancellation_view.py`
+
+One rendering of a cancellation record, shared by every read path.
+
+#### `describe_cancellation(record: Mapping[str, Any])`
+
+Describe one cancellation record in a sentence a reader can act on.
+
 ### `capability_ceiling_probe`
 
 Source: `components/northstar-agent-runtime/capability_ceiling_probe.py`

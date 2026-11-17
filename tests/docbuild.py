@@ -355,6 +355,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "approval_rules",
         "artifact_authority",
         "cancellation_tombstone",
+        "cancellation_view",
         "capability_ceiling_probe",
         "checkpoint_durability",
         "checkpoint_store",
