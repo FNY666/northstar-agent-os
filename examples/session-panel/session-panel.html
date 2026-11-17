@@ -97,13 +97,13 @@
 var RECORD_TYPES = [
   "session_start", "user_prompt", "assistant", "tool_result", "hook",
   "denial", "defensive_assessment", "compact_boundary", "informational", "postconditions",
-  "checkpoint", "subagent", "result", "session_end"
+  "checkpoint", "subagent", "result", "session_end", "cancellation"
 ];
 var TYPE_COLOR = {
   session_start: "ok", session_end: "ok", user_prompt: "warn", assistant: "ok",
   tool_result: "ok", hook: "warn", denial: "err", compact_boundary: "warn",
   defensive_assessment: "audit", informational: "warn", subagent: "ok", result: "ok", postconditions: "audit",
-  checkpoint: "audit"
+  checkpoint: "audit", cancellation: "err"
 };
 var MAX_PREVIEW = 300;
 var MAX_RAW = 20000;
@@ -183,6 +183,26 @@ function summarize(rec) {
     return "tool=" + String(rec.tool || "?") + " source=" + String(rec.source || "?") +
       " turn=" + String(rec.turn_index != null ? rec.turn_index : "?") + "\n" + String(rec.reason || "");
   }
+  if (rec.type === "cancellation") {
+    // A cancellation tombstone: the sticky revocation that says
+    // "stop, do not publish".  It is a record of its own type because a
+    // tombstone is never prose -- a summary that drops the words loses
+    // the stop itself.  So the panel shows what is revoked, by whom,
+    // and whether the stop was lifted.
+    var t = rec.tombstone && typeof rec.tombstone === "object" ? rec.tombstone : {};
+    var lines = ["cancellation — " + String(t.action || "?") + " on " + String(t.subject || "?")];
+    lines.push("grant=" + String(t.grant_id || "?") + " kind=" + String(t.kind || rec.kind || "?") +
+      " by=" + String(t.declarer || "?") + " via=" + String(t.declarer_channel || "?"));
+    if (t.reason) { lines.push("reason: " + String(t.reason)); }
+    if (t.expires_at != null) { lines.push("expires_at: " + String(t.expires_at)); }
+    if (t.measurement) { lines.push("measurement: " + String(t.measurement)); }
+    if (rec.lift && typeof rec.lift === "object") {
+      lines.push("LIFTED — " + String(rec.lift.text || "") +
+        " by=" + String(rec.lift.declarer || "?") + " via=" + String(rec.lift.declarer_channel || "?") +
+        " at=" + String(rec.lift.lifted_at != null ? rec.lift.lifted_at : "?"));
+    }
+    return lines.join("\n");
+  }
   if (rec.type === "defensive_assessment") {
     var assessment = rec.data && typeof rec.data === "object" ? rec.data : rec;
     var summary = [
@@ -249,26 +269,30 @@ function previewOf(text) {
 }
 
 function isErrorRecord(rec) {
+  // This answers ONE question -- "should the errors-and-denials-only
+  // filter show this?" -- so it must answer a BOOLEAN.  It used to
+  // return a summary STRING for a checkpoint and for a postconditions
+  // record;  a string is truthy, so the filter treated both of those
+  // as errors and listed them among the errors.
   if (isAudit(rec)) { return rec.level === "error"; }
   if (rec.type === "checkpoint") {
     // A resumable boundary: what a fork would inherit if it started here.
-    var c = rec;
-    return "checkpoint \u2014 " + c.turns + " turn(s), " + c.transcript_len + " message(s), $" +
-      Number(c.cost_usd || 0).toFixed(6) + " spent\ntool_calls=" + c.tool_calls +
-      " denials=" + (c.denials || 0) + " digest=" + String(c.transcript_digest || "").slice(0, 12) +
-      (c.run_id ? " run=" + c.run_id : "");
+    // A checkpoint is not an error, so it is not in the errors-only view.
+    return false;
   }
   if (rec.type === "postconditions") {
     // The independent end-of-run verdict: which workspace claims held, which did not.
+    // It is an error only when a claim did not hold.
     var d = rec.data && typeof rec.data === "object" ? rec.data : {};
-    var lines = ["postconditions: " + (d.passed || 0) + "/" + (d.checked || 0) + " passed"];
-    (d.results || []).forEach(function (row) {
-      lines.push((row.ok ? "\u2713 " : "\u2717 ") + row.kind + " " + row.path + " \u2014 " + (row.detail || "") +
-        (row.structural ? "" : " (non-structural)"));
-    });
-    return lines.join("\n");
+    return d.ok === false;
   }
   if (rec.type === "denial") { return true; }
+  if (rec.type === "cancellation") {
+    // A cancellation tombstone is a revocation: "stop, do not publish".
+    // It is the one record whose whole point is that it must not be
+    // missed, so the errors-and-denials-only view must show it.
+    return true;
+  }
   if (rec.type === "defensive_assessment") {
     return rec.decision === "block" || rec.decision === "review";
   }
