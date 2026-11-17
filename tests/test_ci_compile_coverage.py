@@ -10,7 +10,7 @@ The repository's CI jobs do not all compile the same way.  Some use a
 glob; some name every module by hand:
 
     # runtime -- a glob, with a comment saying why:
-    python -m py_compile *.py providers/*.py tools/*.py \
+    python -m py_compile *.py providers/*.py tools/*.py \\
       tests/support.py tests/fixtures/*.py tests/test_*.py
 
     # durable-run -- a hand-maintained list:
@@ -19,7 +19,7 @@ glob; some name every module by hand:
       evaluation.py durable_audit.py tests/test_*.py
 
 Measured against the modules each component actually ships, **9 shipped
-modules are not compile-checked by CI at all**:
+modules were not compile-checked by CI at all**:
 
 | component | shipped | compiled by CI | missing |
 |---|---|---|---|
@@ -85,30 +85,28 @@ THE RULE THIS SLICE PINS
 > **Every module a component ships is compiled by that component's CI
 > compile step.**
 
-Checked for EVERY component in the repository, so the next component that
+Checked for EVERY component in the repository -- the six that ship a
+wheel and the two sidecars that do not -- so the next component that
 grows a module inherits the guard for free.
 
 WHAT THIS SLICE IS NOT
 ----------------------
 It does not change what CI DOES beyond making the compile steps cover
 what they are supposed to cover.  It does not add a lint step, a type
-checker, or a coverage threshold.  It does not change the runtime's
-modules.
+checker, or a coverage threshold.  It does not change any module.
 """
 from __future__ import annotations
 
 import glob
-import re
-import shlex
 import tempfile
 import unittest
 from pathlib import Path
 
+import ci_compile_coverage
 import docbuild
 
 ROOT = docbuild.ROOT
-COMPONENTS = ROOT / "components"
-WORKFLOW = ROOT / ".github" / "workflows" / "test.yml"
+COMPONENTS = docbuild.ROOT / "components"
 
 #: The components whose modules CI compiles.  The two sidecars ship no
 #: wheel, so they have no ``py-modules`` and there is nothing to compare
@@ -133,77 +131,8 @@ COMPONENTS_WITHOUT_A_WHEEL = (
 
 
 def compile_steps() -> list[tuple[str, list[str]]]:
-    """Every ``py_compile`` step in the workflow, as (working directory, files).
-
-    The working directory is the step's ``working-directory:`` (which the
-    workflow sets per job), and the files are the glob patterns the
-    ``py_compile`` command was given.
-    """
-    text = WORKFLOW.read_text(encoding="utf-8")
-    # Join the lines of every `run:` block first: a compile command may be
-    # wrapped over several lines with a trailing backslash, and a
-    # line-by-line read would see only the first fragment.
-    lines = text.splitlines()
-    working_directory = ""
-    steps: list[tuple[str, list[str]]] = []
-    index = 0
-    while index < len(lines):
-        line = lines[index]
-        directory = re.search(r"working-directory:\s*(\S+)", line)
-        if directory:
-            working_directory = directory.group(1)
-        if "py_compile" in line:
-            block = [line]
-            while block[-1].rstrip().endswith("\\") and index + 1 < len(lines):
-                index += 1
-                block.append(lines[index])
-            joined = " ".join(part.strip() for part in block)
-            joined = joined.replace("\\", " ")
-            patterns = shlex.split(joined)
-            # Everything after `py_compile` is a pattern; drop the command
-            # words themselves.
-            try:
-                start = patterns.index("py_compile")
-            except ValueError:
-                start = 0
-            steps.append((working_directory, patterns[start + 1 :]))
-        index += 1
-    return steps
-
-
-def compiled_paths(working_directory: str, patterns: list[str]) -> set[str]:
-    """The source paths a compile step's globs actually match.
-
-    ``working_directory`` is the path the workflow's job runs in,
-    relative to the repository root -- ``components/<component>``.
-    """
-    base = (ROOT / working_directory).resolve()
-    found: set[str] = set()
-    for pattern in patterns:
-        for match in glob.glob(str(base / pattern)):
-            path = Path(match)
-            if not path.is_file():
-                continue
-            found.add(str(path.relative_to(base)))
-    return found
-
-
-def compiled_python_paths(working_directory: str, patterns: list[str]) -> set[str]:
-    """The ``.py`` paths a compile step's globs actually compile.
-
-    ``py_compile`` compiles Python source and nothing else.  A glob that
-    also matched, say, a ``.toml`` file would make the compile step FAIL,
-    so such a file is not "covered" -- it breaks the step.
-    """
-    base = (ROOT / working_directory).resolve()
-    found: set[str] = set()
-    for pattern in patterns:
-        for match in glob.glob(str(base / pattern)):
-            path = Path(match)
-            if not path.is_file() or path.suffix != ".py":
-                continue
-            found.add(str(path.relative_to(base)))
-    return found
+    """Every ``py_compile`` step in the repository's workflow."""
+    return ci_compile_coverage.compile_steps()
 
 
 def shipped_paths(component: str) -> set[str]:
@@ -252,15 +181,12 @@ class CiCompileCoverageTests(unittest.TestCase):
                 )
 
     def test_ci_compiles_every_module_every_component_ships(self):
+        steps = compile_steps()
         for component in COMPONENTS_WITH_A_WHEEL:
             shipped = shipped_paths(component)
             with self.subTest(component=component):
                 self.assertTrue(shipped, "%s ships no modules?" % component)
-                covered: set[str] = set()
-                for directory, patterns in compile_steps():
-                    if directory != "components/%s" % component:
-                        continue
-                    covered |= compiled_python_paths(directory, patterns)
+                covered = ci_compile_coverage.covered_for(component, steps)
                 missing = sorted(shipped - covered)
                 self.assertEqual(
                     missing,
@@ -273,15 +199,12 @@ class CiCompileCoverageTests(unittest.TestCase):
         # The two sidecars have no `py-modules`, so the rule above has
         # nothing to compare against for them.  Their files on disk are
         # the statement of what they contain, and they are checked too.
+        steps = compile_steps()
         for component in COMPONENTS_WITHOUT_A_WHEEL:
             present = on_disk_paths(component)
             with self.subTest(component=component):
                 self.assertTrue(present, "%s has no modules?" % component)
-                covered: set[str] = set()
-                for directory, patterns in compile_steps():
-                    if directory != "components/%s" % component:
-                        continue
-                    covered |= compiled_python_paths(directory, patterns)
+                covered = ci_compile_coverage.covered_for(component, steps)
                 missing = sorted(present - covered)
                 self.assertEqual(
                     missing,
@@ -295,12 +218,8 @@ class CiCompileCoverageTests(unittest.TestCase):
         # glob exists so that a new package cannot be missed.  A package
         # that is not in the glob is therefore a contradiction of the
         # comment, and this test names it.
-        runtime = "components/northstar-agent-runtime"
-        covered: set[str] = set()
-        for directory, patterns in compile_steps():
-            if directory != runtime:
-                continue
-            covered |= compiled_python_paths(directory, patterns)
+        steps = compile_steps()
+        covered = ci_compile_coverage.covered_for("northstar-agent-runtime", steps)
         packages = {
             path.name
             for path in (COMPONENTS / "northstar-agent-runtime").iterdir()
@@ -318,6 +237,7 @@ class CiCompileCoverageTests(unittest.TestCase):
                     "that new packages cannot be missed" % package,
                 )
 
+
 class GuardUnitTests(unittest.TestCase):
     """The guard's own logic, against crafted workflow files.
 
@@ -327,8 +247,9 @@ class GuardUnitTests(unittest.TestCase):
     detector a workflow that really has a gap.
 
     They are also what makes the mutant probe meaningful: the probe
-    mutates this file and reruns it, and a detector whose every branch is
-    exercised only by clean data cannot be distinguished from a broken one.
+    mutates ``ci_compile_coverage.py`` and reruns this file, and a
+    detector whose every branch is exercised only by clean data cannot be
+    distinguished from a broken one.
     """
 
     def _workflow_with(self, body: str) -> str:
@@ -342,38 +263,8 @@ class GuardUnitTests(unittest.TestCase):
             "        run: python -m py_compile %s\n" % body
         )
 
-    def _steps_from(self, text: str) -> list[tuple[str, list[str]]]:
-        """The compile steps of a workflow text.
-
-        The production reader reads the real file; this one reads a
-        string, so the same extraction can be pointed at a crafted file.
-        """
-        lines = text.splitlines()
-        working_directory = ""
-        steps: list[tuple[str, list[str]]] = []
-        index = 0
-        while index < len(lines):
-            line = lines[index]
-            directory = re.search(r"working-directory:\s*(\S+)", line)
-            if directory:
-                working_directory = directory.group(1)
-            if "py_compile" in line:
-                block = [line]
-                while block[-1].rstrip().endswith("\\") and index + 1 < len(lines):
-                    index += 1
-                    block.append(lines[index])
-                joined = " ".join(part.strip() for part in block).replace("\\", " ")
-                patterns = shlex.split(joined)
-                try:
-                    start = patterns.index("py_compile")
-                except ValueError:
-                    start = 0
-                steps.append((working_directory, patterns[start + 1 :]))
-            index += 1
-        return steps
-
     def test_a_glob_pattern_is_extracted(self):
-        steps = self._steps_from(self._workflow_with("*.py"))
+        steps = ci_compile_coverage.compile_steps(self._workflow_with("*.py"))
         self.assertEqual(steps, [("components/a_component", ["*.py"])])
 
     def test_a_wrapped_compile_command_is_read_in_full(self):
@@ -390,11 +281,15 @@ class GuardUnitTests(unittest.TestCase):
             "        run: python -m py_compile *.py \\\n"
             "          providers/*.py tools/*.py\n"
         )
-        steps = self._steps_from(workflow)
+        steps = ci_compile_coverage.compile_steps(workflow)
         self.assertEqual(
             steps,
             [("components/a_component", ["*.py", "providers/*.py", "tools/*.py"])],
         )
+
+    def test_a_workflow_without_a_compile_step_yields_nothing(self):
+        workflow = "jobs:\n  a:\n    steps:\n      - run: echo hello\n"
+        self.assertEqual(ci_compile_coverage.compile_steps(workflow), [])
 
     def test_a_module_outside_the_glob_is_not_covered(self):
         # The detector's actual job: a module the component has but the
@@ -406,7 +301,9 @@ class GuardUnitTests(unittest.TestCase):
             (component / "providers" / "base.py").write_text("", encoding="utf-8")
             (component / "policy").mkdir()
             (component / "policy" / "__init__.py").write_text("", encoding="utf-8")
-            covered = _covered_by("*.py providers/*.py", component)
+            covered = ci_compile_coverage.matched_paths(
+                component, ["*.py", "providers/*.py"]
+            )
             self.assertIn("providers/__init__.py", covered)
             self.assertNotIn("policy/__init__.py", covered)
 
@@ -416,7 +313,7 @@ class GuardUnitTests(unittest.TestCase):
             component.mkdir()
             (component / "one.py").write_text("", encoding="utf-8")
             (component / "two.py").write_text("", encoding="utf-8")
-            covered = _covered_by("one.py", component)
+            covered = ci_compile_coverage.matched_paths(component, ["one.py"])
             self.assertIn("one.py", covered)
             self.assertNotIn("two.py", covered)
 
@@ -424,28 +321,27 @@ class GuardUnitTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             component = Path(tmp) / "a_component"
             component.mkdir()
-            covered = _covered_by("packages/*.py", component)
+            covered = ci_compile_coverage.matched_paths(component, ["packages/*.py"])
             self.assertEqual(covered, set())
 
     def test_a_non_python_file_in_the_glob_is_not_counted(self):
+        # `py_compile` compiles Python source and nothing else: a glob
+        # that also matched a `.toml` would make the compile step FAIL,
+        # so such a file is not "covered".
         with tempfile.TemporaryDirectory() as tmp:
             component = Path(tmp) / "a_component"
             component.mkdir()
             (component / "data.toml").write_text("", encoding="utf-8")
-            covered = _covered_by("*", component)
+            covered = ci_compile_coverage.matched_paths(component, ["*"])
             self.assertEqual(covered, set())
 
-
-def _covered_by(patterns: str, base: Path) -> set[str]:
-    """The ``.py`` paths a space-separated list of glob patterns matches."""
-    found: set[str] = set()
-    for pattern in patterns.split():
-        for match in glob.glob(str(base / pattern)):
-            path = Path(match)
-            if not path.is_file() or path.suffix != ".py":
-                continue
-            found.add(str(path.relative_to(base)))
-    return found
+    def test_covered_for_ignores_another_components_step(self):
+        steps = [
+            ("components/a_component", ["*.py"]),
+            ("components/b_component", ["*.py"]),
+        ]
+        covered = ci_compile_coverage.covered_for("a_component", steps)
+        self.assertTrue(covered == set(), covered)
 
 
 if __name__ == "__main__":
