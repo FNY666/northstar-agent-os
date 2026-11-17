@@ -23,10 +23,10 @@ dependencies = []
 
 [tool.setuptools]
 py-modules = [
-    "evidence_contract",
+    "audit_adapter",
     "evidence_chain",
+    "evidence_cli",
+    "evidence_contract",
     "evidence_store",
     "sealed_receipt",
-    "audit_adapter",
-    "evidence_cli",
 ]
