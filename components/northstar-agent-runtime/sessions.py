@@ -171,6 +171,165 @@ def new_session_id(*, now: float | None = None) -> str:
     )
 
 
+# ---------------------------------------------------------------------------
+# The tool-call identity: what a cancellation tombstone can name
+# ---------------------------------------------------------------------------
+#
+# A tombstone's identity is a **grant-pin** triple: ``grant_id`` +
+# ``action`` + ``subject``.  A tool call carries **no grant id** --
+# ``PermissionRequestContext`` and ``ToolSpec`` have no such field -- so a
+# gate cannot reproduce the three-field comparison the sealed ledger makes.
+#
+# The runtime therefore derives the two fields it *can* derive:
+#
+# * the **action** is the canonical tool name (``Write`` and ``write`` are
+#   one action -- the same rule ``permissions.canonical_tool_name`` exists
+#   for), and
+# * the **subject** is the call's target: the workspace-relative path for
+#   a file tool, the host for ``Fetch``, and the empty string for every
+#   other tool.
+#
+# The subject is the *lexically normalized* relative path, which is the
+# runtime's own convention: ``read_file`` computes its skill-digest pin
+# name the same way.  So ``notes.md``, ``./notes.md`` and
+# ``sub/../notes.md`` are one subject, and a tombstone that names
+# ``notes.md`` blocks all three.
+#
+# The grant id is deliberately **not** matched: see
+# ``cancellation_gate_matches`` for the rule and the reason.
+
+#: The tools whose subject is a workspace-relative path.
+PATH_SUBJECT_TOOLS = frozenset({"read", "write", "edit", "ls", "grep"})
+
+#: The tools whose subject is a network host.
+HOST_SUBJECT_TOOLS = frozenset({"fetch"})
+
+
+def canonical_action(tool_name: str) -> str:
+    """The canonical action name for a tool call.
+
+    Whitespace is stripped and the name is casefolded, so ``"  Write "``
+    and ``"write"`` are the same action.  A forbidden action must not be
+    able to slip through via a spelling variant -- the same rule the
+    permission engine applies to its own policy matching.
+    """
+    return str(tool_name).strip().casefold()
+
+
+def canonical_subject(
+    tool_name: str,
+    payload: Any,
+    *,
+    root: Any = None,
+) -> str:
+    """The canonical subject of a tool call: what it acts on.
+
+    * a file tool's subject is its **workspace-relative** path, lexically
+      normalized -- the same string the runtime's own skill-digest pin
+      uses, so a tombstone that names a path means the same path the
+      handler will touch;
+    * ``Fetch``'s subject is the **host** it asks for;
+    * every other tool's subject is the empty string, which means "no
+      subject named": a tombstone that names no subject covers it, and a
+      tombstone that names a subject does not.
+    """
+    action = canonical_action(tool_name)
+    if not isinstance(payload, dict):
+        return ""
+    if action in PATH_SUBJECT_TOOLS:
+        raw = payload.get("path")
+        if not isinstance(raw, str) or not raw.strip():
+            return ""
+        return _relative_subject(raw, root)
+    if action in HOST_SUBJECT_TOOLS:
+        host = payload.get("host")
+        if isinstance(host, str) and host.strip():
+            return host.strip().casefold()
+        return ""
+    return ""
+
+
+def _relative_subject(raw: str, root: Any) -> str:
+    """The workspace-relative form of ``raw``, lexically normalized.
+
+    An absolute path is made relative to ``root`` when it is inside it.
+    The normalization is lexical (``..`` collapsed before the filesystem is
+    consulted), because that is what the runtime's own pin-name
+    computation does -- and because a path that does not exist yet (a
+    ``Write`` of a new file) still has to name a subject.
+    """
+    import os
+    from pathlib import Path
+
+    candidate = raw.strip()
+    if not candidate:
+        return ""
+    path = Path(candidate)
+    if not path.is_absolute() and root is not None:
+        path = Path(root) / path
+    path = Path(os.path.normpath(str(path)))
+    if root is None:
+        return path.as_posix()
+    try:
+        return path.relative_to(Path(os.path.normpath(str(root)))).as_posix()
+    except ValueError:
+        # Outside the workspace: the absolute normalized path is the
+        # subject.  The handler will refuse it anyway; naming it here
+        # keeps the comparison honest.
+        return path.as_posix()
+
+
+def cancellation_gate_matches(
+    tombstone: Any,
+    action: str,
+    subject: str,
+) -> bool:
+    """True when ``tombstone`` covers the tool call ``(action, subject)``.
+
+    The rule, and the reason it is not the tombstone's own
+    ``covers(grant_id, action, subject)``:
+
+    * the **action** must match, canonically;
+    * the **subject** is optional: a tombstone that names no subject
+      covers every subject of the action, and a tombstone that names a
+      subject covers only that subject -- the tombstone's own rule, kept
+      verbatim;
+    * the **grant id** is *not* compared.
+
+    The grant id is not compared because the tool-call path has none.
+    The gate cannot ask "is this the same grant" -- it has no grant.  A
+    gate that demanded an exact grant id would match **nothing** (the
+    tombstone's grant id is minted by whatever declared it), and a gate
+    that failed closed on that would refuse **every** tool call in every
+    session that holds any tombstone at all.  Both are worse than the
+    coarsening, so the coarsening is deliberate and it is stated here
+    rather than hidden.
+
+    The coarsening is in the safe direction: it can block a call that a
+    three-field match would have let through, and it cannot let through a
+    call that any tombstone for that action names.
+    """
+    if tombstone is None:
+        return False
+    tombstone_action = getattr(tombstone, "action", "")
+    if not isinstance(tombstone_action, str) or not tombstone_action.strip():
+        return False
+    if canonical_action(tombstone_action) != canonical_action(action):
+        return False
+    tombstone_subject = getattr(tombstone, "subject", "") or ""
+    if not isinstance(tombstone_subject, str):
+        return False
+    if not tombstone_subject.strip():
+        # An unscoped tombstone covers every subject of the action.
+        return True
+    if not subject:
+        # The call names no subject, and the tombstone does.  The
+        # tombstone's own rule: "an unspecified subject is not evidence
+        # of being outside the scope" -- so it covers.
+        return True
+    return tombstone_subject == subject
+
+
 def _fsync(fd: int) -> None:  # pragma: no cover - thin wrapper, patched in tests
     os.fsync(fd)
 
@@ -564,7 +723,7 @@ class SessionStore:
 
         if not isinstance(tombstone, Tombstone):
             raise TombstoneError("only a Tombstone can be recorded as a cancellation")
-        return self.append(
+        record = self.append(
             "cancellation",
             {
                 "tombstone": tombstone.to_dict(),
@@ -572,6 +731,10 @@ class SessionStore:
                 "kind": tombstone.kind,
             },
         )
+        # The cache is updated from the tombstone that was just written, so
+        # it cannot drift from the record on disk.
+        self.live_tombstones().add(tombstone)
+        return record
 
     def tombstones(self, session_id: str | None = None) -> tuple[Any, ...]:
         """The live tombstones of this session, in declaration order.
@@ -585,11 +748,68 @@ class SessionStore:
         The result is a ``TombstoneSet``, so the caller can ask it
         ``is_blocked(grant_id, action, subject)`` and get the same answer
         the sealed ledger gets at commit.
+
+        For this session's own id the **cached** live set is returned, so a
+        caller that asks per tool call does not re-read the whole
+        transcript each time.  A *different* session id is always read
+        from its own file -- the cache is this store's, and another
+        session's file is not this store's business.
         """
         from cancellation_tombstone import Tombstone, TombstoneSet
 
+        if session_id is None or session_id == self.session_id:
+            return self.live_tombstones()
         records, _dropped = self.read(session_id)
         live = TombstoneSet()
+        for record in records:
+            if record.get("type") != "cancellation":
+                continue
+            payload = record.get("tombstone")
+            if not isinstance(payload, dict):
+                continue
+            try:
+                tombstone = Tombstone.from_dict(payload)
+            except Exception:
+                continue
+            live.add(tombstone)
+            lift = record.get("lift")
+            if isinstance(lift, dict):
+                from cancellation_tombstone import Lift
+
+                try:
+                    live.lift(Lift.from_dict(lift))
+                except Exception:
+                    # A lift that does not hold leaves the tombstone standing.
+                    pass
+        return live
+
+    def live_tombstones(self) -> Any:
+        """The live tombstones of **this** session, from the in-memory cache.
+
+        The cache is the store's own state: it is seeded from the
+        transcript when the store opens on an existing session (so a
+        resumed session enforces the stops it inherited) and it is
+        updated by :meth:`record_cancellation` and
+        :meth:`record_cancellation_lift` as they write.
+
+        The cache can never drift from the durable record, because the
+        record is written first and the cache is updated from the very
+        same tombstone that was written.
+        """
+        from cancellation_tombstone import TombstoneSet
+
+        cached = getattr(self, "_live_tombstones", None)
+        if cached is None:
+            cached = self._build_live_tombstones()
+            self._live_tombstones = cached
+        return cached
+
+    def _build_live_tombstones(self) -> Any:
+        """Rebuild the live tombstone set from this session's transcript."""
+        from cancellation_tombstone import Tombstone, TombstoneSet
+
+        live = TombstoneSet()
+        records, _dropped = self.read()
         for record in records:
             if record.get("type") != "cancellation":
                 continue
@@ -624,7 +844,7 @@ class SessionStore:
         if not isinstance(tombstone, Tombstone) or not isinstance(lift, Lift):
             raise TombstoneError("a lift is recorded against a tombstone")
         check_lift(tombstone, lift)
-        return self.append(
+        record = self.append(
             "cancellation",
             {
                 "tombstone": tombstone.to_dict(),
@@ -633,6 +853,17 @@ class SessionStore:
                 "lift": lift.to_dict(),
             },
         )
+        # The lift is consumed from the live set, so the gate stops
+        # enforcing the tombstone it names.
+        try:
+            self.live_tombstones().lift(lift)
+        except Exception:
+            # A lift that does not hold leaves the tombstone standing, and
+            # the store's own rule says so: the check that the lift holds
+            # has already been made above, so this can only be the
+            # tombstone not being live.
+            pass
+        return record
 
     # -- reading ----------------------------------------------------------
     def read(self, session_id: str | None = None, *, strict: bool = True) -> tuple[list[dict[str, Any]], int]:

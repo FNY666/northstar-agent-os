@@ -241,6 +241,109 @@ class GateScopeTests(RuntimeTestCase):
         )
 
 
+class GateIdentityTests(unittest.TestCase):
+    """The identity derivation, on crafted inputs.
+
+    A guard that only reads clean real files is unverifiable: the whole
+    point of these is the shapes a real session does not produce -- a
+    path spelled three ways, a host in mixed case, a tool with no path
+    argument at all.
+
+    These are the tests that would have caught the bug the first GREEN
+    run had: the subject derivation compared a *canonicalised* action
+    against a set of capitalised names, so it never matched, and every
+    subject came back empty -- which, because an empty subject is
+    covered by every tombstone, silently widened every stop to every
+    call of that action.
+    """
+
+    def test_the_action_is_canonical(self):
+        from sessions import canonical_action
+
+        self.assertEqual(canonical_action("Write"), "write")
+        self.assertEqual(canonical_action("  Write  "), "write")
+        self.assertEqual(canonical_action("WRITE"), "write")
+
+    def test_a_file_tool_names_its_relative_path(self):
+        from sessions import canonical_subject
+
+        self.assertEqual(
+            canonical_subject("Write", {"path": "notes.md"}, root="/tmp/ws"),
+            "notes.md",
+        )
+        self.assertEqual(
+            canonical_subject("write", {"path": "notes.md"}, root="/tmp/ws"),
+            "notes.md",
+            "the subject derivation missed a canonicalised tool name",
+        )
+
+    def test_the_path_is_normalized_lexically(self):
+        from sessions import canonical_subject
+
+        for spelling in ("notes.md", "./notes.md", "sub/../notes.md"):
+            self.assertEqual(
+                canonical_subject("Write", {"path": spelling}, root="/tmp/ws"),
+                "notes.md",
+                f"the path spelling {spelling!r} named a different subject",
+            )
+
+    def test_a_fetch_names_its_host(self):
+        from sessions import canonical_subject
+
+        self.assertEqual(
+            canonical_subject("Fetch", {"host": "Example.COM"}, root="/tmp/ws"),
+            "example.com",
+        )
+
+    def test_a_tool_with_no_subject_names_none(self):
+        from sessions import canonical_subject
+
+        self.assertEqual(canonical_subject("Shell", {"command": "ls"}, root="/tmp/ws"), "")
+        self.assertEqual(canonical_subject("Write", {}, root="/tmp/ws"), "")
+        self.assertEqual(canonical_subject("Write", {"path": 42}, root="/tmp/ws"), "")
+        self.assertEqual(canonical_subject("Write", "not-a-dict", root="/tmp/ws"), "")
+
+    def test_a_scoped_tombstone_does_not_cover_another_subject(self):
+        from sessions import cancellation_gate_matches
+
+        tombstone = a_tombstone(action="Write", subject="notes.md")
+        self.assertTrue(
+            cancellation_gate_matches(tombstone, "write", "notes.md"),
+            "the tombstone did not cover the subject it names",
+        )
+        self.assertFalse(
+            cancellation_gate_matches(tombstone, "write", "other.md"),
+            "the tombstone covered a subject it does not name",
+        )
+
+    def test_an_unscoped_tombstone_covers_every_subject(self):
+        from sessions import cancellation_gate_matches
+
+        tombstone = a_tombstone(action="Write", subject="")
+        self.assertTrue(cancellation_gate_matches(tombstone, "write", "notes.md"))
+        self.assertTrue(cancellation_gate_matches(tombstone, "write", "other.md"))
+
+    def test_a_tombstone_for_another_action_covers_nothing(self):
+        from sessions import cancellation_gate_matches
+
+        tombstone = a_tombstone(action="publish", subject="")
+        self.assertFalse(
+            cancellation_gate_matches(tombstone, "write", "notes.md"),
+            "a tombstone for another action covered a tool call",
+        )
+
+    def test_an_empty_subject_is_covered_by_a_scoped_tombstone(self):
+        """The tombstone's own rule: an unspecified subject is not evidence
+        of being outside the scope."""
+        from sessions import cancellation_gate_matches
+
+        tombstone = a_tombstone(action="Write", subject="notes.md")
+        self.assertTrue(
+            cancellation_gate_matches(tombstone, "write", ""),
+            "a call that names no subject escaped a scoped stop",
+        )
+
+
 class GateLiftTests(RuntimeTestCase):
     """A lifted tombstone does not block."""
 

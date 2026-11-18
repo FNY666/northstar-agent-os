@@ -567,6 +567,11 @@ DecisionSource = Literal[
     "offensive",
     "argument",
     "audit",
+    # A live cancellation tombstone covers the call.  This is a *stop the
+    # principal already gave*, not a policy judgement, so it is its own
+    # source -- an audit consumer must be able to tell "the policy said
+    # no" from "the user said stop".
+    "cancellation",
 ]
 
 

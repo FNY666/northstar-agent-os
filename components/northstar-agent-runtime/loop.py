@@ -931,6 +931,19 @@ class _RunState:
 
 
 @dataclass(frozen=True)
+class _UnknownCancellation:
+    """The live cancellation state could not be established.
+
+    This is a **refusal**, not a pass: an unknown state is never a clean
+    read, so a call whose cancellation state cannot be determined is
+    refused rather than allowed.  The reason is carried so the reader can
+    tell this apart from a stop that was actually declared.
+    """
+
+    reason: str = ""
+
+
+@dataclass(frozen=True)
 class _Refused:
     """`_authorize_tool()` refused the call before any handler ran."""
 
@@ -3402,6 +3415,27 @@ class AgentRuntime:
                 call, spec, state, payload=payload, turn_index=turn_index, span=span, rewritten=rewritten
             )
 
+        # A cancellation tombstone is a stop the principal already gave.
+        # The runtime can write it, carry it, and render it -- but until
+        # this check, nothing CONSULTED it where the effect happens, so a
+        # stopped write still wrote.  This is the gate that closes that.
+        #
+        # It sits here, after the payload is final (schema-validated and
+        # hook-rewritten) and before the permission gate, so the check
+        # sees the arguments the handler would really get.
+        cancelled = self._cancelled_by_tombstone(spec, payload)
+        if cancelled is not None:
+            return self._refuse_by_cancellation(
+                call,
+                spec,
+                cancelled,
+                state,
+                payload=payload,
+                turn_index=turn_index,
+                span=span,
+                rewritten=rewritten,
+            )
+
         if spec.is_delegation:
             # Delegation is a data egress boundary too: the prompt is sent to
             # another agent and often another model provider. Preserve the
@@ -3739,6 +3773,115 @@ class AgentRuntime:
         if isinstance(value, tuple):
             return tuple(self._safe_hook_value(item) for item in value)
         return value
+
+    def _cancelled_by_tombstone(
+        self,
+        spec: Any,
+        payload: dict[str, Any],
+    ) -> Any:
+        """The live tombstone that covers this call, or ``None``.
+
+        The question asked is the one the gate can answer: *does a live
+        tombstone name this action, and does it exclude this subject?*
+        The grant id is not part of the question -- the tool-call path has
+        no grant id, and the rule (with the reason) is
+        ``sessions.cancellation_gate_matches``.
+
+        **Fail closed.**  If the live set cannot be determined -- the
+        store is unreadable, or the transcript is damaged -- the call is
+        refused rather than allowed.  An unknown state is never a clean
+        read, and a stop whose state cannot be established is not a stop
+        that may be ignored.  The refusal carries the reason, so the
+        reader knows the difference between "stopped" and "could not
+        tell".
+        """
+        from sessions import cancellation_gate_matches, canonical_action, canonical_subject
+
+        try:
+            live = self.sessions.live_tombstones()
+        except Exception as error:  # noqa: BLE001 - fail closed on an unknown state
+            return _UnknownCancellation(f"the live cancellation state could not be read: {type(error).__name__}")
+        if live is None:
+            return None
+        action = canonical_action(spec.name)
+        try:
+            subject = canonical_subject(spec.name, payload, root=str(self.sandbox.root_real))
+        except Exception:  # noqa: BLE001 - an unnameable subject is no subject
+            subject = ""
+        try:
+            candidates = list(live.list())
+        except Exception as error:  # noqa: BLE001 - fail closed on an unknown state
+            return _UnknownCancellation(f"the live cancellation state could not be read: {type(error).__name__}")
+        for tombstone in candidates:
+            if cancellation_gate_matches(tombstone, action, subject):
+                return tombstone
+        return None
+
+    def _refuse_by_cancellation(
+        self,
+        call: ToolUseBlock,
+        spec: Any,
+        tombstone: Any,
+        state: _RunState,
+        *,
+        payload: dict[str, Any],
+        turn_index: int,
+        span: Any,
+        rewritten: bool = False,
+    ) -> _Refused:
+        """A live cancellation tombstone covers this call: refuse it.
+
+        The refusal goes through the **existing** denial machinery, so it
+        books a ``denial`` record, fires ``PostToolUseFailure``, writes the
+        evidence event, and gives the model a structured denial tool
+        result -- exactly as a permission-gate denial does.  There is no
+        second refusal path.
+        """
+        from sessions import canonical_subject
+
+        if isinstance(tombstone, _UnknownCancellation):
+            reason = (
+                f"{spec.name} refused: the cancellation state could not be established "
+                f"({tombstone.reason}); an unknown state is refused, never allowed"
+            )
+            decision = PermissionDecision(
+                False,
+                source="cancellation",
+                reason=reason,
+                rule="cancellation:state_unknown",
+                tool=spec.name,
+            )
+        else:
+            subject = canonical_subject(spec.name, payload, root=str(self.sandbox.root_real))
+            scope = spec.name if not subject else f"{spec.name} on {subject}"
+            declarer = str(getattr(tombstone, "declarer", "") or "")
+            channel = str(getattr(tombstone, "declarer_channel", "") or "")
+            grant = str(getattr(tombstone, "grant_id", "") or "")
+            tombstone_reason = str(getattr(tombstone, "reason", "") or "")
+            reason = (
+                f"{scope} was cancelled by {declarer} via {channel} and the stop has not been lifted"
+            )
+            if tombstone_reason:
+                reason += f": {tombstone_reason}"
+            if grant:
+                reason += f" (grant {grant})"
+            decision = PermissionDecision(
+                False,
+                source="cancellation",
+                reason=reason,
+                rule="cancellation:tombstone",
+                tool=spec.name,
+            )
+        return self._refuse_by_gate(
+            call,
+            spec,
+            decision,
+            state,
+            payload=payload,
+            turn_index=turn_index,
+            span=span,
+            rewritten=rewritten,
+        )
 
     def _refuse_by_gate(
         self,
