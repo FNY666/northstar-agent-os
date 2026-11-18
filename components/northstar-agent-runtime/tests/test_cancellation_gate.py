@@ -59,6 +59,7 @@ exercised a helper would not prove it.
 """
 from __future__ import annotations
 
+import shutil
 import sys
 import unittest
 from pathlib import Path
@@ -342,6 +343,116 @@ class GateIdentityTests(unittest.TestCase):
             cancellation_gate_matches(tombstone, "write", ""),
             "a call that names no subject escaped a scoped stop",
         )
+
+    def test_a_malformed_tombstone_covers_nothing(self):
+        """A tombstone the gate cannot read is refused, not honoured.
+
+        The gate is fail-closed on the *state* (an unreadable live set
+        refuses the call), and fail-closed on a *malformed* tombstone in
+        the other direction: a tombstone whose action is not a string
+        names nothing, so it cannot be matched -- and the gate does not
+        mistake "I cannot read this" for "this covers the call".
+
+        These are the guards the mutant probe reaches and cannot kill
+        without a test: a guard that only ever sees well-formed input is
+        unverifiable.
+        """
+        from sessions import cancellation_gate_matches
+
+        class Malformed:
+            action = None
+            subject = ""
+
+        malformed = Malformed()
+        self.assertFalse(
+            cancellation_gate_matches(malformed, "write", "notes.md"),
+            "a tombstone with no action covered a call",
+        )
+        malformed.action = 42
+        self.assertFalse(
+            cancellation_gate_matches(malformed, "write", "notes.md"),
+            "a tombstone with a non-string action covered a call",
+        )
+        malformed.action = "Write"
+        malformed.subject = 42
+        self.assertFalse(
+            cancellation_gate_matches(malformed, "write", "notes.md"),
+            "a tombstone with a non-string subject covered a call",
+        )
+        self.assertFalse(
+            cancellation_gate_matches(None, "write", "notes.md"),
+            "a missing tombstone covered a call",
+        )
+
+    def test_a_host_that_is_not_a_string_names_no_subject(self):
+        """A Fetch with a nonsense host names no subject, so an unscoped
+        stop covers it and a scoped one does not."""
+        from sessions import canonical_subject
+
+        self.assertEqual(canonical_subject("Fetch", {"host": 42}, root="/tmp/ws"), "")
+        self.assertEqual(canonical_subject("Fetch", {"host": "   "}, root="/tmp/ws"), "")
+
+    def test_a_subject_without_a_root_is_the_normalized_absolute_path(self):
+        """With no workspace root to be relative to, the subject is the
+        normalized path itself."""
+        from sessions import canonical_subject
+
+        self.assertEqual(
+            canonical_subject("Write", {"path": "notes.md"}),
+            "notes.md",
+        )
+        self.assertEqual(
+            canonical_subject("Write", {"path": "/tmp/ws/notes.md"}),
+            "/tmp/ws/notes.md",
+        )
+        self.assertEqual(
+            canonical_subject("Write", {"path": "sub/../notes.md"}),
+            "notes.md",
+        )
+
+    def test_another_sessions_tombstones_are_read_from_its_own_file(self):
+        """The cache is this store's; another session's file is not.
+
+        The two branches of ``tombstones()`` -- "this session, from the
+        cache" and "another session, from its own file" -- have to be
+        told apart, or the gate would enforce one session's stops for
+        another (or miss the ones it should see).
+        """
+        from sessions import SessionStore
+
+        import tempfile
+
+        directory = tempfile.mkdtemp(prefix="nsar-cg-")
+        self.addCleanup(shutil.rmtree, directory, ignore_errors=True)
+        writer = SessionStore(directory, session_id="ns-cg-writer")
+        writer.record_cancellation(a_tombstone(action="Write"))
+        other = SessionStore(directory, session_id="ns-cg-other")
+
+        self.assertEqual(
+            len(other.tombstones("ns-cg-writer").list()),
+            1,
+            "another session's tombstones were not read from its own file",
+        )
+        self.assertEqual(
+            len(other.tombstones().list()),
+            0,
+            "another session's cache claimed tombstones it never declared",
+        )
+
+    def test_a_store_with_no_transcript_still_answers_from_its_cache(self):
+        """A store with no directory has no file to read.
+
+        Its live set is still the cache, so the gate still enforces the
+        stops it was told about -- a session that writes nothing to disk
+        must not be the one session where a stop is ignored.
+        """
+        from sessions import SessionStore
+
+        store = SessionStore(None, session_id="ns-cg-nodir")
+        store.record_cancellation(a_tombstone(action="Write"))
+        self.assertEqual(len(store.live_tombstones().list()), 1)
+        self.assertEqual(len(store.tombstones().list()), 1)
+        self.assertEqual(len(store.tombstones("ns-cg-nodir").list()), 1)
 
 
 class GateLiftTests(RuntimeTestCase):
