@@ -74101,6 +74101,18 @@ A resume was refused; the run must not continue as if the session were clean.
 
 Sortable, collision-resistant identifier: ``ns-<utc>-<entropy>``.
 
+#### `canonical_action(tool_name: str)`
+
+The canonical action name for a tool call.
+
+#### `canonical_subject(tool_name: str, payload: Any, *, root: Any=None)`
+
+The canonical subject of a tool call: what it acts on.
+
+#### `cancellation_gate_matches(tombstone: Any, action: str, subject: str)`
+
+True when ``tombstone`` covers the tool call ``(action, subject)``.
+
 #### `SessionStore`
 
 Writer/reader for one session's JSONL transcript.
@@ -74121,6 +74133,8 @@ Writer/reader for one session's JSONL transcript.
   - Record one cancellation tombstone in this session's transcript.
 - `tombstones(session_id: str | None=None)`
   - The live tombstones of this session, in declaration order.
+- `live_tombstones()`
+  - The live tombstones of **this** session, from the in-memory cache.
 - `record_cancellation_lift(tombstone: Any, lift: Any)`
   - Record a named lift of a tombstone.
 - `read(session_id: str | None=None, *, strict: bool=True)`
