@@ -65,6 +65,7 @@ from scope_qualifier import (
     DenialRow,
     DenialRowStore,
     GrantRecord,
+    MalformedGrantError,
     ScopeQualifier,
     ScopeQualifierGate,
     SourceLine,
@@ -231,6 +232,272 @@ class FailClosedPreservationTests(unittest.TestCase):
                                    signature="sig-1")])
         check = gate.check(grant(verb="Lookup"), now=0)
         self.assertFalse(check.blocked)
+
+
+class CraftedInputTests(unittest.TestCase):
+    """The defensive branches, woken with crafted inputs.
+
+    A guard that only ever reads clean real input is unverifiable: the
+    mutant probe reported these branches as SURVIVING, because no test
+    ever reached them.  They are reachable -- measured one by one below --
+    and simply untested.
+    """
+
+    def test_a_verb_longer_than_the_cap_is_refused(self):
+        import scope_qualifier
+
+        with self.assertRaises(scope_qualifier.MalformedGrantError):
+            scope_qualifier.canonical_verb("v" * (scope_qualifier._MAX_ID_CHARS + 1))
+
+    def test_a_verb_exactly_at_the_cap_is_accepted(self):
+        import scope_qualifier
+
+        value = "v" * scope_qualifier._MAX_ID_CHARS
+        self.assertEqual(scope_qualifier.canonical_verb(value), value)
+
+    def test_a_scope_with_no_verb_half_is_read_as_written(self):
+        """A scope with no ``/`` is not a grant/verb scope; guessing at it
+        would be worse than reading it as written."""
+        import scope_qualifier
+
+        self.assertEqual(scope_qualifier.canonical_scope_key("bare-scope"),
+                         "bare-scope")
+
+    def test_a_scope_with_an_uncanonicalisable_verb_half_is_read_as_written(self):
+        import scope_qualifier
+
+        self.assertEqual(scope_qualifier.canonical_scope_key("grant-1/"),
+                         "grant-1/")
+
+    def test_the_scope_key_canonicalises_only_the_verb_half(self):
+        import scope_qualifier
+
+        self.assertEqual(
+            scope_qualifier.canonical_scope_key("Grant-1/Lookup"),
+            "Grant-1/lookup",
+            "the grant id half is an identifier and is kept verbatim",
+        )
+
+    def test_a_non_string_scope_is_refused(self):
+        import scope_qualifier
+
+        with self.assertRaises(scope_qualifier.MalformedGrantError):
+            scope_qualifier.canonical_scope_key(None)
+
+    def test_an_empty_scope_is_refused(self):
+        import scope_qualifier
+
+        with self.assertRaises(scope_qualifier.MalformedGrantError):
+            scope_qualifier.canonical_scope_key("   ")
+
+    def test_the_row_store_rejects_a_row_that_is_not_a_row(self):
+        from scope_qualifier import DenialRowStore, MalformedGrantError
+
+        with self.assertRaises(MalformedGrantError):
+            DenialRowStore().put("not a row")
+
+    def test_the_row_store_reads_a_broken_store_as_unreadable(self):
+        from scope_qualifier import DenialRowStore, ScopeSourceError
+
+        store = DenialRowStore()
+        store.break_reads()
+        with self.assertRaises(ScopeSourceError):
+            store.fetch("grant-1/lookup")
+
+    def test_the_row_store_refuses_an_empty_scope(self):
+        from scope_qualifier import DenialRowStore, ScopeSourceError
+
+        with self.assertRaises(ScopeSourceError):
+            DenialRowStore().fetch("")
+
+    def test_a_grant_with_a_non_int_counter_is_refused(self):
+        with self.assertRaises(Exception):
+            GrantRecord(grant_id="grant-1", verb="write", counter="3")
+
+    def test_a_grant_with_a_bool_counter_is_refused(self):
+        with self.assertRaises(Exception):
+            GrantRecord(grant_id="grant-1", verb="write", counter=True)
+
+    def test_a_grant_with_a_negative_counter_is_refused(self):
+        with self.assertRaises(Exception):
+            GrantRecord(grant_id="grant-1", verb="write", counter=-1)
+
+    def test_a_row_with_an_empty_scope_is_refused(self):
+        with self.assertRaises(Exception):
+            DenialRow(scope="  ", kind=ROW_CLEAR, signature="sig-1")
+
+    def test_a_row_that_does_not_deny_does_not_deny(self):
+        self.assertFalse(DenialRow(scope="grant-1/lookup", kind=ROW_CLEAR,
+                                   signature="sig-1").denies())
+        self.assertTrue(DenialRow(scope="grant-1/lookup", kind=ROW_DENIED).denies())
+
+    def test_the_registry_accepts_no_grants_at_all(self):
+        from scope_qualifier import ScopeGrantRegistry
+
+        registry = ScopeGrantRegistry()
+        self.assertEqual(registry.presented(), ())
+        self.assertEqual(registry.presented_for("write"), ())
+
+    def test_the_row_store_accepts_no_rows_at_all(self):
+        from scope_qualifier import DenialRowStore
+
+        self.assertEqual(len(DenialRowStore()), 0)
+
+    def test_the_presented_lookup_refuses_a_non_string_verb(self):
+        from scope_qualifier import ScopeGrantRegistry
+
+        registry = ScopeGrantRegistry()
+        with self.assertRaises(Exception):
+            registry.presented_for(None)
+
+
+class GrantGuardTests(unittest.TestCase):
+    """The guards on the grant record, woken with crafted inputs.
+
+    These are the guards on the method the slice edited
+    (``GrantRecord.__post_init__``).  The mutant probe reported several of
+    them as SURVIVING: no test ever reached them.  Each one below is
+    measured -- it names the guard it kills and what breaks without it.
+    """
+
+    def test_a_grant_with_a_blank_grant_id_is_refused(self):
+        """Kills the ``grant_id`` half of the guard.
+
+        Without it, a grant with no id could be built, and the denial-row
+        scope it names would start with a bare ``/`` -- a scope that
+        matches every verb.
+        """
+        with self.assertRaises(MalformedGrantError):
+            GrantRecord(grant_id="   ", verb="write")
+
+    def test_a_grant_with_an_over_long_grant_id_is_refused(self):
+        """Kills the ``grant_id`` length guard."""
+        with self.assertRaises(MalformedGrantError):
+            GrantRecord(grant_id="g" * 257, verb="write")
+
+    def test_a_grant_id_exactly_at_the_cap_is_accepted(self):
+        """The boundary the length guard turns on.
+
+        The guard is ``>`` the cap, so an id of exactly the cap's length is
+        legal.  Without this boundary a stricter guard would go unnoticed.
+        """
+        import scope_qualifier
+
+        cap = scope_qualifier._MAX_ID_CHARS
+        record = GrantRecord(grant_id="g" * cap, verb="write")
+        self.assertEqual(len(record.grant_id), cap)
+
+    def test_a_grant_with_a_non_string_verb_is_refused(self):
+        """Kills the verb half of the type guard.
+
+        Without it, ``canonical_verb`` would be handed a non-string and
+        the record would carry an unusable verb -- and the *lookup* side
+        (``canonical_verb(grant.verb)``) would raise at read time, inside
+        the gate, instead of at construction.
+        """
+        with self.assertRaises(MalformedGrantError):
+            GrantRecord(grant_id="grant-1", verb=None)
+
+    def test_a_grant_with_a_blank_verb_is_refused(self):
+        """Kills the blank half of the verb guard.
+
+        A blank verb canonicalises to the empty string, and an empty verb
+        would name *every* action -- so it must never become a record.
+        """
+        with self.assertRaises(MalformedGrantError):
+            GrantRecord(grant_id="grant-1", verb="   ")
+
+    def test_a_grant_with_a_non_string_source_ref_is_refused(self):
+        with self.assertRaises(MalformedGrantError):
+            GrantRecord(grant_id="grant-1", verb="write", source_ref=17)
+
+    def test_a_grant_with_a_bool_counter_is_refused(self):
+        """Kills the ``counter`` type guard.
+
+        ``True`` is an ``int`` in Python, so without the bool half a
+        ``True`` counter would be accepted as the counter ``1``.
+        """
+        with self.assertRaises(MalformedGrantError):
+            GrantRecord(grant_id="grant-1", verb="write", counter=True)
+
+    def test_a_grant_with_a_non_int_counter_is_refused(self):
+        with self.assertRaises(MalformedGrantError):
+            GrantRecord(grant_id="grant-1", verb="write", counter="3")
+
+    def test_a_grant_with_a_negative_counter_is_refused(self):
+        """Kills the ``counter < 0`` guard.
+
+        A negative counter is a version *before* the grant was issued;
+        without the guard the gate would accept a pin that predates the
+        grant it claims to pin.
+        """
+        with self.assertRaises(MalformedGrantError):
+            GrantRecord(grant_id="grant-1", verb="write", counter=-1)
+
+    def test_a_grant_with_a_zero_counter_is_accepted(self):
+        """The boundary: ``0`` is a legal counter, and the guard is ``< 0``."""
+        record = GrantRecord(grant_id="grant-1", verb="write", counter=0)
+        self.assertEqual(record.counter, 0)
+
+    def test_a_grant_with_no_counter_is_accepted(self):
+        record = GrantRecord(grant_id="grant-1", verb="write")
+        self.assertIsNone(record.counter)
+
+    def test_a_grant_with_a_non_mapping_payload_is_refused(self):
+        with self.assertRaises(MalformedGrantError):
+            GrantRecord.from_dict("not a mapping")
+
+    def test_a_grant_with_a_string_qualifier_list_is_refused(self):
+        """Kills the ``qualifiers must be a list`` guard.
+
+        A string is iterable, so without the guard ``"folder X"`` would
+        be read as a list of *characters* as qualifiers.
+        """
+        with self.assertRaises(MalformedGrantError):
+            GrantRecord.from_dict({
+                "grant_id": "grant-1",
+                "verb": "write",
+                "qualifiers": "folder X",
+            })
+
+    def test_a_grant_with_a_mapping_qualifier_list_is_refused(self):
+        """Kills the *other* half of the same guard.
+
+        The guard has two halves -- "it is a string" and "it is not a
+        list/tuple".  A mapping is neither, so only the second half
+        refuses it.
+
+        The *message* is asserted, not just the exception type: a mapping
+        that slips past this guard raises a different
+        ``MalformedGrantError`` downstream (while it is iterated), so the
+        type alone would not distinguish "refused by the guard" from
+        "refused later by accident".
+        """
+        with self.assertRaises(MalformedGrantError) as caught:
+            GrantRecord.from_dict({
+                "grant_id": "grant-1",
+                "verb": "write",
+                "qualifiers": {"kind": "only"},
+            })
+        self.assertIn("qualifiers must be a list", str(caught.exception))
+
+    def test_a_grant_with_a_string_qualifier_list_is_refused_by_the_guard(self):
+        """The same, for the string half of the guard."""
+        with self.assertRaises(MalformedGrantError) as caught:
+            GrantRecord.from_dict({
+                "grant_id": "grant-1",
+                "verb": "write",
+                "qualifiers": "folder X",
+            })
+        self.assertIn("qualifiers must be a list", str(caught.exception))
+
+    def test_a_grant_with_no_qualifiers_is_accepted(self):
+        record = GrantRecord.from_dict({
+            "grant_id": "grant-1",
+            "verb": "Write",
+        })
+        self.assertEqual(record.verb, "write")
+        self.assertEqual(record.qualifiers, ())
 
 
 class FenceUnchangedTests(unittest.TestCase):
