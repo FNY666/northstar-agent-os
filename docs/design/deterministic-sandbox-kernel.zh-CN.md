@@ -246,11 +246,15 @@ plan = policy.plan(('python3', '-c', 'print("ok")'))
 kernel = DeterministicKernel('/var/lib/northstar/runs/run-1/events.ndjson')
 kernel.start_run('run-1', 'sha256:input')
 kernel.plan_step('run-1', 'step-1', 'effect-1', plan.digest)
-result = kernel.run_step('run-1', 'step-1', 'effect-1', lambda: {'exit_code': 0})
+evidence = host_adapter.run_and_collect_evidence(plan)
+result = kernel.run_step(
+    'run-1', 'step-1', 'effect-1', lambda: {'exit_code': 0},
+    plan=plan, evidence=evidence,
+)
 assert kernel.replay('run-1').completed_results['step-1'] == result
 ```
 
-该示例只演示策略/日志契约。它不会启动命令；生产代码应把 `plan` 交给受信宿主 adapter，并将 adapter 返回的 sandbox/cgroup/seccomp 证据交给独立 verifier。
+该示例只演示策略/日志契约。它不会启动命令；生产代码应把 `plan` 交给受信宿主 adapter，用 `verify_evidence(plan, raw_evidence)` 验证 adapter 返回的 sandbox/cgroup/seccomp 证据，再交给内核的 `run_step()`。
 
 ## 测试和上线阶段
 

@@ -166,6 +166,7 @@ class KernelState:
     sequence: int
     steps: dict[str, str]
     completed_results: dict[str, Any]
+    plan_digests: dict[str, str]
 
 
 class DeterministicKernel:
@@ -236,6 +237,7 @@ class DeterministicKernel:
         status = "running"
         steps: dict[str, str] = {}
         results: dict[str, Any] = {}
+        plan_digests: dict[str, str] = {}
         for event in events:
             kind = event["kind"]
             payload = event["payload"]
@@ -247,6 +249,7 @@ class DeterministicKernel:
                 if step_id in steps:
                     raise EventIntegrityError("step planned twice")
                 steps[step_id] = "planned"
+                plan_digests[step_id] = _safe_text(payload.get("plan_digest"), "plan_digest")
             elif kind == "step.started":
                 step_id = _safe_text(payload.get("step_id"), "step_id")
                 if steps.get(step_id) != "planned":
@@ -265,7 +268,7 @@ class DeterministicKernel:
                 steps[step_id] = "failed"
             else:
                 raise EventIntegrityError(f"unsupported event kind: {kind}")
-        return KernelState(run_id, status, events[-1]["sequence"], steps, results)
+        return KernelState(run_id, status, events[-1]["sequence"], steps, results, plan_digests)
 
     def start_run(self, run_id: str, input_digest: str) -> None:
         if self._read():
@@ -283,7 +286,15 @@ class DeterministicKernel:
         })
 
     def run_step(self, run_id: str, step_id: str, action_key: str,
-                 effect: Callable[[], Any]) -> Any:
+                 effect: Callable[[], Any], *, plan: SandboxPlan | None = None,
+                 evidence: Mapping[str, Any] | None = None) -> Any:
+        """Run one effect only after the host sandbox evidence is verified.
+
+        The caller must pass the same plan used by ``plan_step`` and evidence
+        already accepted by ``tools.sandbox_evidence.verify_evidence``. The
+        local import avoids a module cycle while keeping this state machine's
+        completion gate coupled to the evidence contract.
+        """
         current = self.state(run_id)
         status = current.steps.get(step_id)
         if status == "completed":
@@ -292,9 +303,21 @@ class DeterministicKernel:
             raise RecoveryRequired("step started without completion; reconcile effect key before retry")
         if status != "planned":
             raise KernelError("step must be planned before execution")
+        if not isinstance(plan, SandboxPlan) or plan.digest != current.plan_digests.get(step_id):
+            raise KernelError("step plan does not match the recorded plan digest")
+        if evidence is None:
+            raise KernelError("sandbox evidence is required before step execution")
+        try:
+            from tools.sandbox_evidence import verify_evidence
+
+            verified = verify_evidence(plan, evidence)
+        except Exception as exc:  # evidence errors are a fail-closed kernel refusal
+            raise KernelError(f"sandbox evidence refused: {type(exc).__name__}") from exc
         self._append(run_id, "step.started", {
             "step_id": _safe_text(step_id, "step_id"),
             "action_key": _safe_text(action_key, "action_key"),
+            "plan_digest": plan.digest,
+            "evidence_digest": verified.evidence_digest,
         })
         try:
             result = effect()
@@ -308,6 +331,8 @@ class DeterministicKernel:
         self._append(run_id, "step.completed", {
             "step_id": step_id, "action_key": action_key, "result": result,
             "result_digest": _digest(result),
+            "plan_digest": plan.digest,
+            "evidence_digest": verified.evidence_digest,
         })
         return result
 
