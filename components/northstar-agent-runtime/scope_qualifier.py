@@ -163,6 +163,90 @@ def _digest(value: Any) -> str:
 
 
 # ---------------------------------------------------------------------------
+# The verb's identity
+# ---------------------------------------------------------------------------
+
+
+def canonical_verb(verb: Any) -> str:
+    """The canonical form of a **verb** -- an action's name.
+
+    Whitespace is stripped and the name is casefolded, so ``"Lookup"``,
+    ``"lookup"`` and ``"  LOOKUP "`` are one verb.
+
+    **Why a verb needs one identity.**  A verb names an *action*, and a
+    gate's job is to decide about the action.  A gate that compares the
+    *spelling* of the action decides about the spelling instead: a grant
+    that says ``"verb": "lookup"`` would not be found by a dispatch of
+    ``"Lookup"``, and the gate would find no grant and skip itself.
+
+    This is the runtime's own rule, and it was already stated and applied
+    for **tool names**: ``permissions.canonical_tool_name`` strips and
+    casefolds, because "a forbidden action can't slip through via spelling
+    variants" (the Agent Security Bench naming-sensitivity finding, ~Oct
+    2026: neutral renames raised ASR +11-13pp).  The scope-qualifier gate
+    was the one gate that did not apply it.
+
+    The rule is *case and whitespace*.  It does **not** fold shell aliases
+    (``Shell`` vs ``Bash``) or neutral renames (``DataExport`` for an
+    exfiltration tool): those are different actions with different
+    consequences, and the repository has an explicit, separate
+    mechanism for them (``permissions``' tool-kind map), not a string
+    guess.
+
+    A malformed verb is **refused**, not normalised into something: an
+    empty verb would name *every* action.
+    """
+    if not isinstance(verb, str):
+        raise MalformedGrantError("verb must be a string")
+    canonical = verb.strip().casefold()
+    if not canonical:
+        raise MalformedGrantError("verb must be a non-empty string")
+    if len(canonical) > _MAX_ID_CHARS:
+        raise MalformedGrantError("verb is too long")
+    return canonical
+
+
+def canonical_scope_key(scope: Any) -> str:
+    """The canonical *lookup key* for a denial-row scope.
+
+    A denial-row scope is ``<grant id>/<verb>``: the grant id half names
+    a grant and the verb half names an action.  The two halves get
+    **different** treatment, and the reason is the same on both sides:
+
+    * the **grant id** is an *identifier* -- it is minted by whatever
+      declared the grant, and two ids that differ only in case are two
+      grants.  It is kept verbatim.
+    * the **verb** is an *action name* -- one action, one name, whatever
+      the spelling.  It is canonicalised.
+
+    The row's scope is **host-written**: the host's sidecar names it, and
+    the host may name it with any spelling of the verb.  So the key is
+    canonical on **both** sides -- the row is filed under it and the
+    lookup uses it -- and a host's spelling can no longer decide whether
+    its own row is read.
+
+    A scope with no verb half (no ``/``) is kept verbatim: it is not a
+    grant/verb scope, and guessing at it would be worse than reading it
+    as written.
+    """
+    if not isinstance(scope, str):
+        raise MalformedGrantError("scope must be a string")
+    text = scope.strip()
+    if not text:
+        raise MalformedGrantError("scope must be a non-empty string")
+    grant_id, separator, verb = text.rpartition("/")
+    if not separator:
+        return text
+    try:
+        canonical = canonical_verb(verb)
+    except MalformedGrantError:
+        # A verb half that cannot be canonicalised is not a verb half;
+        # the scope is read as written rather than guessed at.
+        return text
+    return f"{grant_id}/{canonical}"
+
+
+# ---------------------------------------------------------------------------
 # The structured grant record
 # ---------------------------------------------------------------------------
 
@@ -252,7 +336,12 @@ class GrantRecord:
         if not isinstance(self.verb, str) or not self.verb.strip():
             raise MalformedGrantError("verb must be a non-empty string")
         object.__setattr__(self, "grant_id", self.grant_id.strip())
-        object.__setattr__(self, "verb", self.verb.strip())
+        # The verb gets ONE identity at construction (strip + casefold),
+        # so two grants that name the same action are the same grant no
+        # matter how either side spelled it.  The grant_id is NOT
+        # canonicalised: it is an identifier minted by whatever declared
+        # the grant, and two ids that differ only in case are two grants.
+        object.__setattr__(self, "verb", canonical_verb(self.verb))
         object.__setattr__(self, "qualifiers", tuple(self.qualifiers or ()))
         if not isinstance(self.source_ref, str):
             raise MalformedGrantError("source_ref must be a string")
@@ -924,6 +1013,14 @@ class ScopeQualifierGate:
         # Conclusion 96: the gate must either get a row or a signed "no
         # denial" proof.  A scope with no row, or a store that cannot
         # answer, is an *unknown* -- never a clean read.
+        #
+        # The row is looked up under the **canonical** scope.  The store
+        # keys its rows canonically too, so a row the host filed as
+        # ``grant-1/Lookup`` is found by a lookup for
+        # ``grant-1/lookup``.  The store's key and the lookup's key go
+        # through the same function (``canonical_scope_key``), so the two
+        # sides cannot drift apart -- and a host's spelling can no longer
+        # decide whether its own row is read.
         try:
             row = self._rows.fetch(self._deny_scope(grant))
         except ScopeSourceError as error:
@@ -1107,6 +1204,15 @@ class ScopeQualifierGate:
         The scope names the grant and the verb it authorizes -- the
         granularity at which a refusal is issued (a refused grant, not a
         blanket refusal of every action the process ever takes).
+
+        The verb half is **canonical**: the scope is a *lookup key*, and a
+        lookup key has one spelling.  The grant's verb is already
+        canonical (it is normalised at construction), so this is the
+        canonical form of the scope.
+
+        The **grant id** half is left verbatim: it is an identifier, not
+        an action name, and two ids that differ only in case are two
+        grants.
         """
         return f"{grant.grant_id}/{grant.verb}"
 
@@ -1203,9 +1309,23 @@ class ScopeGrantRegistry:
         return tuple(self._presented.values())
 
     def presented_for(self, verb: str) -> Tuple[GrantRecord, ...]:
-        """The presented grants that authorize ``verb``."""
+        """The presented grants that authorize ``verb``.
+
+        The comparison is **canonical**: the grant's verb is normalised at
+        construction and the asked-for verb is normalised here, so the two
+        sides agree on what a verb *is* and not on how it was spelled.
+
+        This matters because the gate's answer to "is this action
+        authorized" is ``None`` when no presented grant matches -- and
+        ``None`` means *the gate does not apply to this action at all*.
+        A verbatim comparison turned a spelling variant into a skipped
+        gate.
+        """
+        canonical = canonical_verb(verb)
         return tuple(
-            grant for grant in self._presented.values() if grant.verb == verb
+            grant
+            for grant in self._presented.values()
+            if canonical_verb(grant.verb) == canonical
         )
 
     def drop(self, grant_id: str) -> bool:
@@ -1313,6 +1433,19 @@ class DenialRowStore:
     The store is never written by the compaction path, for the same
     reason the source store is not: the summarizer must not be able to
     remove a row.
+
+    **The scope's key is canonical.**  A scope is
+    ``<grant id>/<verb>``: the grant id half is an identifier and is
+    kept verbatim, and the verb half is an *action name*, so it is
+    canonicalised (``canonical_verb``).  The row's own ``scope`` string
+    is kept verbatim -- it is the host's own text and the audit trail
+    must show what the host wrote -- but the store's *key* is canonical,
+    so a row filed under ``grant-1/Lookup`` is found by a lookup for
+    ``grant-1/lookup``.
+
+    Without that, a host's spelling decided whether its own row was
+    read: a row that said ``denied`` could be read as absent because the
+    key differed by one letter of case.
     """
 
     def __init__(self, rows: Optional[Iterable[DenialRow]] = None) -> None:
@@ -1324,7 +1457,7 @@ class DenialRowStore:
     def put(self, row: DenialRow) -> None:
         if not isinstance(row, DenialRow):
             raise MalformedGrantError("row must be a DenialRow")
-        self._rows[row.scope] = row
+        self._rows[canonical_scope_key(row.scope)] = row
 
     def break_reads(self) -> None:
         """Make every read fail (test helper)."""
@@ -1340,12 +1473,16 @@ class DenialRowStore:
         ``None`` means *there is no row* -- which the gate reads as an
         unknown state, not as permission.  Raises
         :class:`ScopeSourceError` when the store cannot answer.
+
+        The scope is canonicalised before the lookup, so the row is found
+        under any spelling of its verb.  The row's own ``scope`` string
+        is returned verbatim -- the reader sees what the host wrote.
         """
         if self._broken:
             raise ScopeSourceError("denial row store is unreadable")
         if not isinstance(scope, str) or not scope:
             raise ScopeSourceError("scope must be a non-empty string")
-        return self._rows.get(scope)
+        return self._rows.get(canonical_scope_key(scope))
 
     def __len__(self) -> int:
         return len(self._rows)

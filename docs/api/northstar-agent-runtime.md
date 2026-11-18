@@ -90843,6 +90843,14 @@ The grant record is not well-formed.
 
 The source store could not be read.
 
+#### `canonical_verb(verb: Any)`
+
+The canonical form of a **verb** -- an action's name.
+
+#### `canonical_scope_key(scope: Any)`
+
+The canonical *lookup key* for a denial-row scope.
+
 #### `ScopeQualifier`
 
 One qualifier on a grant: the *restriction* itself.
