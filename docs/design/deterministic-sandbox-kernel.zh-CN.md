@@ -28,6 +28,8 @@
 ```text
 components/northstar-agent-runtime/tools/deterministic_kernel.py
 components/northstar-agent-runtime/tests/test_deterministic_kernel.py
+components/northstar-agent-runtime/tools/sandbox_evidence.py
+components/northstar-agent-runtime/tests/test_sandbox_evidence.py
 ```
 
 ## 威胁模型
@@ -63,6 +65,7 @@ components/northstar-agent-runtime/tests/test_deterministic_kernel.py
 4. `started` 没有 `completed` 时拒绝自动重试，必须由 effect receiver 根据幂等键对账。
 5. 所有事件和结果必须是有限、可 canonical JSON 序列化的数据。
 6. 事件链、序列、状态转换或结果摘要不一致时，replay fail-closed。
+7. `step.completed` 之前必须有与 `plan_digest` 匹配的沙箱证据；成功退出码本身不能绕过证据门禁。
 
 ## 组件设计
 
@@ -97,6 +100,23 @@ plan_digest
 ```
 
 任一摘要或实际状态不匹配，必须拒绝执行。
+
+### `SandboxEvidence`
+
+`tools/sandbox_evidence.py` 是宿主适配器与确定性内核之间的窄证据合同。它要求宿主返回并摘要固定字段：
+
+```text
+plan_digest
+backend / runtime_digest
+rootless / workspace_readonly
+network_mode
+seccomp_loaded / seccomp_profile_digest
+cgroup_enforced / cgroup_path
+effective_memory_max_bytes / effective_pids_max / effective_cpu_max_percent
+descendant_pids
+```
+
+验证器拒绝以下情况：计划摘要不匹配、有效资源限制比计划更宽、rootless 或只读挂载未证明、network 不是 `none`、required seccomp 未加载、cgroup 未生效、仍有 descendant PID，或证据自身摘要损坏。证据验证成功也只表示“宿主报告的边界与计划一致”，不替代内核实测；生产 verifier 仍应读取 cgroup、`/proc`、seccomp 状态和运行时返回的 profile 摘要。
 
 ### `DeterministicKernel`
 
