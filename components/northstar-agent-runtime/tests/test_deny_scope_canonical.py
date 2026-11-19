@@ -251,6 +251,88 @@ class DenySelfCheckTests(unittest.TestCase):
     def test_the_module_self_check_runs_clean(self):
         deny_hotpath.main()
 
+    def test_the_module_runs_as_a_script(self):
+        # The entry point must actually reach the self-check: a module
+        # whose __main__ guard never fires would pass every test above
+        # while its self-check never ran.
+        import subprocess
+
+        module = Path(deny_hotpath.__file__)
+        result = subprocess.run(
+            [sys.executable, str(module)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("self-check ok", result.stdout)
+
+
+class DenyCacheabilityTests(unittest.TestCase):
+    """A deny lookup result is never cacheable.
+
+    The whole point of the indexed read is that the lookup is cheap
+    enough not to be cached; a cached deny would outlive its reason.
+    """
+
+    def _store(self) -> DenyStore:
+        store = DenyStore()
+        self.addCleanup(store.close)
+        return store
+
+    def test_a_lookup_result_is_not_cacheable(self):
+        store = self._store()
+        lookup = store.lookup("main/Bash")
+        self.assertFalse(lookup.cacheable)
+        self.assertEqual(lookup.cache_ttl_ms, 0)
+
+    def test_a_denied_lookup_result_is_not_cacheable_either(self):
+        store = self._store()
+        store.revoke("main/Bash", reason="operator revoked")
+        lookup = store.lookup("main/Bash")
+        self.assertFalse(lookup.cacheable)
+        self.assertEqual(lookup.cache_ttl_ms, 0)
+
+    def test_a_fail_closed_lookup_result_is_not_cacheable(self):
+        store = self._store()
+        store._conn.execute(f"DROP TABLE {COUNTER_TABLE}")
+        lookup = store.lookup("main/Bash")
+        self.assertTrue(lookup.denied)
+        self.assertFalse(lookup.cacheable)
+        self.assertEqual(lookup.cache_ttl_ms, 0)
+
+
+class DenyDecisionShapeTests(unittest.TestCase):
+    """The decision carries what a caller needs to explain itself."""
+
+    def _store(self) -> DenyStore:
+        store = DenyStore()
+        self.addCleanup(store.close)
+        return store
+
+    def test_a_refusal_row_is_readable_by_its_id(self):
+        store = self._store()
+        dispatcher = DenyDispatcher(store)
+        store.revoke("main/Bash", reason="operator revoked")
+        decision = dispatcher.check("main/Bash")
+        row = store.refusal(decision.refusal_id)
+        self.assertIsNotNone(row)
+        self.assertEqual(row["outcome"], "denied")
+        self.assertEqual(row["scope"], "main/Bash")
+
+    def test_an_unknown_refusal_id_reads_back_as_none(self):
+        store = self._store()
+        self.assertIsNone(store.refusal("ref-does-not-exist"))
+
+    def test_the_dispatcher_reports_the_fail_closed_source(self):
+        store = self._store()
+        dispatcher = DenyDispatcher(store)
+        store._conn.execute(f"DROP TABLE {COUNTER_TABLE}")
+        decision = dispatcher.check("main/Bash")
+        self.assertTrue(decision.denied)
+        self.assertEqual(decision.lookup.source, "fail-closed")
+
 
 class DenyStoreMigrationTests(unittest.TestCase):
     """An existing store file keeps its revocations."""
