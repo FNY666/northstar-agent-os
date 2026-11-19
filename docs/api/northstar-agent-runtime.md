@@ -36902,6 +36902,10 @@ A latency distribution, in milliseconds.
 
 - `as_dict()`
   - Dict form, for the acceptance report.
+#### `canonical_deny_scope(scope: Any)`
+
+The canonical **key** for a deny scope.
+
 #### `DenyStore`
 
 The deny state: a revocation counter per scope, plus a refusal log.
@@ -36952,7 +36956,7 @@ Measure the latency distribution of the deny lookup.
 
 The audit event for one dispatch deny check.
 
-#### `stdlib_only()`
+#### `stdlib_only(source: Optional[str]=None)`
 
 AST check: this module imports stdlib modules only.
 
