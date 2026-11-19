@@ -251,6 +251,45 @@ def _check_scope(scope: Any) -> str:
     return scope
 
 
+def canonical_deny_scope(scope: Any) -> str:
+    """The canonical **key** for a deny scope.
+
+    A deny scope is ``<subject>/<tool>``: the subject the action runs as,
+    and the tool it runs.  The two halves are **not** the same kind of
+    thing, and they get **different** treatment:
+
+    * the **last** half is an *action name*.  It is canonicalised --
+      whitespace stripped and casefolded -- so ``"Bash"``, ``"bash"`` and
+      ``"BASH"`` are one action.  This is the runtime's own rule, stated
+      twice for the same reason: ``permissions.canonical_tool_name``
+      ("a forbidden action can't slip through via spelling variants")
+      and ``sessions.canonical_action`` ("A forbidden action must not be
+      able to slip through via a spelling variant").
+    * the **first** half is an *agent name*.  It is kept **verbatim**.
+      ``AgentRegistry.get()`` is case-sensitive, so two agents whose
+      names differ only in case are two agents; merging their scopes
+      would merge two authorities.
+
+    A scope with **no** separator is kept verbatim: it is not a compound
+    scope, and guessing at it would be worse than reading it as written.
+
+    Why this has to happen: the scope is a **key written by one side and
+    read by the other** -- the host revokes it, the dispatch looks it up.
+    Compared verbatim, a revocation was bypassed by a case variant of the
+    action, and the miss was not fail-closed: a scope with no row reads as
+    ``allowed``, with the indexed counter as the source.  A revocation
+    that was never found left a refusal row saying ``allowed``.
+
+    Both sides go through **one** function, so the writing side and the
+    checking side cannot drift apart.
+    """
+    scope = _check_scope(scope)
+    subject, separator, action = scope.rpartition("/")
+    if not separator:
+        return scope
+    return subject + "/" + action.strip().casefold()
+
+
 class DenyStore:
     """The deny state: a revocation counter per scope, plus a refusal log.
 
@@ -297,9 +336,83 @@ class DenyStore:
             with self._conn:
                 for statement in _SCHEMA:
                     self._conn.execute(statement)
+                self._migrate_scope_keys()
+
+    # -- the scope key migration ----------------------------------------
+
+    def _migrate_scope_keys(self) -> None:
+        """Re-file the revocation counter's rows under the canonical key.
+
+        The counter table's key is the scope, and the canonical key is
+        the scope with its action half casefolded.  A store file written
+        before the canonical key existed holds rows under the host's own
+        spelling, and those rows are **decision state** -- a revocation
+        that is not re-filed would be silently lost, which is the very
+        failure this key change exists to close.
+
+        The migration runs once, at open, inside the lock, and it reads
+        the counter table directly rather than through the store's own
+        API: the ``events`` sequence is pinned by the acceptance tests
+        (``events[0]`` must be ``"refusal"``), and the deny log must not
+        be touched at all (the joined statements are pinned too).
+
+        Two rows that collapse onto one canonical key are merged with the
+        **denied** row winning -- a migration must never weaken a
+        revocation -- and the **higher** counter winning, because the
+        counter is monotonic and a migration must not move it backwards.
+        """
+        rows = self._conn.execute(
+            f"SELECT scope, counter, denied, reason, seq FROM {COUNTER_TABLE}"
+        ).fetchall()
+        if not rows:
+            return
+        merged: Dict[str, Dict[str, Any]] = {}
+        changed = False
+        for row in rows:
+            scope = str(row["scope"])
+            try:
+                key = canonical_deny_scope(scope)
+            except DenyStoreError:
+                # A malformed scope is left exactly as it is: the
+                # migration must not refuse to open a store over it.
+                key = scope
+            if key != scope:
+                changed = True
+            value = {
+                "counter": int(row["counter"]),
+                "denied": bool(int(row["denied"])),
+                "reason": str(row["reason"] or ""),
+                "seq": int(row["seq"]),
+            }
+            current = merged.get(key)
+            if current is None:
+                merged[key] = value
+                continue
+            # A collision: two spellings of one scope.
+            changed = True
+            current["counter"] = max(current["counter"], value["counter"])
+            if value["denied"]:
+                current["denied"] = True
+                current["reason"] = value["reason"]
+                current["seq"] = value["seq"]
+        if not changed:
+            # Every row is already under its canonical key.
+            return
+        self._conn.execute(f"DELETE FROM {COUNTER_TABLE}")
+        for key, value in merged.items():
+            self._conn.execute(
+                f"INSERT INTO {COUNTER_TABLE} (scope, counter, denied, reason, seq) "
+                f"VALUES (?, ?, ?, ?, ?)",
+                (
+                    key,
+                    int(value["counter"]),
+                    1 if value["denied"] else 0,
+                    str(value["reason"])[:_MAX_REASON_CHARS],
+                    int(value["seq"]),
+                ),
+            )
 
     # -- introspection -------------------------------------------------
-
     def _trace(self, statement: str) -> None:
         """Record every statement the connection executes."""
         self._statements.append(statement)
@@ -354,11 +467,17 @@ class DenyStore:
         A counter that has not moved is a state that has not changed, so
         a stale read is detectable by comparing counters rather than by
         trusting a cached copy.
+
+        The row is filed under the **canonical** key, so a revocation and
+        a lookup that spell the action differently are the same scope.
+        The deny log, by contrast, keeps the **verbatim** scope: it is
+        the audit trail, and a reader must see what the host wrote.
         """
         scope = _check_scope(scope)
+        key = canonical_deny_scope(scope)
         with self._lock:
             row = self._conn.execute(
-                f"SELECT counter FROM {COUNTER_TABLE} WHERE scope = ?", (scope,)
+                f"SELECT counter FROM {COUNTER_TABLE} WHERE scope = ?", (key,)
             ).fetchone()
             current = int(row["counter"]) if row is not None else 0
             new_counter = current + 1 if counter is None else int(counter)
@@ -367,7 +486,7 @@ class DenyStore:
                 f"VALUES (?, ?, ?, ?, ?) "
                 f"ON CONFLICT(scope) DO UPDATE SET counter=excluded.counter, "
                 f"denied=excluded.denied, reason=excluded.reason, seq=excluded.seq",
-                (scope, new_counter, 1 if denied else 0, reason[:_MAX_REASON_CHARS], int(seq)),
+                (key, new_counter, 1 if denied else 0, reason[:_MAX_REASON_CHARS], int(seq)),
             )
         return new_counter
 
@@ -384,9 +503,10 @@ class DenyStore:
 
         This is a read for reporting, not the decision path.
         """
+        key = canonical_deny_scope(scope)
         with self._lock:
             row = self._conn.execute(
-                f"SELECT counter FROM {COUNTER_TABLE} WHERE scope = ?", (scope,)
+                f"SELECT counter FROM {COUNTER_TABLE} WHERE scope = ?", (key,)
             ).fetchone()
         return None if row is None else int(row["counter"])
 
@@ -402,12 +522,19 @@ class DenyStore:
 
         Fail-closed: any error reading the counter produces a *denial*,
         not an allow.  "I could not check" is never "allowed".
+
+        The scope is looked up under its **canonical** key, so the
+        revocation and the lookup agree even when they spell the action
+        differently.  The canonicalisation happens here, in Python, before
+        the parameter is bound -- so the statement keeps its shape: one
+        indexed read on the primary key, a seek and never a scan.
         """
         scope = _check_scope(scope)
+        key = canonical_deny_scope(scope)
         self._events.append("lookup")
         try:
             with self._lock:
-                row = self._conn.execute(LOOKUP_SQL, (scope,)).fetchone()
+                row = self._conn.execute(LOOKUP_SQL, (key,)).fetchone()
         except sqlite3.Error as error:
             return DenyLookup(
                 scope=scope,
@@ -439,10 +566,10 @@ class DenyStore:
         The acceptance tests use this to assert the lookup is a seek
         (``SEARCH``) and not a scan (``SCAN``).
         """
-        scope = _check_scope(scope)
+        key = canonical_deny_scope(scope)
         with self._lock:
             rows = self._conn.execute(
-                "EXPLAIN QUERY PLAN " + LOOKUP_SQL, (scope,)
+                "EXPLAIN QUERY PLAN " + LOOKUP_SQL, (key,)
             ).fetchall()
         return " | ".join(str(row["detail"]) for row in rows)
 
