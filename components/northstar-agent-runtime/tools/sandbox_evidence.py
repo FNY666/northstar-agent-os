@@ -14,7 +14,7 @@ from typing import Any, Mapping
 from tools.deterministic_kernel import SandboxPlan
 
 SCHEMA = "northstar.sandbox-evidence.v1"
-_ALLOWED_BACKENDS = {"bwrap", "oci", "gvisor", "microvm"}
+_ALLOWED_BACKENDS = {"process", "bwrap", "oci", "gvisor", "microvm"}
 
 
 class EvidenceError(ValueError):
@@ -85,8 +85,8 @@ class SandboxEvidence:
                 raise EvidenceError(f"invalid evidence field: {field}")
         if raw["backend"] not in _ALLOWED_BACKENDS:
             raise EvidenceError("unsupported sandbox backend")
-        if raw["network_mode"] != "none":
-            raise EvidenceError("only network_mode=none is accepted by this contract")
+        if raw["network_mode"] not in {"none", "unverified"}:
+            raise EvidenceError("network_mode must be none or unverified")
         if not isinstance(raw["rootless"], bool) or not isinstance(raw["workspace_readonly"], bool):
             raise EvidenceError("rootless and workspace_readonly must be booleans")
         if not isinstance(raw["seccomp_loaded"], bool) or not isinstance(raw["cgroup_enforced"], bool):
@@ -128,6 +128,8 @@ def verify_evidence(plan: SandboxPlan, raw: Mapping[str, Any], *, require_os_iso
         raise EvidenceError("sandbox is not rootless and read-only")
     if evidence.network_mode != plan.data["network"]:
         raise EvidenceError("effective network policy does not match plan")
+    if evidence.backend == "process":
+        raise EvidenceError("process backend is not an OS sandbox; install/use bwrap or a stronger backend")
     if plan.data["seccomp"] == "required" and not evidence.seccomp_loaded:
         raise EvidenceError("required seccomp profile was not loaded")
     if not evidence.cgroup_enforced:

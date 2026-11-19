@@ -29,6 +29,7 @@
 components/northstar-agent-runtime/tools/deterministic_kernel.py
 components/northstar-agent-runtime/tests/test_deterministic_kernel.py
 components/northstar-agent-runtime/tools/sandbox_evidence.py
+components/northstar-agent-runtime/tools/sandbox_evidence_adapter.py
 components/northstar-agent-runtime/tests/test_sandbox_evidence.py
 ```
 
@@ -117,6 +118,8 @@ descendant_pids
 ```
 
 验证器拒绝以下情况：计划摘要不匹配、有效资源限制比计划更宽、rootless 或只读挂载未证明、network 不是 `none`、required seccomp 未加载、cgroup 未生效、仍有 descendant PID，或证据自身摘要损坏。证据验证成功也只表示“宿主报告的边界与计划一致”，不替代内核实测；生产 verifier 仍应读取 cgroup、`/proc`、seccomp 状态和运行时返回的 profile 摘要。
+
+`sandbox_evidence_adapter.py` 将 `os_sandbox.SandboxResult` 和 `SandboxRequest` 转换为该合同的原始 JSON。它要求宿主显式提供 runtime/profile 摘要、rootless、只读挂载、cgroup 路径和 descendant 数量，不从退出码猜测这些事实。process backend 可以被记录用于诊断，但 `verify_evidence()` 永远拒绝它作为 OS 沙箱；只有 bwrap 或其他经过批准的强隔离 backend 才能进入 kernel completion gate。
 
 ### `DeterministicKernel`
 
