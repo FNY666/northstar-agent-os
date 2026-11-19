@@ -216,6 +216,41 @@ class DenyStoreCanonicalScopeTests(unittest.TestCase):
     def test_the_module_is_still_stdlib_only(self):
         self.assertTrue(stdlib_only())
 
+    def test_the_stdlib_guard_rejects_a_foreign_import(self):
+        # The guard must be EXERCISED, not merely called: a guard that
+        # reads only its own clean file cannot be told apart from one
+        # that always says "yes".
+        self.assertFalse(stdlib_only("import requests\n"))
+
+    def test_the_stdlib_guard_rejects_a_foreign_from_import(self):
+        self.assertFalse(stdlib_only("from requests import get\n"))
+
+    def test_the_stdlib_guard_rejects_a_relative_import(self):
+        self.assertFalse(stdlib_only("from . import sibling\n"))
+
+    def test_the_stdlib_guard_accepts_an_allowed_import(self):
+        self.assertTrue(stdlib_only("import json\nfrom typing import Any\n"))
+
+    def test_the_stdlib_guard_accepts_a_submodule_of_an_allowed_package(self):
+        # "sqlite3" is allowed, and so is anything under it.
+        self.assertTrue(stdlib_only("from sqlite3 import dbapi2\n"))
+
+    def test_the_stdlib_guard_rejects_a_dotted_foreign_package(self):
+        self.assertFalse(stdlib_only("from requests.sessions import get\n"))
+
+
+class DenySelfCheckTests(unittest.TestCase):
+    """The module's own self-check runs clean.
+
+    The self-check is where the module's invariants are stated in the
+    module itself -- the refusal row lands first, the lookup is one
+    read, an unreadable counter denies.  A test that runs it is what
+    keeps those assertions live rather than decorative.
+    """
+
+    def test_the_module_self_check_runs_clean(self):
+        deny_hotpath.main()
+
 
 class DenyStoreMigrationTests(unittest.TestCase):
     """An existing store file keeps its revocations."""
