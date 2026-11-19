@@ -113,6 +113,20 @@ class DenyScopeKeyTests(unittest.TestCase):
         with self.assertRaises(Exception):
             canonical_deny_scope("x" * 300)
 
+    def test_a_scope_that_casefolding_lengthens_is_refused(self):
+        # Casefolding can LENGTHEN a string: "ß" folds to "ss".  So a
+        # scope that was within the cap can become longer than it, and
+        # the key space must stay bounded.
+        scope = "main/" + ("ß" * 126)
+        self.assertLessEqual(len(scope), 256)
+        with self.assertRaises(Exception):
+            canonical_deny_scope(scope)
+
+    def test_a_scope_at_the_cap_is_still_accepted(self):
+        scope = "main/" + ("a" * 251)
+        self.assertEqual(len(scope), 256)
+        self.assertEqual(canonical_deny_scope(scope), scope)
+
 
 class DenyStoreCanonicalScopeTests(unittest.TestCase):
     """The store files under the canonical key and reads it back."""
@@ -284,6 +298,89 @@ class DenyStoreMigrationTests(unittest.TestCase):
             store = DenyStore(path)
             self.addCleanup(store.close)
             self.assertEqual(store.lookup("main/lookup").counter, 7)
+
+    def _legacy_store(self, path: str, rows) -> None:
+        """A store file written the way the runtime wrote it before the
+        canonical key existed."""
+        legacy = sqlite3.connect(path)
+        legacy.execute(
+            f"CREATE TABLE {COUNTER_TABLE} ("
+            "scope TEXT PRIMARY KEY, counter INTEGER NOT NULL DEFAULT 0, "
+            "denied INTEGER NOT NULL DEFAULT 0, reason TEXT NOT NULL "
+            "DEFAULT '', seq INTEGER NOT NULL DEFAULT 0)"
+        )
+        for scope, counter, denied, reason in rows:
+            legacy.execute(
+                f"INSERT INTO {COUNTER_TABLE} (scope, counter, denied, reason) "
+                "VALUES (?, ?, ?, ?)",
+                (scope, counter, denied, reason),
+            )
+        legacy.commit()
+        legacy.close()
+
+    def test_a_migration_keeps_the_revocation_reason(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "deny.sqlite3")
+            self._legacy_store(
+                path,
+                [("main/Lookup", 3, 1, "operator revoked")],
+            )
+            store = DenyStore(path)
+            self.addCleanup(store.close)
+            lookup = store.lookup("main/lookup")
+            self.assertTrue(lookup.denied)
+            self.assertEqual(lookup.reason, "operator revoked")
+
+    def test_a_migration_keeps_a_cleared_scope_cleared(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "deny.sqlite3")
+            self._legacy_store(
+                path,
+                [("main/Lookup", 3, 0, "")],
+            )
+            store = DenyStore(path)
+            self.addCleanup(store.close)
+            lookup = store.lookup("main/lookup")
+            self.assertFalse(lookup.denied)
+            self.assertEqual(lookup.counter, 3)
+
+    def test_a_migration_leaves_a_canonical_row_alone(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "deny.sqlite3")
+            self._legacy_store(
+                path,
+                [("main/lookup", 4, 1, "operator revoked")],
+            )
+            store = DenyStore(path)
+            self.addCleanup(store.close)
+            lookup = store.lookup("main/lookup")
+            self.assertTrue(lookup.denied)
+            self.assertEqual(lookup.counter, 4)
+
+    def test_a_migration_does_not_touch_the_deny_log(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "deny.sqlite3")
+            self._legacy_store(
+                path,
+                [("main/Lookup", 3, 1, "operator revoked")],
+            )
+            store = DenyStore(path)
+            self.addCleanup(store.close)
+            # The deny log is the record; the migration is about the key.
+            self.assertEqual(store.refusal_count(), 0)
+
+    def test_a_migration_leaves_the_events_sequence_empty(self):
+        # The acceptance tests pin events[0] == "refusal"; a migration that
+        # went through the store's own API would shift it.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "deny.sqlite3")
+            self._legacy_store(
+                path,
+                [("main/Lookup", 3, 1, "operator revoked")],
+            )
+            store = DenyStore(path)
+            self.addCleanup(store.close)
+            self.assertEqual(store.events, ())
 
 
 class DenyDispatcherCanonicalScopeTests(unittest.TestCase):

@@ -282,12 +282,21 @@ def canonical_deny_scope(scope: Any) -> str:
 
     Both sides go through **one** function, so the writing side and the
     checking side cannot drift apart.
+
+    The canonical form is length-checked too, and that is not
+    bookkeeping: casefolding can *lengthen* a string (``"ß"`` folds to
+    ``"ss"``), so a scope that was within the cap can become longer than
+    it.  A key longer than the cap is refused rather than written, so
+    the key space stays bounded.
     """
     scope = _check_scope(scope)
     subject, separator, action = scope.rpartition("/")
     if not separator:
         return scope
-    return subject + "/" + action.strip().casefold()
+    key = subject + "/" + action.strip().casefold()
+    if len(key) > _MAX_SCOPE_CHARS:
+        raise DenyStoreError("scope is too long")
+    return key
 
 
 class DenyStore:
