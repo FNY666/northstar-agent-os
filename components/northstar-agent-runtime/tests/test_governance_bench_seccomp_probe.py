@@ -35,7 +35,7 @@ class SeccompProbeTests(unittest.TestCase):
         from tools.seccomp import prctl_loader_argv
 
         argv = prctl_loader_argv(
-            ["sh", "-c", "grep -q 'Seccomp:\\t2' /proc/self/status"]
+            ["sh", "-c", "grep -q 'Seccomp:\t2' /proc/self/status"]
         )
         completed = subprocess.run(argv, capture_output=True, timeout=30)
         self.assertEqual(completed.returncode, 0, completed.stderr[-400:])
