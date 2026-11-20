@@ -790,5 +790,418 @@ class FreshStartHeadTests(_WorkspaceCase):
         self.assertIn("mismatch", note)
 
 
+class DoubleGuardTests(_WorkspaceCase):
+    """The mutant-lift for the ``horizon`` slice.
+
+    The slice's own tests drove only ONE half of each double-guard in
+    ``long_horizon.py``.  The planted faults ``or@114`` and ``or@192``
+    (``or -> and``) both SURVIVED the slice's test suite, which is the
+    measure of the gap: the tests executed the code but did not verify
+    its behaviour.
+
+    Each guard below joins a TYPE half to an EMPTY/BOUND half with ``or``.
+    The type half fires on a value of the wrong type; the second half
+    fires on a value of the RIGHT type that is empty, blank, or out of
+    bounds.  A suite that only feeds the wrong type cannot tell the two
+    halves apart, so flipping the connective leaves it green.
+
+    Every test here drives the SECOND half of its guard, and every test
+    is proven -- against a mutated copy of the module -- to FAIL when
+    its fault is applied alone.
+    """
+
+    # -- or@114: `not isinstance(value, str) or not value.strip()` ----------
+
+    def test_a_blank_step_id_is_refused(self) -> None:
+        """``not value.strip()`` -- the emptiness half of the text guard.
+
+        The step id is a string, so the type half never fires; only the
+        emptiness half can refuse it.  A blank step id would produce an
+        unverifiable progress row whose id names nothing.
+        """
+        with self.assertRaises(lh.LongHorizonError):
+            VerifiedProgress(step_id="   ", round_index=0, summary="did the thing")
+
+    def test_an_empty_evidence_path_is_refused(self) -> None:
+        """``not value.strip()`` -- the emptiness half, on the evidence path."""
+        with self.assertRaises(lh.LongHorizonError):
+            lh.EvidencePointer(kind=lh.EVIDENCE_FILE, path="")
+
+    def test_a_blank_failure_reason_is_refused(self) -> None:
+        """``not value.strip()`` -- the emptiness half, on a failure reason."""
+        with self.assertRaises(lh.LongHorizonError):
+            FailureEvidence(reason="\t\n ")
+
+    def test_a_blank_objective_is_refused(self) -> None:
+        """``not value.strip()`` -- the emptiness half, on the objective.
+
+        The objective is what the whole round is rebuilt from, so a blank
+        one must fail closed rather than rebuild an empty round.
+        """
+        with self.assertRaises(lh.LongHorizonError):
+            RoundState(round_index=0, objective="  ")
+
+    def test_a_blank_session_id_is_refused(self) -> None:
+        """``not value.strip()`` -- the emptiness half, on a session id."""
+        with self.assertRaises(lh.LongHorizonError):
+            VerifiedCheckpoint(session_id=" ", round_index=0, objective="ship it")
+
+    # -- or@192: `isinstance(self.round_index, bool) or not isinstance(...)` --
+
+    def test_a_round_index_that_is_a_string_is_refused(self) -> None:
+        """``not isinstance(self.round_index, int)`` -- the type half.
+
+        ``"0"`` is not an int.  It compares equal to ``0`` nowhere in
+        Python, but a round index of ``"0"`` would still serialise into
+        the checkpoint as a string and break the chain's arithmetic.
+        """
+        with self.assertRaises(lh.LongHorizonError):
+            VerifiedProgress(step_id="r0", round_index="0", summary="did the thing")
+
+    def test_a_round_index_that_is_a_float_is_refused(self) -> None:
+        """``not isinstance(self.round_index, int)`` -- the type half again.
+
+        A float round index would silently truncate into the checkpoint.
+        """
+        with self.assertRaises(lh.LongHorizonError):
+            VerifiedProgress(step_id="r0", round_index=1.5, summary="did the thing")
+
+    def test_a_round_state_with_a_non_int_round_index_is_refused(self) -> None:
+        """The same type half, on the rebuilt round state."""
+        with self.assertRaises(lh.LongHorizonError):
+            RoundState(round_index="1", objective="ship it")
+
+    def test_a_checkpoint_with_a_non_int_round_index_is_refused(self) -> None:
+        """The same type half, on the checkpoint that a resume forks from."""
+        with self.assertRaises(lh.LongHorizonError):
+            VerifiedCheckpoint(session_id="lh", round_index=None, objective="ship it")
+
+    def test_a_boolean_round_index_is_refused(self) -> None:
+        """``isinstance(self.round_index, bool)`` -- the bool half.
+
+        ``True`` IS an ``int`` in Python, so the second half of the guard
+        (``not isinstance(..., int)``) does not fire for it.  The first
+        half has to exclude it explicitly, or a round index of ``True``
+        would be a round index of ``1``.
+        """
+        with self.assertRaises(lh.LongHorizonError):
+            VerifiedProgress(step_id="r0", round_index=True, summary="did the thing")
+
+    def test_a_boolean_round_index_is_refused_on_the_round_state(self) -> None:
+        """The same bool half, on the rebuilt round state."""
+        with self.assertRaises(lh.LongHorizonError):
+            RoundState(round_index=False, objective="ship it")
+
+    # -- or@337 / or@340: a planned command / a declared artifact ----------
+
+    def test_a_blank_planned_command_is_refused(self) -> None:
+        """``not command.strip()`` -- the emptiness half of the plan guard.
+
+        A blank command is a string, so the type half never fires; only
+        the emptiness half can refuse it.
+        """
+        with self.assertRaises(lh.LongHorizonError):
+            StepPlan(commands=("   ",))
+
+    def test_a_blank_declared_artifact_is_refused(self) -> None:
+        """``not artifact.strip()`` -- the emptiness half, on the artifact.
+
+        A blank artifact path would be audited against the workspace root
+        rather than against a real file.
+        """
+        with self.assertRaises(lh.LongHorizonError):
+            StepPlan(artifacts=("  ",))
+
+    # -- or@370: an audit check's three text fields -----------------------
+
+    def test_a_blank_audit_check_id_is_refused(self) -> None:
+        """``not value.strip()`` -- the emptiness half of the check guard.
+
+        The check id is what a rejection names ("c1: the check failed"),
+        so a blank one names nothing.
+        """
+        with self.assertRaises(lh.LongHorizonError):
+            AuditCheck(check_id="  ", description="the marker is present", command="true")
+
+    def test_a_blank_audit_check_description_is_refused(self) -> None:
+        """The same emptiness half, on the description."""
+        with self.assertRaises(lh.LongHorizonError):
+            AuditCheck(check_id="c1", description="   ", command="true")
+
+    def test_a_blank_audit_check_command_is_refused(self) -> None:
+        """The same emptiness half, on the command."""
+        with self.assertRaises(lh.LongHorizonError):
+            AuditCheck(check_id="c1", description="the marker is present", command=" ")
+
+    # -- or@554: `not commands or not all(command.strip() ...)` ------------
+
+    def test_a_blank_command_in_a_plan_is_a_failed_step(self) -> None:
+        """``not all(command.strip() ...)`` -- the emptiness half.
+
+        The executor's own guard has two halves: no commands at all, and
+        commands that are all blank.  The slice's suite drove only the
+        first.  A plan of one blank command must be a FAILED step, not a
+        step that runs an empty shell line.
+        """
+        executor = ExecutorBackend(workspace=self.workspace)
+        state = ManagerBackend().rebuild(
+            objective="do it", verified_progress=(), failures=(), round_index=0
+        )
+        outcome = executor.run_step(
+            state=state,
+            plan=lambda _state: ["   "],
+            step_id="s0",
+        )
+        self.assertEqual(outcome.kind, lh.STEP_FAILED)
+        self.assertIn("no command", outcome.reason)
+
+    # -- or@603: `output = completed.stdout or ""` -----------------------
+
+    def test_a_command_with_no_output_yields_an_empty_string(self) -> None:
+        """``completed.stdout or ""`` -- the empty-output half.
+
+        A command that prints nothing has ``stdout`` of ``None`` when the
+        pipe is closed early.  The step's summary must then be the empty
+        string, and the step must still be pending audit rather than a
+        crash.
+        """
+        executor = ExecutorBackend(workspace=self.workspace)
+        state = ManagerBackend().rebuild(
+            objective="do it", verified_progress=(), failures=(), round_index=0
+        )
+        outcome = executor.run_step(
+            state=state,
+            plan=lambda _state: ["exit 0"],
+            step_id="s0",
+        )
+        self.assertEqual(outcome.kind, lh.STEP_PENDING_AUDIT)
+        self.assertEqual(outcome.summary, "")
+
+    # -- or@732 / or@733: the auditor's check output ----------------------
+
+    def test_a_check_with_no_output_is_still_audited(self) -> None:
+        """``completed.stdout or ""`` -- the empty-output half, in the auditor.
+
+        The check passes on its exit status; an empty output must not
+        change that, and must not crash the auditor.
+        """
+        self.write("marker.txt", "MARKER\n")
+        auditor = AuditorBackend(workspace=self.workspace)
+        state = ManagerBackend().rebuild(
+            objective="ship it", verified_progress=(), failures=(), round_index=0
+        )
+        verdict = auditor.audit(
+            state=state,
+            declared_artifacts=("marker.txt",),
+            checks=(AuditCheck(check_id="c1", description="the marker is present", command="true"),),
+        )
+        self.assertTrue(verdict.passed)
+
+    # -- or@805: the checkpoint's round index ----------------------------
+
+    def test_a_checkpoint_with_a_boolean_round_index_is_refused(self) -> None:
+        """``isinstance(self.round_index, bool)`` -- the bool half."""
+        with self.assertRaises(lh.LongHorizonError):
+            VerifiedCheckpoint(session_id="lh", round_index=True, objective="ship it")
+
+    # -- or@830: `path is None or (isinstance(path, str) and not path)` ---
+
+    def test_an_empty_store_path_is_refused(self) -> None:
+        """``isinstance(path, str) and not path`` -- the emptiness half.
+
+        The store's path is a str, so the type half never fires; only the
+        emptiness half can refuse it.  An empty path would point the store
+        at the current directory.
+        """
+        with self.assertRaises(lh.LongHorizonError):
+            VerifiedProgressStore("")
+
+    def test_a_none_store_path_is_refused(self) -> None:
+        """``path is None`` -- the type half, for the pair."""
+        with self.assertRaises(lh.LongHorizonError):
+            VerifiedProgressStore(None)
+
+    def test_a_real_store_path_is_accepted(self) -> None:
+        """``isinstance(path, str) and not path`` -- the emptiness half.
+
+        The guard refuses a path that is *empty*, not one that is a
+        string.  A real path must be accepted, and the store must write
+        its checkpoint there.  The slice's suite only ever fed the guard
+        a bad path, so it could not tell "refuse an empty path" from
+        "refuse every path".
+        """
+        path = self.workspace / "verified.ndjson"
+        store = VerifiedProgressStore(str(path))
+        store.record(
+            VerifiedCheckpoint(
+                session_id="lh-store",
+                round_index=0,
+                objective="ship it",
+                context_digest="sha256:ctx",
+                head_hash="sha256:head",
+            )
+        )
+        self.assertTrue(path.exists())
+        self.assertEqual(len(store.checkpoints()), 1)
+
+    # -- or@732: `output = completed.stdout or ""` in the auditor ----------
+
+    def test_a_failing_check_reports_the_output_it_actually_read(self) -> None:
+        """``completed.stdout or ""`` -- the empty-output half, in the auditor.
+
+        The auditor's rejection quotes what the check printed.  If the
+        check's own output were dropped, the rejection would name the
+        check but not the reason it failed -- an auditor that cannot show
+        what it read is an auditor that cannot be audited.
+        """
+        auditor = AuditorBackend(workspace=self.workspace)
+        state = ManagerBackend().rebuild(
+            objective="ship it", verified_progress=(), failures=(), round_index=0
+        )
+        verdict = auditor.audit(
+            state=state,
+            declared_artifacts=(),
+            checks=(
+                AuditCheck(
+                    check_id="c1",
+                    description="the marker is present",
+                    command="printf 'the-marker-is-missing'; exit 1",
+                ),
+            ),
+        )
+        self.assertFalse(verdict.passed)
+        self.assertIn("the-marker-is-missing", verdict.summary)
+
+    # -- lt@517: `if self.max_output_chars < 1` ---------------------------
+
+    def test_an_output_budget_of_one_char_is_accepted(self) -> None:
+        """``max_output_chars < 1`` -- the bound half, at the exact limit.
+
+        A budget of one character is a budget: the bound is ``< 1``, so
+        exactly one is allowed and only zero is refused.
+        """
+        executor = ExecutorBackend(workspace=self.workspace, max_output_chars=1)
+        self.assertEqual(executor.max_output_chars, 1)
+
+    # -- gt@605: `if total > self.max_output_chars` -----------------------
+
+    def test_output_exactly_at_the_budget_is_not_aborted(self) -> None:
+        """``total > max_output_chars`` -- the bound half, at the limit.
+
+        The budget is a ceiling on what may be produced; output of
+        exactly the budget is within it.  The slice's suite only ever
+        overshot, so it could not tell ``>`` from ``>=``.
+        """
+        executor = ExecutorBackend(workspace=self.workspace, max_output_chars=3)
+        state = ManagerBackend().rebuild(
+            objective="do it", verified_progress=(), failures=(), round_index=0
+        )
+        outcome = executor.run_step(
+            state=state,
+            plan=lambda _state: ["printf abc"],
+            step_id="s0",
+        )
+        self.assertEqual(outcome.kind, lh.STEP_PENDING_AUDIT)
+        self.assertEqual(outcome.summary, "abc")
+
+    # -- or@1078: `verdict.summary or f"round {round_index} verified"` ----
+
+    def test_the_verified_progress_carries_the_auditors_own_wording(self) -> None:
+        """``verdict.summary or ...`` -- the fallback half, on the summary.
+
+        The progress row's summary is the AUDITOR's wording about what it
+        verified.  The fallback is only for a verdict that carries no
+        wording at all; when the auditor did speak, its words are what
+        must be recorded.
+        """
+        self.write("out.txt", "real content\n")
+        loop = LongHorizonLoop(
+            objective="ship it",
+            manager=ManagerBackend(),
+            executor=ExecutorBackend(workspace=self.workspace),
+            auditor=AuditorBackend(workspace=self.workspace),
+            plan=lambda state: StepPlan(commands=["true"], artifacts=("out.txt",)),
+            checks=(),
+            max_rounds=1,
+        )
+        result = loop.run()
+        self.assertEqual(result.outcome, lh.LOOP_PASSED)
+        summary = result.verified_progress[0].summary
+        self.assertIn("declared artifact", summary)
+        self.assertNotIn("round 0 verified", summary)
+
+    # -- or@1145: `int(getattr(self.session, "written", 0) or 0)` ---------
+
+    def test_the_session_checkpoint_records_the_position_it_was_written_at(self) -> None:
+        """``getattr(self.session, "written", 0) or 0`` -- the fallback half.
+
+        The checkpoint's ``record_index`` is its POSITION in the
+        transcript: the number of records already written when it was
+        built.  A session that already holds a record must not write its
+        checkpoint at position zero.
+        """
+        from sessions import SessionStore
+
+        self.write("out.txt", "real content\n")
+        directory = self.workspace / "sessions-position"
+        store = SessionStore(directory, session_id="lh-position")
+        store.append("assistant", {"role": "assistant", "content": []})
+        self.assertEqual(store.written, 1)
+        loop = LongHorizonLoop(
+            objective="ship it",
+            manager=ManagerBackend(),
+            executor=ExecutorBackend(workspace=self.workspace),
+            auditor=AuditorBackend(workspace=self.workspace),
+            plan=lambda state: StepPlan(commands=["true"], artifacts=("out.txt",)),
+            checks=(),
+            max_rounds=1,
+            session_id="lh-position",
+            session=store,
+        )
+        result = loop.run()
+        self.assertEqual(result.outcome, lh.LOOP_PASSED)
+        records, _ = store.read()
+        checkpoints = [item for item in records if item.get("type") == "checkpoint"]
+        self.assertEqual(len(checkpoints), 1)
+        # The checkpoint was written at position 1 -- after the assistant
+        # record that was already there.
+        self.assertEqual(checkpoints[0]["record_index"], 1)
+
+    # -- or@1151: `self.executor_config.model or "unknown"` ---------------
+
+    def test_the_session_checkpoint_records_the_executors_model(self) -> None:
+        """``self.executor_config.model or "unknown"`` -- the fallback half.
+
+        The checkpoint names the model that ran the step.  The fallback
+        is only for a config with no model at all; a named model must be
+        the one recorded.
+        """
+        from sessions import SessionStore
+
+        self.write("out.txt", "real content\n")
+        directory = self.workspace / "sessions-model"
+        store = SessionStore(directory, session_id="lh-model")
+        loop = LongHorizonLoop(
+            objective="ship it",
+            manager=ManagerBackend(),
+            executor=ExecutorBackend(workspace=self.workspace),
+            auditor=AuditorBackend(workspace=self.workspace),
+            plan=lambda state: StepPlan(commands=["true"], artifacts=("out.txt",)),
+            checks=(),
+            max_rounds=1,
+            session_id="lh-model",
+            session=store,
+            executor_config=RoleConfig(
+                role="executor", backend_id="executor.shell.v1", model="model-under-test"
+            ),
+        )
+        result = loop.run()
+        self.assertEqual(result.outcome, lh.LOOP_PASSED)
+        records, _ = store.read()
+        checkpoints = [item for item in records if item.get("type") == "checkpoint"]
+        self.assertEqual(len(checkpoints), 1)
+        self.assertEqual(checkpoints[0]["model"], "model-under-test")
+
+
 if __name__ == "__main__":  # pragma: no cover - manual entry point
     unittest.main()
