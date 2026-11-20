@@ -1164,5 +1164,75 @@ class TestCliSurface(_HolderCase):
         self.assertEqual(rc, 3)
 
 
+
+class TestThePinRefusesEveryMalformedField(_HolderCase):
+    """The mutant-lift for the ``audit-head`` slice.
+
+    The slice's own tests exercised only ONE branch of each of the
+    three ``or`` double-guards in ``HeadPin.__post_init__``.  The planted
+    faults ``or@176``, ``or@178`` and ``or@184`` (``or -> and``) all
+    SURVIVED the slice's test suite, which is the measure of the gap:
+    the tests did not verify the behaviour.
+
+    Each guard below has two halves -- a TYPE half and an EMPTY/NEGATIVE
+    half -- and the slice's tests only ever drove the first.  These tests
+    drive the SECOND half of each guard, and they are what makes the
+    planted fault observable.
+    """
+
+    def test_a_head_hash_that_is_not_a_string_is_refused(self):
+        """``not isinstance(self.head_hash, str)`` -- the type half."""
+        with self.assertRaises(ahh.HeadHolderError):
+            ahh.HeadPin(
+                head_hash=12345,
+                seq=3,
+                records_sealed=3,
+                genesis=GENESIS,
+                seq_first=1,
+                seq_last=3,
+            )
+
+    def test_a_genesis_that_is_not_a_string_is_refused(self):
+        """``not isinstance(self.genesis, str)`` -- the type half."""
+        with self.assertRaises(ahh.HeadHolderError):
+            ahh.HeadPin(
+                head_hash=HEAD_A,
+                seq=3,
+                records_sealed=3,
+                genesis=None,
+                seq_first=1,
+                seq_last=3,
+            )
+
+    def test_a_boolean_is_not_an_int_count(self):
+        """``isinstance(value, bool)`` -- the bool half of the int guard.
+
+        ``True`` is an ``int`` in Python, so the guard has to exclude it
+        explicitly.  A pin whose ``seq`` is ``True`` would seal a chain of
+        length one.
+        """
+        with self.assertRaises(ahh.HeadHolderError):
+            ahh.HeadPin(
+                head_hash=HEAD_A,
+                seq=True,
+                records_sealed=3,
+                genesis=GENESIS,
+                seq_first=1,
+                seq_last=3,
+            )
+
+    def test_a_boolean_record_count_is_refused(self):
+        """The same bool half, on the other int field."""
+        with self.assertRaises(ahh.HeadHolderError):
+            ahh.HeadPin(
+                head_hash=HEAD_A,
+                seq=3,
+                records_sealed=False,
+                genesis=GENESIS,
+                seq_first=1,
+                seq_last=3,
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
