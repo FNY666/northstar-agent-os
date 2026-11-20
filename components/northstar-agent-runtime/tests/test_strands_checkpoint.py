@@ -363,8 +363,142 @@ class RetryPathTests(RuntimeTestCase):
         self.assertFalse(decision.retry)
 
 
+class CheckpointIntGuardSecondHalfTests(unittest.TestCase):
+    """The `or@101` guard: the BOOLEAN half of `_require_int`.
+
+    `_require_int` refuses a value that is not an integer.  The guard is
+    a double one:
+
+        if isinstance(value, bool) or not isinstance(value, int):
+
+    A bool IS an int in Python, so the first half exists precisely to
+    exclude bools.  The strands slice's own suite exercised only the
+    "not an int" half, so the planted fault `or@101` (or -> and)
+    SURVIVED it: with the connective flipped, `isinstance(value, bool)`
+    AND `not isinstance(value, int)` is never true for a bool (a bool
+    IS an int), so a boolean would be waved through as a cycle index.
+
+    The fault is not merely cosmetic: `True` is an int of value 1, so a
+    boolean cycle index would be stored as 1 and read back as 1.
+    """
+
+    def test_a_boolean_cycle_index_is_refused(self):
+        """The `or@101` guard: a bool cycle index must be refused."""
+        with self.assertRaises(CheckpointException):
+            Checkpoint(position=sc.POSITION_AFTER_MODEL, cycle_index=True)
+
+    def test_a_boolean_schema_version_is_refused(self):
+        """The `or@101` guard on the other field it guards.
+
+        `schema_version` is checked by the same helper, so it must be
+        refused the same way -- and it must be refused for being a
+        BOOL, not merely for being the wrong number.
+        """
+        with self.assertRaises(CheckpointException):
+            Checkpoint(
+                position=sc.POSITION_AFTER_MODEL,
+                cycle_index=1,
+                schema_version=True,
+            )
+
+    def test_a_float_cycle_index_is_refused(self):
+        """The other half of the guard, as the control.
+
+        A float is not an int, so the "not an int" half refuses it.
+        """
+        with self.assertRaises(CheckpointException):
+            Checkpoint(position=sc.POSITION_AFTER_MODEL, cycle_index=1.0)
+
+    def test_a_string_cycle_index_is_refused(self):
+        """The other half of the guard, from the other side."""
+        with self.assertRaises(CheckpointException):
+            Checkpoint(position=sc.POSITION_AFTER_MODEL, cycle_index="1")
+
+    def test_an_integer_cycle_index_is_accepted(self):
+        """The control: an ordinary int is a legal cycle index."""
+        marker = Checkpoint(position=sc.POSITION_AFTER_MODEL, cycle_index=3)
+        self.assertEqual(marker.cycle_index, 3)
+
+    def test_a_boolean_is_not_stored_as_its_integer_value(self):
+        """The consequence, stated plainly.
+
+        `True` is an int of value 1 in Python.  If the guard let it
+        through, the marker would carry the cycle index 1 -- a cycle
+        that never existed, indistinguishable from a real one.
+        """
+        with self.assertRaises(CheckpointException):
+            Checkpoint(position=sc.POSITION_AFTER_MODEL, cycle_index=True)
+
+
 if __name__ == "__main__":  # pragma: no cover - manual run
     unittest.main()
+
+
+class CheckpointIntGuardSecondHalfTests(unittest.TestCase):
+    """The `or@101` guard: the BOOLEAN half of `_require_int`.
+
+    `_require_int` refuses a value that is not an integer.  The guard is
+    a double one:
+
+        if isinstance(value, bool) or not isinstance(value, int):
+
+    A bool IS an int in Python, so the first half exists precisely to
+    exclude bools.  The strands slice's own suite exercised only the
+    "not an int" half, so the planted fault `or@101` (or -> and)
+    SURVIVED it: with the connective flipped, `isinstance(value, bool)`
+    AND `not isinstance(value, int)` is never true for a bool (a bool
+    IS an int), so a boolean would be waved through as a cycle index.
+
+    The fault is not merely cosmetic: `True` is an int of value 1, so a
+    boolean cycle index would be stored as 1 and read back as 1.
+    """
+
+    def test_a_boolean_cycle_index_is_refused(self):
+        """The `or@101` guard: a bool cycle index must be refused."""
+        with self.assertRaises(CheckpointException):
+            Checkpoint(position=sc.POSITION_AFTER_MODEL, cycle_index=True)
+
+    def test_a_boolean_schema_version_is_refused(self):
+        """The `or@101` guard on the other field it guards.
+
+        `schema_version` is checked by the same helper, so it must be
+        refused the same way -- and it must be refused for being a
+        BOOL, not merely for being the wrong number.
+        """
+        with self.assertRaises(CheckpointException):
+            Checkpoint(
+                position=sc.POSITION_AFTER_MODEL,
+                cycle_index=1,
+                schema_version=True,
+            )
+
+    def test_a_float_cycle_index_is_refused(self):
+        """The other half of the guard, as the control.
+
+        A float is not an int, so the "not an int" half refuses it.
+        """
+        with self.assertRaises(CheckpointException):
+            Checkpoint(position=sc.POSITION_AFTER_MODEL, cycle_index=1.0)
+
+    def test_a_string_cycle_index_is_refused(self):
+        """The other half of the guard, from the other side."""
+        with self.assertRaises(CheckpointException):
+            Checkpoint(position=sc.POSITION_AFTER_MODEL, cycle_index="1")
+
+    def test_an_integer_cycle_index_is_accepted(self):
+        """The control: an ordinary int is a legal cycle index."""
+        marker = Checkpoint(position=sc.POSITION_AFTER_MODEL, cycle_index=3)
+        self.assertEqual(marker.cycle_index, 3)
+
+    def test_a_boolean_is_not_stored_as_its_integer_value(self):
+        """The consequence, stated plainly.
+
+        `True` is an int of value 1 in Python.  If the guard let it
+        through, the marker would carry the cycle index 1 -- a cycle
+        that never existed, indistinguishable from a real one.
+        """
+        with self.assertRaises(CheckpointException):
+            Checkpoint(position=sc.POSITION_AFTER_MODEL, cycle_index=True)
 
 
 if __name__ == "__main__":  # pragma: no cover - manual run
