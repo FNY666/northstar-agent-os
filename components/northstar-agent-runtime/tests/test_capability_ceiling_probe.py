@@ -22,8 +22,12 @@ path end to end.
 """
 from __future__ import annotations
 
+import io
 import pathlib
+import runpy
+import sys
 import unittest
+from unittest import mock
 
 import capability_ceiling_probe
 from capability_ceiling_probe import (
@@ -522,3 +526,161 @@ class PublicSurfaceTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertNotIn("raise UnknownProbeError", source)
+
+
+class CeilingGuardSecondHalfTests(unittest.TestCase):
+    """The SECOND half of each guard in ``capability_ceiling_probe``.
+
+    Six planted faults survived this slice's suite, and every one of
+    them is a double guard:
+
+      or@378  the ``bool`` half of the threshold's number guard
+      lt@386  the "is non-negative" half of the threshold's range guard
+      gt@565  the "is beyond the threshold" half of the miscalibration
+             test
+      gt@566  the upper bound of the overconfident direction
+      lt@568  the lower bound of the underconfident direction
+      eq@705  the ``__main__`` guard of the self-check
+
+    Each test below fails when its own planted fault is applied alone.
+    """
+
+    # --- or@378: the `bool` half ---------------------------------------
+    def test_a_boolean_calibration_threshold_is_refused(self):
+        """`or@378`: **a bool IS an int in Python**.
+
+        The guard is ``isinstance(threshold, bool) or not isinstance(
+        threshold, (int, float))``.  The "not a number" half never
+        refuses a bool -- only the explicit ``bool`` half does.  Under
+        the mutant (``or`` -> ``and``) a boolean threshold is accepted
+        and used as the number 1, which would make every bucket
+        miscalibrated.
+        """
+        with self.assertRaises(CapabilityCeilingProbeError):
+            CeilingLedger(calibration_threshold=True)
+
+    def test_a_false_boolean_calibration_threshold_is_refused_too(self):
+        """`or@378`: the other boolean."""
+        with self.assertRaises(CapabilityCeilingProbeError):
+            CeilingLedger(calibration_threshold=False)
+
+    def test_a_string_calibration_threshold_is_refused(self):
+        """`or@378`: the other half, as the control."""
+        with self.assertRaises(CapabilityCeilingProbeError):
+            CeilingLedger(calibration_threshold="0.2")
+
+    # --- lt@386: the non-negative half ---------------------------------
+    def test_a_negative_calibration_threshold_is_refused(self):
+        """`lt@386`: the "is non-negative" half.
+
+        The guard is ``not math.isfinite(threshold) or threshold < 0``.
+        Under the mutant (``<`` -> ``<=``) the bound becomes
+        non-positive -- and a threshold of exactly ``0.0``, which is a
+        legal threshold, would be refused.
+        """
+        with self.assertRaises(CapabilityCeilingProbeError):
+            CeilingLedger(calibration_threshold=-0.1)
+
+    def test_a_threshold_of_exactly_zero_is_accepted(self):
+        """`lt@386`: the bound is STRICT.
+
+        A threshold of exactly ``0.0`` means "any error at all is
+        miscalibration" -- a legal, meaningful setting.  Under the
+        mutant it would be refused.
+        """
+        ledger = CeilingLedger(calibration_threshold=0.0)
+        self.assertEqual(ledger.calibration_threshold, 0.0)
+
+    def test_an_infinite_calibration_threshold_is_refused(self):
+        """`lt@386`: the "is finite" half, as the control."""
+        with self.assertRaises(CapabilityCeilingProbeError):
+            CeilingLedger(calibration_threshold=float("inf"))
+
+    def test_a_not_a_number_calibration_threshold_is_refused(self):
+        """`lt@386`: the "is finite" half, from the other side."""
+        with self.assertRaises(CapabilityCeilingProbeError):
+            CeilingLedger(calibration_threshold=float("nan"))
+
+    # --- gt@565: the miscalibration bound ------------------------------
+    def test_an_error_exactly_at_the_threshold_is_not_miscalibrated(self):
+        """`gt@565`: the bound is STRICT.
+
+        The default threshold is 0.20, so a bucket whose error is
+        exactly ``0.20`` is AT the threshold, not beyond it.  Under the
+        mutant (``>`` -> ``>=``) it would be flagged as miscalibrated.
+        """
+        ledger = CeilingLedger()
+        ledger.observe(probe("p1", 90.0, 0.2, passed=False))
+        bucket = ledger.calibration()[0]
+        self.assertAlmostEqual(bucket.error, 0.2)
+        self.assertFalse(bucket.miscalibrated)
+
+    def test_an_error_just_beyond_the_threshold_is_miscalibrated(self):
+        """`gt@565`: the bound, from the other side."""
+        ledger = CeilingLedger()
+        ledger.observe(probe("p1", 90.0, 0.25, passed=False))
+        self.assertTrue(ledger.calibration()[0].miscalibrated)
+
+    # --- gt@566: the overconfident bound -------------------------------
+    def test_an_error_exactly_at_the_threshold_is_neither_direction(self):
+        """`gt@566`: the upper bound is EXCLUSIVE.
+
+        An error of exactly ``0.20`` is overconfident by exactly the
+        threshold, which is the "none" case -- the direction is a
+        *direction*, and at the threshold the bucket is not beyond it.
+        Under the mutant (``>`` -> ``>=``) it would be called
+        overconfident.
+        """
+        ledger = CeilingLedger()
+        ledger.observe(probe("p1", 90.0, 0.2, passed=False))
+        self.assertEqual(ledger.calibration()[0].direction, "none")
+
+    def test_an_error_beyond_the_threshold_is_overconfident(self):
+        """`gt@566`: the bound, from the other side."""
+        ledger = CeilingLedger()
+        ledger.observe(probe("p1", 90.0, 0.25, passed=False))
+        self.assertEqual(ledger.calibration()[0].direction, "overconfident")
+
+    # --- lt@568: the underconfident bound ------------------------------
+    def test_a_negative_error_exactly_at_the_threshold_is_neither_direction(self):
+        """`lt@568`: the lower bound is EXCLUSIVE.
+
+        An error of exactly ``-0.20`` is underconfident by exactly the
+        threshold, which is the "none" case.  Under the mutant
+        (``<`` -> ``<=``) it would be called underconfident.
+        """
+        ledger = CeilingLedger()
+        ledger.observe(probe("p1", 90.0, 0.8, passed=True))
+        bucket = ledger.calibration()[0]
+        self.assertAlmostEqual(bucket.error, -0.2)
+        self.assertEqual(bucket.direction, "none")
+
+    def test_a_negative_error_beyond_the_threshold_is_underconfident(self):
+        """`lt@568`: the bound, from the other side."""
+        ledger = CeilingLedger()
+        # mean confidence 0.75, accuracy 1.0 -> error -0.25, beyond the
+        # default threshold of 0.20.
+        ledger.observe(probe("p1", 90.0, 0.75, passed=True))
+        bucket = ledger.calibration()[0]
+        self.assertAlmostEqual(bucket.error, -0.25)
+        self.assertTrue(bucket.miscalibrated)
+        self.assertEqual(bucket.direction, "underconfident")
+
+    # --- eq@705: the self-check entry point ----------------------------
+    def test_running_the_module_as_a_script_runs_the_self_check(self):
+        """`eq@705`: the entry point is the ``__main__`` guard.
+
+        The module's last two lines are ``if __name__ == "__main__":
+        main()``.  Under ``== -> !=`` the guard would be FALSE when the
+        module is run as a script -- so the self-check would silently
+        not run, and the module would ship with an entry point that
+        prints nothing.
+        """
+        stdout = io.StringIO()
+        with mock.patch.object(sys, "stdout", stdout):
+            runpy.run_module("capability_ceiling_probe", run_name="__main__")
+        self.assertIn("capability-ceiling-probe OK", stdout.getvalue())
+
+    def test_the_self_check_function_is_callable(self):
+        """`eq@705`: the guard, so the entry point cannot be a no-op."""
+        self.assertTrue(callable(capability_ceiling_probe.main))
