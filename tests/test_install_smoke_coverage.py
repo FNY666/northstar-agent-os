@@ -20,6 +20,7 @@ by name.
 from __future__ import annotations
 
 import sys
+import ast
 import unittest
 from pathlib import Path
 
@@ -248,3 +249,119 @@ class GuardUnitTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SmokeGuardSecondHalfTests(unittest.TestCase):
+    """The SECOND half of each guard in ``install_smoke_coverage``.
+
+    Four planted faults survived this slice's suite:
+
+      and@75   the "is absolute" half of the ``from`` import guard
+      eq@188   the ``__init__`` branch of the module-path resolver
+      or@252   the "is absolute" half of the import-time dependency guard
+      and@283  the "is not already seen" half of the reachability walk
+
+    All four are killable and are driven below.
+    """
+
+    # --- and@75: the "is absolute" half --------------------------------
+    def test_a_relative_import_contributes_no_module_name(self):
+        """`and@75`: the ``level == 0`` half.
+
+        A relative import (``from . import sibling``) has no absolute
+        module name, so it contributes no name to the scanner.  Under
+        the mutant (``and`` -> ``or``) the relative import's name is
+        added -- and a smoke step would then be credited with covering
+        a module it never imports.
+        """
+        self.assertEqual(isc.imported_names("from .pkg import x"), set())
+
+    def test_an_absolute_import_contributes_its_module_name(self):
+        """`and@75`: the control -- an absolute import names its module."""
+        self.assertEqual(isc.imported_names("from pkg.mod import x"), {"pkg"})
+
+    def test_a_plain_import_still_contributes_its_name(self):
+        """`and@75`: the other import form."""
+        self.assertEqual(isc.imported_names("import os"), {"os"})
+
+    # --- or@252: the "is absolute" half --------------------------------
+    def test_a_relative_import_is_not_an_import_time_dependency(self):
+        """`or@252`: the ``level != 0`` half.
+
+        A relative import is not an import-time dependency on an
+        absolute module -- the module it names is a sibling, not a
+        shipped package.  Under the mutant (``or`` -> ``and``) the
+        relative import's module is added to the dependency set, and
+        the smoke step would be credited with covering it.
+        """
+        tree = ast.parse("from .pkg import x\n")
+        self.assertEqual(isc._import_time_dependencies(tree), set())
+
+    def test_an_absolute_from_import_is_an_import_time_dependency(self):
+        """`or@252`: the control -- an absolute ``from`` import is."""
+        tree = ast.parse("from pkg.mod import x\n")
+        self.assertEqual(
+            isc._import_time_dependencies(tree), {"pkg.mod", "pkg.mod.x"}
+        )
+
+    def test_a_plain_import_is_an_import_time_dependency(self):
+        """`or@252`: the other import form."""
+        tree = ast.parse("import os\n")
+        self.assertEqual(isc._import_time_dependencies(tree), {"os"})
+
+    # --- and@283: the "not already seen" half --------------------------
+    def test_an_unshipped_dependency_is_not_reached(self):
+        """`and@283`: the "is shipped" half.
+
+        The walk pushes a dependency only when it is SHIPPED and NOT
+        already seen.  Under the mutant (``and`` -> ``or``) the
+        "is shipped" half stops mattering -- a dependency that is not
+        shipped is pushed anyway, and lands in the covered set.
+
+        That is the false claim that matters: the covered set is what
+        says a module IS exercised by the smoke step, and an unshipped
+        module in it is a module nobody can import.
+        """
+        graph = {"a": {"z", "nope"}}
+        shipped = {"a", "z"}
+        covered = isc.reachable({"a"}, graph, shipped)
+        self.assertEqual(covered, {"a", "z"})
+        self.assertNotIn("nope", covered)
+
+    def test_a_cyclic_import_graph_terminates(self):
+        """`and@283`: the other half -- the walk is finite.
+
+        Two modules that depend on each other must not make the walk
+        loop forever.
+        """
+        graph = {"a": {"z"}, "z": {"a"}}
+        shipped = {"a", "z"}
+        covered = isc.reachable({"a"}, graph, shipped)
+        self.assertEqual(covered, {"a", "z"})
+
+    # --- eq@188: the `__init__` branch ---------------------------------
+    def test_a_package_initializer_resolves_to_its_init_file(self):
+        """`eq@188`: the initializer branch.
+
+        A package member named ``__init__`` resolves to the package's
+        ``__init__.py``.  Under the mutant (``==`` -> ``!=``) the two
+        branches are exchanged, and EVERY package member resolves to
+        the initializer instead -- so a module that does not exist
+        would be reported as present.
+        """
+        source = isc.module_source("northstar-agent-runtime", "tools.__init__")
+        self.assertIsNotNone(source)
+        self.assertEqual(source.name, "__init__.py")
+        self.assertEqual(source.parent.name, "tools")
+
+    def test_a_package_member_resolves_to_its_module_file(self):
+        """`eq@188`: the other branch -- the ordinary member.
+
+        This is the discriminating input: a package member that is NOT
+        the initializer must resolve to its OWN file.  Under the mutant
+        it would resolve to the package's ``__init__.py`` instead.
+        """
+        source = isc.module_source("northstar-agent-runtime", "tools.verify_invariants")
+        self.assertIsNotNone(source)
+        self.assertEqual(source.name, "verify_invariants.py")
+        self.assertEqual(source.parent.name, "tools")
