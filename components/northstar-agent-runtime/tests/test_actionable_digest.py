@@ -17,6 +17,7 @@ import unittest
 from actionable_digest import (
     ActionableDigest,
     DigestError,
+    DigestEvent,
     FireCondition,
     DEFAULT_IMPACT_FLOOR,
     DEFAULT_SEVERITY_THRESHOLD,
@@ -391,3 +392,81 @@ class RealPathTests(unittest.TestCase):
         digest = ActionableDigest()
         digest.ingest(event(window_id="w1"))
         self.assertIsNone(digest.record_for("w2"))
+
+
+class ScoreGuardSecondHalfTests(unittest.TestCase):
+    """The SECOND half of each guard in ``actionable_digest``.
+
+    The score validation is two guards, each with two halves, and the
+    slice's own suite drove only one half of each:
+
+      or@490  ``isinstance(value, bool) or
+               not isinstance(value, (int, float))``
+      gt@499  ``float(value) < 0.0 or float(value) > 1.0``
+
+    ``or@490`` refuses a value that is not a number.  The ``bool`` half
+    exists because **a bool IS an int in Python**: ``isinstance(True,
+    int)`` is True, so the "not a number" half never refuses a bool --
+    only the explicit ``bool`` half does.  The slice's suite drove the
+    "not a number" half only, so the planted fault ``or@490``
+    (``or`` -> ``and``) SURVIVED it, and a boolean would be booked as
+    the integer 1.
+
+    ``gt@499`` bounds a score to ``[0, 1]``.  The slice's suite drove
+    the lower bound only (it fed ``1.5``), so the planted fault
+    ``gt@499`` (``>`` -> ``>=``) SURVIVED it: with the upper bound
+    weakened, a score of exactly ``1.0`` -- the top of the range, and
+    a perfectly legal score -- would be refused.
+    """
+
+    def test_a_boolean_score_is_refused(self):
+        """`or@490`: the ``bool`` half.
+
+        A boolean is not a score, even though Python says it is an
+        int.  Under the mutant (``or`` -> ``and``) the ``bool`` half
+        stops firing and ``True`` is accepted as the score 1.
+        """
+        with self.assertRaises(DigestError):
+            DigestEvent(severity=True, impact=0.5, legitimate=True)
+
+    def test_a_false_boolean_score_is_refused_too(self):
+        """`or@490`: the other boolean.
+
+        ``False`` is also an int in Python, and it is also not a score.
+        """
+        with self.assertRaises(DigestError):
+            DigestEvent(severity=0.5, impact=False, legitimate=True)
+
+    def test_a_string_score_is_refused(self):
+        """`or@490`: the other half, as the control."""
+        with self.assertRaises(DigestError):
+            DigestEvent(severity="0.5", impact=0.5, legitimate=True)
+
+    def test_a_score_of_exactly_one_is_accepted(self):
+        """`gt@499`: the upper bound is EXCLUSIVE.
+
+        A score of exactly ``1.0`` is the top of the range and is
+        legal.  Under the mutant (``>`` -> ``>=``) it would be
+        refused -- so a fully-severe event would be dropped.
+        """
+        event = DigestEvent(severity=1.0, impact=0.5, legitimate=True)
+        self.assertEqual(event.severity, 1.0)
+
+    def test_a_score_of_exactly_zero_is_accepted(self):
+        """`gt@499`: the other end of the range, as the control."""
+        event = DigestEvent(severity=0.0, impact=0.5, legitimate=True)
+        self.assertEqual(event.severity, 0.0)
+
+    def test_a_score_just_above_one_is_refused(self):
+        """`gt@499`: the bound, from the other side.
+
+        The upper bound still bites: ``1.0 + epsilon`` is over the
+        range and must be refused.
+        """
+        with self.assertRaises(DigestError):
+            DigestEvent(severity=1.0 + 1e-9, impact=0.5, legitimate=True)
+
+    def test_a_score_just_below_zero_is_refused(self):
+        """`gt@499`: the lower bound, from the other side."""
+        with self.assertRaises(DigestError):
+            DigestEvent(severity=-1e-9, impact=0.5, legitimate=True)
