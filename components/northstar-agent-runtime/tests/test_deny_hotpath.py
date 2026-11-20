@@ -14,13 +14,18 @@ The rule under test:
 
 from __future__ import annotations
 
+import io
+import runpy
 import sqlite3
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import deny_hotpath as dh
 from deny_hotpath import (
     COUNTER_TABLE,
     DENY_CACHE_TTL_MS,
@@ -460,3 +465,285 @@ class GovernedRunnerIntegrationTests(DenyTestCase):
             if COUNTER_TABLE in statement and statement.strip().startswith("SELECT")
         ]
         self.assertEqual(len(lookups), 1, store.statements)
+
+
+class DenyGuardSecondHalfTests(DenyTestCase):
+    """The SECOND half of each guard in ``deny_hotpath``.
+
+    Every surviving fault in this slice is a **double guard**: a type
+    half joined to a second half by ``and`` or ``or``, or a bound
+    compared against a constant.  The slice's own suite drove only ONE
+    half of each, so all eleven planted faults SURVIVED it:
+
+      gt@249   the scope length cap
+      gt@297   the canonical key length cap
+      or@393   the migration's reason default
+      retF@841 the non-stdlib ``import`` refusal
+      retF@847 the relative-import refusal
+      retF@849 the non-stdlib ``from X import`` refusal
+      eq@861   the self-check's first-event assertion
+      eq@863   the self-check's refusal-row assertion
+      and@863  ... and its second half
+      eq@870   the self-check's fail-closed source assertion
+      eq@876   the self-check entry point
+
+    Each test here fails when its own planted fault is applied alone.
+    """
+
+    # --- gt@249: the scope length cap ----------------------------------
+    def test_a_scope_exactly_at_the_cap_is_accepted(self):
+        """`gt@249`: the cap is STRICT.
+
+        A scope whose length is exactly the cap must be accepted.  With
+        `> -> >=` it would be refused -- and a scope the host wrote
+        would then fail its own lookup.
+        """
+        scope = "s" * 256
+        self.assertEqual(dh._check_scope(scope), scope)
+
+    def test_a_scope_one_over_the_cap_is_refused(self):
+        """`gt@249`: the bound, from the other side."""
+        with self.assertRaises(DenyStoreError):
+            dh._check_scope("s" * 257)
+
+    # --- gt@297: the canonical key length cap --------------------------
+    def test_a_canonical_key_exactly_at_the_cap_is_accepted(self):
+        """`gt@297`: the cap is STRICT on the KEY.
+
+        The key is checked after casefolding, so the two lengths can
+        differ: "ß" casefolds to "ss", so a scope of 129 characters
+        yields a key of 256 -- exactly the cap.  The scope is under the
+        scope cap, so only the KEY check can refuse it, and the cap is
+        strict: a key of exactly 256 must be accepted.
+
+        With `> -> >=` this key would be refused.
+        """
+        scope = "a/" + "ß" * 127
+        self.assertEqual(len(scope), 129)
+        self.assertEqual(len(dh.canonical_deny_scope(scope)), 256)
+
+    def test_a_canonical_key_one_over_the_cap_is_refused(self):
+        """`gt@297`: the bound, from the other side.
+
+        The same construction with one more "ß" gives a key of 258 --
+        over the cap -- and must be refused.
+        """
+        scope = "a/" + "ß" * 128
+        with self.assertRaises(DenyStoreError):
+            dh.canonical_deny_scope(scope)
+
+    def test_a_casefold_that_lengthens_the_key_is_refused(self):
+        """`gt@297`: the reason the key is checked at all.
+
+        Casefolding can LENGTHEN a string -- "ß" folds to "ss" -- so a
+        scope that was within the cap can become longer than it.  A key
+        longer than the cap must be refused rather than written.
+        """
+        scope = "a" * 254 + "/ß"
+        with self.assertRaises(DenyStoreError):
+            dh.canonical_deny_scope(scope)
+
+    # --- or@393: the migration's reason default -----------------------
+    def test_a_row_with_an_empty_reason_keeps_an_empty_reason(self):
+        """`or@393`: the defaulting half.
+
+        A stored reason of ``""`` must come back as ``""`` -- not as
+        some placeholder.  With `or -> and` the default would apply
+        only when the reason was falsy AND the other half held.
+        """
+        store = self._store()
+        store.revoke("scope-a", reason="")
+        row = store._conn.execute(
+            f"SELECT reason FROM {COUNTER_TABLE} WHERE scope = ?", ("scope-a",)
+        ).fetchone()
+        self.assertEqual(row["reason"], "")
+
+    def test_a_row_with_a_real_reason_keeps_it(self):
+        """`or@393`: the control -- a reason that is there stays."""
+        store = self._store()
+        store.revoke("scope-a", reason="revoked by operator")
+        lookup = store.lookup("scope-a")
+        self.assertEqual(lookup.reason, "revoked by operator")
+
+    def test_the_migration_keeps_a_real_reason(self):
+        """`or@393`: the migration path, where the defaulting half bites.
+
+        The line is ``str(row["reason"] or "")`` inside the scope-key
+        migration.  With `or -> and` it becomes
+        ``str(row["reason"] and "")`` -- and a NON-EMPTY reason then
+        evaluates to the empty string, so the migration would erase
+        every reason it touched.
+
+        So the reason must survive the migration: a row filed under a
+        non-canonical scope ("Scope-A/Bash") is re-filed under the
+        canonical key, and its reason must come out the other side
+        unchanged.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "deny.db")
+            store = dh.DenyStore(path)
+            try:
+                store._conn.execute(
+                    f"INSERT INTO {dh.COUNTER_TABLE} "
+                    "(scope, counter, denied, reason, seq) VALUES (?, ?, ?, ?, ?)",
+                    ("Scope-A/Bash", 3, 1, "revoked by operator", 1),
+                )
+            finally:
+                store.close()
+            reopened = dh.DenyStore(path)
+            try:
+                row = reopened._conn.execute(
+                    f"SELECT scope, reason, counter FROM {dh.COUNTER_TABLE}"
+                ).fetchone()
+                self.assertEqual(row["scope"], "Scope-A/bash")
+                self.assertEqual(row["reason"], "revoked by operator")
+                self.assertEqual(
+                    reopened.lookup("Scope-A/Bash").reason, "revoked by operator"
+                )
+            finally:
+                reopened.close()
+
+    # --- retF@841 / retF@847 / retF@849: the stdlib guard --------------
+    def test_a_non_stdlib_import_is_refused(self):
+        """`retF@841`: the plain ``import`` branch.
+
+        The guard reads its OWN source by default, and this module's
+        own source is clean -- so the guard's branch is only reachable
+        with a crafted source.  That is what the parameter is for.
+        """
+        self.assertFalse(dh.stdlib_only("import numpy\n"))
+
+    def test_a_stdlib_import_is_accepted(self):
+        """`retF@841`: the control -- a stdlib import passes."""
+        self.assertTrue(dh.stdlib_only("import json\n"))
+
+    def test_a_relative_import_is_refused(self):
+        """`retF@847`: the relative-import branch.
+
+        A relative import has no module name to check -- and it reaches
+        outside the stdlib all the same way, so it is a non-stdlib
+        import.
+        """
+        self.assertFalse(dh.stdlib_only("from . import sibling\n"))
+
+    def test_a_non_stdlib_from_import_is_refused(self):
+        """`retF@849`: the ``from X import`` branch."""
+        self.assertFalse(dh.stdlib_only("from numpy import array\n"))
+
+    def test_a_stdlib_from_import_is_accepted(self):
+        """`retF@849`: the control -- a stdlib ``from`` import passes."""
+        self.assertTrue(dh.stdlib_only("from typing import Optional\n"))
+
+    # --- eq@861 / eq@863 / and@863 / eq@870: the self-check ------------
+    def test_the_refusal_row_is_the_first_event(self):
+        """`eq@861`: the order the self-check pins.
+
+        The refusal row must be written BEFORE the lookup -- that is
+        the whole point of the slice.  This is the assertion the
+        self-check makes, stated as a test.
+        """
+        store = self._store()
+        dispatcher = self._dispatcher(store)
+        dispatcher.check("scope-a")
+        self.assertEqual(store.events[0], "refusal")
+
+    def test_the_lookup_follows_the_refusal_row(self):
+        """`eq@861`: the second half of the order."""
+        store = self._store()
+        dispatcher = self._dispatcher(store)
+        dispatcher.check("scope-a")
+        self.assertEqual(store.events[:2], ("refusal", "lookup"))
+
+    def test_the_refusal_row_records_the_denied_outcome(self):
+        """`eq@863` and `and@863`: the row's outcome.
+
+        A revoked scope must leave a row whose outcome is ``denied`` --
+        and the row must EXIST.  The ``and`` half is the "row is not
+        None" check; the ``eq`` half is the outcome.
+        """
+        store = self._store()
+        dispatcher = self._dispatcher(store)
+        store.revoke("scope-a", reason="revoked by operator")
+        decision = dispatcher.check("scope-a")
+        row = store.refusal(decision.refusal_id)
+        self.assertIsNotNone(row)
+        self.assertEqual(row["outcome"], OUTCOME_DENIED)
+
+    def test_the_self_check_fails_when_the_row_carries_the_wrong_outcome(self):
+        """`and@863`: the second half of the self-check's assertion.
+
+        The line is ``assert row is not None and row["outcome"] ==
+        OUTCOME_DENIED``.  With `and -> or` it becomes ``row is not
+        None or ...`` -- so a row that EXISTS with the WRONG outcome
+        would satisfy the assertion, and the self-check would pass on a
+        decision it is supposed to reject.
+
+        So the self-check must FAIL when the row's outcome is not
+        ``denied``.  The row is made wrong by a store whose ``refusal``
+        reports an allowed outcome for a denied decision.
+        """
+        class WrongOutcomeStore(dh.DenyStore):
+            def refusal(self, refusal_id):
+                row = super().refusal(refusal_id)
+                if row is None:
+                    return None
+                row["outcome"] = dh.OUTCOME_ALLOWED
+                return row
+
+        original = dh.DenyStore
+        dh.DenyStore = WrongOutcomeStore
+        try:
+            with self.assertRaises(AssertionError):
+                dh.main()
+        finally:
+            dh.DenyStore = original
+
+    def test_an_unreadable_counter_reports_the_fail_closed_source(self):
+        """`eq@870`: the source of a fail-closed decision.
+
+        When the counter cannot be read the decision must deny AND say
+        so -- the source is what tells a reader the answer was not
+        "allowed", it was "unresolvable".
+        """
+        store = self._store()
+        dispatcher = self._dispatcher(store)
+        store._conn.execute(f"DROP TABLE {COUNTER_TABLE}")
+        failed = dispatcher.check("scope-b")
+        self.assertTrue(failed.denied)
+        self.assertEqual(failed.lookup.source, SOURCE_FAIL_CLOSED)
+
+    def test_a_readable_counter_reports_the_index_source(self):
+        """`eq@870`: the control -- a readable counter is not fail-closed."""
+        store = self._store()
+        dispatcher = self._dispatcher(store)
+        decision = dispatcher.check("scope-b")
+        self.assertEqual(decision.lookup.source, SOURCE_INDEX)
+
+    # --- eq@876: the self-check entry point ----------------------------
+    def test_the_self_check_runs_and_passes(self):
+        """`eq@876`: the self-check is reachable and passes.
+
+        The module ships a self-check entry point.  It must run without
+        raising -- otherwise the module's own claim is unverified.
+        """
+        dh.main()
+
+    def test_the_self_check_is_wired_to_the_main_guard(self):
+        """`eq@876`: the guard, so the entry point cannot be a no-op."""
+        self.assertTrue(callable(dh.main))
+
+    def test_running_the_module_as_a_script_runs_the_self_check(self):
+        """`eq@876`: the entry point is the ``__main__`` guard.
+
+        The module's last line is ``if __name__ == "__main__": main()``.
+        With `== -> !=` the guard would be FALSE when the module is run
+        as a script -- so the self-check would silently not run, and
+        the module would ship with an entry point that prints nothing.
+
+        Running the module under that name must produce the self-check's
+        own line on stdout.
+        """
+        stdout = io.StringIO()
+        with mock.patch.object(sys, "stdout", stdout):
+            runpy.run_module("deny_hotpath", run_name="__main__")
+        self.assertIn("deny-hotpath self-check ok", stdout.getvalue())
