@@ -243,3 +243,113 @@ class FullPathTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StateBudgetGuardSecondHalfTests(unittest.TestCase):
+    """The SECOND half of each guard in ``state_budget``.
+
+    Four planted faults survived this slice's suite:
+
+      or@183   the ``bool`` half of the ``current_size`` guard
+      retF@206 the "is not within budget" return
+      gt@216   the "is over the budget" bound
+      gt@304   the "is over the budget" bound in ``bytes_over_budget``
+
+    The first three are killable and are driven below.
+
+    ``gt@304`` is **not killable, and provably so**: the line is
+    ``return over if over > 0 else 0``, and ``over`` is an integer, so
+    ``over if over > 0 else 0`` and ``over if over >= 0 else 0`` are
+    the same function -- at ``over == 0`` both return 0, and at every
+    other value both return ``over``.  It is an EQUIVALENT mutant, not
+    a gap in the suite, and no test can distinguish it.  It is recorded
+    here so the next person does not spend a round looking for one.
+    """
+
+    # --- or@183: the `bool` half ---------------------------------------
+    def test_a_boolean_current_size_is_refused(self):
+        """`or@183`: **a bool IS an int in Python**.
+
+        The guard is ``isinstance(self.current_size, bool) or not
+        isinstance(self.current_size, int)``.  The "not an int" half
+        never refuses a bool -- only the explicit ``bool`` half does.
+        Under the mutant (``or`` -> ``and``) a boolean current size is
+        accepted and used as the integer 1.
+        """
+        with self.assertRaises(ValueError):
+            StateBudget(max_state_size=1024, current_size=True)
+
+    def test_a_false_boolean_current_size_is_refused_too(self):
+        """`or@183`: the other boolean."""
+        with self.assertRaises(ValueError):
+            StateBudget(max_state_size=1024, current_size=False)
+
+    def test_a_float_current_size_is_refused(self):
+        """`or@183`: the other half, as the control."""
+        with self.assertRaises(ValueError):
+            StateBudget(max_state_size=1024, current_size=1.5)
+
+    # --- retF@206: the unmeasurable state ------------------------------
+    def test_a_state_that_cannot_be_measured_is_not_within_budget(self):
+        """`retF@206`: the "is not within budget" answer.
+
+        A state that cannot be canonicalized cannot be measured, and a
+        state that cannot be measured is NOT within budget.  Under the
+        mutant (``return False`` -> ``return True``) an unmeasurable
+        state would read as WITHIN budget -- the opposite of the
+        fail-closed rule.
+        """
+        budget = StateBudget(max_state_size=1024)
+        self.assertFalse(budget.check({"k": object()}))
+
+    def test_a_measurable_state_is_still_checked(self):
+        """`retF@206`: the control -- a real state is measured."""
+        budget = StateBudget(max_state_size=1024)
+        self.assertTrue(budget.check({"a": 1}))
+
+    # --- gt@216: the budget bound --------------------------------------
+    def test_a_state_exactly_at_the_cap_does_not_raise(self):
+        """`gt@216`: the bound is STRICT.
+
+        A state whose measured size is exactly the cap is WITHIN
+        budget -- the cap is the largest state that fits.  Under the
+        mutant (``>`` -> ``>=``) it would be refused, so a state that
+        exactly fills the budget would be rejected.
+        """
+        size = measure_state({"a": 1})
+        budget = StateBudget(max_state_size=size)
+        self.assertIsNone(budget.check_or_raise({"a": 1}))
+        self.assertTrue(budget.check({"a": 1}))
+
+    def test_a_state_one_byte_over_the_cap_raises(self):
+        """`gt@216`: the bound, from the other side."""
+        size = measure_state({"a": 1})
+        budget = StateBudget(max_state_size=size - 1)
+        with self.assertRaises(OverBudget):
+            budget.check_or_raise({"a": 1})
+        self.assertFalse(budget.check({"a": 1}))
+
+    # --- gt@304: an EQUIVALENT mutant, recorded ------------------------
+    def test_the_bytes_over_budget_zero_boundary_is_zero(self):
+        """`gt@304`: the boundary, and why the mutant is equivalent.
+
+        ``bytes_over_budget`` returns 0 for a state that fits and the
+        shortfall for one that does not.  At the boundary -- a state
+        whose size is exactly the cap -- the shortfall is 0, and it
+        must be reported as 0.
+
+        The planted fault at this site (``>`` -> ``>=``) is an
+        EQUIVALENT mutant: ``over`` is an integer, so ``over if over >
+        0 else 0`` and ``over if over >= 0 else 0`` agree at every
+        value.  This test pins the behaviour so the equivalence is
+        visible rather than assumed.
+        """
+        size = measure_state({"a": 1})
+        exact = StateBudget(max_state_size=size)
+        self.assertEqual(exact.bytes_over_budget({"a": 1}), 0)
+
+    def test_the_bytes_over_budget_shortfall_is_the_difference(self):
+        """`gt@304`: the other side -- the shortfall is reported."""
+        size = measure_state({"a": 1})
+        tight = StateBudget(max_state_size=size - 5)
+        self.assertEqual(tight.bytes_over_budget({"a": 1}), 5)
