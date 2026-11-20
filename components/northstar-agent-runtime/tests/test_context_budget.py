@@ -267,5 +267,198 @@ class TodoOptInTests(unittest.TestCase):
         self.assertTrue(todo_state_enabled(ContextThresholds(todo_state_enabled=True)))
 
 
+class ContextGuardSecondHalfTests(unittest.TestCase):
+    """The SECOND half of each context-budget guard.
+
+    Every guard here is a double guard: a TYPE half joined to a second
+    half -- a POSITIVITY half, a RANGE half, a DEFAULTING half, a
+    CHARACTER-SET half -- by `or` or `and`.  The fable slice's own suite
+    drove only ONE half of each, so flipping the connective left the
+    suite green: the planted faults or@82, or@90, lt@92, gt@144, or@241,
+    or@246, or@247 and gt@291 all SURVIVED it.
+
+      or@82    isinstance(value, bool) or not isinstance(value, int)
+               The second half is the POSITIVITY half: a valid int that
+               is zero or negative must still be refused.
+      or@90    isinstance(value, bool) or not isinstance(value, (int, float))
+               The same for a fraction: a number outside (0, 1] must be
+               refused.
+      lt@92    not 0 < float(value) <= 1
+               The RANGE half: zero must be refused and one accepted.
+      gt@144   subagent_summary_min_tokens > subagent_summary_max_tokens
+               The bound half: the two summary budgets must be ordered.
+      or@241   limits or ContextThresholds()
+               The DEFAULTING half: an explicitly supplied limits object
+               must be USED, not replaced by a default.
+      or@246   character.isalnum() or character in "-_."
+               The CHARACTER-SET half: the other characters of the
+               allowed set must survive the safe-name mapping.
+      or@247   safe.strip("._") or "tool-result"
+               The DEFAULTING half: a name that reduces to nothing must
+               fall back to the default, not become an empty path stem.
+      gt@291   estimate_text_tokens(text) > tool_result_offload_tokens
+               The bound half: a result exactly AT the cap must NOT be
+               offloaded.
+
+    Each test here fails when its planted fault is applied alone.
+    """
+
+    def test_a_zero_token_threshold_is_refused(self):
+        """`or@82`: the POSITIVITY half of the int guard.
+
+        Zero is an int, so the type half passes it; the positivity half
+        is what refuses it.
+        """
+        with self.assertRaises(ValueError):
+            ContextThresholds(tool_result_offload_tokens=0)
+
+    def test_a_negative_token_threshold_is_refused(self):
+        """`or@82`: the positivity half, from the other side."""
+        with self.assertRaises(ValueError):
+            ContextThresholds(tool_result_offload_tokens=-1)
+
+    def test_a_positive_token_threshold_is_accepted(self):
+        """`or@82`: the control."""
+        self.assertEqual(ContextThresholds(tool_result_offload_tokens=7).tool_result_offload_tokens, 7)
+
+    def test_a_boolean_token_threshold_is_refused(self):
+        """`or@82`: the BOOLEAN half, and the one the mutant hides.
+
+        `isinstance(value, bool) or not isinstance(value, int)` -- a bool
+        IS an int in Python, so the two halves say different things.  With
+        the connective flipped to `and`, a boolean would satisfy "is a
+        bool" AND "is not an int" only if it were not an int -- and it
+        is -- so the guard would wave a boolean through and store it as
+        a threshold.
+        """
+        with self.assertRaises(ValueError):
+            ContextThresholds(tool_result_offload_tokens=True)
+
+    def test_a_boolean_fraction_is_refused(self):
+        """`or@90`: the BOOLEAN half of the fraction guard.
+
+        `isinstance(value, bool) or not isinstance(value, (int, float))`
+        -- the same shape.  A boolean fraction would be waved through
+        with the connective flipped, and `float(True)` is 1.0, so it
+        would silently become a valid threshold.
+        """
+        with self.assertRaises(ValueError):
+            ContextThresholds(window_pressure_fraction=True)
+
+    def test_a_zero_fraction_is_refused(self):
+        """`or@90` / `lt@92`: the RANGE half of the fraction guard.
+
+        Zero is a number, so the type half passes it; the range half is
+        what refuses it.  With `lt -> le` the guard would accept 0.
+        """
+        with self.assertRaises(ValueError):
+            ContextThresholds(window_pressure_fraction=0)
+
+    def test_a_fraction_above_one_is_refused(self):
+        """`or@90`: the range half, from the other side."""
+        with self.assertRaises(ValueError):
+            ContextThresholds(window_pressure_fraction=1.5)
+
+    def test_a_fraction_of_exactly_one_is_accepted(self):
+        """`lt@92`: the upper edge is INSIDE the range."""
+        self.assertEqual(ContextThresholds(window_pressure_fraction=1.0).window_pressure_fraction, 1.0)
+
+    def test_a_fraction_just_above_zero_is_accepted(self):
+        """`lt@92`: the lower edge is OUTSIDE the range, but only just.
+
+        A fraction of 0.001 is inside (0, 1] and must be accepted -- the
+        guard is a strict lower bound.
+        """
+        self.assertEqual(ContextThresholds(window_pressure_fraction=0.001).window_pressure_fraction, 0.001)
+
+    def test_summary_min_may_equal_summary_max(self):
+        """`gt@144`: the bound half, at the equal point.
+
+        The rule is "must not exceed", so equal budgets are legal.  With
+        `> -> >=` they would be refused.
+        """
+        thresholds = ContextThresholds(subagent_summary_min_tokens=100, subagent_summary_max_tokens=100)
+        self.assertEqual(thresholds.subagent_summary_min_tokens, 100)
+
+    def test_summary_min_may_not_exceed_summary_max(self):
+        """`gt@144`: the bound half, from the other side."""
+        with self.assertRaises(ValueError):
+            ContextThresholds(subagent_summary_min_tokens=101, subagent_summary_max_tokens=100)
+
+    def test_an_explicit_limits_object_is_used(self):
+        """`or@241`: the DEFAULTING half.
+
+        The store must keep the limits it was given.  With the
+        connective flipped to `and`, an explicitly supplied object would
+        be replaced by a fresh default -- and the caller would never
+        know its thresholds were ignored.
+        """
+        import tempfile
+
+        limits = ContextThresholds(tool_result_offload_tokens=1234)
+        with tempfile.TemporaryDirectory() as workspace:
+            store = OffloadStore(workspace, limits=limits)
+            self.assertEqual(store.limits.tool_result_offload_tokens, 1234)
+
+    def test_a_store_without_limits_uses_the_defaults(self):
+        """`or@241`: the control -- no limits means the defaults."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as workspace:
+            store = OffloadStore(workspace)
+            self.assertEqual(store.limits.tool_result_offload_tokens, ContextThresholds().tool_result_offload_tokens)
+
+    def test_the_allowed_character_set_survives_the_safe_name(self):
+        """`or@246`: the CHARACTER-SET half.
+
+        The safe-name mapping keeps alphanumerics and the characters
+        "-_." and replaces everything else with "_".  The suite drove
+        only the alphanumeric half, so a name spelled with "-" or "_"
+        was never exercised: flipping the connective would replace
+        those too.
+        """
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as workspace:
+            store = OffloadStore(workspace)
+            path = store.path_for(name="a-b_c.d")
+            self.assertTrue(path.name.startswith("a-b_c.d-"), path.name)
+
+    def test_a_name_that_reduces_to_nothing_falls_back(self):
+        """`or@247`: the DEFAULTING half of the safe-name guard.
+
+        A name made only of "." and "_" is stripped to nothing, so the
+        default "tool-result" must take over.  With the connective
+        flipped to `and`, the stem would be empty and the path would
+        lose its name.
+        """
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as workspace:
+            store = OffloadStore(workspace)
+            path = store.path_for(name="._")
+            self.assertTrue(path.name.startswith("tool-result-"), path.name)
+
+    def test_a_tool_result_exactly_at_the_cap_is_not_offloaded(self):
+        """`gt@291`: the bound half, at the exact cap.
+
+        The rule is "strictly bigger than the cap", so a result whose
+        estimate is exactly the cap must NOT be offloaded.  With
+        `> -> >=` it would be.  The estimate is one token per four
+        bytes, so 40 bytes is exactly 10 tokens -- the cap here.
+        """
+        limits = ContextThresholds(tool_result_offload_tokens=10)
+        text = "x" * 40
+        self.assertEqual(estimate_text_tokens(text), 10)
+        self.assertFalse(should_offload_tool_result(text, limits))
+
+    def test_a_tool_result_one_token_over_the_cap_is_offloaded(self):
+        """`gt@291`: the bound half, from the other side."""
+        limits = ContextThresholds(tool_result_offload_tokens=10)
+        text = "x" * 44  # exactly 11 tokens
+        self.assertEqual(estimate_text_tokens(text), 11)
+        self.assertTrue(should_offload_tool_result(text, limits))
+
+
 if __name__ == "__main__":
     unittest.main()
