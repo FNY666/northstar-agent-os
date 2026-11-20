@@ -36,6 +36,34 @@ def run_cli(*argv: str, stdin_text: str = "") -> tuple[int, str, str]:
     return code, out.getvalue(), err.getvalue()
 
 
+def _doctor_capability_skip_reason(caps=None) -> str | None:
+    """Why doctor cannot exit clean here, or None if it can.
+
+    Doctor's Shell seccomp check fails when the host kernel cannot load a
+    BPF filter, and one failed check makes the whole report exit non-zero.
+    A test that asserts "doctor exits clean" is then asserting a property of
+    the kernel it runs on. This names the missing capability instead, and
+    quotes the probe so a skip still tells the reader what the host said.
+    """
+    if caps is None:
+        from tools.os_sandbox import probe_capabilities
+
+        caps = probe_capabilities()
+    if not caps.bwrap_usable:
+        return f"bwrap unusable on this host, so doctor cannot exit clean: {caps.bwrap_detail}"
+    if not caps.bwrap_cap_drop:
+        return (
+            "bwrap capability-drop probe failed on this host, so doctor cannot exit "
+            f"clean: {caps.bwrap_detail}"
+        )
+    if not caps.bwrap_seccomp:
+        return (
+            "bwrap seccomp probe failed on this host, so doctor cannot exit clean: "
+            f"{caps.bwrap_seccomp_detail}"
+        )
+    return None
+
+
 class ParserTests(unittest.TestCase):
     def test_importing_cli_does_not_load_research_benchmark(self):
         script = "import sys; import cli; print('governance_bench' in sys.modules)"
@@ -817,18 +845,27 @@ class DoctorTests(unittest.TestCase):
     def test_doctor_reports_missing_optional_sdks_as_warnings(self):
         # The check follows the selected provider: a scripted run needs no model
         # SDK at all, and only the SDK a live provider actually imports is named.
+        reason = _doctor_capability_skip_reason()
+        if reason:
+            self.skipTest(reason)
         code, out, _ = run_cli("doctor", "--mcp-network", "allowed")
         self.assertEqual(code, 0)  # warnings, not failures
         self.assertIn("model-sdk", out)
         self.assertIn("none required", out)
         self.assertNotIn("anthropic", out, "doctor must not nag about an SDK this provider never imports")
         self.assertIn("session-dir", out)
+        reason = _doctor_capability_skip_reason()
+        if reason:
+            self.skipTest(reason)
         code, out, _ = run_cli("doctor", "--provider", "anthropic", "--mcp-network", "allowed")
         self.assertEqual(code, 0)
         self.assertIn("anthropic", out)
 
     def test_doctor_reports_the_openai_compatible_endpoint_without_touching_it(self):
         tmp = Path(tempfile.mkdtemp(prefix="nsar-doctor-openai-"))
+        reason = _doctor_capability_skip_reason()
+        if reason:
+            self.skipTest(reason)
         code, out, _ = run_cli("doctor", "--workspace", str(tmp), "--provider", "openai", "--model", "gpt-4.1", "--mcp-network", "allowed")
         self.assertEqual(code, 0)
         self.assertIn("openai-compatible", out)
@@ -884,6 +921,9 @@ class DoctorTests(unittest.TestCase):
 
     def test_doctor_reports_mcp_seccomp_status(self):
         tmp = Path(tempfile.mkdtemp(prefix="nsar-doctor-"))
+        reason = _doctor_capability_skip_reason()
+        if reason:
+            self.skipTest(reason)
         code, out, _ = run_cli("doctor", "--workspace", str(tmp), "--mcp-network", "allowed")
         self.assertEqual(code, 0)
         self.assertIn("[ok]", out)
@@ -893,6 +933,9 @@ class DoctorTests(unittest.TestCase):
 
     def test_doctor_reports_mcp_seccomp_off_as_a_warning(self):
         tmp = Path(tempfile.mkdtemp(prefix="nsar-doctor-"))
+        reason = _doctor_capability_skip_reason()
+        if reason:
+            self.skipTest(reason)
         code, out, _ = run_cli("doctor", "--workspace", str(tmp), "--mcp-seccomp", "off", "--mcp-network", "allowed")
         self.assertEqual(code, 0)  # warnings, not failures
         self.assertIn("[warn] mcp-seccomp", out)
