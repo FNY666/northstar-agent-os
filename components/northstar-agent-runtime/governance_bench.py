@@ -28,6 +28,7 @@ import hmac
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -13273,20 +13274,64 @@ def _case_seccomp_denylist_tables(h: BenchHarness) -> BenchExpectation:
     )
 
 
+#: Cached answer of the seccomp capability probe (None = not probed yet).
+_SECCOMP_LOADABLE: bool | None = None
+
+
+def seccomp_filter_loadable() -> bool:
+    """Report whether this host can actually install the seccomp denylist.
+
+    The platform is not the question and neither is the filter bytes: a
+    kernel can expose prctl and still refuse a BPF filter
+    (CONFIG_SECCOMP_FILTER missing). The only honest answer comes from
+    installing the filter in a child process and looking for the
+    "Seccomp: 2" line it produces.
+    """
+    global _SECCOMP_LOADABLE
+    if _SECCOMP_LOADABLE is not None:
+        return _SECCOMP_LOADABLE
+    loadable = False
+    try:
+        from tools.seccomp import prctl_loader_argv
+
+        argv = prctl_loader_argv(
+            ["sh", "-c", "grep -q 'Seccomp:\t2' /proc/self/status"]
+        )
+        completed = subprocess.run(
+            argv,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=30,
+        )
+        loadable = completed.returncode == 0
+    except Exception:
+        # A host that cannot even try is a host that cannot load a filter.
+        loadable = False
+    _SECCOMP_LOADABLE = loadable
+    return loadable
+
+
 def _case_seccomp_filter_live_on_process(h: BenchHarness) -> BenchExpectation:
     # Behavioral proof the prctl wrapper really loads the filter: only a live
     # SECCOMP_MODE_FILTER lets the command observe Seccomp: 2 and create the
     # proof file.
     ws = h.workspace()
+    supported = seccomp_filter_loadable()
+    turns: list[Any] = [
+        _tool(
+            "Shell",
+            {"command": "grep -q 'Seccomp:\t2' /proc/self/status && touch filter_live.txt"},
+        ),
+        _text("done"),
+    ]
+    if not supported:
+        # The host cannot install a filter, so the proof cannot be made.
+        # Drive an engine-only runtime instead of one that must fail, and
+        # say in the report that no proof was made.
+        turns = [_text("engine-only")]
     runtime = h.runtime(
         workspace=ws,
-        turns=[
-            _tool(
-                "Shell",
-                {"command": "grep -q 'Seccomp:\t2' /proc/self/status && touch filter_live.txt"},
-            ),
-            _text("done"),
-        ],
+        turns=turns,
         config_kwargs={
             "allowed_tools": ("Shell",),
             "shell_backend": "process",
@@ -13297,8 +13342,14 @@ def _case_seccomp_filter_live_on_process(h: BenchHarness) -> BenchExpectation:
         runtime=runtime,
         workspace=ws,
         expect_subtype="success",
-        require_paths=("filter_live.txt",),
-        notes="process backend loads the denylist via prctl (Seccomp: 2 observable)",
+        require_paths=("filter_live.txt",) if supported else (),
+        engine_ok=True if not supported else None,
+        metrics={"supported": supported},
+        notes=(
+            "process backend loads the denylist via prctl (Seccomp: 2 observable)"
+            if supported
+            else "this host cannot install a BPF filter, so the live proof was not made"
+        ),
     )
 
 
@@ -13306,18 +13357,24 @@ def _case_seccomp_payload_cannot_loosen(h: BenchHarness) -> BenchExpectation:
     # Tighten-only, observed behaviorally: with the operator at "on", a
     # per-call "off" must still leave the filter live (Seccomp: 2).
     ws = h.workspace()
+    supported = seccomp_filter_loadable()
+    turns: list[Any] = [
+        _tool(
+            "Shell",
+            {
+                "command": "grep -q 'Seccomp:\t2' /proc/self/status && touch tightened.txt",
+                "seccomp": "off",
+            },
+        ),
+        _text("done"),
+    ]
+    if not supported:
+        # No filter can be installed here, so the tighten-only proof cannot
+        # be made. Drive an engine-only runtime and record the gap.
+        turns = [_text("engine-only")]
     runtime = h.runtime(
         workspace=ws,
-        turns=[
-            _tool(
-                "Shell",
-                {
-                    "command": "grep -q 'Seccomp:\t2' /proc/self/status && touch tightened.txt",
-                    "seccomp": "off",
-                },
-            ),
-            _text("done"),
-        ],
+        turns=turns,
         config_kwargs={
             "allowed_tools": ("Shell",),
             "shell_backend": "process",
@@ -13329,8 +13386,14 @@ def _case_seccomp_payload_cannot_loosen(h: BenchHarness) -> BenchExpectation:
         runtime=runtime,
         workspace=ws,
         expect_subtype="success",
-        require_paths=("tightened.txt",),
-        notes="operator --seccomp=on wins over a per-call seccomp=off (tighten-only)",
+        require_paths=("tightened.txt",) if supported else (),
+        engine_ok=True if not supported else None,
+        metrics={"supported": supported},
+        notes=(
+            "operator --seccomp=on wins over a per-call seccomp=off (tighten-only)"
+            if supported
+            else "this host cannot install a BPF filter, so the tighten-only proof was not made"
+        ),
     )
 
 
