@@ -322,6 +322,80 @@ class RealRepositoryCheckTests(unittest.TestCase):
         self.assertEqual(set(modules_on_disk()), set(registered_module_names()))
 
 
+class ImportableModuleNameGuardTests(unittest.TestCase):
+    """The double guard in ``_is_importable_module_name`` -- both halves.
+
+    The guard is one line with two halves joined by ``or``::
+
+        if not isinstance(name, str) or not name:
+            return False
+
+    The first half is a **type** check and the second is an **emptiness**
+    check.  A suite that only feeds one of the two cannot tell this guard
+    apart from a single-check guard, so a fault that swaps the connective
+    (``or`` -> ``and``) or flips the returned constant (``False`` ->
+    ``True``) survives it.  Each half is therefore driven separately here.
+
+    The guard is reached **directly** on purpose.  ``Registration.__init__``
+    rejects a missing or blank module name with a ``ValueError`` before it
+    ever calls the guard, so the public constructor cannot reach it with a
+    value that tells the two halves apart.
+    """
+
+    def _is_importable(self, name):
+        return runtime_registration._is_importable_module_name(name)
+
+    def test_a_truthy_non_string_is_not_an_importable_module_name(self):
+        """The type half, with the emptiness half taking the other branch.
+
+        ``or`` short-circuits on the type check: a non-string is refused
+        without the emptiness check ever being consulted.  With ``and``
+        instead, a *truthy* non-string would fall through to the identifier
+        scan below the guard -- and a non-string has no ``.split``, so the
+        mutated guard raises instead of refusing the name.
+        """
+        for value in (42, 3.5, True, [1], ("a",), object()):
+            with self.subTest(value=value):
+                self.assertFalse(self._is_importable(value))
+
+    def test_a_falsy_non_string_is_not_an_importable_module_name(self):
+        """The type half with a falsy value: refused on the type alone."""
+        for value in (None, 0, 0.0, [], (), {}, b"", False):
+            with self.subTest(value=value):
+                self.assertFalse(self._is_importable(value))
+
+    def test_an_empty_name_is_not_an_importable_module_name(self):
+        """The emptiness half: the type check passes, the emptiness check fires.
+
+        A name that *is* a string but is empty reaches the second half of
+        the guard.  If the guard's ``return False`` were flipped to
+        ``return True``, an empty name would be accepted -- and the
+        registry would then name a module with no file behind it.
+        """
+        self.assertFalse(self._is_importable(""))
+
+    def test_a_blank_name_is_not_an_importable_module_name(self):
+        """A blank name is not importable either -- the name has to carry a segment."""
+        self.assertFalse(self._is_importable("   "))
+        self.assertFalse(self._is_importable("."))
+        self.assertFalse(self._is_importable("a..b"))
+
+    def test_a_real_flat_module_name_is_importable(self):
+        """The happy path of the first half: a flat module name is accepted."""
+        self.assertTrue(self._is_importable("runtime_registration"))
+
+    def test_a_real_package_member_name_is_importable(self):
+        """The happy path of the second half: a dotted package member is accepted."""
+        self.assertTrue(self._is_importable("tools.shell"))
+
+    def test_the_constructor_refuses_the_names_the_guard_refuses(self):
+        """The public surface refuses them too, with the registry's own error."""
+        for name in ("", "not a module", 42, None):
+            with self.subTest(name=name):
+                with self.assertRaises(ValueError):
+                    Registration(name, "a-slice", "2026-11-14", "A module.")
+
+
 class RegistrationEqualityTests(unittest.TestCase):
     """A registry record compares by value, and hashes like its value.
 
