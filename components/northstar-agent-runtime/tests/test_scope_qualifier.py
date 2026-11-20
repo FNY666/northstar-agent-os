@@ -429,5 +429,147 @@ class ScopeQualifierModuleTests(unittest.TestCase):
             )
 
 
+class QualifierGuardSecondHalfTests(unittest.TestCase):
+    """The SECOND half of each scope-qualifier guard.
+
+    Every guard here is a double guard: a type half joined to a second
+    half -- an emptiness half, a bound half, or a defaulting half -- by
+    `or`.  The diviner slice's own suite drove only ONE half of each, so
+    flipping the connective left the suite green: the planted faults
+    gt@204, or@274, or@276, gt@278, gt@280 and or@303 all SURVIVED it.
+
+      gt@204   len(canonical) > _MAX_ID_CHARS
+               The bound is on the CANONICAL verb (after strip and
+               casefold), so the exact limit must be ACCEPTED and the
+               limit plus one REFUSED.  A suite that only fed a very
+               long verb never measured where the line is.
+      or@274   not isinstance(self.kind, str) or not self.kind.strip()
+               The second half is the EMPTINESS half: a kind that is a
+               string but only whitespace must be refused.
+      or@276   the same for the resource.
+      gt@278   len(self.kind) > _MAX_SCOPE_CHARS
+               The bound is on the kind, and the exact limit must be
+               accepted.
+      gt@280   the same for the resource.
+      or@303   str(value.get("note", "") or "")
+               The second half is the DEFAULTING half: a note that is
+               None, absent, or empty must become the empty string
+               rather than the string "None" or a crash.
+
+    Each test here fails when its planted fault is applied alone.
+    """
+
+    def test_a_verb_at_the_character_limit_is_accepted(self):
+        """`gt@204`: the exact limit is inside the bound.
+
+        `_MAX_ID_CHARS` is 256 and the bound is on the CANONICAL verb,
+        so a 256-character verb must be accepted.
+        """
+        from scope_qualifier import _MAX_ID_CHARS, canonical_verb
+
+        verb = "v" * _MAX_ID_CHARS
+        self.assertEqual(canonical_verb(verb), verb)
+
+    def test_a_verb_one_character_over_the_limit_is_refused(self):
+        """`gt@204`: the limit plus one is outside it.
+
+        With `> -> >=` the verb exactly at the limit is refused, which
+        is the off-by-one this test closes.
+        """
+        from scope_qualifier import _MAX_ID_CHARS, canonical_verb
+
+        verb = "v" * (_MAX_ID_CHARS + 1)
+        with self.assertRaises(ScopeQualifierError):
+            canonical_verb(verb)
+
+    def test_the_verb_bound_is_measured_after_stripping(self):
+        """`gt@204`: the bound is on the canonical form.
+
+        A verb with leading whitespace is stripped before the bound is
+        measured, so a verb that is exactly at the limit once stripped
+        must be accepted even though the raw string is longer.
+        """
+        from scope_qualifier import _MAX_ID_CHARS, canonical_verb
+
+        verb = "  " + ("v" * _MAX_ID_CHARS) + "  "
+        self.assertEqual(canonical_verb(verb), "v" * _MAX_ID_CHARS)
+
+    def test_a_whitespace_only_kind_is_refused(self):
+        """`or@274`: the EMPTINESS half of the kind guard.
+
+        A kind that is a string but holds only whitespace names
+        nothing, so it must be refused -- the type half alone cannot
+        see that.
+        """
+        with self.assertRaises(ScopeQualifierError):
+            ScopeQualifier(kind="   ", resource="the China segment")
+
+    def test_a_whitespace_only_resource_is_refused(self):
+        """`or@276`: the EMPTINESS half of the resource guard."""
+        with self.assertRaises(ScopeQualifierError):
+            ScopeQualifier(kind="only", resource="\t\n ")
+
+    def test_a_kind_at_the_character_limit_is_accepted(self):
+        """`gt@278`: the exact limit is inside the bound."""
+        from scope_qualifier import _MAX_SCOPE_CHARS
+
+        kind = "k" * _MAX_SCOPE_CHARS
+        qualifier = ScopeQualifier(kind=kind, resource="segment")
+        self.assertEqual(qualifier.kind, kind)
+
+    def test_a_kind_one_character_over_the_limit_is_refused(self):
+        """`gt@278`: the limit plus one is outside it."""
+        from scope_qualifier import _MAX_SCOPE_CHARS
+
+        with self.assertRaises(ScopeQualifierError):
+            ScopeQualifier(kind="k" * (_MAX_SCOPE_CHARS + 1), resource="segment")
+
+    def test_a_resource_at_the_character_limit_is_accepted(self):
+        """`gt@280`: the exact limit is inside the bound."""
+        from scope_qualifier import _MAX_SCOPE_CHARS
+
+        resource = "r" * _MAX_SCOPE_CHARS
+        qualifier = ScopeQualifier(kind="only", resource=resource)
+        self.assertEqual(qualifier.resource, resource)
+
+    def test_a_resource_one_character_over_the_limit_is_refused(self):
+        """`gt@280`: the limit plus one is outside it."""
+        from scope_qualifier import _MAX_SCOPE_CHARS
+
+        with self.assertRaises(ScopeQualifierError):
+            ScopeQualifier(kind="only", resource="r" * (_MAX_SCOPE_CHARS + 1))
+
+    def test_a_missing_note_becomes_the_empty_string(self):
+        """`or@303`: the DEFAULTING half of the note guard.
+
+        A qualifier built from a mapping with no note must carry the
+        empty string, not the string "None" and not a crash.
+        """
+        qualifier = ScopeQualifier.from_dict({"kind": "only", "resource": "segment"})
+        self.assertEqual(qualifier.note, "")
+
+    def test_a_null_note_becomes_the_empty_string(self):
+        """`or@303`: a note that is explicitly None.
+
+        `str(value.get("note", "") or "")` -- the `or ""` is the half
+        under test.  A note of None must become the empty string; with
+        the connective flipped to `and`, `None` would reach `str()` and
+        become the literal text "None", which is a note the grant never
+        had.
+        """
+        qualifier = ScopeQualifier.from_dict(
+            {"kind": "only", "resource": "segment", "note": None}
+        )
+        self.assertEqual(qualifier.note, "")
+        self.assertNotEqual(qualifier.note, "None")
+
+    def test_a_present_note_is_kept_verbatim(self):
+        """`or@303`: the control -- a real note survives."""
+        qualifier = ScopeQualifier.from_dict(
+            {"kind": "only", "resource": "segment", "note": "as of Q3"}
+        )
+        self.assertEqual(qualifier.note, "as of Q3")
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
