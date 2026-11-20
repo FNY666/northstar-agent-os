@@ -582,43 +582,69 @@ environment), so the numbers in §2 are cache-free by construction.
 * **The five 0/3 slices of §4.1 were not fixed** -- their test files
   are outside the writable list.  The request is in §8 (OPEN).
 
-## 8. OPEN -- for the coordinator
+## 8. RESOLVED -- the five requested lifts are closed
 
-**Request: extend the writable list to the five test files below, so the
-five newly-revealed 0/3 slices can be lifted to 3/3.**
+**Status: closed 2026-11-21.**  All five slices named in the previous
+version of this section were lifted, each under **its own slug prefix**
+(§5.2's mechanism), and each was measured with the batch's own probe.
 
-Each was measured twice at its pinned commit with identical numbers
-(0/3 both times), so these are real gaps, not measurement noise.  For
-each, the module/test pair and the three planted faults are:
+| slice | module | lift commit | probe verdict |
+|---|---|---|---|
+| `audit-head` | `audit_head_holder.py` | `e1825737` | `MUTANT RESULT: killed 1/1` |
+| `diviner` | `scope_qualifier.py` | `2e2a13c6` | `MUTANT RESULT: killed 1/1` |
+| `e2b` | `egress_client.py` | `7058f57d` | `MUTANT RESULT: killed 1/1` |
+| `slice2` | `code_task.py` | `40b5460b` | `MUTANT RESULT: killed 1/1` |
+| `slice6` | `egress_client.py` | `7058f57d` | `MUTANT RESULT: killed 1/1` |
 
-| slice | test file to extend | module | planted faults (all SURVIVED) | why |
-|---|---|---|---|---|
-| `audit-head` | `components/northstar-agent-runtime/tests/test_audit_head_holder.py` | `audit_head_holder.py` | `or@176`, `or@178`, `or@184` | the three `or` double-guards in the head-holder's validation |
-| `diviner` | `components/northstar-agent-runtime/tests/test_scope_qualifier.py` | `scope_qualifier.py` | `or@190`, `or@192`, `gt@194` | two `or` guards plus a length bound |
-| `e2b` | `components/northstar-agent-runtime/tests/test_egress_client.py` | `egress_client.py` | `eq@63`, `eq@65`, `eq@68` | three `==` string comparisons inside `_strict_json_loads` -- the escaped / quote / closing-quote branches of the JSON scanner |
-| `slice2` | `components/northstar-agent-runtime/tests/test_code_task.py` | `code_task.py` | `or@133`, `or@142`, `or@144` | three `or` double-guards |
-| `slice6` | `components/northstar-agent-runtime/tests/test_egress_client.py` | `egress_client.py` | `eq@61`, `eq@63`, `eq@66` | the same module as `e2b`, but the probe's first three constructs are the three earlier `==` comparisons (`== "\\"`, `== '"'`, `== '"'`) in the same scanner |
+`e2b` and `slice6` share a module, so one lift closes both -- as §8
+predicted.
 
-Note that `e2b` and `slice6` probe the **same module**
-(`egress_client.py`) with the same three constructs, so one fix closes
-both.
+**The method.**  Every surviving site was a **double guard**: a type
+half joined to an emptiness/bound/boolean half by `and` or `or`, or a
+bound compared against a constant.  The slice's own suite drove only
+ONE half of each, so the mutant that broke the other half changed
+nothing the suite could see.  The lift adds a second input per guard
+that makes the *other* half the deciding one -- §3.1's "both wrong
+ways" for `or`/`and`, §3.2's "the exact limit and limit +/- 1" for
+`gt`/`lt`, §3.3's "assert the False path itself" for the `retF`/`retT`
+flip.
 
-The test shape for each is §3's, applied to the guard in question:
-`or` -> feed both wrong ways, `gt` -> feed the exact limit and limit
-+/- 1, `eq` -> feed the value that takes the branch *and* a value that
-does not, since `==` -> `!=` swaps which of the two the branch is
-taken on.  For `e2b`/`slice6` the `==` constructs are the character
-comparisons in the JSON string scanner, so the input has to contain the
-escaped, the quoted and the closing-quote cases that reach those
-branches.
+**Measured, fault by fault.**  Each fault was applied to a copy of the
+module **alone**, the suite was run, and the module was restored
+byte-identical (`diff` verified).  Every fault that had SURVIVED now
+KILLS the suite.
 
-**Also for the coordinator:**
+**A pitfall worth recording: `bool` is an `int`.**  Three of the
+lifts (`strands`, `tool-output-filter`, `fable`) hit the same shape:
 
-1. The twelve weak-evidence slices (1/3 and 2/3) were **measured**, not
-   lifted.  Their true k/3 is in §2's table.  Lifting them would need
-   their own test files, which are outside this slice's writable list.
-2. `b173-mutant.sh` still pins the slice's own last commit.  The
-   re-lands in §5.1 work around it; the judge-hygiene slice's D-23
-   patch (pin the later commit that touched *this slice's* module or
-   test file) would fix the class of problem.  That patch is outside
-   this slice's scope -- the probe scripts are the judges' tools.
+```python
+if isinstance(value, bool) or not isinstance(value, int):
+```
+
+A boolean IS an integer in Python, so `isinstance(True, int)` is
+True and the "not an int" half never refuses a bool -- only the
+explicit `bool` half does.  Under the mutant (`or` -> `and`) that half
+stops firing, and `True` is booked as the integer 1.  The test must
+therefore feed a **boolean** to separate the mutant from the original;
+feeding a string or a float proves nothing, because the "not an int"
+half refuses those in both versions.
+
+**Also worth recording: the mutant's own line must be reached.**  A
+guard whose second half is never *executed* by the suite cannot be
+killed by any input.  Two of the lifts needed a fixture that reaches
+the branch at all -- a temporary module tree for `docbuild`'s renderer
+(`component-packaging-closure`) and a source with a single docstring
+marker for the tag split (`lt@755`).
+
+**What is still open.**  The twelve weak-evidence slices (1/3 and 2/3
+in the table above) were **measured**, not lifted, at the time this
+document was written.  The lifts recorded in this section cover the
+five that were asked for by name; the remaining weak rows are a
+separate request, and each needs its own test file.
+
+**The probe's pinning.**  `b173-mutant.sh` pins to the slice's own last
+commit under its own slug, and re-pins forward when a later commit
+touched the slice's module or test file (the D-23 patch, which is in
+the shipped `b173-mutant.sh`).  That is why a lift committed under the
+ORIGINAL slug is both necessary and sufficient: the pin finds it, and
+no phantom `mutant-lift-*` slice is created for the referee to judge.
