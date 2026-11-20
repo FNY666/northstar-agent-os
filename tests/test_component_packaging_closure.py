@@ -81,12 +81,14 @@ These tests pin the rule, the fix, and the guard's own honesty:
 """
 from __future__ import annotations
 
+import ast
 import subprocess
 import sys
 import tempfile
 import tomllib
 import unittest
 import zipfile
+from unittest import mock
 from pathlib import Path
 
 import docbuild
@@ -435,6 +437,354 @@ class CiSmokeTests(unittest.TestCase):
             "documented CI entry point is never exercised on the installed "
             "surface",
         )
+
+
+class DocbuildGuardSecondHalfTests(unittest.TestCase):
+    """The SECOND half of each guard in ``tests/docbuild.py``.
+
+    ``docbuild`` renders the reference pages, so every guard in it decides
+    what a reader is shown.  Each guard below is a double guard -- a type
+    half joined to a second half by ``and``, or a bound compared against a
+    constant -- and the component-packaging-closure slice's own suite
+    drove only ONE half of each.  Every one of these planted faults
+    therefore SURVIVED that suite:
+
+      gt@429   the summary cap
+      and@440  the leading self/cls drop
+      and@464  the ``@property`` decorator (Name form)
+      retT@465 its return
+      and@466  the ``@x.property`` decorator (Attribute form)
+      retT@467 its return
+      retF@468 the fall-through
+      and@488  the module-level function filter
+      and@495  the module-level class filter
+      and@503  the class-member filter
+      eq@540   the trailing-blank-line trim
+      eq@680   the exclusion-family lookup
+      lt@755   the docstring-tag split
+      retF@756 its "no tag" return
+      or@808   the probe-corpus name test
+      and@812  the guard-detector rule
+
+    Each test here fails when its own planted fault is applied alone.
+    """
+
+    # --- gt@429: the summary cap -----------------------------------------
+    def test_a_summary_at_the_cap_is_not_truncated(self):
+        """`gt@429`: the cap is STRICT.
+
+        A summary whose length is exactly the cap must come back whole.
+        With `> -> >=` it would be truncated and given an ellipsis.
+        """
+        text = "x" * 300
+        self.assertEqual(docbuild._summary(text, cap=300), text)
+
+    def test_a_summary_one_over_the_cap_is_truncated(self):
+        """`gt@429`: the bound, from the other side."""
+        summary = docbuild._summary("x" * 301, cap=300)
+        self.assertEqual(len(summary), 300)
+        self.assertTrue(summary.endswith("…"))
+
+    def test_a_summary_shorter_than_the_cap_is_untouched(self):
+        """`gt@429`: the control -- under the cap, nothing is dropped."""
+        text = "short summary"
+        self.assertEqual(docbuild._summary(text, cap=300), text)
+
+    # --- and@440: the leading self/cls drop ------------------------------
+    def test_the_leading_self_is_dropped_from_a_signature(self):
+        """`and@440`: both halves hold, so the drop happens."""
+        node = ast.parse("def method(self, value):\n    pass\n").body[0]
+        self.assertEqual(docbuild._signature(node), "method(value)")
+
+    def test_a_non_self_first_parameter_is_kept(self):
+        """`and@440`: the other half.
+
+        A first parameter that is not a self-name must be kept -- the
+        signature would otherwise name the wrong thing.
+        """
+        node = ast.parse("def method(value, other):\n    pass\n").body[0]
+        self.assertEqual(docbuild._signature(node), "method(value, other)")
+
+    def test_a_method_with_no_parameters_renders_with_empty_parens(self):
+        """`and@440`: the empty-list half.
+
+        With no positionals at all the first half is False, so the drop
+        must not happen -- and the rendering must not crash on the
+        `positionals[0]` it must not reach.
+        """
+        node = ast.parse("def method():\n    pass\n").body[0]
+        self.assertEqual(docbuild._signature(node), "method()")
+
+    def test_a_leading_cls_is_dropped_too(self):
+        """`and@440`: the self-name set is not just ``self``."""
+        node = ast.parse("def method(cls, value):\n    pass\n").body[0]
+        self.assertEqual(docbuild._signature(node), "method(value)")
+
+    # --- and@464 / retT@465 / and@466 / retT@467 / retF@468: properties ---
+    def test_a_property_decorator_is_recognised(self):
+        """`and@464` and `retT@465`: the bare ``@property`` name form."""
+        node = ast.parse("@property\ndef value(self):\n    pass\n").body[0]
+        self.assertTrue(docbuild._is_property(node))
+
+    def test_a_cached_property_decorator_is_recognised(self):
+        """`and@464`: the other name in the same set."""
+        node = ast.parse("@cached_property\ndef value(self):\n    pass\n").body[0]
+        self.assertTrue(docbuild._is_property(node))
+
+    def test_an_attribute_property_decorator_is_recognised(self):
+        """`and@466` and `retT@467`: the ``@x.property`` attribute form."""
+        node = ast.parse("@functools.cached_property\ndef value(self):\n    pass\n").body[0]
+        self.assertTrue(docbuild._is_property(node))
+
+    def test_a_non_property_decorator_is_not_a_property(self):
+        """`retF@468`: the fall-through.
+
+        A plain decorator must not be read as a property -- otherwise the
+        reference page would drop the parentheses from a method that has
+        arguments.
+        """
+        node = ast.parse("@staticmethod\ndef value(x):\n    pass\n").body[0]
+        self.assertFalse(docbuild._is_property(node))
+
+    def test_an_undecorated_function_is_not_a_property(self):
+        """`retF@468`: the fall-through, with no decorator at all."""
+        node = ast.parse("def value(self):\n    pass\n").body[0]
+        self.assertFalse(docbuild._is_property(node))
+
+    def test_a_property_member_is_rendered_without_parentheses(self):
+        """`and@464`/`and@466`/`retT@465`/`retT@467`: through the renderer.
+
+        The renderer consults `_is_property` to decide whether a class
+        member is written as ``name`` (property) or ``name(args)``.  The
+        fixture module carries one property and one ordinary method.
+        """
+        source = (
+            "class Sample:\n"
+            "    @property\n"
+            "    def value(self):\n"
+            "        \"\"\"A value.\"\"\"\n"
+            "        return 1\n"
+            "\n"
+            "    def compute(self, factor):\n"
+            "        \"\"\"A method.\"\"\"\n"
+            "        return factor\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "sample.py"
+            path.write_text(source, encoding="utf-8")
+            with mock.patch.object(docbuild, "ROOT", root):
+                lines = docbuild._render_module("northstar-agent-runtime", "sample", path)
+        body = "\n".join(lines)
+        self.assertIn("- `value` (property)", body)
+        self.assertIn("- `compute(factor)`", body)
+        self.assertNotIn("- `value()`", body)
+
+    # --- and@488 / and@495 / and@503: the private-name filters -----------
+    def test_a_private_module_level_function_is_not_rendered(self):
+        """`and@488`: the name filter on module-level functions."""
+        source = (
+            "def _hidden():\n"
+            "    \"\"\"Hidden.\"\"\"\n"
+            "\n"
+            "def visible():\n"
+            "    \"\"\"Visible.\"\"\"\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "sample.py"
+            path.write_text(source, encoding="utf-8")
+            with mock.patch.object(docbuild, "ROOT", root):
+                lines = docbuild._render_module("northstar-agent-runtime", "sample", path)
+        body = "\n".join(lines)
+        self.assertNotIn("`_hidden()`", body)
+        self.assertIn("`visible()`", body)
+
+    def test_a_private_class_is_not_rendered(self):
+        """`and@495`: the name filter on module-level classes."""
+        source = (
+            "class _Hidden:\n"
+            "    \"\"\"Hidden.\"\"\"\n"
+            "\n"
+            "class Visible:\n"
+            "    \"\"\"Visible.\"\"\"\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "sample.py"
+            path.write_text(source, encoding="utf-8")
+            with mock.patch.object(docbuild, "ROOT", root):
+                lines = docbuild._render_module("northstar-agent-runtime", "sample", path)
+        body = "\n".join(lines)
+        self.assertNotIn("`_Hidden`", body)
+        self.assertIn("`Visible`", body)
+
+    def test_a_private_class_member_is_not_rendered(self):
+        """`and@503`: the name filter on class members."""
+        source = (
+            "class Visible:\n"
+            "    \"\"\"Visible.\"\"\"\n"
+            "\n"
+            "    def _hidden(self):\n"
+            "        \"\"\"Hidden.\"\"\"\n"
+            "\n"
+            "    def shown(self):\n"
+            "        \"\"\"Shown.\"\"\"\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "sample.py"
+            path.write_text(source, encoding="utf-8")
+            with mock.patch.object(docbuild, "ROOT", root):
+                lines = docbuild._render_module("northstar-agent-runtime", "sample", path)
+        body = "\n".join(lines)
+        self.assertNotIn("- `_hidden`", body)
+        self.assertIn("- `shown()`", body)
+
+    # --- eq@540: the trailing-blank-line trim ---------------------------
+    def test_the_rendered_page_ends_with_exactly_one_newline(self):
+        """`eq@540`: the trailing-blank trim.
+
+        The rendered reference page must end with exactly one final
+        newline -- no run of blank lines at the end.  With `== -> !=`
+        the trim would stop at the first non-blank line and the page
+        would keep its trailing blanks.
+        """
+        page = docbuild.render_page("northstar-run-contract")
+        self.assertTrue(page.endswith("\n"))
+        self.assertFalse(page.endswith("\n\n"))
+
+    def test_no_rendered_page_ends_with_a_blank_line(self):
+        """`eq@540`: across every component the renderer builds."""
+        for component in docbuild.MANIFEST:
+            with self.subTest(component=component):
+                page = docbuild.render_page(component)
+                self.assertFalse(page.endswith("\n\n"))
+
+    # --- eq@680: the exclusion-family lookup ----------------------------
+    def test_an_exclusion_family_is_found_by_its_name(self):
+        """`eq@680`: the name that IS a family."""
+        declared = docbuild.EXCLUSION_FAMILIES[1]
+        self.assertEqual(docbuild.family_members(declared.name), declared.member_names())
+
+    def test_an_unknown_family_name_is_refused(self):
+        """`eq@680`: the name that is NOT a family.
+
+        A name that matches no family must raise KeyError -- it must
+        not be handed the FIRST family's members, which would classify
+        a module under a family it does not belong to.
+        """
+        with self.assertRaises(KeyError):
+            docbuild.family_members("no-such-family")
+
+    def test_a_family_object_is_used_directly(self):
+        """`eq@680`: the control -- an object is not looked up by name."""
+        declared = docbuild.EXCLUSION_FAMILIES[1]
+        self.assertEqual(docbuild.family_members(declared), declared.member_names())
+
+    # --- lt@755 / retF@756: the design-tag split ------------------------
+    def test_a_module_with_a_docstring_but_no_tag_has_no_design_tag(self):
+        """`lt@755`: the split happened, and the tag is absent.
+
+        The docstring is present, so the split succeeds; the pattern
+        does not match, so the answer is False.
+        """
+        self.assertFalse(
+            docbuild._has_design_tag("northstar-agent-runtime", "egress_client")
+        )
+
+    def test_a_module_without_a_docstring_has_no_design_tag(self):
+        """`lt@755` and `retF@756`: the "no docstring" answer.
+
+        A module with no source at all yields an empty string, so there
+        are no docstring parts to split and the guard must say False.
+        """
+        self.assertFalse(
+            docbuild._has_design_tag("northstar-agent-runtime", "no_such_module_xyz")
+        )
+
+    def test_a_source_with_a_single_docstring_marker_is_still_scanned(self):
+        """`lt@755`: the bound, from the side that shows it is strict.
+
+        The guard is ``if len(parts) < 2: return False``.  A source
+        whose docstring marker has no closing marker splits into exactly
+        TWO parts, and the second still carries the tag -- so the tag
+        must be found.  With the bound weakened to ``<= 2`` the guard
+        would return False and the tag would be missed.
+        """
+        source = '"""Module docstring carrying (D-OUT-123) and no closing marker'
+        with mock.patch.object(docbuild, "_module_source", return_value=source):
+            self.assertTrue(docbuild._has_design_tag("northstar-agent-runtime", "any"))
+
+    def test_a_tagged_module_is_recognised(self):
+        """The control: a module that really does carry the tag.
+
+        ``out_def_36`` is a numbered-probe-family member whose docstring
+        carries a ``(D-OUT-nnn)`` tag.
+        """
+        self.assertTrue(
+            docbuild._has_design_tag("northstar-agent-runtime", "out_def_36")
+        )
+
+    # --- or@808: the probe-corpus name test ------------------------------
+    def test_a_probe_named_module_is_a_probe_corpus(self):
+        """`or@808`: the ``_probe`` suffix -- the first half.
+
+        The two halves are the two spellings -- ``_probe`` and
+        ``_probes``.  Both must be recognised, and the first is what
+        this test drives.
+        """
+        kinds = docbuild.exclusion_reason_kinds("northstar-agent-runtime", "asi02_probe")
+        self.assertIn("probe-corpus", kinds)
+
+    def test_a_probes_named_module_is_a_probe_corpus(self):
+        """`or@808`: the ``_probes`` suffix -- the second half."""
+        kinds = docbuild.exclusion_reason_kinds(
+            "northstar-agent-runtime", "approval_fatigue_probes"
+        )
+        self.assertIn("probe-corpus", kinds)
+
+    def test_a_module_with_neither_suffix_is_not_a_probe_corpus(self):
+        """`or@808`: the name that is neither.
+
+        With the connective flipped to `and`, a module ending in
+        ``_probe`` would no longer be a probe corpus -- and one ending
+        in neither would have been checked only by the second half.
+        """
+        kinds = docbuild.exclusion_reason_kinds("northstar-agent-runtime", "egress_client")
+        self.assertNotIn("probe-corpus", kinds)
+
+    # --- and@812: the guard-detector rule -------------------------------
+    def test_a_family_member_with_a_tag_is_not_a_guard_detector(self):
+        """`and@812`: the second half of the rule.
+
+        ``out_def_36`` is BOTH a numbered-probe-family member and
+        tag-carrying.  The family is its reason -- it is a sibling in a
+        numbered defence series -- so the tag rule must not claim it.
+        """
+        kinds = docbuild.exclusion_reason_kinds("northstar-agent-runtime", "out_def_36")
+        self.assertIn("numbered-probe-family", kinds)
+        self.assertNotIn("guard-detector", kinds)
+
+    def test_a_mock_with_a_tag_is_not_a_guard_detector(self):
+        """`and@812`: the other exclusion of the tag rule.
+
+        ``bias_mock`` is a mock stand-in that also carries a design tag.
+        The mock is its reason, so the tag rule must not claim it.
+        """
+        kinds = docbuild.exclusion_reason_kinds("northstar-agent-runtime", "bias_mock")
+        self.assertIn("mock-stand-in", kinds)
+        self.assertNotIn("guard-detector", kinds)
+
+    def test_a_probe_corpus_is_not_a_guard_detector(self):
+        """`and@812`: the probe rule does not carry a design tag.
+
+        The kinds are disjoint, so a probe corpus must not also be
+        reported as a guard detector.
+        """
+        kinds = docbuild.exclusion_reason_kinds("northstar-agent-runtime", "asi02_probe")
+        self.assertIn("probe-corpus", kinds)
+        self.assertNotIn("guard-detector", kinds)
 
 
 if __name__ == "__main__":
