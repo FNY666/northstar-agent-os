@@ -985,5 +985,172 @@ class DeliverySealV2Tests(unittest.TestCase):
                 isolated.cleanup()
 
 
+class PhaseMachineInputGuardTests(unittest.TestCase):
+    """The phase machine's constructor guards must reject both halves.
+
+    Each guard in ``CodePhaseMachine.__init__`` is a double check joined by
+    ``or``: a *type* half (``not isinstance(x, str)``) and an *emptiness*
+    half (``not x.strip()``).  The original suite drove only the type half,
+    so a planted fault that swapped the connective (``or`` -> ``and``)
+    left it green: with ``and`` the emptiness half is never reached for a
+    well-typed value, so a blank run id, a blank verifier rule and a blank
+    verifier rule version all slip through.
+
+    The behaviour was correct throughout; the evidence was missing.  These
+    tests drive the second half of each guard -- the blank/whitespace value
+    -- and assert that the failure is the declared ``CodeTaskError`` rather
+    than an incidental ``AttributeError``.
+    """
+
+    def _machine(self, evidence_dir: Path, **kwargs) -> CodePhaseMachine:
+        return CodePhaseMachine(run_id="guard-test", evidence_dir=evidence_dir, **kwargs)
+
+    def test_blank_run_id_is_rejected(self):
+        # The second half of the run-id guard: a string that is empty or only
+        # whitespace carries no identity for the run.
+        with tempfile.TemporaryDirectory() as directory:
+            for run_id in ("", "   ", "\t\n"):
+                with self.subTest(run_id=run_id):
+                    with self.assertRaisesRegex(CodeTaskError, "needs a run id"):
+                        CodePhaseMachine(run_id=run_id, evidence_dir=directory)
+
+    def test_non_text_run_id_is_rejected(self):
+        # The first half of the same guard, asserted to fail as the
+        # DECLARED error rather than by an AttributeError from ``.strip()``
+        # on a non-string.  A guard that short-circuits past the type check
+        # must still not reach ``.strip()`` with a non-string value.
+        with tempfile.TemporaryDirectory() as directory:
+            for run_id in (None, 123, 1.5, ["run"], b"run"):
+                with self.subTest(run_id=run_id):
+                    with self.assertRaisesRegex(CodeTaskError, "needs a run id"):
+                        CodePhaseMachine(run_id=run_id, evidence_dir=directory)
+
+    def test_blank_verifier_rule_is_rejected(self):
+        # The second half of the verifier-rule guard: the rule is hashed and
+        # recorded in the seal, so a blank rule would be an unverifiable
+        # rule pinned into the evidence.
+        with tempfile.TemporaryDirectory() as directory:
+            for rule in ("", "   ", "\n"):
+                with self.subTest(rule=rule):
+                    with self.assertRaisesRegex(CodeTaskError, "verifier rule must be"):
+                        self._machine(Path(directory), verifier_rule=rule)
+
+    def test_non_text_verifier_rule_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for rule in (None, 42, ["rule"]):
+                with self.subTest(rule=rule):
+                    with self.assertRaisesRegex(CodeTaskError, "verifier rule must be"):
+                        self._machine(Path(directory), verifier_rule=rule)
+
+    def test_blank_verifier_rule_version_is_rejected(self):
+        # The second half of the verifier-rule-version guard.
+        with tempfile.TemporaryDirectory() as directory:
+            for version in ("", "   ", "\t"):
+                with self.subTest(version=version):
+                    with self.assertRaisesRegex(
+                        CodeTaskError, "verifier rule version must be"
+                    ):
+                        self._machine(Path(directory), verifier_rule_version=version)
+
+    def test_non_text_verifier_rule_version_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for version in (None, 7, ["v1"]):
+                with self.subTest(version=version):
+                    with self.assertRaisesRegex(
+                        CodeTaskError, "verifier rule version must be"
+                    ):
+                        self._machine(Path(directory), verifier_rule_version=version)
+
+    def test_non_blank_verifier_rule_is_accepted(self):
+        # The other side of the guard: a real rule and version must be
+        # accepted, so the tests above are not passing by accident.
+        with tempfile.TemporaryDirectory() as directory:
+            phases = self._machine(
+                Path(directory), verifier_rule="the declared check inputs", verifier_rule_version="v2"
+            )
+            self.assertEqual(phases.verifier_rule, "the declared check inputs")
+            self.assertEqual(phases.verifier_rule_version, "v2")
+
+
+class CheckInputPinPayloadTests(unittest.TestCase):
+    """The persisted phase payload must carry the pinned check inputs.
+
+    ``_payload`` writes the pins as ``[dict(pin) for pin in
+    (self._check_input_pins or ())]``.  That ``or`` has two halves: the
+    machine has no pins yet (``None`` -> empty list), and the machine has
+    pins (the tuple -> the pins themselves).  A planted fault that swapped
+    the connective (``or`` -> ``and``) made the pinned case silently
+    publish an EMPTY list, so the persisted evidence stopped recording
+    which inputs the check was bound to -- and the unpinned case crashed
+    outright on ``for pin in None``.
+
+    These tests drive both halves.
+    """
+
+    def make_check_repository(self, parent: Path) -> Path:
+        root = parent / "repo"
+        root.mkdir()
+        git(root, "init")
+        git(root, "config", "user.email", "northstar-tests@example.invalid")
+        git(root, "config", "user.name", "Northstar Tests")
+        (root / "app.py").write_text("value = 1\n", encoding="utf-8")
+        (root / "checks").mkdir()
+        (root / "checks" / "run_check.py").write_text("import sys\nsys.exit(0)\n", encoding="utf-8")
+        git(root, "add", "app.py", "checks/run_check.py")
+        git(root, "commit", "-m", "initial with host check")
+        return root
+
+    def test_unpinned_machine_persists_an_empty_pin_list(self):
+        # The falsy half: before any check input is pinned, the payload
+        # carries an empty list -- not a crash on a missing value.
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            phases = CodePhaseMachine(run_id="unpinned", evidence_dir=parent / "evidence")
+            persisted = json.loads(
+                (parent / "evidence" / "phases.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(persisted["check_input_pins"], [])
+            self.assertEqual(phases.as_dict()["check_input_pins"], [])
+
+    def test_pinned_machine_persists_every_pin(self):
+        # The truthy half: once the check inputs are pinned, the persisted
+        # payload must record them, one record per declared input.  A
+        # payload that silently dropped them would let the seal claim a
+        # binding the evidence does not contain.
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            source = self.make_check_repository(parent)
+            isolated = IsolatedCodeWorkspace(
+                source, evidence_root=parent / "evidence"
+            ).prepare()
+            try:
+                assert isolated.worktree is not None and isolated.evidence_dir is not None
+                (isolated.worktree / "app.py").write_text("value = 2\n", encoding="utf-8")
+                phases = CodePhaseMachine(
+                    run_id=isolated.run_id,
+                    evidence_dir=isolated.evidence_dir,
+                    worktree=isolated.worktree,
+                    start_commit=isolated.start_commit,
+                    check_inputs=("checks/run_check.py",),
+                )
+                phases.start()
+                phases.submit_plan({"files": ["app.py"], "steps": ["edit"], "check_indices": [0]})
+                phases.begin_verification()
+
+                persisted = json.loads(
+                    (isolated.evidence_dir / "phases.json").read_text(encoding="utf-8")
+                )
+                self.assertEqual(
+                    [pin["path"] for pin in persisted["check_input_pins"]],
+                    ["checks/run_check.py"],
+                )
+                self.assertEqual(
+                    [pin["path"] for pin in phases.as_dict()["check_input_pins"]],
+                    ["checks/run_check.py"],
+                )
+            finally:
+                isolated.cleanup()
+
+
 if __name__ == "__main__":
     unittest.main()
