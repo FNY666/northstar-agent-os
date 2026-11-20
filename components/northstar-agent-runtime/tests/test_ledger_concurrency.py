@@ -9,8 +9,11 @@ Covers the ageOfAgents absorption:
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import os
+import subprocess
 import sys
 import tempfile
 import threading
@@ -458,6 +461,231 @@ class DrivenPathTests(LedgerConcurrencyTestCase):
         self.assertEqual(
             sum(1 for e in events if e.idempotency_key == "approval-1"), 1
         )
+
+
+class DoubleGuardTests(LedgerConcurrencyTestCase):
+    """Rule: every guard's SECOND half is driven, not just its first.
+
+    Each guard in the module is a pair -- a TYPE half joined to an
+    EMPTINESS / BOUND half by ``or`` -- and the original suite drove only
+    one half of each.  A suite that feeds a non-string never tells
+    "refuse a non-string" apart from "refuse an empty string", so flipping
+    the connective left the suite green.  Every test below drives the half
+    the original suite missed, so each planted fault (the connective
+    flipped) is killed on its own.
+    """
+
+    # -- or@302: `not isinstance(seq, int) or isinstance(seq, bool)` ------
+
+    def test_a_non_integer_seq_is_not_an_event(self):
+        """The TYPE half of the seq guard: a string seq is not a sequence."""
+        self._write_raw(
+            '{"seq":"3","payload":"p","idempotency_key":"k","record_hash":"h"}\n'
+        )
+        self.assertEqual(
+            self.log.read_events(), (), "a string seq is not a whole event"
+        )
+        self.assertIsNone(
+            lc._parse_line(
+                '{"seq":"3","payload":"p","idempotency_key":"k","record_hash":"h"}'
+            )
+        )
+
+    def test_a_boolean_seq_is_not_an_event(self):
+        """The BOOL half of the seq guard: True is not a sequence number."""
+        self._write_raw(
+            '{"seq":true,"payload":"p","idempotency_key":"k","record_hash":"h"}\n'
+        )
+        self.assertEqual(self.log.read_events(), (), "a boolean seq is not an event")
+        self.assertIsNone(
+            lc._parse_line(
+                '{"seq":true,"payload":"p","idempotency_key":"k","record_hash":"h"}'
+            )
+        )
+
+    def test_a_missing_seq_is_not_an_event(self):
+        """A line with no seq at all is refused too."""
+        self._write_raw('{"payload":"p","idempotency_key":"k","record_hash":"h"}\n')
+        self.assertEqual(self.log.read_events(), ())
+
+    # -- or@475: `not isinstance(payload, str) or not payload` -----------
+
+    def test_an_empty_payload_is_refused(self):
+        """The EMPTINESS half of the append guard."""
+        with self.assertRaises(lc.LedgerConcurrencyError):
+            self.log.append("")
+        self.assertEqual(self.log.read_events(), (), "nothing was appended")
+
+    def test_a_non_string_payload_is_refused(self):
+        """The TYPE half of the append guard."""
+        for payload in (123, ["a"], None, 1.5, True):
+            with self.assertRaises(lc.LedgerConcurrencyError):
+                self.log.append(payload)
+        self.assertEqual(self.log.read_events(), (), "nothing was appended")
+
+    # -- or@547: `not isinstance(key, str) or not key` -------------------
+
+    def test_an_empty_idempotency_key_is_refused(self):
+        """The EMPTINESS half of the update guard."""
+        with self.assertRaises(lc.LedgerConcurrencyError):
+            self.log.update(
+                key="",
+                check=lambda events: True,
+                decide=lambda events: {"d": 1},
+                payload_of=lambda d: "body",
+            )
+        self.assertEqual(self.log.read_events(), (), "nothing was appended")
+
+    def test_a_non_string_idempotency_key_is_refused(self):
+        """The TYPE half of the update guard."""
+        for key in (123, None, ["k"]):
+            with self.assertRaises(lc.LedgerConcurrencyError):
+                self.log.update(
+                    key=key,
+                    check=lambda events: True,
+                    decide=lambda events: {"d": 1},
+                    payload_of=lambda d: "body",
+                )
+        self.assertEqual(self.log.read_events(), (), "nothing was appended")
+
+    # -- or@564: `not isinstance(payload, str) or not payload` (update) --
+
+    def test_a_decision_that_renders_an_empty_payload_is_refused(self):
+        """The EMPTINESS half of the update payload guard."""
+        with self.assertRaises(lc.LedgerConcurrencyError):
+            self.log.update(
+                key="k-empty",
+                check=lambda events: True,
+                decide=lambda events: {"d": 1},
+                payload_of=lambda d: "",
+            )
+        self.assertEqual(self.log.read_events(), (), "nothing was appended")
+
+    def test_a_decision_that_renders_a_non_string_payload_is_refused(self):
+        """The TYPE half of the update payload guard."""
+        for rendered in (123, None, ["x"]):
+            with self.assertRaises(lc.LedgerConcurrencyError):
+                self.log.update(
+                    key=f"k-{type(rendered).__name__}",
+                    check=lambda events: True,
+                    decide=lambda events: {"d": 1},
+                    payload_of=lambda d: rendered,
+                )
+        self.assertEqual(self.log.read_events(), (), "nothing was appended")
+
+    # -- or@681: `isinstance(exit_code, bool) or not isinstance(..., int)` -
+
+    def test_a_boolean_exit_code_is_refused(self):
+        """The BOOL half of the exit-code guard."""
+        for value in (True, False):
+            with self.assertRaises(lc.LedgerConcurrencyError):
+                lc.classify_verification(exit_code=value)
+
+    def test_a_non_integer_exit_code_is_refused(self):
+        """The TYPE half of the exit-code guard."""
+        for value in ("1", 1.0, None, [1]):
+            with self.assertRaises(lc.LedgerConcurrencyError):
+                lc.classify_verification(exit_code=value)
+
+    # -- or@684: `not isinstance(signal, str) or not signal` ------------
+
+    def test_an_empty_signal_is_refused(self):
+        """The EMPTINESS half of the signal guard."""
+        with self.assertRaises(lc.LedgerConcurrencyError):
+            lc.classify_verification(signals=("",))
+        with self.assertRaises(lc.LedgerConcurrencyError):
+            lc.classify_verification(signals=("relay_unavailable", ""))
+
+    def test_a_non_string_signal_is_refused(self):
+        """The TYPE half of the signal guard."""
+        for value in (123, None, ["s"]):
+            with self.assertRaises(lc.LedgerConcurrencyError):
+                lc.classify_verification(signals=(value,))
+
+    # -- or@698: `isinstance(http_status, bool) or not isinstance(...)` --
+
+    def test_a_boolean_http_status_is_refused(self):
+        """The BOOL half of the http-status guard."""
+        for value in (True, False):
+            with self.assertRaises(lc.LedgerConcurrencyError):
+                lc.classify_verification(http_status=value)
+
+    def test_a_non_integer_http_status_is_refused(self):
+        """The TYPE half of the http-status guard."""
+        for value in ("403", 403.0, [403]):
+            with self.assertRaises(lc.LedgerConcurrencyError):
+                lc.classify_verification(http_status=value)
+
+    # -- retF@774 / retF@777: the two `return False` branches ----------
+
+    def _load_a_copy_with(self, injected: str):
+        """Load a copy of the module with one extra import injected.
+
+        ``stdlib_only()`` reads ``__file__`` -- its OWN source -- so a copy
+        is what lets the test drive the branches the real module never
+        reaches.
+        """
+        source = (ROOT / "ledger_concurrency.py").read_text(encoding="utf-8")
+        anchor = "from typing import Any, Callable, Dict, List, Optional, Tuple\n"
+        self.assertIn(anchor, source)
+        patched = source.replace(anchor, anchor + injected + "\n", 1)
+        copy_path = self.dir / "ledger_concurrency_copy.py"
+        copy_path.write_text(patched, encoding="utf-8")
+        name = "ledger_concurrency_copy_%d" % id(self)
+        spec = importlib.util.spec_from_file_location(name, copy_path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        try:
+            spec.loader.exec_module(module)
+        finally:
+            sys.modules.pop(name, None)
+        return module
+
+    def test_stdlib_only_is_false_for_a_module_with_a_foreign_import(self):
+        """The `import` branch of the stdlib check must report False."""
+        copy = self._load_a_copy_with("import unittest")
+        self.assertFalse(copy.stdlib_only(), "a foreign import is not stdlib-only")
+
+    def test_stdlib_only_is_false_for_a_module_with_a_foreign_from_import(self):
+        """The `from ... import` branch of the stdlib check must report False."""
+        copy = self._load_a_copy_with("from unittest import TestCase")
+        self.assertFalse(copy.stdlib_only(), "a foreign from-import is not stdlib-only")
+
+    def test_stdlib_only_is_true_for_the_real_module(self):
+        """The final `return True` is only reached when nothing is foreign."""
+        self.assertTrue(lc.stdlib_only())
+
+    # -- eq@807 / eq@823 / eq@827 / eq@829: the module's own self-check --
+
+    def test_the_modules_self_check_passes(self):
+        """``main()`` is the module's own self-check; it must pass.
+
+        The self-check asserts the gapless sequence, the idempotent update
+        and the Infra flag.  Running it is what verifies those assertions
+        are actually made -- a self-check that silently stops asserting
+        verifies nothing.
+        """
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            lc.main()
+        printed = buffer.getvalue()
+        self.assertIn("ledger-concurrency OK", printed)
+
+    # -- eq@836: `if __name__ == "__main__":` ---------------------------
+
+    def test_running_the_module_as_a_script_runs_its_self_check(self):
+        """The module must still self-check when run as a script."""
+        completed = subprocess.run(
+            [sys.executable, str(ROOT / "ledger_concurrency.py")],
+            cwd=str(ROOT),
+            env={**os.environ, "PYTHONPATH": str(ROOT)},
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stdout)
+        self.assertIn("ledger-concurrency OK", completed.stdout)
 
 
 class ModuleShapeTests(unittest.TestCase):
