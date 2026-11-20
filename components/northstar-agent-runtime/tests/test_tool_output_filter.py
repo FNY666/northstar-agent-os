@@ -404,3 +404,68 @@ class TestReceiptsAndResultShape(FilterTestCase):
             first.output.split("\n", 1)[1], second.output.split("\n", 1)[1]
         )
         self.assertNotEqual(first.full_output_path, second.full_output_path)
+
+
+class FilterConfigGuardSecondHalfTests(unittest.TestCase):
+    """The `or@165` guard: the BOOLEAN half of the int guard.
+
+    `FilterConfig.__post_init__` validates three integers with a double
+    guard:
+
+        if isinstance(value, bool) or not isinstance(value, int):
+
+    A bool IS an int in Python, so the first half exists precisely to
+    exclude bools -- and it is never true on its own, because `not
+    isinstance(value, int)` is False for a bool.  The tool-output-filter
+    slice's own suite exercised only the "not an int" half, so the
+    planted fault `or@165` (or -> and) SURVIVED it: with the connective
+    flipped, a boolean would be waved through as a byte cap or a line
+    count.
+
+    The consequence is not cosmetic: `True` is an int of value 1, so a
+    boolean `max_bytes` would cap every body at ONE byte, and a boolean
+    `preview_lines` would keep one line.
+    """
+
+    def test_a_boolean_max_bytes_is_refused(self):
+        """The `or@165` guard: a bool byte cap must be refused."""
+        with self.assertRaises(ValueError):
+            FilterConfig(max_bytes=True)
+
+    def test_a_boolean_preview_lines_is_refused(self):
+        """The `or@165` guard on another field it guards."""
+        with self.assertRaises(ValueError):
+            FilterConfig(preview_lines=True)
+
+    def test_a_boolean_preview_max_bytes_is_refused(self):
+        """The `or@165` guard on the third field it guards."""
+        with self.assertRaises(ValueError):
+            FilterConfig(preview_max_bytes=False)
+
+    def test_a_float_max_bytes_is_refused(self):
+        """The other half of the guard, as the control.
+
+        A float is not an int, so the "not an int" half refuses it.
+        """
+        with self.assertRaises(ValueError):
+            FilterConfig(max_bytes=1024.0)
+
+    def test_a_string_preview_lines_is_refused(self):
+        """The other half of the guard, from the other side."""
+        with self.assertRaises(ValueError):
+            FilterConfig(preview_lines="10")
+
+    def test_an_ordinary_max_bytes_is_accepted(self):
+        """The control: an ordinary int is a legal cap."""
+        self.assertEqual(FilterConfig(max_bytes=4096).max_bytes, 4096)
+
+    def test_a_boolean_is_not_stored_as_its_integer_value(self):
+        """The consequence, stated plainly.
+
+        `True` is an int of value 1 in Python.  If the guard let it
+        through, the filter would cap every body at one byte -- and the
+        config would read back as a cap of 1, indistinguishable from a
+        deliberate one.
+        """
+        with self.assertRaises(ValueError):
+            FilterConfig(max_bytes=True)
