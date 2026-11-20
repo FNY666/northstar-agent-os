@@ -275,5 +275,73 @@ class IntentBoundRetryEdgeTests(unittest.TestCase):
                 self.assertFalse(decision.allowed)
 
 
+class PreconditionGuardSecondHalfTests(unittest.TestCase):
+    """The `retT@157` guard: a precondition that is ABSENT.
+
+    `_evaluate_precondition` has one constant return that is a real
+    decision, not a default: when there is NO precondition, the
+    premise is vacuously satisfied and the answer is True.  The planted
+    fault flips that `return True` to `return False`.
+
+    The intent-bound-retry slice's own suite exercised the *other*
+    returns of the same function -- a precondition that holds, one that
+    is false, one that raises -- but never the ABSENT case, so the
+    constant was never read and the fault SURVIVED.
+
+    With `return True -> return False`, a gate declared with no
+    precondition would refuse every retry: an unevaluable premise is
+    not the same as an unsatisfied one, and the two must not collapse.
+    """
+
+    def test_an_absent_precondition_is_satisfied(self):
+        """The `retT@157` guard, taken one way.
+
+        No precondition means no premise to violate, so the answer is
+        True.
+        """
+        from intent_bound_retry import _evaluate_precondition
+
+        self.assertIs(_evaluate_precondition(None, {"call": "state"}), True)
+
+    def test_an_absent_precondition_is_satisfied_for_any_state(self):
+        """The `retT@157` guard, independent of the state.
+
+        The absence of a precondition does not depend on the state, so
+        the answer must not either.
+        """
+        from intent_bound_retry import _evaluate_precondition
+
+        self.assertIs(_evaluate_precondition(None, None), True)
+        self.assertIs(_evaluate_precondition(None, 0), True)
+        self.assertIs(_evaluate_precondition(None, ""), True)
+
+    def test_a_precondition_that_holds_is_satisfied(self):
+        """The control: the other returns still agree."""
+        from intent_bound_retry import _evaluate_precondition
+
+        self.assertIs(_evaluate_precondition(lambda state: True, {}), True)
+
+    def test_a_precondition_that_is_false_is_not_satisfied(self):
+        """The other side of the same function, so the two are not
+        conflated: a FALSE precondition must still be False."""
+        from intent_bound_retry import _evaluate_precondition
+
+        self.assertIs(_evaluate_precondition(lambda state: False, {}), False)
+
+    def test_a_precondition_that_raises_is_not_satisfied(self):
+        """The fail-closed case: an unevaluable premise is False.
+
+        This is the distinction the mutant erases.  An absent
+        precondition is not an unevaluable one -- absence means there
+        was never a premise to evaluate.
+        """
+        from intent_bound_retry import _evaluate_precondition
+
+        def raising(state):
+            raise RuntimeError("boom")
+
+        self.assertIs(_evaluate_precondition(raising, {}), False)
+
+
 if __name__ == "__main__":
     unittest.main()
