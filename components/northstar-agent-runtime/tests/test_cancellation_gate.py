@@ -502,5 +502,168 @@ class GateResumeTests(RuntimeTestCase):
         self.assertFalse((Path(workspace) / "notes.md").exists())
 
 
+class SessionGuardSecondHalfTests(unittest.TestCase):
+    """The SECOND half of two session-file guards.
+
+    Both guards are *double* guards: a type half joined to a second half
+    by `and`.  The session suite drove only the first half, so flipping
+    the connective left the suite green -- the planted faults `and@102`
+    and `eq@140` SURVIVED it.
+
+      and@102  `isinstance(key, str) and key.lower() in _SESSION_CONTENT_KEYS`
+                The second half is the MEMBERSHIP test.  The first half
+                says "the key is a string"; the second says "and it
+                names a content key".  A string key that is NOT a
+                content key must keep its value; a string key that IS
+                one must have its value replaced.  The two halves say
+                different things, and the membership half is the one
+                under test: flipping `and` to `or` would replace EVERY
+                string key's value, which is a false redaction of data
+                the guard never meant to touch.
+      eq@140   `error.errno == errno.ELOOP`
+                `== -> !=` swaps which errno takes the branch, so the
+                symlink refusal must fire on ELOOP and NOT fire on any
+                other errno.
+
+    Each test here fails when its planted fault is applied alone.
+    """
+
+    def test_a_content_key_has_its_value_replaced(self):
+        """The membership half of `and@102`, taken one way.
+
+        ``"content"`` IS in ``_SESSION_CONTENT_KEYS``, so its value is
+        the secret and must be replaced by the omission marker.
+        """
+        from sessions import _redact_session_payload
+
+        redacted = _redact_session_payload({"content": "secret"})
+
+        self.assertEqual(
+            redacted.get("content"),
+            "[omitted by session privacy mode]",
+            "a content key's value must be replaced",
+        )
+
+    def test_a_string_key_that_is_not_a_content_key_keeps_its_value(self):
+        """The membership half of `and@102`, taken the other way.
+
+        ``"kind"`` is a string but is NOT in ``_SESSION_CONTENT_KEYS``:
+        it names no conversational content, so its value is kept.
+        Flipping `and` to `or` makes the branch fire for ANY string key
+        and replaces this value too -- which is the false redaction
+        this test closes.
+        """
+        from sessions import _redact_session_payload
+
+        redacted = _redact_session_payload({"kind": "note"})
+
+        self.assertEqual(
+            redacted.get("kind"),
+            "note",
+            "a string key that is not a content key must keep its value",
+        )
+
+    def test_the_membership_test_is_case_insensitive(self):
+        """The membership half again, with a case variant.
+
+        The guard lowercases the key before the membership test, so
+        ``"CONTENT"`` is a content key.  A guard that compared without
+        lowering would keep the secret -- and flipping the connective
+        would hide that, because the redacting branch would fire anyway.
+        """
+        from sessions import _redact_session_payload
+
+        redacted = _redact_session_payload({"CONTENT": "secret"})
+
+        self.assertEqual(
+            redacted.get("CONTENT"),
+            "[omitted by session privacy mode]",
+            "the membership test must be case-insensitive",
+        )
+
+    def test_a_non_string_key_is_not_treated_as_a_content_key(self):
+        """The type half still guards.
+
+        The first half of `and@102` says "the key is a string".  A
+        non-string key cannot be lowered, so the guard must leave it
+        alone -- the type half must still hold when the membership half
+        is exercised.
+        """
+        from sessions import _redact_session_payload
+
+        redacted = _redact_session_payload({1: "value", "content": "secret"})
+
+        self.assertEqual(redacted.get(1), "value")
+        self.assertEqual(redacted.get("content"), "[omitted by session privacy mode]")
+
+    def test_a_symlinked_transcript_is_refused(self):
+        """The `eq@140` half: ELOOP takes the branch.
+
+        Opening a symlink with ``O_NOFOLLOW`` raises ``ELOOP``.  The
+        guard must turn that into a ``SessionIntegrityError`` that says
+        it is refusing to follow a transcript symlink -- not a bare
+        ``OSError``.
+        """
+        import errno
+        import os
+        import tempfile
+
+        from sessions import SessionIntegrityError, _open_regular_nofollow
+
+        with tempfile.TemporaryDirectory() as workspace:
+            root = Path(workspace)
+            target = root / "target.jsonl"
+            target.write_text("{}\n", encoding="utf-8")
+            link = root / "link.jsonl"
+            try:
+                os.symlink(target, link)
+            except (OSError, NotImplementedError):
+                self.skipTest("symlinks are not available here")
+
+            with self.assertRaises(SessionIntegrityError) as caught:
+                _open_regular_nofollow(link, os.O_RDONLY)
+            self.assertIn("symlink", str(caught.exception))
+            self.assertIsInstance(caught.exception.__cause__, OSError)
+            self.assertEqual(caught.exception.__cause__.errno, errno.ELOOP)
+
+    def test_a_transcript_that_is_not_a_symlink_is_not_refused_as_one(self):
+        """The `eq@140` half from the other side.
+
+        ``== -> !=`` makes the branch fire on EVERY errno other than
+        ELOOP, so an ordinary error (say ``ENOENT``) would be reported
+        as "refusing to follow a transcript symlink" -- a lie about the
+        cause.  A missing file must raise the ordinary ``OSError``, not
+        a ``SessionIntegrityError`` about symlinks.
+        """
+        import errno
+        import os
+        import tempfile
+
+        from sessions import SessionIntegrityError, _open_regular_nofollow
+
+        with tempfile.TemporaryDirectory() as workspace:
+            missing = Path(workspace) / "absent.jsonl"
+            with self.assertRaises(OSError) as caught:
+                _open_regular_nofollow(missing, os.O_RDONLY)
+            self.assertNotIsInstance(caught.exception, SessionIntegrityError)
+            self.assertEqual(caught.exception.errno, errno.ENOENT)
+
+    def test_a_regular_transcript_opens_without_a_symlink_refusal(self):
+        """The control: the ordinary path is untouched."""
+        import os
+        import tempfile
+
+        from sessions import _open_regular_nofollow
+
+        with tempfile.TemporaryDirectory() as workspace:
+            path = Path(workspace) / "plain.jsonl"
+            path.write_text("{}\n", encoding="utf-8")
+            fd = _open_regular_nofollow(path, os.O_RDONLY)
+            try:
+                self.assertGreaterEqual(os.fstat(fd).st_size, 0)
+            finally:
+                os.close(fd)
+
+
 if __name__ == "__main__":
     unittest.main()
