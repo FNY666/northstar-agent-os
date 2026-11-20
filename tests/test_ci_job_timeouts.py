@@ -234,5 +234,120 @@ class GuardUnitTests(unittest.TestCase):
         self.assertEqual(ci_job_timeouts.jobs_without_timeout(workflow), [])
 
 
+class GuardSecondHalfTests(unittest.TestCase):
+    """The SECOND half of each guard in ``ci_job_timeouts``.
+
+    Two guards, each with two halves, and the slice's own suite drove
+    only one half of each:
+
+      gt@146   ``line.strip() and _indent_of(line) > indent``
+      and@146  ... the "is deeper" half
+      and@216  ``_indent_of(line) == child_indent and
+               line.strip() == "steps:"``
+
+    ``gt@146`` finds a job's own keys: the lines DEEPER than the job
+    header.  The slice's suite drove the "not blank" half only, so the
+    planted fault ``gt@146`` (``>`` -> ``>=``) SURVIVED it -- with the
+    comparison weakened, a line at the job's OWN indentation would be
+    counted as deeper, and the job's own key would be mistaken for a
+    nested one.
+
+    ``and@216`` finds a job's ``steps:`` key.  The slice's suite drove
+    the "is at the child indent" half only, so ``and@216``
+    (``and`` -> ``or``) SURVIVED it -- with the connective flipped, a
+    ``steps:`` key at ANY indentation would be accepted, so a nested
+    mapping's own ``steps:`` would be read as the job's.
+    """
+
+    # A job followed by a SIBLING key at the job's own indentation.
+    # The sibling is not part of the job, but it is inside the job's
+    # body region -- so the region's "deeper than the header" test has
+    # to exclude it, and the job's own key must still be found.
+    _SIBLING_AFTER_JOB = (
+        "jobs:\n"
+        "  job:\n"
+        "    timeout-minutes: 30\n"
+        "    steps:\n"
+        "      - run: echo hi\n"
+        "  env: global-value\n"
+    )
+
+    # A job with a NESTED mapping that has its own `steps:` key, before
+    # the job's own `steps:` key.
+    _NESTED_STEPS = (
+        "jobs:\n"
+        "  job:\n"
+        "    timeout-minutes: 30\n"
+        "    env:\n"
+        "      steps:\n"
+        "        - name: inner\n"
+        "          run: echo inner\n"
+        "        - name: inner2\n"
+        "          run: echo inner2\n"
+        "    steps:\n"
+        "      - name: outer\n"
+        "        run: echo outer\n"
+    )
+
+    def test_a_job_with_a_sibling_key_still_finds_its_own_timeout(self):
+        """`gt@146`: the "is deeper" half.
+
+        A job's body region can contain a line at the job's OWN
+        indentation -- a sibling key that follows the job.  That line
+        is NOT deeper than the header, so it must not be counted as a
+        nested key; and the job's own ``timeout-minutes``, which IS
+        deeper, must still be found.
+
+        With `> -> >=` the sibling counts as deeper, so the shallowest
+        "deeper" line becomes the sibling's indentation rather than
+        the job's, and the job's own key is missed: the job reads as
+        having no timeout at all.
+        """
+        timeouts = ci_job_timeouts.job_timeout(self._SIBLING_AFTER_JOB)
+        self.assertEqual(timeouts["job"], 30)
+        self.assertEqual(
+            ci_job_timeouts.jobs_without_timeout(self._SIBLING_AFTER_JOB), []
+        )
+
+    def test_a_job_with_no_timeout_at_all_is_still_named(self):
+        """`gt@146`: the control -- nothing there means nothing there."""
+        workflow = (
+            "jobs:\n"
+            "  job:\n"
+            "    runs-on: ubuntu-latest\n"
+            "    steps:\n"
+            "      - run: echo hi\n"
+        )
+        self.assertEqual(ci_job_timeouts.jobs_without_timeout(workflow), ["job"])
+
+    def test_a_nested_mapping_steps_key_is_not_the_jobs_steps_key(self):
+        """`and@216`: the "is at the child indent" half.
+
+        The job's ``steps:`` key sits at the job's child indentation.  A
+        ``steps:`` key inside a NESTED mapping sits deeper, and it is
+        that mapping's key -- reading it as the job's would count the
+        nested steps and miss the job's own.
+
+        With `and -> or` the nested ``steps:`` is accepted first, so
+        the job's own steps are never found.
+        """
+        counts = ci_job_timeouts.job_step_count(self._NESTED_STEPS)
+        self.assertEqual(counts["job"], 1)
+
+    def test_the_jobs_own_steps_key_is_found_when_there_is_no_nesting(self):
+        """`and@216`: the control -- a plain job's steps are counted."""
+        workflow = (
+            "jobs:\n"
+            "  job:\n"
+            "    timeout-minutes: 30\n"
+            "    steps:\n"
+            "      - name: one\n"
+            "        run: echo hi\n"
+            "      - name: two\n"
+            "        run: echo hi\n"
+        )
+        self.assertEqual(ci_job_timeouts.job_step_count(workflow), {"job": 2})
+
+
 if __name__ == "__main__":
     unittest.main()

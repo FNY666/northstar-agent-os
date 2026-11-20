@@ -344,5 +344,67 @@ class GuardUnitTests(unittest.TestCase):
         self.assertTrue(covered == set(), covered)
 
 
+class CompileStepGuardSecondHalfTests(unittest.TestCase):
+    """The `lt@76` guard: the wrapped-command loop's bound.
+
+    ``compile_steps`` joins a compile command that is wrapped over
+    several lines with a trailing backslash:
+
+        while block[-1].rstrip().endswith("\\") and index + 1 < len(lines):
+
+    Two conditions hold there: the block CONTINUES (``endswith``) and
+    there IS a next line (``index + 1 < len(lines)``).  The slice's own
+    suite drove the first one only, so the planted fault
+    ``lt@76`` (``<`` -> ``<=``) SURVIVED it: with the bound weakened,
+    the loop would step onto a line that does not exist and raise
+    ``IndexError`` on a command whose trailing backslash is the LAST
+    line of the file.
+
+    So the discriminating input is a workflow whose final line is a
+    ``py_compile`` command ending in a backslash -- the loop's
+    ``index + 1 < len(lines)`` half is the one that must stop it.
+    """
+
+    def test_a_compile_command_whose_last_line_is_a_backslash_does_not_crash(self):
+        """`lt@76`: the loop must stop at the end of the file.
+
+        The backslash says "the command continues", but there is no
+        next line.  The parser must stop anyway -- reading past the
+        end of the file is an ``IndexError``, not a step.
+        """
+        workflow = (
+            "jobs:\n"
+            "  a_component:\n"
+            "    steps:\n"
+            "      - name: Compile\n"
+            "        working-directory: components/a_component\n"
+            "        run: python -m py_compile *.py \\\n"
+        )
+        steps = ci_compile_coverage.compile_steps(workflow)
+        self.assertEqual(steps, [("components/a_component", ["*.py"])])
+
+    def test_a_trailing_backslash_before_another_line_is_still_joined(self):
+        """`lt@76`: the control -- the loop DOES continue when it can.
+
+        The other half of the guard is what makes the bound a bound: a
+        backslash followed by another line means the command really
+        does continue, and the continuation must be read.
+        """
+        workflow = (
+            "jobs:\n"
+            "  a_component:\n"
+            "    steps:\n"
+            "      - name: Compile\n"
+            "        working-directory: components/a_component\n"
+            "        run: python -m py_compile *.py \\\n"
+            "          providers/*.py\n"
+        )
+        steps = ci_compile_coverage.compile_steps(workflow)
+        self.assertEqual(
+            steps,
+            [("components/a_component", ["*.py", "providers/*.py"])],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
