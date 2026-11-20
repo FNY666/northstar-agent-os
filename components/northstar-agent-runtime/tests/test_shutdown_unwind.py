@@ -439,5 +439,93 @@ class ReplayCountingTests(RuntimeTestCase):
         self.assertEqual(report.counts["tool_errors"], 0, "an interrupted call is not a tool failure")
 
 
+class UnwindGuardSecondHalfTests(unittest.TestCase):
+    """The SECOND half of two unwind guards.
+
+    Both guards compare a name or a classification against a constant.
+    The unwind slice's own suite drove only one side of each comparison,
+    so flipping the equality left the suite green: the planted faults
+    eq@74 and eq@110 both SURVIVED it.
+
+      eq@74   `if name == "ResumeRefusedError":`
+              The lazy module attribute resolver.  The comparison has
+              two halves -- the name that IS the canonical class, and
+              the name that is NOT.  With `== -> !=`, the resolver
+              would import the canonical class for EVERY attribute and
+              refuse the one it is there to serve, so the module would
+              raise AttributeError for `ResumeRefusedError` -- the
+              exact name the resolver exists to provide.
+      eq@110  `self.classification == RESUME_INTERRUPTED`
+              The `interrupted` property.  A clean outcome must report
+              False and an interrupted one True.  With `== -> !=` the
+              two answers are swapped: a clean transcript would claim to
+              be interrupted, and an interrupted one would claim to be
+              clean.
+
+    Each test here fails when its planted fault is applied alone.
+    """
+
+    def test_the_canonical_error_name_resolves(self):
+        """`eq@74`: the name that IS the canonical class.
+
+        The resolver exists so a caller can write
+        ``shutdown_unwind.ResumeRefusedError`` without the import
+        cycle.  It must resolve to the SAME class the canonical module
+        defines -- not a copy, not a different exception.
+        """
+        import shutdown_unwind
+        from sessions import ResumeRefusedError as Canonical
+
+        self.assertIs(shutdown_unwind.ResumeRefusedError, Canonical)
+
+    def test_an_unknown_attribute_name_is_refused(self):
+        """`eq@74`: the name that is NOT the canonical class.
+
+        Every other name must raise AttributeError.  With `== -> !=`,
+        the resolver would try to import the canonical class for ANY
+        name -- and since the canonical class does exist, the import
+        would succeed and the wrong class would be returned under a
+        name that does not mean it.
+        """
+        import shutdown_unwind
+
+        with self.assertRaises(AttributeError):
+            shutdown_unwind.NoSuchAttribute  # noqa: B018 - the lookup is the test
+
+    def test_the_canonical_error_is_a_session_integrity_error(self):
+        """`eq@74`: the resolved class keeps its meaning.
+
+        A caller that already catches SessionIntegrityError must catch
+        this one too -- that is why the resolver points at the
+        canonical class rather than defining a new one.
+        """
+        import shutdown_unwind
+        from sessions import SessionIntegrityError
+
+        self.assertTrue(issubclass(shutdown_unwind.ResumeRefusedError, SessionIntegrityError))
+
+    def test_a_clean_outcome_is_not_interrupted(self):
+        """`eq@110`: the clean side of the comparison."""
+        from shutdown_unwind import RESUME_CLEAN, UnwindOutcome
+
+        self.assertFalse(UnwindOutcome(classification=RESUME_CLEAN).interrupted)
+
+    def test_an_interrupted_outcome_is_interrupted(self):
+        """`eq@110`: the interrupted side of the comparison."""
+        from shutdown_unwind import RESUME_INTERRUPTED, UnwindOutcome
+
+        self.assertTrue(UnwindOutcome(classification=RESUME_INTERRUPTED).interrupted)
+
+    def test_the_default_outcome_is_clean_and_not_interrupted(self):
+        """`eq@110`: the default, read through the property.
+
+        An outcome with no classification given is CLEAN, so it must
+        not claim to be interrupted.
+        """
+        from shutdown_unwind import UnwindOutcome
+
+        self.assertFalse(UnwindOutcome().interrupted)
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
