@@ -15,7 +15,10 @@ that could have been offloaded has thrown away recoverable bytes for nothing.
 """
 from __future__ import annotations
 
+import random
+import re
 import sys
+import types
 import unittest
 from pathlib import Path
 
@@ -652,38 +655,38 @@ class ContextBudgetSecondHalfTests(unittest.TestCase):
             self.assertEqual(len(capped.encode("utf-8")), len(text.encode("utf-8")))
             self.assertFalse(record["truncated"])
 
-    # -- or@682: the type half of the memory-tax source guard ----------
+    # -- or@686: the type half of the memory-tax source guard ----------
 
     def test_a_non_string_source_is_refused(self):
-        """`or@682`: the type half of the source guard."""
+        """`or@686`: the type half of the source guard."""
         ledger = MemoryTaxLedger()
         with self.assertRaises(ValueError) as ctx:
             ledger.record(source=42, tokens=10)
         self.assertIn("source must be a non-empty string", str(ctx.exception))
 
     def test_an_empty_source_is_refused(self):
-        """`or@682`: the emptiness half of the source guard."""
+        """`or@686`: the emptiness half of the source guard."""
         ledger = MemoryTaxLedger()
         with self.assertRaises(ValueError):
             ledger.record(source="", tokens=10)
 
-    # -- lt@684: the sign of the memory-tax token count ----------------
+    # -- lt@688: the sign of the memory-tax token count ----------------
 
     def test_a_negative_token_count_is_refused(self):
-        """`lt@684`: the sign half of the token-count guard."""
+        """`lt@688`: the sign half of the token-count guard."""
         ledger = MemoryTaxLedger()
         with self.assertRaises(ValueError) as ctx:
             ledger.record(source="m", tokens=-1)
         self.assertIn("tokens must be a non-negative int", str(ctx.exception))
 
     def test_a_zero_token_count_is_allowed(self):
-        """`lt@684`: the boundary -- zero tokens is not a negative count."""
+        """`lt@688`: the boundary -- zero tokens is not a negative count."""
         ledger = MemoryTaxLedger()
         self.assertEqual(ledger.record(source="m", tokens=0), 0)
         self.assertEqual(ledger.injected_tokens, 0)
 
     def test_a_boolean_token_count_is_refused(self):
-        """`or@684`: the type half of the token-count guard, on a bool.
+        """`or@688`: the type half of the token-count guard, on a bool.
 
         A bool IS an int in Python, so only the isinstance(..., bool)
         half can catch it.
@@ -693,7 +696,204 @@ class ContextBudgetSecondHalfTests(unittest.TestCase):
             ledger.record(source="m", tokens=True)
 
     def test_a_float_token_count_is_refused(self):
-        """`or@684`: the other type half -- a float is not an int."""
+        """`or@688`: the other type half -- a float is not an int."""
         ledger = MemoryTaxLedger()
         with self.assertRaises(ValueError):
             ledger.record(source="m", tokens=10.0)
+
+
+class AutoMemoryByteCapEquivalentMutantTests(unittest.TestCase):
+    """``lt@579``: the auto-memory byte cap -- an EQUIVALENT mutant.
+
+    The planted fault at this site (``<`` -> ``<=``) survives the slice's
+    suite, and it is **not killable, and provably so**.
+
+    The site is inside ``cap_auto_memory``::
+
+        bytes_kept = min(body_bytes, limits.auto_memory_max_bytes)
+        if bytes_kept < body_bytes:
+            body = body.encode("utf-8")[:bytes_kept].decode("utf-8", errors="ignore")
+            body_bytes = bytes_kept
+
+    The mutant turns the bound into ``<=``, so the cut branch runs one
+    extra time -- at ``bytes_kept == body_bytes`` exactly.
+
+    That extra run is a no-op, because:
+
+    * ``bytes_kept = min(body_bytes, auto_memory_max_bytes)``, so
+      ``bytes_kept == body_bytes`` exactly when the body already fits
+      the byte cap;
+    * under the mutant the cut is
+      ``body.encode("utf-8")[:bytes_kept].decode("utf-8", errors="ignore")``
+      with ``bytes_kept == len(body.encode("utf-8"))`` -- slicing a
+      string to exactly its own length is the IDENTITY, and re-decoding
+      well-formed UTF-8 is the identity too;
+    * the mutant branch also assigns ``body_bytes = bytes_kept``, which
+      is the value it already had.
+
+    The ``truncated`` flag is computed from ``lines_kept`` and
+    ``bytes_kept`` against ``bytes_total``, none of which the mutant
+    touches.  So the two versions agree at every input.
+
+    This class PROVES that by differential testing: it loads the module
+    twice -- once as it is, once with the bound mutated -- and compares
+    the two across a randomised sweep of line counts, byte limits and
+    multibyte contents.  A single behavioural difference anywhere in the
+    sweep fails the test.
+
+    It is an EQUIVALENT mutant, not a gap in the suite, and no test can
+    distinguish it.  It is recorded here so the next person does not
+    spend a round looking for one.
+    """
+
+    #: The exact source line the mutation targets.
+    _BOUND_RE = re.compile(r"if bytes_kept (?P<op>[<>]=?) body_bytes:")
+
+    def _load_with_bound(self, op: str):
+        """Load ``context_budget`` with the byte-cap bound set to ``op``.
+
+        The module is re-executed from its own source with the one
+        comparison rewritten, in a fresh module object, so the two
+        versions coexist in one process and can be called side by side.
+        """
+        import context_budget
+
+        source = Path(context_budget.__file__).read_text(encoding="utf-8")
+        matches = self._BOUND_RE.findall(source)
+        self.assertEqual(
+            len(matches), 1, f"expected exactly one byte cap, found {matches}"
+        )
+        mutated = self._BOUND_RE.sub(
+            f"if bytes_kept {op} body_bytes:", source, count=1
+        )
+        name = f"_context_budget_bound_{op.replace('<', 'lt').replace('>', 'gt')}"
+        module = types.ModuleType(name)
+        module.__file__ = str(Path(context_budget.__file__))
+        sys.modules[name] = module
+        exec(compile(mutated, module.__file__, "exec"), module.__dict__)
+        return module
+
+    def _cap(self, module, text: str, max_lines: int, max_bytes: int):
+        limits = module.ContextThresholds(
+            auto_memory_max_lines=max_lines, auto_memory_max_bytes=max_bytes
+        )
+        body, record = module.cap_auto_memory(text, limits=limits)
+        # The record is a dict, so it compares by value; the body is a str.
+        return (body, tuple(sorted(record.items())))
+
+    # -- the proof -------------------------------------------------------
+
+    def test_the_mutated_bound_behaves_identically_across_a_sweep(self):
+        """``lt@579``: the differential proof of equivalence.
+
+        The sweep is randomised but seeded, so a failure is
+        reproducible.  It covers ASCII and multibyte content, bodies
+        under and over both the line cap and the byte cap, and bodies
+        exactly AT the byte cap -- the boundary the mutant reaches.
+        """
+        original = self._load_with_bound("<")
+        mutant = self._load_with_bound("<=")
+
+        rng = random.Random(20261121)
+        alphabet = "ab c\n\té漢"
+        cases = 0
+        for _ in range(2000):
+            line_count = rng.randint(0, 12)
+            lines = [
+                "".join(rng.choice(alphabet) for _ in range(rng.randint(0, 12)))
+                for _ in range(line_count)
+            ]
+            text = "\n".join(lines)
+            max_lines = rng.randint(1, 15)
+            max_bytes = rng.randint(1, 60)
+            cases += 1
+            before = self._cap(original, text, max_lines, max_bytes)
+            after = self._cap(mutant, text, max_lines, max_bytes)
+            if before != after:
+                self.fail(
+                    f"the mutated bound changed the behaviour for "
+                    f"text={text!r} max_lines={max_lines} "
+                    f"max_bytes={max_bytes}: {before!r} != {after!r}"
+                )
+        self.assertGreater(cases, 0)
+
+    def test_the_boundary_is_reached_exactly_at_the_byte_cap(self):
+        """``lt@579``: the sweep reaches the boundary the mutant adds.
+
+        The mutant's extra branch runs only when the body is EXACTLY the
+        byte cap.  This test drives that point directly and shows the
+        body comes back byte-identical -- so the extra branch has
+        nothing to do.
+        """
+        limits = ContextThresholds(auto_memory_max_bytes=100)
+        text = "y" * 100
+        capped, record = cap_auto_memory(text, limits=limits)
+        self.assertEqual(capped, text)
+        self.assertEqual(record["kept_bytes"], 100)
+        self.assertFalse(record["truncated"])
+
+
+class AutoMemoryByteAccountingTests(unittest.TestCase):
+    """The auto-memory record reports the bytes that were ACTUALLY kept.
+
+    The byte cap cuts the body on a byte boundary, so the cut can land
+    INSIDE a multibyte character.  When it does, the character is
+    dropped whole -- the half-character is not decodable -- so the body
+    that survives holds FEWER bytes than the budget allowed.
+
+    The record must report the bytes that were really kept.  Reporting
+    the budget instead overstates what stayed in the context: a run that
+    books its memory tax from this record would bill itself for bytes
+    that were never there.
+    """
+
+    def test_kept_bytes_matches_the_body_when_the_cut_splits_a_character(self):
+        """A cut inside a multibyte character drops the whole character.
+
+        ``"é"`` is two bytes in UTF-8.  A cap of nine bytes cuts the
+        fifth character in half, so only four whole characters survive --
+        eight bytes, not the nine the cap allowed.
+        """
+        limits = ContextThresholds(auto_memory_max_bytes=9)
+        text = "é" * 10
+        capped, record = cap_auto_memory(text, limits=limits)
+        self.assertEqual(capped, "éééé")
+        self.assertEqual(len(capped.encode("utf-8")), 8)
+        self.assertEqual(record["kept_bytes"], len(capped.encode("utf-8")))
+        self.assertTrue(record["truncated"])
+
+    def test_the_recorded_dropped_bytes_are_the_bytes_actually_dropped(self):
+        """``original_bytes`` minus ``kept_bytes`` is what was dropped.
+
+        The two numbers must describe the same text: what is gone is
+        exactly the difference.
+        """
+        limits = ContextThresholds(auto_memory_max_bytes=9)
+        text = "é" * 10
+        capped, record = cap_auto_memory(text, limits=limits)
+        dropped = record["original_bytes"] - record["kept_bytes"]
+        self.assertEqual(dropped, len(text.encode("utf-8")) - len(capped.encode("utf-8")))
+
+    def test_an_ascii_body_is_unchanged_by_the_accounting(self):
+        """The control -- ASCII has no split character, so nothing moves.
+
+        An ASCII byte is one byte and one character, so the cut always
+        lands on a character boundary and the kept bytes equal the
+        budget exactly.
+        """
+        limits = ContextThresholds(auto_memory_max_bytes=100)
+        text = "y" * 101
+        capped, record = cap_auto_memory(text, limits=limits)
+        self.assertEqual(len(capped.encode("utf-8")), 100)
+        self.assertEqual(record["kept_bytes"], 100)
+        self.assertTrue(record["truncated"])
+
+    def test_a_multibyte_body_that_fits_is_untouched(self):
+        """The control -- a body that fits the cap keeps every byte."""
+        limits = ContextThresholds(auto_memory_max_bytes=100)
+        text = "é" * 50
+        capped, record = cap_auto_memory(text, limits=limits)
+        self.assertEqual(capped, text)
+        self.assertEqual(record["kept_bytes"], 100)
+        self.assertFalse(record["truncated"])
+
