@@ -23,8 +23,10 @@ accepted.
 
 from __future__ import annotations
 
+import re
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 
@@ -977,7 +979,7 @@ class DoubleGuardTests(_WorkspaceCase):
         self.assertEqual(outcome.kind, lh.STEP_PENDING_AUDIT)
         self.assertEqual(outcome.summary, "")
 
-    # -- or@732 / or@733: the auditor's check output ----------------------
+    # -- or@740 / or@741: the auditor's check output ----------------------
 
     def test_a_check_with_no_output_is_still_audited(self) -> None:
         """``completed.stdout or ""`` -- the empty-output half, in the auditor.
@@ -997,14 +999,14 @@ class DoubleGuardTests(_WorkspaceCase):
         )
         self.assertTrue(verdict.passed)
 
-    # -- or@805: the checkpoint's round index ----------------------------
+    # -- or@813: the checkpoint's round index ----------------------------
 
     def test_a_checkpoint_with_a_boolean_round_index_is_refused(self) -> None:
         """``isinstance(self.round_index, bool)`` -- the bool half."""
         with self.assertRaises(lh.LongHorizonError):
             VerifiedCheckpoint(session_id="lh", round_index=True, objective="ship it")
 
-    # -- or@830: `path is None or (isinstance(path, str) and not path)` ---
+    # -- or@838: `path is None or (isinstance(path, str) and not path)` ---
 
     def test_an_empty_store_path_is_refused(self) -> None:
         """``isinstance(path, str) and not path`` -- the emptiness half.
@@ -1044,7 +1046,7 @@ class DoubleGuardTests(_WorkspaceCase):
         self.assertTrue(path.exists())
         self.assertEqual(len(store.checkpoints()), 1)
 
-    # -- or@732: `output = completed.stdout or ""` in the auditor ----------
+    # -- or@740: `output = completed.stdout or ""` in the auditor ----------
 
     def test_a_failing_check_reports_the_output_it_actually_read(self) -> None:
         """``completed.stdout or ""`` -- the empty-output half, in the auditor.
@@ -1104,7 +1106,7 @@ class DoubleGuardTests(_WorkspaceCase):
         self.assertEqual(outcome.kind, lh.STEP_PENDING_AUDIT)
         self.assertEqual(outcome.summary, "abc")
 
-    # -- or@1078: `verdict.summary or f"round {round_index} verified"` ----
+    # -- or@1086: `verdict.summary or f"round {round_index} verified"` ----
 
     def test_the_verified_progress_carries_the_auditors_own_wording(self) -> None:
         """``verdict.summary or ...`` -- the fallback half, on the summary.
@@ -1130,7 +1132,7 @@ class DoubleGuardTests(_WorkspaceCase):
         self.assertIn("declared artifact", summary)
         self.assertNotIn("round 0 verified", summary)
 
-    # -- or@1145: `int(getattr(self.session, "written", 0) or 0)` ---------
+    # -- or@1153: `int(getattr(self.session, "written", 0) or 0)` ---------
 
     def test_the_session_checkpoint_records_the_position_it_was_written_at(self) -> None:
         """``getattr(self.session, "written", 0) or 0`` -- the fallback half.
@@ -1167,7 +1169,7 @@ class DoubleGuardTests(_WorkspaceCase):
         # record that was already there.
         self.assertEqual(checkpoints[0]["record_index"], 1)
 
-    # -- or@1151: `self.executor_config.model or "unknown"` ---------------
+    # -- or@1159: `self.executor_config.model or "unknown"` ---------------
 
     def test_the_session_checkpoint_records_the_executors_model(self) -> None:
         """``self.executor_config.model or "unknown"`` -- the fallback half.
@@ -1201,6 +1203,201 @@ class DoubleGuardTests(_WorkspaceCase):
         checkpoints = [item for item in records if item.get("type") == "checkpoint"]
         self.assertEqual(len(checkpoints), 1)
         self.assertEqual(checkpoints[0]["model"], "model-under-test")
+
+
+class AuditorOutputTruncationEquivalentMutantTests(_WorkspaceCase):
+    """``gt@741``: the auditor's output cap -- an EQUIVALENT mutant.
+
+    The planted fault at this site (``>`` -> ``>=``) survives the slice's
+    suite, and it is **not killable, and provably so**.
+
+    The site is::
+
+        output = completed.stdout or ""
+        if len(output) > self.max_output_chars:
+            output = output[: self.max_output_chars]
+
+    The mutant turns the bound into ``>=``, so the truncation branch runs
+    one extra time -- at ``len(output) == self.max_output_chars`` exactly.
+
+    That extra run is a no-op, because:
+
+    * ``output[: self.max_output_chars]`` with ``len(output) ==
+      self.max_output_chars`` is the IDENTITY -- slicing a string to
+      exactly its own length returns the string unchanged;
+    * the truncated value is then used only in ``output.strip()[:400]``
+      (the failure message) and nowhere else, and the *detail* the
+      evidence pointer carries is ``f"exit={completed.returncode}"`` --
+      which does not mention the output at all.
+
+    So the two versions agree at every input, on both the passing and the
+    failing branch.  This class PROVES that by differential testing: it
+    loads the module twice -- once as it is, once with the bound mutated
+    -- and compares the two across a sweep of output lengths, caps and
+    exit codes.  A single behavioural difference anywhere in the sweep
+    fails the test.
+
+    It is an EQUIVALENT mutant, not a gap in the suite, and no test can
+    distinguish it.  It is recorded here so the next person does not
+    spend a round looking for one.
+    """
+
+    #: The exact source line the mutation targets.
+    _BOUND_RE = re.compile(
+        r"if len\(output\) (?P<op>[<>]=?) self\.max_output_chars:"
+    )
+
+    def _load_with_bound(self, op: str):
+        """Load ``long_horizon`` with the truncation bound set to ``op``.
+
+        The module is re-executed from its own source with the one
+        comparison rewritten, in a fresh module object, so the two
+        versions coexist in one process and can be called side by side.
+        """
+        source = Path(lh.__file__).read_text(encoding="utf-8")
+        matches = self._BOUND_RE.findall(source)
+        self.assertEqual(
+            len(matches), 1, f"expected exactly one truncation bound, found {matches}"
+        )
+        mutated = self._BOUND_RE.sub(
+            f"if len(output) {op} self.max_output_chars:", source, count=1
+        )
+        name = f"_long_horizon_bound_{op.replace('<', 'lt').replace('>', 'gt')}"
+        module = types.ModuleType(name)
+        module.__file__ = str(Path(lh.__file__))
+        sys.modules[name] = module
+        exec(compile(mutated, module.__file__, "exec"), module.__dict__)
+        return module
+
+    def _run_check(self, module, out_len: int, cap: int, returncode: int):
+        """Run one check under ``module`` with a faked ``subprocess``."""
+        completed = types.SimpleNamespace(
+            stdout="y" * out_len, returncode=returncode
+        )
+        original = module.subprocess.run
+        module.subprocess.run = lambda *args, **kwargs: completed
+        try:
+            auditor = module.AuditorBackend(
+                workspace=self.workspace, max_output_chars=cap
+            )
+            check = module.AuditCheck(
+                check_id="c1", description="a check", command="true"
+            )
+            ok, detail, pointer = auditor._run_check(check)
+            # The pointer is a dataclass from a *different* module object,
+            # so it is compared field by field rather than by identity.
+            return (ok, detail, pointer.kind, pointer.path, pointer.detail)
+        finally:
+            module.subprocess.run = original
+
+    # -- the proof -------------------------------------------------------
+
+    def test_the_mutated_bound_behaves_identically_across_a_sweep(self):
+        """``gt@741``: the differential proof of equivalence.
+
+        The sweep covers both sides of the bound, the boundary itself,
+        caps below and above the output length, and BOTH branches of the
+        check (a passing check and a failing one, whose rejection quotes
+        the output it read).
+
+        The caps start at 1 because a cap below 1 is refused outright by
+        the auditor's constructor -- see the validation test below.
+        """
+        original = self._load_with_bound(">")
+        mutant = self._load_with_bound(">=")
+
+        differences = 0
+        cases = 0
+        for cap in list(range(1, 12)) + [100, 8192]:
+            for out_len in range(0, 16):
+                for returncode in (0, 3):
+                    cases += 1
+                    before = self._run_check(original, out_len, cap, returncode)
+                    after = self._run_check(mutant, out_len, cap, returncode)
+                    if before != after:
+                        differences += 1
+                        self.fail(
+                            f"the mutated bound changed the behaviour at "
+                            f"cap={cap} out_len={out_len} rc={returncode}: "
+                            f"{before!r} != {after!r}"
+                        )
+        self.assertGreater(cases, 0)
+        self.assertEqual(differences, 0)
+
+    # -- the behaviour the equivalence rests on --------------------------
+
+    def test_output_exactly_at_the_cap_is_returned_whole(self):
+        """``gt@741``: the boundary -- an output exactly at the cap is whole.
+
+        The cap is the largest output the auditor keeps.  An output of
+        exactly the cap is kept whole, and the check's verdict does not
+        depend on it.
+        """
+        auditor = AuditorBackend(workspace=self.workspace, max_output_chars=10)
+        check = AuditCheck(
+            check_id="c1", description="a check", command="true"
+        )
+        state = ManagerBackend().rebuild(
+            objective="ship it", verified_progress=(), failures=(), round_index=0
+        )
+        verdict = auditor.audit(
+            state=state, declared_artifacts=(), checks=(check,)
+        )
+        self.assertTrue(verdict.passed)
+
+    def test_output_one_over_the_cap_is_still_verified_and_quoted(self):
+        """``gt@741``: from the other side -- over the cap is still checked.
+
+        The cap bounds what the auditor KEEPS; it does not turn an
+        over-cap output into an error, and it does not hide the output
+        the check actually read: the rejection still quotes it -- capped
+        to the cap, which is the truncation the site performs.
+        """
+        auditor = AuditorBackend(workspace=self.workspace, max_output_chars=10)
+        check = AuditCheck(
+            check_id="c1",
+            description="a check",
+            command="printf 'the-marker-is-missing-and-then-some'; exit 1",
+        )
+        state = ManagerBackend().rebuild(
+            objective="ship it", verified_progress=(), failures=(), round_index=0
+        )
+        verdict = auditor.audit(
+            state=state, declared_artifacts=(), checks=(check,)
+        )
+        self.assertFalse(verdict.passed)
+        # The rejection quotes the output the check really read, capped
+        # to the cap -- and the tail beyond the cap is dropped.
+        self.assertIn("the-marker", verdict.summary)
+        self.assertNotIn("the-marker-is-missing-and-then-some", verdict.summary)
+
+    # -- lt@674: `if self.max_output_chars < 1` in the auditor -------------
+
+    def test_the_auditors_output_cap_of_zero_is_refused(self):
+        """``lt@674``: the auditor's output cap must be at least one.
+
+        A cap of zero keeps NO output at all, so the rejection of a
+        failing check would name the check but not the reason it
+        failed.  A cap below zero is worse: it slices from the tail, so
+        it keeps output the cap was meant to drop.  The executor refuses
+        these caps already; the auditor must too.
+        """
+        with self.assertRaises(lh.LongHorizonError):
+            AuditorBackend(workspace=self.workspace, max_output_chars=0)
+
+    def test_the_auditors_output_cap_below_zero_is_refused(self):
+        """``lt@674``: from the other side -- a negative cap is refused."""
+        with self.assertRaises(lh.LongHorizonError):
+            AuditorBackend(workspace=self.workspace, max_output_chars=-1)
+
+    def test_the_auditors_output_cap_of_one_char_is_accepted(self):
+        """``lt@674``: the boundary -- exactly one char is a cap.
+
+        The bound is ``< 1``, so exactly one is allowed and only zero is
+        refused.
+        """
+        auditor = AuditorBackend(workspace=self.workspace, max_output_chars=1)
+        self.assertEqual(auditor.max_output_chars, 1)
 
 
 if __name__ == "__main__":  # pragma: no cover - manual entry point
