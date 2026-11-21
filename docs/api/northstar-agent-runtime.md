@@ -44581,6 +44581,10 @@ Temp workspaces + scripted providers for one suite run.
 - `workspace(files: dict[str, str] | None=None)`
 - `provider(turns: Sequence[Any], **kwargs: Any)`
 - `runtime(*, workspace: Path, turns: Sequence[Any], tools: Any=None, config_kwargs: dict[str, Any] | None=None, tool_limits: ToolLimits | None=None, can_use_tool: Any=None, hooks: HookRegistry | None=None, sessions: Any=None)`
+#### `seccomp_filter_loadable()`
+
+Report whether this host can actually install the seccomp denylist.
+
 #### `run_offline_bundle()`
 
 Signed offline policy bundles (ninety-seventh batch).
