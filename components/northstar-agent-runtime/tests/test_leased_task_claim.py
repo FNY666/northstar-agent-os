@@ -1181,3 +1181,107 @@ class SelfCheckTests(unittest.TestCase):
                     ltc.main()
         finally:
             ltc.LeasedTaskClaim.complete = original_complete
+
+
+class SelfCheckAndAssertKillerTests(unittest.TestCase):
+    """Kill the ``and`` -> ``or`` mutants in the self-check's asserts.
+
+    A self-check assertion of the form ``assert A and B`` is replaced by
+    ``assert A or B`` under the mutant.  The two agree whenever A is
+    true, so the mutant survives unless the assertion is exercised with
+    **A false and B true** -- and then the original raises
+    ``AssertionError`` while the mutant passes.
+
+    Each test below arranges exactly that: the accessor the assertion
+    reads is patched so that the first operand is false and the second
+    one still holds.
+    """
+
+    def _run(self):
+        import io
+        from contextlib import redirect_stdout
+
+        import leased_task_claim as ltc
+
+        with redirect_stdout(io.StringIO()):
+            ltc.main()
+
+    def test_and_at_1253_fails_when_the_state_is_not_ready(self):
+        """`and@1253`: the reaped view's state and delay.
+
+        The assertion is ``view.state == STATE_READY and
+        view.delay_until == 0.0``.  The view is patched to a state that
+        is NOT ready while the delay is still zero -- so the first
+        operand is false and the second is true.
+
+        The original raises ``AssertionError``; the mutant (``or``)
+        passes, so this test kills it.
+        """
+        import dataclasses
+
+        import leased_task_claim as ltc
+
+        original_task = ltc.LeasedTaskClaim.task
+
+        def patched_task(self, task_id):
+            view = original_task(self, task_id)
+            # The state is wrong, the delay is still zero.
+            return dataclasses.replace(view, state=STATE_LEASED)
+
+        ltc.LeasedTaskClaim.task = patched_task
+        try:
+            with self.assertRaises(AssertionError):
+                self._run()
+        finally:
+            ltc.LeasedTaskClaim.task = original_task
+
+    def test_and_at_1260_fails_when_there_is_no_resume_point(self):
+        """`and@1260`: the resume assertion.
+
+        The assertion is ``resumed is not None and resumed.step == 2``.
+        The resume is patched to ``None``, so the first operand is false.
+
+        The original raises ``AssertionError``; the mutant (``or``)
+        evaluates ``None.step`` and raises ``AttributeError`` -- which is
+        not an ``AssertionError``, so this test kills it.
+        """
+        import leased_task_claim as ltc
+
+        original_resume = ltc.LeasedTaskClaim.resume_from
+
+        def patched_resume(self, task_id):
+            return None
+
+        ltc.LeasedTaskClaim.resume_from = patched_resume
+        try:
+            with self.assertRaises(AssertionError):
+                self._run()
+        finally:
+            ltc.LeasedTaskClaim.resume_from = original_resume
+
+    def test_and_at_1282_fails_when_there_is_more_than_one_outbox_row(self):
+        """`and@1282`: the outbox row assertion.
+
+        The assertion is ``len(rows) == 1 and rows[0].message_id ==
+        "t1:completed"``.  The rows are patched to two rows whose FIRST
+        row is the completed one -- so the first operand is false and
+        the second is true.
+
+        The original raises ``AssertionError``; the mutant (``or``)
+        passes, so this test kills it.
+        """
+        import leased_task_claim as ltc
+
+        original_rows = ltc.LeasedTaskClaim.outbox_rows
+
+        def patched_rows(self, task_id):
+            rows = original_rows(self, task_id)
+            # Two rows, the first of them the completed one.
+            return tuple(rows) + tuple(rows)
+
+        ltc.LeasedTaskClaim.outbox_rows = patched_rows
+        try:
+            with self.assertRaises(AssertionError):
+                self._run()
+        finally:
+            ltc.LeasedTaskClaim.outbox_rows = original_rows
