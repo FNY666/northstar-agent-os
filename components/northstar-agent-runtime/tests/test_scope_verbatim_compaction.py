@@ -1045,5 +1045,108 @@ class EquivalentMutantTests(unittest.TestCase):
             )
 
 
+class ScopeVerbatimEquivalenceHarnessControlTests(unittest.TestCase):
+    """The ``lt@390`` equivalence proof must be able to FAIL.
+
+    ``EquivalentMutantTests`` proves that the planted fault at
+    ``lt@390`` (``if end < 0:`` -> ``if end <= 0:``) changes nothing:
+    the end marker is searched for from the begin marker onwards, and
+    the begin marker is 25 characters long, so a found end marker is at
+    index 25 or beyond -- it can never be 0, and the two spellings of the
+    guard therefore agree on every reachable value.
+
+    A differential test that CANNOT fail proves nothing.  If the two
+    versions were accidentally the same source, or if the sweep never
+    reached an input that separates them, the agreement would be empty
+    and the "EQUIVALENT mutant" conclusion would be worthless.
+
+    This class gives the harness its **non-vacuity control**: the same
+    loader and the same comparison are pointed at a mutation that is
+    known to change behaviour, and the harness is REQUIRED to notice.
+    The control is the same guard with the bound moved to ``< -1`` --
+    a bound that is never true, so the "no end marker" case falls
+    through instead of reporting "no block at all", and the difference
+    is observable at once.
+    """
+
+    #: The source line the control mutation rewrites.
+    _GUARD = "if end < 0:"
+
+    def _load_with(self, source: str, name: str) -> types.ModuleType:
+        """Load the module's own source, optionally rewritten."""
+        module = types.ModuleType(name)
+        module.__file__ = str(Path(svc.__file__))
+        sys.modules[name] = module
+        exec(compile(source, module.__file__, "exec"), module.__dict__)  # noqa: S102
+        return module
+
+    def _control_version(self) -> types.ModuleType:
+        """The CONTROL variant: the guard can never fire."""
+        source = Path(svc.__file__).read_text(encoding="utf-8")
+        self.assertIn(self._GUARD, source, "the end-marker guard moved")
+        mutated = source.replace(self._GUARD, "if end < -1:", 1)
+        return self._load_with(mutated, "_svc_end_control")
+
+    def test_the_control_mutation_changes_the_outcome(self):
+        """The control mutation must actually CHANGE the outcome."""
+        source = Path(svc.__file__).read_text(encoding="utf-8")
+        original = self._load_with(source, "_svc_end_original")
+        control = self._control_version()
+
+        # A begin marker with NO end marker: the shipped form reports
+        # "no block at all" (None), the control form returns a block.
+        text = svc.BLOCK_BEGIN + "body"
+        before = original.extract_scope_block(text)
+        after = control.extract_scope_block(text)
+        self.assertIsNone(before)
+        self.assertNotEqual(
+            before,
+            after,
+            "the control mutation changed nothing, so the differential "
+            "harness cannot distinguish any two functions",
+        )
+
+    def test_the_harness_notices_the_control_mutation(self):
+        """The SAME harness, pointed at the control, must find a difference.
+
+        This is the non-vacuity check on the equivalence proof: the same
+        loader and the same sweep that ``lt@390`` uses must report a
+        disagreement when the rule it compares against is one that
+        genuinely disagrees.
+        """
+        source = Path(svc.__file__).read_text(encoding="utf-8")
+        original = self._load_with(source, "_svc_end_sweep_original")
+        control = self._control_version()
+
+        begin = svc.BLOCK_BEGIN
+        end = svc.BLOCK_END
+        rng = random.Random(20261121)
+        alphabet = "ab:[] \n\tX1.-_"
+        differences = 0
+        cases = 0
+        for _ in range(300):
+            body = "".join(rng.choice(alphabet) for _ in range(rng.randint(0, 12)))
+            for template in (
+                "{body}",
+                "preamble {begin}{body}",
+                "{begin}{body}{end}",
+                "{begin}{body}",
+                "{begin}{end}",
+                "{end}{begin}",
+                "{body}{begin}{body}{end}{body}",
+            ):
+                text = template.format(body=body, begin=begin, end=end)
+                cases += 1
+                if original.extract_scope_block(text) != control.extract_scope_block(text):
+                    differences += 1
+        self.assertGreater(cases, 0)
+        self.assertGreater(
+            differences,
+            0,
+            "the harness found no difference for a mutation that changes "
+            "the outcome, so it cannot certify lt@390 as equivalent",
+        )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
