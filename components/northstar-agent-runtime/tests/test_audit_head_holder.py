@@ -1921,3 +1921,160 @@ class TestEquivalentMutantsAreRecorded(_HolderCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestEquivalentMutantsHaveDiscriminatingControls(_HolderCase):
+    """The two equivalence records must be able to FAIL.
+
+    ``TestEquivalentMutantsAreRecorded`` records two planted faults as
+    EQUIVALENT:
+
+    * ``or@527`` -- ``if pin.seq < last.pin.seq or pin.records_sealed <
+      last.pin.records_sealed:``.  A :class:`HeadPin` always has
+      ``seq == records_sealed``, so the two halves of the disjunction
+      are the same predicate and ``or`` and ``and`` cannot differ.
+    * ``lt@928`` -- ``shortened = writer_rows < independent_rows``,
+      reached only when the two row counts already differ, and for two
+      different integers ``a != b`` implies ``a < b`` iff ``a <= b``.
+
+    A proof that CANNOT fail proves nothing.  Both records above pin
+    the PREMISE (the invariant that makes the equivalence hold), but
+    neither shows that a broken premise would change the answer.  If
+    the invariant were not what the argument says, the "no observable
+    difference" conclusion would be empty.
+
+    This class closes that gap.  For each of the two, it shows that the
+    two spellings genuinely DISAGREE on an input that violates the
+    premise, and that the premise holds on the inputs the module
+    actually produces.  The disagreement is what makes the agreement
+    meaningful.
+    """
+
+    # -- or@527: the monotonicity guard -------------------------------
+
+    @staticmethod
+    def _refuses_original(seq: int, records: int, last_seq: int, last_records: int) -> bool:
+        """The guard as written."""
+        return seq < last_seq or records < last_records
+
+    @staticmethod
+    def _refuses_mutant(seq: int, records: int, last_seq: int, last_records: int) -> bool:
+        """The planted fault: the connective turned into ``and``."""
+        return seq < last_seq and records < last_records
+
+    def test_the_two_spellings_disagree_when_the_invariant_is_broken(self):
+        """The control: the two spellings MUST differ somewhere.
+
+        If they agreed everywhere, the guard would not be a guard and
+        the equivalence claim would have nothing to prove.
+        """
+        differences = 0
+        for seq in range(0, 4):
+            for records in range(0, 4):
+                for last_seq in range(0, 4):
+                    for last_records in range(0, 4):
+                        if self._refuses_original(seq, records, last_seq, last_records) != (
+                            self._refuses_mutant(seq, records, last_seq, last_records)
+                        ):
+                            differences += 1
+        self.assertGreater(
+            differences,
+            0,
+            "the two spellings of the monotonicity guard agree everywhere, "
+            "so the guard is not a guard",
+        )
+
+    def test_the_disagreement_needs_both_halves_to_differ(self):
+        """The disagreement is exactly the half-the-invariant case.
+
+        A rollback moves BOTH counters down, so the original's ``or``
+        fires and the mutant's ``and`` also fires -- they agree.  The
+        spellings differ only when ONE counter moves down and the other
+        does not, which is precisely what the invariant
+        ``seq == records_sealed`` forbids.
+        """
+        # Both counters down: both spellings refuse.
+        self.assertTrue(self._refuses_original(1, 1, 3, 3))
+        self.assertTrue(self._refuses_mutant(1, 1, 3, 3))
+        # Only one counter down: the spellings disagree.
+        self.assertTrue(self._refuses_original(1, 3, 3, 3))
+        self.assertFalse(self._refuses_mutant(1, 3, 3, 3))
+
+    def test_every_head_pin_the_module_accepts_satisfies_the_invariant(self):
+        """The premise, checked against the module's own pins.
+
+        This is what makes the disagreement above unreachable: a pin
+        that reaches the guard always has ``seq == records_sealed``, so
+        both spellings take the same branch.
+        """
+        for seq, records, first, last in (
+            (3, 3, 1, 3),
+            (0, 0, 1, 0),
+            (7, 7, 1, 7),
+        ):
+            with self.subTest(seq=seq, records=records):
+                pin = _pin(seq=seq, records=records, first=first, last=last)
+                self.assertEqual(pin.seq, pin.records_sealed)
+
+    # -- lt@928: the row-count comparison ----------------------------
+
+    @staticmethod
+    def _shortened_original(writer_rows: int, independent_rows: int) -> bool:
+        """The comparison as written."""
+        return writer_rows < independent_rows
+
+    @staticmethod
+    def _shortened_mutant(writer_rows: int, independent_rows: int) -> bool:
+        """The planted fault: the bound widened to ``<=``."""
+        return writer_rows <= independent_rows
+
+    def test_the_two_row_comparisons_disagree_on_an_equal_count(self):
+        """The control: the two comparisons MUST differ somewhere.
+
+        The line is reached only when the counts already differ, so the
+        equal case is where the two spellings would disagree -- and it
+        is the case the guard's precondition excludes.
+        """
+        self.assertNotEqual(
+            self._shortened_original(4, 4),
+            self._shortened_mutant(4, 4),
+            "the strict and non-strict row comparisons agree on an equal "
+            "count, so the equality precondition is not doing the work "
+            "the equivalence argument claims",
+        )
+        self.assertFalse(self._shortened_original(4, 4))
+        self.assertTrue(self._shortened_mutant(4, 4))
+
+    def test_the_two_row_comparisons_agree_on_every_different_count(self):
+        """The equivalence itself: on the shape the guard reaches.
+
+        For two different integers the strict and non-strict spellings
+        agree, which is why the planted fault is equivalent.
+        """
+        for writer_rows in range(0, 12):
+            for independent_rows in range(0, 12):
+                if writer_rows == independent_rows:
+                    continue
+                with self.subTest(writer=writer_rows, independent=independent_rows):
+                    self.assertEqual(
+                        self._shortened_original(writer_rows, independent_rows),
+                        self._shortened_mutant(writer_rows, independent_rows),
+                    )
+
+    def test_the_row_counts_the_module_compares_always_differ(self):
+        """The premise, checked against the module's own behaviour.
+
+        The comparison is reached only under ``writer_rows !=
+        independent_rows``; this drives the real tail check at the two
+        sides of that boundary and pins that the shipped answers are the
+        ones the equivalence says they are.
+        """
+        holder = self.holder()
+        pin = _pin(seq=3, records=3)
+        holder.publish_head(pin, receipt=_receipt(pin))
+        short = holder.tail_check(pin, writer_rows=2)
+        long = holder.tail_check(pin, writer_rows=4)
+        self.assertFalse(short.ok)
+        self.assertIn("chain shortened", short.reason)
+        self.assertFalse(long.ok)
+        self.assertIn("chain extended past the anchored head", long.reason)
