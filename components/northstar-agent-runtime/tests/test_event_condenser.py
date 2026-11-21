@@ -819,6 +819,51 @@ class SecondHalfGuardTests(unittest.TestCase):
             condense_by_importance(log, scorer=lambda r: 1.0, keep=1.0)
 
 
+    def test_a_zero_keep_first_is_allowed(self):
+        """`lt@504`: the boundary -- zero is not negative, so it is kept.
+
+        With ``keep_first=0`` nothing is kept from the head; the whole
+        middle is condensed.  A mutant that turns ``< 0`` into ``<= 0``
+        refuses this, and this test says zero is legal.
+        """
+        log = _log_with(["user"] * 8)
+        event = condense_on_limit(
+            log,
+            is_exceeded=_exceeded_once(),
+            keep_first=0,
+            keep_recent=2,
+        )
+        self.assertIsNotNone(event)
+        self.assertEqual(event.forgotten, (0, 1, 2, 3, 4, 5))
+
+    def test_a_zero_keep_recent_is_allowed(self):
+        """`lt@507`: the boundary -- zero is not negative, so it is kept.
+
+        With ``keep_recent=0`` nothing is kept from the recent window.
+        """
+        log = _log_with(["user"] * 8)
+        event = condense_on_limit(
+            log,
+            is_exceeded=_exceeded_once(),
+            keep_first=2,
+            keep_recent=0,
+        )
+        self.assertIsNotNone(event)
+        self.assertEqual(event.forgotten, (2, 3, 4, 5, 6, 7))
+
+    def test_a_zero_keep_is_allowed(self):
+        """`lt@573`: the boundary -- zero is not negative, so it is kept.
+
+        With ``keep=0`` every event is condensed.
+        """
+        log = _log_with(["user"] * 4)
+        event = condense_by_importance(log, scorer=lambda r: 1.0, keep=0)
+        self.assertIsNotNone(event)
+        # Equal scores are broken by the id, newest first, so the
+        # forgotten set is the whole log in reverse id order.
+        self.assertEqual(event.forgotten, (3, 2, 1, 0))
+        self.assertEqual(sorted(event.forgotten), [0, 1, 2, 3])
+
 class SelfCheckTests(unittest.TestCase):
     """The module's own self-check, driven for real.
 
