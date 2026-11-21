@@ -1068,3 +1068,529 @@ class TestSweFailureModesLayerMatching(unittest.TestCase):
                 mutant_result.as_dict(),
                 f"or@509 changed the verdict for the {label} case",
             )
+
+
+class TestSweFailureModesRequirementMatching(unittest.TestCase):
+    """The requirement-matching helper and the requirement rule.
+
+    The survivors are the arms of the two-armed conditionals in
+    ``_test_reflects_requirement`` and ``_requirement_name_matches``,
+    plus the "an empty reference is not a reference" arm in the
+    assumption rule:
+
+      and@582  the "a name that is not empty AND not already seen" arm
+      and@697  the "a requirement that is not empty" arm
+      retT@698  the "the requirement is named in the test name" answer
+      and@699  the "the test exercises an implementing file" arm
+      retT@700  the "the test exercises an implementing file" answer
+      and@721  the "not a stop word AND long enough" arm
+      retF@724  the "no content words at all" answer
+      retF@728  the "every content word must prefix a test word" answer
+    """
+
+    def _requirement_record(self, requirement, impl_file, tests):
+        return FailureRecord(
+            instruction="do the thing",
+            instruction_requirements=(requirement,),
+            requirement_files={requirement: impl_file},
+            changes=(PatchChange(file="api/other.py"),),
+            failed_tests=tests,
+        )
+
+    def test_an_empty_unknown_reference_is_not_a_reference(self):
+        """`and@582`: the "a name that is not empty" arm.
+
+        The condition is ``if name and name not in seen``.  An empty
+        name is not a reference to anything -- the caller reported no
+        name at all.  Under the mutant (``and`` -> ``or``) an empty name
+        is taken as a reference, and every record with an empty entry in
+        ``unknown_references`` is read as an unverified assumption.
+        """
+        record = FailureRecord(instruction="do the thing", unknown_references=("",))
+        result = classify(record)
+        self.assertIs(result.mode, FailureMode.UNKNOWN)
+        self.assertEqual(result.rule, RULE_NONE)
+
+    def test_an_empty_requirement_is_not_a_requirement(self):
+        """`and@697`: the "a requirement that is not empty" arm.
+
+        The condition is ``if requirement and requirement in test.name``.
+        An empty requirement is named by every test name (the empty
+        string is a substring of everything), so it must be excluded
+        explicitly.  Under the mutant (``and`` -> ``or``) an empty
+        requirement matches every failing test, and the record is read
+        as a requirement miss.
+        """
+        record = self._requirement_record(
+            "",
+            "api/auth.py",
+            (TestOutcome(name="test_zzz_qqq", passed=False, file="tests/test_o.py"),),
+        )
+        result = classify(record)
+        self.assertIs(result.mode, FailureMode.UNKNOWN)
+        self.assertEqual(result.rule, RULE_NONE)
+
+    def test_a_requirement_named_in_the_test_name_matches(self):
+        """`retT@698`: the "the requirement is named in the test name" arm.
+
+        The requirement word may be shorter than the test-name word
+        ("index" vs "reindexed"), so the match is one-directional.  The
+        requirement word does NOT prefix any test-name word here, so the
+        prefix rule alone would not match -- only the substring rule
+        can.  Under the mutant (``return True`` -> ``return False``)
+        the requirement is not recognised.
+        """
+        record = self._requirement_record(
+            "index",
+            "api/auth.py",
+            (
+                TestOutcome(
+                    name="test_reindexed_helper", passed=False, file="tests/test_x.py"
+                ),
+            ),
+        )
+        result = classify(record)
+        self.assertIs(result.mode, FailureMode.REQUIREMENT_MISS)
+
+    def test_a_test_outside_the_implementing_file_does_not_match(self):
+        """`and@699`: the "the test exercises an implementing file" arm.
+
+        The condition is ``if impl_files and _layer_of(test) in
+        impl_files``.  A failing test in an unrelated file is not about
+        the requirement, so the rule must not fire.  Under the mutant
+        (``and`` -> ``or``) the test file is never consulted and the
+        record is read as a requirement miss.
+        """
+        record = self._requirement_record(
+            "enforce lease renewal",
+            "api/auth.py",
+            (
+                TestOutcome(
+                    name="test_zzz_other", passed=False, file="tests/test_other.py"
+                ),
+            ),
+        )
+        result = classify(record)
+        self.assertIs(result.mode, FailureMode.UNKNOWN)
+        self.assertEqual(result.rule, RULE_NONE)
+
+    def test_a_test_targeting_the_implementing_file_matches(self):
+        """`retT@700`: the "the test exercises an implementing file" answer.
+
+        The branch is ``if impl_files and _layer_of(test) in impl_files:
+        return True``.  The test's name carries no hint of the
+        requirement, so only the target file can match it.  Under the
+        mutant (``return True`` -> ``return False``) the target-file
+        route is lost.
+        """
+        record = self._requirement_record(
+            "enforce lease renewal",
+            "api/auth.py",
+            (
+                TestOutcome(
+                    name="test_zzz_other",
+                    passed=False,
+                    file="tests/test_other.py",
+                    target_file="api/auth.py",
+                ),
+            ),
+        )
+        result = classify(record)
+        self.assertIs(result.mode, FailureMode.REQUIREMENT_MISS)
+
+    def test_a_stop_word_in_the_requirement_is_ignored(self):
+        """`and@721`: the "not a stop word AND long enough" arm.
+
+        The filter is ``if w not in _STOP_WORDS and len(w) >= 3``.  The
+        requirement "enforce the lease renewal" carries the stop word
+        "the"; the requirement must still match a test whose name
+        spells the content words without it.  Under the mutant
+        (``and`` -> ``or``) the stop word "the" becomes a required
+        prefix and the match is lost.
+        """
+        record = self._requirement_record(
+            "enforce the lease renewal",
+            "api/auth.py",
+            (
+                TestOutcome(
+                    name="test_enforce_lease_renewal",
+                    passed=False,
+                    file="tests/test_x.py",
+                ),
+            ),
+        )
+        result = classify(record)
+        self.assertIs(result.mode, FailureMode.REQUIREMENT_MISS)
+
+    def test_a_requirement_of_only_stop_words_matches_nothing(self):
+        """`retF@724`: the "no content words at all" answer.
+
+        The branch is ``if not req_words: return False``.  A requirement
+        made only of stop words carries no content, so it cannot be
+        matched by name.  Under the mutant (``return False`` -> ``return
+        True``) such a requirement matches every test, and the record
+        is read as a requirement miss.
+        """
+        record = self._requirement_record(
+            "the",
+            "api/auth.py",
+            (TestOutcome(name="test_zzz_qqq", passed=False, file="tests/test_o.py"),),
+        )
+        result = classify(record)
+        self.assertIs(result.mode, FailureMode.UNKNOWN)
+        self.assertEqual(result.rule, RULE_NONE)
+
+    def test_a_partial_prefix_match_is_not_a_match(self):
+        """`retF@728`: the "every content word must prefix a test word" answer.
+
+        The requirement "enforce lease renewal" has three content
+        words; the test name "test_enforce_only" covers only one of
+        them, so the requirement is NOT matched.  Under the mutant
+        (``return False`` -> ``return True``) a partial match is
+        accepted, and the record is read as a requirement miss.
+        """
+        record = self._requirement_record(
+            "enforce lease renewal",
+            "api/auth.py",
+            (
+                TestOutcome(
+                    name="test_enforce_only", passed=False, file="tests/test_x.py"
+                ),
+            ),
+        )
+        result = classify(record)
+        self.assertIs(result.mode, FailureMode.UNKNOWN)
+        self.assertEqual(result.rule, RULE_NONE)
+
+
+class TestSweFailureModesRouting(unittest.TestCase):
+    """The routing fallbacks -- the arms the suite never drove.
+
+      eq@959    the "requirement-not-implemented" evidence filter
+      or@992    the "the implementing file is known" fallback
+      eq@1103   the "unknown-reference" evidence filter
+      or@1155   the "both layers are known" precondition
+      eq@1157   the "layer-split" evidence filter
+      and@1157  the "a layer-split evidence AND a '--' in it" arm
+      or@1180   the "the root layer is known" fallback
+      or@1182   the "the symptom layer is known" fallback
+    """
+
+    def test_the_requirement_route_falls_back_to_the_evidence(self):
+        """`eq@959`: the "requirement-not-implemented" evidence filter.
+
+        When the caller supplies no record, the route reconstructs the
+        requirements from the classification's own evidence.  Under the
+        mutant (``==`` -> ``!=``) the filter selects the WRONG kind of
+        evidence -- the "failing-test" evidence rather than the
+        "requirement-not-implemented" evidence -- so the requirement
+        name is lost.
+        """
+        record = FailureRecord(
+            instruction="do the thing",
+            instruction_requirements=("enforce lease renewal",),
+            requirement_files={"enforce lease renewal": "api/auth.py"},
+            changes=(PatchChange(file="api/other.py"),),
+            failed_tests=(
+                TestOutcome(
+                    name="test_enforce_lease_renewal",
+                    passed=False,
+                    file="tests/test_auth.py",
+                ),
+            ),
+        )
+        result = classify(record)
+        self.assertIs(result.mode, FailureMode.REQUIREMENT_MISS)
+        checklist = route(result, None)
+        self.assertEqual(checklist.route, ROUTE_REQUIREMENT_READBACK)
+        behaviour = checklist.checks[0].inputs[0]
+        self.assertEqual(behaviour.name, "required-behaviour")
+        # the requirement is recovered from the evidence detail; under
+        # the mutant the WRONG evidence kind is selected and the
+        # requirement is replaced by the failing test's name
+        self.assertIn("enforce lease renewal", behaviour.value)
+        self.assertNotIn("test_enforce_lease_renewal", behaviour.value)
+
+    def test_the_requirement_route_names_the_implementing_file(self):
+        """`or@992`: the "the implementing file is known" fallback.
+
+        The criterion is built from ``impl or 'the implementing
+        file'``.  When the caller declared the implementing file, the
+        criterion must name it; the fallback prose is only for a
+        requirement whose file was never declared.  Under the mutant
+        (``or`` -> ``and``) the fallback prose is used even when the
+        file is known.
+        """
+        classification = Classification(
+            mode=FailureMode.REQUIREMENT_MISS,
+            rule=RULE_REQUIREMENT_UNMET,
+            reason="a reason",
+        )
+        record = FailureRecord(
+            instruction="do the thing",
+            instruction_requirements=("enforce lease renewal",),
+        )
+        checklist = route(classification, record)
+        criterion = checklist.checks[0].criterion
+        self.assertIn("the implementing file", criterion)
+
+    def test_the_assumption_route_falls_back_to_the_evidence(self):
+        """`eq@1103`: the "unknown-reference" evidence filter.
+
+        With no record, the route reconstructs the names from the
+        classification's evidence.  Under the mutant (``==`` -> ``!=``)
+        the filter selects the wrong evidence kind, and the name is
+        lost.
+        """
+        classification = Classification(
+            mode=FailureMode.UNVERIFIED_ASSUMPTION,
+            rule=RULE_ASSUMPTION_UNVERIFIED,
+            reason="a reason",
+            evidence=(
+                Evidence(
+                    kind="unknown-reference",
+                    detail="missing_fn -- not defined in 'api/other.py'",
+                ),
+            ),
+        )
+        checklist = route(classification, None)
+        self.assertEqual(checklist.route, ROUTE_ASSUMPTION_VERIFICATION)
+        name_input = checklist.checks[0].inputs[0]
+        self.assertEqual(name_input.name, "referenced-name")
+        self.assertEqual(name_input.value, "missing_fn")
+
+    def test_the_wrong_layer_route_reads_the_layers_from_the_evidence(self):
+        """`eq@1157`: the "layer-split" evidence filter.
+
+        With no record, the route recovers the symptom layer from the
+        evidence's file and the root layer from its detail.  Under the
+        mutant (``==`` -> ``!=``) the filter selects the wrong kind of
+        evidence and both layers come back unknown.
+        """
+        classification = Classification(
+            mode=FailureMode.WRONG_LAYER,
+            rule=RULE_SYMPTOM_ONLY,
+            reason="a reason",
+            evidence=(
+                Evidence(
+                    kind="layer-split",
+                    detail=(
+                        "symptom layer 'ui/handler.py' -- root cause layer "
+                        "'store/store.py'"
+                    ),
+                    file="ui/handler.py",
+                ),
+            ),
+        )
+        checklist = route(classification, None)
+        self.assertEqual(checklist.route, ROUTE_LAYER_CROSSING)
+        inputs = {i.name: i.value for i in checklist.checks[0].inputs}
+        self.assertEqual(inputs["symptom-layer"], "ui/handler.py")
+        self.assertEqual(inputs["root-cause-layer"], "store/store.py")
+
+    def test_the_wrong_layer_route_falls_back_to_the_evidence_split(self):
+        """`and@1157`: the "a layer-split evidence AND a '--' in it" arm.
+
+        The condition is ``if evidence.kind == "layer-split" and "--" in
+        evidence.detail``.  The detail carries a "--" separator, so the
+        second arm is the one that fires.  Under the mutant
+        (``and`` -> ``or``) the detail's own text would be enough, and
+        a layer-split evidence WITHOUT a "--" would be parsed as a
+        layer pair -- reading the tail of the prose as a path.
+        """
+        classification = Classification(
+            mode=FailureMode.WRONG_LAYER,
+            rule=RULE_SYMPTOM_ONLY,
+            reason="a reason",
+            evidence=(
+                Evidence(
+                    kind="layer-split",
+                    detail=(
+                        "symptom layer 'ui/handler.py' -- root cause layer "
+                        "'store/store.py'"
+                    ),
+                    file="ui/handler.py",
+                ),
+            ),
+        )
+        checklist = route(classification, None)
+        inputs = {i.name: i.value for i in checklist.checks[0].inputs}
+        # the root layer is parsed out of the detail -- it must be the
+        # path, not the tail of the sentence
+        self.assertEqual(inputs["root-cause-layer"], "store/store.py")
+
+    def test_the_wrong_layer_route_ignores_evidence_that_is_not_a_layer_split(self):
+        """`and@1157`: the second arm of the "a layer-split AND a '--'" test.
+
+        The condition is ``evidence.kind == "layer-split" and "--" in
+        evidence.detail``.  Evidence of ANOTHER kind is never a layer
+        split, even when its detail happens to contain a "--".  Under
+        the mutant (``and`` -> ``or``) the kind check is bypassed and
+        the detail of an unrelated piece of evidence is parsed as a
+        layer pair.
+        """
+        classification = Classification(
+            mode=FailureMode.WRONG_LAYER,
+            rule=RULE_SYMPTOM_ONLY,
+            reason="a reason",
+            evidence=(
+                Evidence(
+                    kind="failing-test",
+                    detail="test_store -- root cause layer 'store/store.py'",
+                    file="",
+                ),
+            ),
+        )
+        checklist = route(classification, None)
+        inputs = {i.name: i.value for i in checklist.checks[0].inputs}
+        # not a layer-split evidence: the layers stay unknown
+        self.assertEqual(inputs["symptom-layer"], "(unknown)")
+        self.assertEqual(inputs["root-cause-layer"], "(unknown)")
+
+    def test_the_wrong_layer_route_needs_both_layers(self):
+        """`or@1155`: the "both layers are known" precondition.
+
+        The condition is ``if not symptom or not root:``.  When the
+        caller supplies only one layer, the route must fall back to the
+        evidence rather than half-filling the checklist.  Under the
+        mutant (``or`` -> ``and``) the fallback is taken only when BOTH
+        are missing, so a half-known pair keeps the unknown half and
+        never consults the evidence.
+        """
+        classification = Classification(
+            mode=FailureMode.WRONG_LAYER,
+            rule=RULE_SYMPTOM_ONLY,
+            reason="a reason",
+            evidence=(
+                Evidence(
+                    kind="layer-split",
+                    detail=(
+                        "symptom layer 'ui/handler.py' -- root cause layer "
+                        "'store/store.py'"
+                    ),
+                    file="ui/handler.py",
+                ),
+            ),
+        )
+        record = FailureRecord(
+            instruction="do the thing",
+            symptom_layer="",
+            root_cause_layer="store/store.py",
+        )
+        checklist = route(classification, record)
+        inputs = {i.name: i.value for i in checklist.checks[0].inputs}
+        self.assertEqual(inputs["symptom-layer"], "ui/handler.py")
+        self.assertEqual(inputs["root-cause-layer"], "store/store.py")
+
+    def test_the_wrong_layer_criterion_names_the_root_layer(self):
+        """`or@1180`: the "the root layer is known" fallback.
+
+        The criterion is built from ``root or '(unknown)'``.  When the
+        root layer IS known, the criterion must name it, not the
+        fallback prose.  Under the mutant (``or`` -> ``and``) the
+        fallback prose is used even when the layer is known.
+        """
+        classification = Classification(
+            mode=FailureMode.WRONG_LAYER,
+            rule=RULE_SYMPTOM_ONLY,
+            reason="a reason",
+        )
+        record = FailureRecord(
+            instruction="do the thing",
+            symptom_layer="ui/handler.py",
+            root_cause_layer="store/store.py",
+        )
+        checklist = route(classification, record)
+        criterion = checklist.checks[0].criterion
+        self.assertIn("store/store.py", criterion)
+        self.assertNotIn("root-cause layer (unknown)", criterion)
+
+    def test_the_wrong_layer_criterion_names_the_symptom_layer(self):
+        """`or@1182`: the "the symptom layer is known" fallback.
+
+        The criterion is built from ``symptom or '(unknown)'``.  When
+        the symptom layer IS known, the criterion must name it.  Under
+        the mutant (``or`` -> ``and``) the fallback prose is used even
+        when the layer is known.
+        """
+        classification = Classification(
+            mode=FailureMode.WRONG_LAYER,
+            rule=RULE_SYMPTOM_ONLY,
+            reason="a reason",
+        )
+        record = FailureRecord(
+            instruction="do the thing",
+            symptom_layer="ui/handler.py",
+            root_cause_layer="store/store.py",
+        )
+        checklist = route(classification, record)
+        criterion = checklist.checks[0].criterion
+        self.assertIn("ui/handler.py", criterion)
+        self.assertNotIn("layer (unknown)", criterion)
+
+
+class TestSweFailureModesMainGuard(unittest.TestCase):
+    """The ``__main__`` guard -- the last planted fault in the sweep.
+
+      eq@1473  ``if __name__ == "__main__":``
+
+    The guard decides whether ``main()`` runs when the module is
+    EXECUTED as a script.  Under the mutant (``==`` -> ``!=``) the
+    condition is false for a script run, so the module's self-check
+    never executes and the script prints nothing at all.
+
+    The test runs the module as a real subprocess and reads its
+    output, which is the only way to observe the guard: importing the
+    module (as the test suite does) sets ``__name__`` to the module
+    name, not ``"__main__"``, and would not exercise the branch.
+    """
+
+    def _component_dir(self):
+        import os
+
+        return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    def _run(self, argv):
+        import os
+        import subprocess
+        import sys
+
+        env = dict(os.environ)
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        env["PYTHONPATH"] = self._component_dir()
+        result = subprocess.run(
+            [sys.executable] + argv,
+            cwd=self._component_dir(),
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=60,
+        )
+        return result
+
+    def test_running_the_module_as_a_script_prints_the_self_check(self):
+        """`eq@1473`: the guard decides whether the self-check runs.
+
+        Executed as a script, the module classifies one record of each
+        mode and prints the route for each.  Under the mutant the
+        ``if`` is false, the self-check never runs, and the script is
+        silent -- so the expected output is missing.
+        """
+        result = self._run(["swe_failure_modes.py"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("requirement-miss: classified as", result.stdout)
+        self.assertIn("route instruction-diff-readback", result.stdout)
+        self.assertIn("unknown: classified as unknown", result.stdout)
+
+    def test_importing_the_module_does_not_run_the_self_check(self):
+        """`eq@1473`: the other side of the guard.
+
+        IMPORTED, the module must stay silent -- the self-check is a
+        script's job, and an import that printed would pollute the
+        importer's output.  Under the mutant the condition is true for
+        an import, and the self-check runs and prints.
+        """
+        result = self._run(["-c", "import swe_failure_modes"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "")
