@@ -384,3 +384,327 @@ class ModuleHygieneTests(unittest.TestCase):
         result = reveal(note, commitment, ledger)
         self.assertEqual(result.outcome, VOID_PLANT)
         self.assertEqual(len(ledger.catches()), 0)
+
+
+class SecondHalfGuardTests(unittest.TestCase):
+    """The second half of every guard in the planted-fault module.
+
+    Each surviving mutant is one arm of a two-armed conditional, or one
+    half of a conjunction, and the rest of the suite drove only the
+    other arm.  These tests drive the missing half.
+    """
+
+    # -- or@384: the commitment-match guard ----------------------------
+
+    def test_a_wrong_commitment_is_reported_as_a_mismatch(self):
+        """`or@384`: the "or the commitment is wrong" half.
+
+        The guard is ``if not commitment or commitment != computed``.
+        The suite drove the "no commitment at all" half; this drives a
+        commitment that is present but does not match the note.  The
+        outcome must say the commitment MISMATCHED -- not that no
+        commitment was posted.
+        """
+        ledger = EvidenceLedger()
+        note = _note()
+        # A truthy commitment that is not the note's digest, and no
+        # commitment was ever posted to the ledger.
+        wrong = "sha256:" + "0" * 64
+        result = reveal(note, wrong, ledger)
+        self.assertEqual(result.outcome, VOID_PLANT)
+        self.assertEqual(result.detail, "commitment mismatch")
+
+    def test_a_matching_commitment_reports_no_mismatch(self):
+        """`or@384`: the control -- the matching commitment does not
+        reach the mismatch branch."""
+        ledger = EvidenceLedger()
+        note = _note()
+        commitment = post_commitment(note, ledger)
+        faulted = plant(_allow_record(), note, "planter-alpha")
+        run_check(_kill_switch_check, faulted, "checker-beta", ledger)
+        result = reveal(note, commitment, ledger)
+        self.assertEqual(result.outcome, REVEALED)
+        self.assertNotEqual(result.detail, "commitment mismatch")
+
+    # -- or@441: the ledger's commitment guard -------------------------
+
+    def test_posting_an_empty_commitment_is_refused(self):
+        """`or@441`: the "or the commitment is empty" half.
+
+        The guard is ``if not plant_id or not commitment``.  The suite
+        drove the plant-id half; this drives the commitment half.
+        """
+        from planted_fault import CommitmentError
+
+        ledger = EvidenceLedger()
+        with self.assertRaises(CommitmentError):
+            ledger.post_commitment("plant-1", "")
+        self.assertIsNone(ledger.commitment_for("plant-1"))
+
+    def test_posting_an_empty_plant_id_is_refused(self):
+        """`or@441`: the other half -- an empty plant id."""
+        from planted_fault import CommitmentError
+
+        ledger = EvidenceLedger()
+        with self.assertRaises(CommitmentError):
+            ledger.post_commitment("", "sha256:abc")
+        self.assertIsNone(ledger.commitment_for(""))
+
+    def test_posting_a_real_commitment_is_accepted(self):
+        """`or@441`: the control -- a complete commitment is accepted."""
+        ledger = EvidenceLedger()
+        ledger.post_commitment("plant-1", "sha256:abc")
+        self.assertEqual(ledger.commitment_for("plant-1"), "sha256:abc")
+
+    # -- eq@467 / and@467: the dead-plant lookup -----------------------
+
+    def test_a_voided_plant_is_dead(self):
+        """`eq@467`: the "and it is a VOID_PLANT row" half.
+
+        The lookup is ``row.kind == KIND_VOID_PLANT and row.plant_id ==
+        plant_id``.  A ledger holding a VOID_PLANT row for this plant
+        must report it dead.
+        """
+        ledger = EvidenceLedger()
+        self.assertFalse(ledger.plant_is_dead("plant-1"))
+        ledger.record_void_plant("plant-1", "commitment mismatch")
+        self.assertTrue(ledger.plant_is_dead("plant-1"))
+
+    def test_a_caught_plant_is_not_dead(self):
+        """`and@467`: the other half -- the row's plant id must match.
+
+        A CATCH row for this plant is not a VOID_PLANT row: the plant
+        was caught, not voided, so it is not dead.
+        """
+        ledger = EvidenceLedger()
+        ledger.record_catch("plant-1", 1, seq=1)
+        self.assertFalse(ledger.plant_is_dead("plant-1"))
+
+    def test_a_void_plant_of_another_plant_does_not_kill_this_one(self):
+        """`eq@467` / `and@467`: the plant-id half, across plants."""
+        ledger = EvidenceLedger()
+        ledger.record_void_plant("plant-2", "commitment mismatch")
+        self.assertFalse(ledger.plant_is_dead("plant-1"))
+        self.assertTrue(ledger.plant_is_dead("plant-2"))
+
+    # -- or@561: the void-back-to-last-catch filter --------------------
+
+    def test_a_second_void_back_voids_nothing_new(self):
+        """`or@561`: the "or the row is not still a PASS" half.
+
+        The filter is ``if row.kind != KIND_PASS or row.status !=
+        STATUS_PASS: continue``.  A pass that was ALREADY voided is not
+        voided a second time: the second sweep returns nothing.
+        """
+        ledger = EvidenceLedger()
+        ledger.record_pass("kill-switch", 1, seq=10)
+        ledger.record_miss("plant-1", 2, seq=11)
+        self.assertEqual(len(ledger.voided_passes()), 1)
+        # A second sweep must find nothing new to void.
+        self.assertEqual(list(ledger.void_back_to_last_catch()), [])
+        self.assertEqual(len(ledger.voided_passes()), 1)
+
+    def test_a_catch_row_is_never_voided(self):
+        """`or@561`: the other half -- a row of another kind.
+
+        A CATCH row is not a PASS row, so the sweep leaves it alone.
+        """
+        ledger = EvidenceLedger()
+        ledger.record_catch("plant-1", 1, seq=10)
+        ledger.record_miss("plant-2", 2, seq=11)
+        self.assertEqual(len(ledger.voided_passes()), 0)
+        self.assertEqual(len(ledger.catches()), 1)
+
+    # -- gt@563: the last-catch comparison -----------------------------
+
+    def test_a_pass_at_the_same_seq_as_the_last_catch_is_left_alone(self):
+        """`gt@563`: the "or there is no last catch" half.
+
+        The comparison is ``row.seq > last_catch``.  A pass whose seq is
+        EQUAL to the last catch's seq is not after it, so it is not
+        voided.  (The rule voids passes *after* the last catch, and the
+        boundary itself belongs to the catch.)
+        """
+        ledger = EvidenceLedger()
+        ledger.record_catch("plant-1", 1, seq=10)
+        ledger.record_pass("kill-switch", 2, seq=10)
+        ledger.record_miss("plant-2", 3, seq=11)
+        self.assertEqual(len(ledger.voided_passes()), 0)
+        self.assertEqual(len(ledger.valid_passes()), 1)
+
+    def test_a_pass_after_the_last_catch_is_voided(self):
+        """`gt@563`: the control -- a pass strictly after is voided."""
+        ledger = EvidenceLedger()
+        ledger.record_catch("plant-1", 1, seq=10)
+        ledger.record_pass("kill-switch", 2, seq=11)
+        ledger.record_miss("plant-2", 3, seq=12)
+        self.assertEqual(len(ledger.voided_passes()), 1)
+        self.assertEqual(len(ledger.valid_passes()), 0)
+
+    # -- and@600: the voided-pass filter -------------------------------
+
+    def test_a_valid_pass_is_not_a_voided_pass(self):
+        """`and@600`: the "and it is VOID" half.
+
+        The filter is ``row.kind == KIND_PASS and row.status ==
+        STATUS_VOID``.  A pass that still counts as evidence is not a
+        voided pass.
+        """
+        ledger = EvidenceLedger()
+        ledger.record_pass("kill-switch", 1, seq=10)
+        self.assertEqual(len(ledger.valid_passes()), 1)
+        self.assertEqual(len(ledger.voided_passes()), 0)
+
+    def test_a_voided_pass_is_a_voided_pass(self):
+        """`and@600`: the control -- a voided pass is counted."""
+        ledger = EvidenceLedger()
+        ledger.record_pass("kill-switch", 1, seq=10)
+        ledger.record_miss("plant-1", 2, seq=11)
+        self.assertEqual(len(ledger.voided_passes()), 1)
+        self.assertEqual(len(ledger.valid_passes()), 0)
+
+
+class StdlibOnlyGuardTests(unittest.TestCase):
+    """The stdlib-only guard's refusal half.
+
+    ``stdlib_only()`` walks the module's own AST and refuses any import
+    outside the allowed set.  The suite drove only the "this module is
+    stdlib-only" half; the refusal half needs a source that is not, so
+    these tests point the check at stand-in sources.
+    """
+
+    def _check_source(self, source: str) -> bool:
+        """Run ``stdlib_only()`` against a stand-in source file."""
+        import tempfile
+
+        import planted_fault as pf
+
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".py", delete=False, encoding="utf-8"
+        ) as handle:
+            handle.write(source)
+            path = handle.name
+
+        original = pf.__file__
+        try:
+            pf.__file__ = path
+            return pf.stdlib_only()
+        finally:
+            pf.__file__ = original
+
+    def test_a_forbidden_plain_import_is_refused(self):
+        """`retF@653`: the ``ast.Import`` branch's refusal.
+
+        ``import numpy`` is not in the allowed set, so the module that
+        holds it is not stdlib-only.
+        """
+        self.assertFalse(self._check_source("import json\nimport numpy\n"))
+
+    def test_a_forbidden_from_import_is_refused(self):
+        """`retF@656`: the ``ast.ImportFrom`` branch's refusal.
+
+        ``from requests import get`` is not in the allowed set.
+        """
+        self.assertFalse(self._check_source("from requests import get\n"))
+
+    def test_an_allowed_source_is_accepted(self):
+        """The control -- a source with only allowed imports passes."""
+        self.assertTrue(
+            self._check_source(
+                "import ast\nimport hashlib\nfrom dataclasses import dataclass\n"
+            )
+        )
+
+    def test_the_module_itself_is_stdlib_only(self):
+        """The control -- the real module passes its own check."""
+        import planted_fault as pf
+
+        self.assertTrue(pf.stdlib_only())
+
+
+class SelfCheckTests(unittest.TestCase):
+    """The module's own self-check, pinned.
+
+    ``planted_fault.main()`` is the module's self-check: plant, blind
+    check, reveal, catch, then a pass.  The suite ran it once without
+    asserting anything about it, so the ``__main__`` guard was free.
+    """
+
+    def test_the_module_self_checks_when_run_as_a_script(self):
+        """`eq@691`: the ``__name__ == "__main__"`` guard.
+
+        Run as a script, the module self-checks and says so; run as an
+        import, it says nothing.
+        """
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        import planted_fault as pf
+
+        component = Path(pf.__file__).resolve().parent
+        result = subprocess.run(
+            [sys.executable, "-m", "planted_fault"],
+            cwd=str(component),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=180,
+        )
+        output = result.stdout.decode("utf-8", "replace")
+        self.assertEqual(result.returncode, 0, output)
+        self.assertIn("planted-fault OK", output)
+
+    def test_the_self_check_pins_the_planted_value(self):
+        """The self-check's claim: the fault is in the INPUT.
+
+        The record's ``outcome`` carries the wrong value, and the
+        original input is left alone.
+        """
+        note = PlantNote(
+            plant_id="p1",
+            run_index=3,
+            field="outcome",
+            wrong_value="permission.deny",
+            true_value="permission.allow",
+            planted_by="planter-1",
+            check_scope="kill-switch",
+        )
+        record = {"outcome": "permission.allow"}
+        faulted = plant(record, note, "planter-1")
+        self.assertEqual(faulted["outcome"], "permission.deny")
+        self.assertEqual(record["outcome"], "permission.allow")
+
+    def test_the_self_check_pins_the_catch(self):
+        """The self-check's claim: the blind check catches the fault.
+
+        The reveal is REVEALED and the ledger holds exactly one catch.
+        """
+        note = PlantNote(
+            plant_id="p1",
+            run_index=3,
+            field="outcome",
+            wrong_value="permission.deny",
+            true_value="permission.allow",
+            planted_by="planter-1",
+            check_scope="kill-switch",
+        )
+        ledger = EvidenceLedger()
+        commitment = post_commitment(note, ledger)
+        faulted = plant({"outcome": "permission.allow"}, note, "planter-1")
+        outcome = run_check(
+            lambda record: record.get("outcome") == "permission.deny",
+            faulted, "checker-2", ledger,
+        )
+        result = reveal(note, commitment, ledger)
+        self.assertTrue(outcome.caught)
+        self.assertEqual(result.outcome, REVEALED)
+        self.assertEqual(len(ledger.catches()), 1)
+
+    def test_the_self_check_pins_the_valid_pass(self):
+        """The self-check's last claim: one pass still counts.
+
+        After the catch, a recorded PASS is still a valid pass.
+        """
+        ledger = EvidenceLedger()
+        ledger.record_pass("kill-switch", 4, seq=10)
+        self.assertEqual(len(ledger.valid_passes()), 1)
