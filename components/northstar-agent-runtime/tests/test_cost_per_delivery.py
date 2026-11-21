@@ -515,3 +515,95 @@ class SealedReceiptSourceTests(unittest.TestCase):
         )
         self.assertEqual(record.verdict_source, source)
         self.assertAlmostEqual(book.cost_per_verified_delivery(), 6.96, delta=1e-9)
+
+
+class NumericGuardSecondHalfTests(unittest.TestCase):
+    """The second half of every numeric guard in the module.
+
+    The module's guards are all of one shape:
+
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+
+    The FIRST half is "is it a boolean?" and the SECOND is "is it a
+    number?".  The suite drove the second half -- a string, a ``None``
+    and a list were all refused -- and left the first, so a fault
+    planted there survived.
+
+    The halves are NOT interchangeable, because ``bool`` IS an ``int``
+    in Python: ``isinstance(True, (int, float))`` is True.  A boolean
+    is a NUMBER as far as the second half is concerned, and only the
+    first half refuses it.
+
+    And the fault is not cosmetic: ``True`` is 1.0, so an accepted
+    boolean is a settled cost of one dollar, a resolution rate of one
+    (every attempt delivers), or a rate of zero.
+    """
+
+    def test_a_settled_cost_that_is_a_boolean_is_refused(self):
+        """`or@215`: the boolean half of the settled-cost guard.
+
+        ``_check_usd`` is the guard on every settled cost a ledger
+        books.  Under the mutant (``or`` -> ``and``) a boolean is
+        accepted, and ``True`` is a settled cost of $1.00.
+        """
+        ledger = CostPerDeliveryLedger()
+        with self.assertRaises(CostPerDeliveryError):
+            ledger.book_attempt("a1", True, "verified_delivered", "sealed-receipt:r-1")
+        self.assertEqual(ledger.records, ())
+
+    def test_a_resolution_rate_that_is_a_boolean_is_refused(self):
+        """`or@301`: the boolean half of the admission gate's rate guard.
+
+        The admission gate is the fail-closed door: it decides whether
+        a slice may be dispatched at a price.  Under the mutant
+        (``or`` -> ``and``) a boolean rate is accepted -- and ``True``
+        is a rate of 1.0, so the gate computes a price per delivery
+        that equals the price per attempt and admits the dispatch.
+        """
+        with self.assertRaises(CostPerDeliveryError):
+            admit(6.96, True, 10.0)
+
+    def test_a_settled_cost_that_is_a_boolean_false_is_refused(self):
+        """`or@215`: the other boolean.
+
+        ``False`` is 0.0, so accepting it books a free attempt.  The
+        suite's existing cases cover a negative cost and a non-finite
+        cost, but not this one.
+        """
+        ledger = CostPerDeliveryLedger()
+        with self.assertRaises(CostPerDeliveryError):
+            ledger.book_attempt("a1", False, "verified_delivered", "sealed-receipt:r-1")
+        self.assertEqual(ledger.records, ())
+
+    def test_a_resolution_rate_that_is_a_boolean_false_is_refused(self):
+        """`or@301`: the other boolean.
+
+        ``False`` is 0.0, which the gate would otherwise treat as "a
+        rate of zero" -- and a rate of zero is REFUSED, not an error.
+        So the mutant's version of this input returns a refusal
+        verdict where the real code raises: the two are different
+        answers to the same question, and the mutant's is the wrong
+        one -- it silently declines a dispatch instead of refusing the
+        input.
+        """
+        with self.assertRaises(CostPerDeliveryError):
+            admit(6.96, False, 10.0)
+
+    def test_a_real_settled_cost_is_still_booked(self):
+        """`or@215`: the control -- a real amount is booked."""
+        ledger = CostPerDeliveryLedger()
+        record = ledger.book_attempt(
+            "a1", 6.96, "verified_delivered", "sealed-receipt:r-1", model="local"
+        )
+        self.assertEqual(record.settled_cost_usd, 6.96)
+        self.assertEqual(len(ledger.records), 1)
+
+    def test_a_real_resolution_rate_is_still_admitted(self):
+        """`or@301`: the control -- a real rate is admitted.
+
+        The ceiling is $20 here, because Fable at $6.96 per rollout and
+        a 38.8% resolution rate projects to $17.94 per delivery -- which
+        a $10 ceiling correctly refuses.
+        """
+        verdict = admit(6.96, 0.388, 20.0)
+        self.assertTrue(verdict.admitted)
