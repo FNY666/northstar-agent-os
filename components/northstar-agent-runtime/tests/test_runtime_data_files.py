@@ -341,7 +341,13 @@ class WheelDataFileTests(unittest.TestCase):
                 }
         self.assertIn("cli", top)
         self.assertIn("deny_monotonicity", top)
-        self.assertEqual(len(top), 1614, sorted(top)[:5])
+        # The wheel's flat-module count is pinned here, and it is the ONE
+        # place the count is measured against the built artefact rather
+        # than against a list -- so a new module that joins the flat
+        # surface shows up here and nowhere else until this number moves.
+        # 1615 == 1614 (pre-finding_gate) + 1 (finding_gate).
+        self.assertIn("finding_gate", top)
+        self.assertEqual(len(top), 1615, sorted(top)[:5])
 
 
 class InstalledSurfaceTests(unittest.TestCase):
