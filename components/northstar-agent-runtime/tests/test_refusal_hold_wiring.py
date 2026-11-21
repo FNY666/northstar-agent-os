@@ -46,7 +46,7 @@ for _cached in Path(__file__).resolve().parents[1].glob(
 ):
     _cached.unlink(missing_ok=True)
 
-import forward_seal_ledger
+import forward_seal_ledger as _FSL
 from forward_seal_ledger import ForwardSealError, ForwardSealLedger
 from grant_pin_ledger import GrantPin
 from refusal_hold import (
@@ -1339,12 +1339,33 @@ class TwoGateFamiliesTests(unittest.TestCase):
 
 
 def _legacy_ledger(state):
-    """A ledger rebuilt from a legacy (pre-split) pickle state."""
-    import forward_seal_ledger
+    """A ledger rebuilt from a legacy (pre-split) pickle state.
 
-    ledger = forward_seal_ledger.ForwardSealLedger.__new__(
-        forward_seal_ledger.ForwardSealLedger
-    )
+    The ledger is built from ``_FSL`` -- **this file's own** binding of
+    the module -- and not from a fresh ``import forward_seal_ledger``
+    inside the function.
+
+    That is not a style choice.  ``tests/test_forward_seal_ledger.py``
+    replaces ``sys.modules["forward_seal_ledger"]`` with a freshly
+    executed copy of the same source at ITS import time.  A function-level
+    ``import`` inside this file therefore resolves to whatever module is
+    CURRENTLY registered, while this file's module-level
+    ``from forward_seal_ledger import ForwardSealError`` bound to the
+    module that was registered when THIS file was imported.
+
+    Two module objects, two distinct ``ForwardSealError`` classes, one
+    name.  A ledger built from the current module raises the current
+    class; ``assertRaises(ForwardSealError)`` -- the class bound above --
+    watches the other one, and the assertion fails even though the
+    refusal happened exactly as it should.
+
+    Measured 2026-11-21: this failed in the full-suite discovery and
+    passed in isolation, because only the full-suite import order puts a
+    different module in ``sys.modules`` first.  Building from ``_FSL``
+    keeps the ledger and the asserted class in one module, so the test
+    means the same thing in both orders.
+    """
+    ledger = _FSL.ForwardSealLedger.__new__(_FSL.ForwardSealLedger)
     ledger.__setstate__(state)
     return ledger
 
