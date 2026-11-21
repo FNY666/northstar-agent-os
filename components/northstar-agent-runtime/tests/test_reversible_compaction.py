@@ -344,3 +344,219 @@ class NonRecordInputsTests(unittest.TestCase):
             self.assertFalse(rc.can_revert(junk, {}))
             self.assertIsNone(rc.revert(junk, {}))
             self.assertFalse(rc.rederive(junk, rc.prompt_hash_for(_prompt())))
+
+
+class ReversibleCompactionSecondHalfTests(unittest.TestCase):
+    """The SECOND half of each surviving guard in ``reversible_compaction``.
+
+    Five planted faults survived this slice's suite:
+
+      or@290   the ``isinstance(summary, str)`` half of the summary guard
+      or@299   the ``isinstance(token, str)`` half of the token guard
+      retF@326 the "an unhashable candidate is not a match" return
+      or@367   the ``not record.summary`` half of the rederive summary guard
+      and@374  the ``isinstance(record, CompactionRecord)`` half of
+               ``is_reversible()``
+
+    All five are killable, and all five are driven below.  Each test names
+    the mutant it kills and states what the ORIGINAL code does, so the next
+    person can check the claim instead of trusting it.
+
+    The recurring shape is a two-armed guard of the form
+    ``if not isinstance(x, T) or <the other half>:`` -- the suite had only
+    ever driven the *other* half, so mutating the type arm away changed
+    nothing the suite could see.  The fix is the same in each case: feed
+    the kind of bad input the *untested* arm is responsible for.
+
+      * a **blank-but-string** value (whitespace only) is refused by the
+        ``not x.strip()`` half of a guard whose type half already says
+        "this is a string" -- and it is invisible to the type half, so
+        mutating the type arm away (``or`` -> ``and``) makes the guard
+        stop firing at all,
+      * a **non-iterable candidate** makes ``transcript_hash()`` raise, and
+        the ``except`` arm must answer ``False`` (an unreadable candidate
+        is not a match),
+      * a **duck-typed impostor** is not a ``CompactionRecord``, so
+        ``is_reversible()`` must answer ``False`` even when the impostor
+        claims it is reversible.
+    """
+
+    # --- or@290: the `isinstance(summary, str)` half --------------------
+    def test_a_whitespace_only_summary_is_refused(self):
+        """`or@290`: **a blank summary is refused**.
+
+        The guard is ``not isinstance(summary, str) or not
+        summary.strip()``.  A whitespace-only summary is a *string*, so the
+        type half says "fine" and only the ``.strip()`` half refuses it.
+        Under the mutant (``or`` -> ``and``) both halves must be true for
+        the guard to fire, so the whitespace summary is accepted and a
+        record with no usable summary is minted.
+        """
+        with self.assertRaises(rc.MissingHashError):
+            rc.compact_reversible(_transcript(), "   \t\n ", rc.prompt_hash_for(_prompt()))
+
+    def test_an_empty_summary_is_refused(self):
+        """`or@290`: the empty string, the same guard."""
+        with self.assertRaises(rc.MissingHashError):
+            rc.compact_reversible(_transcript(), "", rc.prompt_hash_for(_prompt()))
+
+    def test_a_non_string_summary_is_refused(self):
+        """`or@290`: the type half itself, as the control.
+
+        A non-string summary is refused by the ``isinstance`` half.  This
+        is the arm that WAS covered; it is kept here so the pair is
+        explicit: both halves refuse, each for its own reason.
+        """
+        for bad in (None, 42, ["a summary"], b"bytes"):
+            with self.assertRaises(rc.MissingHashError):
+                rc.compact_reversible(_transcript(), bad, rc.prompt_hash_for(_prompt()))
+
+    def test_a_real_summary_is_accepted(self):
+        """`or@290`: the control -- a real summary is minted."""
+        record = rc.compact_reversible(_transcript(), _summary(), rc.prompt_hash_for(_prompt()))
+        self.assertEqual(record.summary, _summary())
+        self.assertTrue(record.is_reversible())
+
+    # --- or@299: the `isinstance(token, str)` half --------------------
+    def test_a_whitespace_only_revert_token_is_refused(self):
+        """`or@299`: **a blank revert token is refused**.
+
+        The guard is ``not isinstance(token, str) or not token.strip()``.  A
+        whitespace-only token is a string, so only the ``.strip()`` half
+        refuses it.  Under the mutant (``or`` -> ``and``) the blank token
+        is accepted and the record is minted with a token that cannot
+        address anything.
+        """
+        with self.assertRaises(rc.MissingHashError):
+            rc.compact_reversible(
+                _transcript(), _summary(), rc.prompt_hash_for(_prompt()), revert_token="   "
+            )
+
+    def test_an_empty_revert_token_is_refused(self):
+        """`or@299`: the empty string, the same guard."""
+        with self.assertRaises(rc.MissingHashError):
+            rc.compact_reversible(
+                _transcript(), _summary(), rc.prompt_hash_for(_prompt()), revert_token=""
+            )
+
+    def test_a_non_string_revert_token_is_refused(self):
+        """`or@299`: the type half itself, as the control."""
+        for bad in (42, ["token"], b"token"):
+            with self.assertRaises(rc.MissingHashError):
+                rc.compact_reversible(
+                    _transcript(), _summary(), rc.prompt_hash_for(_prompt()), revert_token=bad
+                )
+
+    def test_a_real_revert_token_is_accepted(self):
+        """`or@299`: the control -- a real token is minted."""
+        record = rc.compact_reversible(
+            _transcript(), _summary(), rc.prompt_hash_for(_prompt()), revert_token="revert:custom"
+        )
+        self.assertEqual(record.revert_token, "revert:custom")
+
+    # --- retF@326: an unhashable candidate is not a match --------------
+    def test_can_revert_is_false_for_a_candidate_that_cannot_be_hashed(self):
+        """`retF@326`: **an unreadable candidate is NOT a match**.
+
+        ``transcript_hash()`` raises when the candidate is not a sequence
+        of messages (it iterates it).  The archive is caller-supplied and
+        may hold anything, so the failure must be swallowed and answered
+        ``False``.  Under the mutant (``return False`` -> ``return True``)
+        an unreadable candidate reads as a MATCH -- the archive claims to
+        hold the transcript and the caller is told it can revert to
+        bytes it can never obtain.
+        """
+        record = _record()
+        archive = {record.transcript_hash: 42}
+        self.assertFalse(rc.can_revert(record, archive))
+
+    def test_can_revert_is_false_for_a_non_iterable_candidate_of_any_type(self):
+        """`retF@326`: the same guard, other unreadable shapes."""
+        record = _record()
+        for junk in (42, 3.5, object()):
+            self.assertFalse(rc.can_revert(record, {record.transcript_hash: junk}))
+
+    def test_can_revert_is_still_true_for_a_hashable_candidate(self):
+        """`retF@326`: the control -- a real transcript is still a match."""
+        transcript = _transcript()
+        record = _record(transcript)
+        self.assertTrue(rc.can_revert(record, {record.transcript_hash: transcript}))
+
+    # --- or@367: the `not record.summary` half ------------------------
+    def test_rederive_is_false_for_a_whitespace_only_summary(self):
+        """`or@367`: **a blank summary fails the rederive check**.
+
+        The guard is ``not record.summary or not record.summary.strip()``.
+        A whitespace-only summary is truthy, so only the ``.strip()`` half
+        refuses it.  Under the mutant (``or`` -> ``and``) the whitespace
+        summary slips past the guard and ``rederive()`` answers ``True``
+        for a record that carries no summary at all -- and it answers
+        ``True`` *by the prompt-hash equality*, which is exactly the
+        half-check the guard was there to prevent.
+        """
+        record = rc.CompactionRecord(
+            summary="   \t ",
+            transcript_hash=rc.transcript_hash(_transcript()),
+            prompt_hash=rc.prompt_hash_for(_prompt()),
+            revert_token="revert:abc",
+        )
+        # The record's own prompt hash agrees with the caller's -- so the
+        # ONLY thing that can answer False is the summary guard.
+        self.assertEqual(record.prompt_hash, rc.prompt_hash_for(_prompt()))
+        self.assertFalse(rc.rederive(record, rc.prompt_hash_for(_prompt())))
+
+    def test_rederive_is_false_for_an_empty_summary(self):
+        """`or@367`: the empty string, the same guard."""
+        record = rc.CompactionRecord(
+            summary="",
+            transcript_hash=rc.transcript_hash(_transcript()),
+            prompt_hash=rc.prompt_hash_for(_prompt()),
+            revert_token="revert:abc",
+        )
+        self.assertFalse(rc.rederive(record, rc.prompt_hash_for(_prompt())))
+
+    def test_rederive_is_true_for_a_real_summary(self):
+        """`or@367`: the control -- a real summary rederives."""
+        record = _record()
+        self.assertTrue(rc.rederive(record, rc.prompt_hash_for(_prompt())))
+
+    # --- and@374: the `isinstance` half of `is_reversible()` -----------
+    def test_is_reversible_is_false_for_a_duck_typed_impostor(self):
+        """`and@374`: **only a real record is reversible**.
+
+        The guard is ``isinstance(record, CompactionRecord) and
+        record.is_reversible()``.  An impostor that *claims* to be
+        reversible -- it has an ``is_reversible()`` method that answers
+        ``True`` -- is still not a ``CompactionRecord``, so the type half
+        must refuse it.  Under the mutant (``and`` -> ``or``) the
+        impostor is reported as reversible, and a caller that trusts that
+        answer would try to revert a record this module never minted.
+        """
+        class Impostor:
+            def is_reversible(self):
+                return True
+
+        self.assertFalse(rc.is_reversible(Impostor()))
+
+    def test_is_reversible_is_false_for_junk(self):
+        """`and@374`: the other non-records, as the control."""
+        for junk in (None, "record", 42, {"summary": "x"}):
+            self.assertFalse(rc.is_reversible(junk))
+
+    def test_is_reversible_is_true_for_a_real_record(self):
+        """`and@374`: the control -- a real, well formed record."""
+        self.assertTrue(rc.is_reversible(_record()))
+
+    def test_is_reversible_is_false_for_a_real_record_without_hashes(self):
+        """`and@374`: the other half -- a real record still needs hashes."""
+        record = rc.CompactionRecord(
+            summary=_summary(),
+            transcript_hash="sha256:deadbeef",
+            prompt_hash=rc.prompt_hash_for(_prompt()),
+            revert_token="revert:abc",
+        )
+        self.assertFalse(rc.is_reversible(record))
+
+
+if __name__ == "__main__":
+    unittest.main()
