@@ -544,3 +544,141 @@ def _load_docbuild():
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RegenerateBaselineCorpusTests(unittest.TestCase):
+    """``regenerate_baseline`` must use the corpus it is GIVEN.
+
+    One planted fault survived this slice's suite:
+
+      or@266  ``compute_deny_set(corpus or DENY_CORPUS, build_gate_fn())``
+
+    The expression reads "the corpus I was given, or the default one".
+    The mutant (``or`` -> ``and``) does not read that at all: it reads
+    "the corpus I was given AND the default one", and because ``and``
+    returns the SECOND operand when the first is truthy, a corpus the
+    caller DID give is silently replaced by the default corpus.  A
+    caller who regenerates the baseline against a custom corpus would
+    get back a baseline describing the default canary set -- a floor
+    they never reviewed and never approved.
+
+    The two halves are pinned here:
+
+    * a corpus the caller GIVES is the corpus that is evaluated and
+      pinned (this is what kills the mutant);
+    * NO corpus falls back to the default canary corpus.
+
+    The EMPTY corpus is a third case, and the module's answer to it is
+    deliberate: an empty corpus also falls back to the default canary
+    set.  That is the SAFE answer, and it is pinned below rather than
+    changed.  A baseline is a FLOOR -- the set of denials the gate is
+    not allowed to lose.  Pinning the empty set as the floor would
+    make the monotonicity check vacuous: a gate that denied NOTHING at
+    all would satisfy it, and the canary set exists precisely to make
+    sure a gate that stops denying is caught.  So the module refuses
+    to let a caller talk it out of its own canaries.
+    """
+
+    def test_a_given_corpus_is_the_corpus_that_gets_pinned(self):
+        """`or@266`: the corpus the caller GIVES is the corpus pinned.
+
+        Under the mutant (``or`` -> ``and``) the default corpus is
+        pinned instead of the given one, so the baseline describes five
+        canary denials the caller never asked about.
+        """
+        custom = (
+            {
+                "probe": "custom-probe",
+                "tool": "BankTransfer",
+                "kind": "mutating",
+                "payload": {"action": "wire money"},
+                "config": "policy",
+            },
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "b.json"
+            dm.regenerate_baseline(corpus=custom, path=path)
+            pinned = dm.load_baseline(path)
+        self.assertEqual(pinned, {("custom-probe", "denial.disallowed_tools")})
+        self.assertNotIn(("disallowed-tool", "denial.disallowed_tools"), pinned)
+
+    def test_a_given_corpus_replaces_the_default_corpus_entirely(self):
+        """`or@266`: the difference, stated as a difference.
+
+        A custom corpus and the default corpus must produce DIFFERENT
+        baselines.  Under the mutant they are the same file, so the
+        floor a reviewer approves is not the floor that was pinned.
+        """
+        custom = (
+            {
+                "probe": "custom-probe",
+                "tool": "BankTransfer",
+                "kind": "mutating",
+                "payload": {"action": "wire money"},
+                "config": "policy",
+            },
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            custom_path = Path(tmp) / "custom.json"
+            default_path = Path(tmp) / "default.json"
+            dm.regenerate_baseline(corpus=custom, path=custom_path)
+            dm.regenerate_baseline(path=default_path)
+            custom_pinned = dm.load_baseline(custom_path)
+            default_pinned = dm.load_baseline(default_path)
+        self.assertNotEqual(custom_pinned, default_pinned)
+        self.assertEqual(len(custom_pinned), 1)
+        self.assertEqual(len(default_pinned), 5)
+
+    def test_no_corpus_falls_back_to_the_default_corpus(self):
+        """`or@266`: the fallback half, from the other side.
+
+        With NO corpus given at all, the default corpus is used -- that
+        is the point of the ``or``.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "b.json"
+            dm.regenerate_baseline(path=path)
+            pinned = dm.load_baseline(path)
+        self.assertEqual(
+            pinned, dm.compute_deny_set(dm.DENY_CORPUS, dm.build_gate_fn())
+        )
+        self.assertEqual(len(pinned), 5)
+
+    def test_an_empty_corpus_still_falls_back_to_the_canary_set(self):
+        """`or@266`: the empty corpus, and why the fallback is SAFE.
+
+        An empty corpus is falsy, so the module pins its DEFAULT canary
+        set rather than an empty floor.  That is deliberate: the
+        baseline is the set of denials the gate may not lose, and an
+        empty floor would make the monotonicity check vacuous -- a gate
+        that denied nothing at all would satisfy it.  The canary set
+        exists precisely to catch that, so a caller cannot talk the
+        module out of it.
+
+        This test pins the safe behaviour; it is NOT the killer for the
+        mutant.  The killer is the custom-corpus test above.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "b.json"
+            dm.regenerate_baseline(corpus=(), path=path)
+            pinned = dm.load_baseline(path)
+        self.assertEqual(
+            pinned, dm.compute_deny_set(dm.DENY_CORPUS, dm.build_gate_fn())
+        )
+        self.assertEqual(len(pinned), 5)
+
+    def test_an_empty_corpus_does_not_pin_an_empty_floor(self):
+        """`or@266`: the consequence, stated as a difference.
+
+        The empty corpus and the default corpus produce the SAME
+        baseline -- the canary floor -- and that floor is never empty.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            empty_path = Path(tmp) / "empty.json"
+            default_path = Path(tmp) / "default.json"
+            dm.regenerate_baseline(corpus=(), path=empty_path)
+            dm.regenerate_baseline(path=default_path)
+            empty = dm.load_baseline(empty_path)
+            default = dm.load_baseline(default_path)
+        self.assertEqual(empty, default)
+        self.assertEqual(len(empty), 5)
