@@ -27,7 +27,9 @@ from effort_scaling import (
     REASON_SHARED_CONTEXT,
     TOOLS_PER_SUBAGENT_MIN,
     WINDOW_CARD_LIMIT,
+    EffortScaling,
     EffortScalingError,
+    ParallelPlan,
     TaskSignals,
     check_applicability,
     classify_complexity,
@@ -407,6 +409,339 @@ class BudgetSeamTests(unittest.TestCase):
     def test_module_self_check_runs(self):
         """The module's own end-to-end self-check passes."""
         effort_scaling.main()
+
+
+class GuardArmsAndBoundariesTests(unittest.TestCase):
+    """The arm of each guard and the boundary each bound is drawn at.
+
+    Seven planted faults survived this slice's suite:
+
+      or@174   the ``bool`` half of the positive-int guard
+      or@180   the ``bool`` half of the non-negative-int guard
+      lt@180   the lower bound of the non-negative-int guard
+      gt@606   the card-degradation bound
+      lt@616   the parallel-spawn band's lower edge
+      gt@756   the remaining-budget bound
+      eq@861   the ``__main__`` guard
+
+    The first six are driven below; ``eq@861`` is driven in
+    :class:`MainGuardTests``.
+
+    Why the existing suite missed them
+    ----------------------------------
+
+    Each of the first four is one arm of a three-way disjunction, and the
+    existing suite drove only the arm that was easy to reach from the
+    public API:
+
+      or@174 / or@180   ``isinstance(value, bool) or not isinstance(value,
+                       int) or <bound>``.  Under the mutant the ``bool``
+                       arm is gone, so a BOOLEAN slips through as the
+                       integer 1 (or 0).  The existing suite fed
+                       negative numbers and floats, which the ``not an
+                       int`` arm catches; it never fed a bool.  The
+                       killer is a boolean.
+      lt@180           ``value < 0`` -> ``value <= 0``.  Zero is a LEGAL
+                       non-negative count, so the mutant refuses a value
+                       the original accepts.  The killer is exactly zero.
+      gt@606           ``requested > window_cards``.  The mutant degrades
+                       a plan that fits EXACTLY.  The killer is a card
+                       count equal to the requested subagent count.
+      lt@616           ``subagents < LEAD_PARALLEL_SPAWN_MIN``.  The
+                       mutant treats exactly-3 as "below the band".  The
+                       killer is a plan that lands on exactly 3.
+      gt@756           ``total_tool_calls > remaining``.  The mutant
+                       clamps a plan that fits EXACTLY.  The killer is a
+                       remaining budget equal to the row's total.
+    """
+
+    # --- or@174: the `bool` half of the positive-int guard --------------
+    def test_a_boolean_subagent_count_is_refused(self):
+        """`or@174`: **a bool IS an int in Python**.
+
+        The guard is ``isinstance(value, bool) or not isinstance(value,
+        int) or value < 1``.  The "not an int" half never refuses a
+        bool -- only the explicit ``bool`` half does.  Under the mutant
+        (``or`` -> ``and``) a boolean subagent count is accepted and
+        used as the integer 1, so a caller asking for "one agent" with a
+        boolean gets a plan instead of a refusal.
+        """
+        with self.assertRaises(EffortScalingError):
+            EffortScaling(
+                complexity=COMPLEXITY_SIMPLE,
+                agent_band="1",
+                tool_calls_band="3-10",
+                subagent_count=True,
+                tools_per_subagent=3,
+                source_quote="q",
+            )
+
+    def test_a_false_boolean_subagent_count_is_refused_too(self):
+        """`or@174`: the other boolean."""
+        with self.assertRaises(EffortScalingError):
+            EffortScaling(
+                complexity=COMPLEXITY_SIMPLE,
+                agent_band="1",
+                tool_calls_band="3-10",
+                subagent_count=False,
+                tools_per_subagent=3,
+                source_quote="q",
+            )
+
+    def test_a_boolean_parallel_spawn_count_is_refused(self):
+        """`or@174`: the same guard on a second positive-int field."""
+        with self.assertRaises(EffortScalingError):
+            ParallelPlan(
+                subagent_count=1,
+                tools_per_subagent=3,
+                parallel_spawn_count=True,
+                window_cards=3,
+            )
+
+    def test_a_float_subagent_count_is_refused(self):
+        """`or@174`: the other half, as the control."""
+        with self.assertRaises(EffortScalingError):
+            EffortScaling(
+                complexity=COMPLEXITY_SIMPLE,
+                agent_band="1",
+                tool_calls_band="3-10",
+                subagent_count=1.5,
+                tools_per_subagent=3,
+                source_quote="q",
+            )
+
+    # --- lt@174: the lower bound of the positive-int guard --------------
+    def test_exactly_one_window_card_is_accepted(self):
+        """`lt@174`: one is the smallest legal card count.
+
+        A host with a single context-window card can still run a plan;
+        the guard is ``value < 1``, so exactly one is inside the bound.
+        Under the mutant (``< 1`` -> ``<= 1``) a single-card host would
+        be refused, which would make the module unusable for the
+        smallest legal deployment.
+        """
+        plan = parallel_plan_for(
+            effort_scaling_for(COMPLEXITY_SIMPLE), window_cards=1
+        )
+        self.assertEqual(plan.window_cards, 1)
+        self.assertEqual(plan.subagent_count, 1)
+        self.assertEqual(plan.parallel_spawn_count, 1)
+
+    def test_zero_window_cards_is_still_refused(self):
+        """`lt@174`: the other side of the bound, as the control."""
+        with self.assertRaises(EffortScalingError):
+            parallel_plan_for(
+                effort_scaling_for(COMPLEXITY_SIMPLE), window_cards=0
+            )
+
+    # --- or@180: the `bool` half of the non-negative-int guard ----------
+    def test_a_boolean_independent_direction_count_is_refused(self):
+        """`or@180`: **a bool IS an int in Python**, again.
+
+        The guard is ``isinstance(value, bool) or not isinstance(value,
+        int) or value < 0``.  Under the mutant a boolean is accepted and
+        read as 1 (or 0), so a caller who passes ``True`` instead of an
+        integer gets a classified task instead of a refusal.
+        """
+        with self.assertRaises(EffortScalingError):
+            TaskSignals(independent_directions=True)
+
+    def test_a_false_boolean_independent_direction_count_is_refused(self):
+        """`or@180`: the other boolean."""
+        with self.assertRaises(EffortScalingError):
+            TaskSignals(independent_directions=False)
+
+    def test_a_boolean_tool_complexity_is_refused(self):
+        """`or@180`: the same guard on the second non-negative-int field."""
+        with self.assertRaises(EffortScalingError):
+            TaskSignals(tool_complexity=True)
+
+    def test_a_float_independent_direction_count_is_refused(self):
+        """`or@180`: the other half, as the control."""
+        with self.assertRaises(EffortScalingError):
+            TaskSignals(independent_directions=1.5)
+
+    # --- lt@180: the lower bound is INCLUSIVE --------------------------
+    def test_zero_independent_directions_is_accepted(self):
+        """`lt@180`: zero is a legal non-negative count.
+
+        A task with no independent directions is degenerate but not
+        malformed: the count is a non-negative int, and zero is one.
+        Under the mutant (``< 0`` -> ``<= 0``) it would be refused, so
+        the module would reject a value the contract allows.
+        """
+        signals = TaskSignals(independent_directions=0, tool_complexity=0)
+        self.assertEqual(signals.independent_directions, 0)
+        self.assertEqual(signals.tool_complexity, 0)
+        self.assertEqual(
+            classify_complexity(signals).complexity, COMPLEXITY_SIMPLE
+        )
+
+    def test_zero_tool_complexity_is_accepted(self):
+        """`lt@180`: the same bound on the second field."""
+        signals = TaskSignals(tool_complexity=0)
+        self.assertEqual(signals.tool_complexity, 0)
+
+    def test_a_negative_direction_count_is_still_refused(self):
+        """`lt@180`: the other side of the bound, as the control."""
+        with self.assertRaises(EffortScalingError):
+            TaskSignals(independent_directions=-1)
+
+    # --- gt@606: the card-degradation bound is STRICT --------------------
+    def test_a_plan_that_exactly_fills_the_cards_is_not_degraded(self):
+        """`gt@606`: the bound is STRICT.
+
+        A row whose requested subagent count EQUALS the number of
+        context-window cards fits exactly -- there is nothing to
+        degrade.  Under the mutant (``>`` -> ``>=``) the plan would be
+        marked degraded and would record a "requested 12 subagents
+        exceeds the 12 context-window cards" reason, which is false: 12
+        does not exceed 12.
+        """
+        row = effort_scaling_for(COMPLEXITY_COMPLEX)
+        plan = parallel_plan_for(row, window_cards=row.subagent_count)
+        self.assertFalse(plan.degraded)
+        self.assertEqual(plan.degradation_reasons, ())
+        self.assertEqual(plan.subagent_count, row.subagent_count)
+        self.assertEqual(plan.requested_subagent_count, row.subagent_count)
+
+    def test_a_plan_that_exceeds_the_cards_is_still_degraded(self):
+        """`gt@606`: the other side of the bound, as the control."""
+        row = effort_scaling_for(COMPLEXITY_COMPLEX)
+        plan = parallel_plan_for(row, window_cards=row.subagent_count - 1)
+        self.assertTrue(plan.degraded)
+        self.assertTrue(plan.degradation_reasons)
+
+    # --- lt@616: the parallel-spawn band's lower edge is INCLUSIVE ------
+    def test_a_plan_of_exactly_three_subagents_is_inside_the_band(self):
+        """`lt@616`: exactly three IS inside Anthropic's 3-5 band.
+
+        "the lead agent spins up 3-5 subagents in parallel" -- three is
+        the band's lower edge, so a plan that lands on three is inside
+        the band and must NOT be reported as below it.  Under the mutant
+        (``<`` -> ``<=``) the plan would carry a spurious "below
+        Anthropic's 3-5 parallel spawn band" reason and the spawn count
+        would be clamped to the subagent count instead of the band.
+        """
+        row = effort_scaling_for(COMPLEXITY_COMPLEX)
+        plan = parallel_plan_for(row, window_cards=LEAD_PARALLEL_SPAWN_MIN)
+        self.assertEqual(plan.subagent_count, LEAD_PARALLEL_SPAWN_MIN)
+        self.assertEqual(plan.parallel_spawn_count, LEAD_PARALLEL_SPAWN_MIN)
+        self.assertFalse(
+            any("parallel spawn band" in reason for reason in plan.degradation_reasons),
+            plan.degradation_reasons,
+        )
+
+    def test_a_plan_of_exactly_two_subagents_is_below_the_band(self):
+        """`lt@616`: the other side of the bound, as the control."""
+        row = effort_scaling_for(COMPLEXITY_COMPLEX)
+        plan = parallel_plan_for(row, window_cards=LEAD_PARALLEL_SPAWN_MIN - 1)
+        self.assertEqual(plan.subagent_count, LEAD_PARALLEL_SPAWN_MIN - 1)
+        self.assertEqual(plan.parallel_spawn_count, LEAD_PARALLEL_SPAWN_MIN - 1)
+        self.assertTrue(
+            any("parallel spawn band" in reason for reason in plan.degradation_reasons),
+            plan.degradation_reasons,
+        )
+
+    # --- gt@756: the remaining-budget bound is STRICT --------------------
+    def test_a_row_that_exactly_fits_the_remaining_budget_is_not_clamped(self):
+        """`gt@756`: the bound is STRICT.
+
+        When the row's total tool-call count EQUALS what is left, the
+        plan fits exactly and nothing needs clamping.  Under the mutant
+        (``>`` -> ``>=``) the plan would be marked clamped and would
+        record a "exceed the remaining budget" reason, which is false.
+        """
+        signals = TaskSignals(independent_directions=9)
+        plan = plan_effort(signals, window_cards=3)
+        exact = plan.parallel.total_tool_calls
+        fitted = plan_effort(
+            signals, window_cards=3, remaining_tool_call_budget=exact
+        )
+        self.assertFalse(fitted.tool_calls_clamped)
+        self.assertEqual(fitted.parallel.total_tool_calls, exact)
+        self.assertFalse(
+            any("remaining budget" in reason for reason in fitted.degradation_reasons),
+            fitted.degradation_reasons,
+        )
+
+    def test_a_row_that_exceeds_the_remaining_budget_is_still_clamped(self):
+        """`gt@756`: the other side of the bound, as the control."""
+        signals = TaskSignals(independent_directions=9)
+        plan = plan_effort(signals, window_cards=3)
+        exact = plan.parallel.total_tool_calls
+        tight = plan_effort(
+            signals, window_cards=3, remaining_tool_call_budget=exact - 1
+        )
+        self.assertTrue(tight.tool_calls_clamped)
+        self.assertLess(tight.parallel.total_tool_calls, exact)
+        self.assertTrue(
+            any("remaining budget" in reason for reason in tight.degradation_reasons),
+            tight.degradation_reasons,
+        )
+
+
+class MainGuardTests(unittest.TestCase):
+    """`eq@861`: the ``__main__`` guard.
+
+    The last line of the module is::
+
+        if __name__ == "__main__":
+            main()
+
+    Under the planted fault (``==`` -> ``!=``) the guard is INVERTED: the
+    self-check runs when the module is IMPORTED, and does NOT run when
+    the module is executed as a script.
+
+    That inversion is invisible to a suite that only imports the module,
+    because the import path already calls ``main()`` -- and the mutant
+    calls it a second time, which prints the banner again and still
+    passes every assertion.  The killer is the other direction: the
+    module must be SILENT when it is imported.
+
+    The technique is ``runpy.run_path`` with ``run_name`` set to
+    anything other than ``"__main__"``.  That runs the module body
+    exactly as an import would, without importing it, and captures
+    whatever it prints.
+    """
+
+    def test_importing_the_module_prints_nothing(self):
+        """`eq@861`: an import is silent.
+
+        A module that prints on import is a module that corrupts the
+        output of every tool that imports it.  Under the mutant the
+        banner is printed on import.
+        """
+        import runpy
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        stream = StringIO()
+        with redirect_stdout(stream):
+            runpy.run_path(
+                effort_scaling.__file__, run_name="effort_scaling_import_probe"
+            )
+        self.assertEqual(
+            stream.getvalue(),
+            "",
+            "the module must be silent when it is imported",
+        )
+
+    def test_running_the_module_as_a_script_prints_the_banner(self):
+        """`eq@861`: the other side of the guard.
+
+        Executed as a script, the module DOES run its self-check and
+        DOES print the banner.  Under the mutant the banner never
+        appears, because the inverted guard skips it.
+        """
+        import runpy
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        stream = StringIO()
+        with redirect_stdout(stream):
+            runpy.run_path(effort_scaling.__file__, run_name="__main__")
+        self.assertIn("effort-scaling OK", stream.getvalue())
 
 
 if __name__ == "__main__":
