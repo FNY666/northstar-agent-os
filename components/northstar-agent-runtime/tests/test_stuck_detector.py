@@ -653,3 +653,567 @@ class RealTranscriptTests(RuntimeTestCase):
             self._write_assistant_tool(store, f"b{index}", "Bash", {"command": "ls"})
             self._write_result(store, f"b{index}", "README.md")
         self.assertFalse(detect(self._records(store)).is_stuck)
+
+
+class StuckDetectorGuardSecondHalfTests(unittest.TestCase):
+    """The SECOND half of each surviving guard in ``stuck_detector``.
+
+    The slice's own suite drove only one arm of the guards below, so the
+    planted faults on the other arm survived.  Every mutant target named in
+    each docstring is the line of the module it refers to, and the technique
+    used to kill it is stated with it.
+
+    The list is the census of the surviving mutants for this slice:
+
+      or@278   the ``text`` half of the dict-content flattening
+      eq@279   the ``tool_result`` half of the dict-content flattening
+      and@328  the ``agent`` half of the message source
+      or@409   the ``tool_name`` half of the observation tool name
+      or@434   the ``tool_use_id`` of the error event
+      eq@440   the ``denial`` record type
+      or@441   the ``reason`` half of the denial reason
+      or@447   the denial's tool name
+      and@482  the ``KIND_ACTION`` half of the tool-name map
+      gt@574   the tie-break of the longest-run search
+      or@632   the ``pair.observation`` half of the error filter
+      gt@637   the tie-break of the error-count search
+      eq@639   the tie-break of the error-count search
+      gt@681   the message-source index
+      gt@692   the tie-break of the monologue-run search
+      lt@727   the alternating scan's bounds
+      gt@735   the tie-break of the alternating search
+    """
+
+    # -- helpers ---------------------------------------------------------
+
+    def _pair(self, tool_id: str, name: str, tool_input: dict, observation: str,
+              *, is_error: bool = False) -> list[dict]:
+        """One action plus the observation that answered it."""
+        return action_observation_pair(
+            tool_id, name, tool_input, observation, is_error=is_error
+        )
+
+    def _message(self, text: str, agent: str = "main") -> dict:
+        return assistant_text(text, agent=agent)
+
+    # -- or@278: the ``text`` half of the dict-content flattening ------
+    def test_a_dict_content_with_a_text_key_is_flattened_to_that_text(self):
+        """or@278: the discriminating half of the dict branch.
+
+        The line is ``str(value.get("text") or "")``.  Under the mutant
+        (``or`` -> ``and``) it becomes ``str(value.get("text") and "")``,
+        which yields the EMPTY STRING for every dict that carries a
+        truthy ``text``.  An observation whose content is a content-block
+        dict would then compare as the empty string -- every such
+        observation would look identical to every other one.
+        """
+        records = [
+            {
+                "type": "tool_result",
+                "agent": "main",
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "x",
+                        "content": {"text": "the real content"},
+                    }
+                ],
+            }
+        ]
+        events = StuckDetector().normalised_events(records)
+        observation = next(e for e in events if e.kind == "observation")
+        self.assertEqual(observation.observation_key[0], "the real content")
+
+    def test_a_dict_content_without_a_text_key_is_canonicalised(self):
+        """or@278: the control -- a dict with no ``text`` key."""
+        records = [
+            {
+                "type": "tool_result",
+                "agent": "main",
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "x",
+                        "content": {"kind": "output", "value": 7},
+                    }
+                ],
+            }
+        ]
+        events = StuckDetector().normalised_events(records)
+        observation = next(e for e in events if e.kind == "observation")
+        self.assertIn("output", observation.observation_key[0])
+
+    # -- eq@279: the ``tool_result`` half of the dict flattening -------
+    def test_a_dict_content_of_type_tool_result_is_unwrapped(self):
+        """eq@279: the nested tool_result dict is unwrapped, not dumped.
+
+        The line is ``if value.get("type") == "tool_result":`` and the
+        branch below it recurses into the nested ``content``.  Under the
+        mutant (``==`` -> ``!=``) the branch is skipped and the dict is
+        canonicalised as JSON -- the observation content would become a
+        JSON blob instead of the text it holds.
+        """
+        records = [
+            {
+                "type": "tool_result",
+                "agent": "main",
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "x",
+                        "content": {"type": "tool_result", "content": "inner text"},
+                    }
+                ],
+            }
+        ]
+        events = StuckDetector().normalised_events(records)
+        observation = next(e for e in events if e.kind == "observation")
+        self.assertEqual(observation.observation_key[0], "inner text")
+
+    # -- and@328: the ``agent`` half of the message source -------------
+    def test_a_record_with_no_agent_falls_back_to_the_role(self):
+        """and@328: the discriminating half of the source guard.
+
+        The guard is ``isinstance(source, str) and source``.  With an
+        empty or non-string ``agent`` the ORIGINAL falls through to the
+        role; under the mutant (``and`` -> ``or``) the guard is true for
+        an empty string, so the source would be the empty string instead
+        of the role -- and the message key would lose the role that
+        distinguishes the agent from a different speaker.
+        """
+        records = [
+            {
+                "type": "assistant",
+                "agent": "",
+                "role": "assistant",
+                "content": [{"type": "text", "text": "hi"}],
+            }
+        ]
+        events = StuckDetector().normalised_events(records)
+        message = next(e for e in events if e.kind == "message")
+        self.assertEqual(message.message_key[1], "assistant")
+
+    def test_a_record_with_a_non_string_agent_falls_back_to_the_role(self):
+        """and@328: the other half -- a non-string agent."""
+        records = [
+            {
+                "type": "assistant",
+                "agent": 5,
+                "role": "assistant",
+                "content": [{"type": "text", "text": "hi"}],
+            }
+        ]
+        events = StuckDetector().normalised_events(records)
+        message = next(e for e in events if e.kind == "message")
+        self.assertEqual(message.message_key[1], "assistant")
+
+    def test_a_record_with_an_agent_uses_it_as_the_source(self):
+        """and@328: the control -- a real agent name wins."""
+        records = [
+            {
+                "type": "assistant",
+                "agent": "subagent",
+                "role": "assistant",
+                "content": [{"type": "text", "text": "hi"}],
+            }
+        ]
+        events = StuckDetector().normalised_events(records)
+        message = next(e for e in events if e.kind == "message")
+        self.assertEqual(message.message_key[1], "subagent")
+
+    # -- or@409: the ``tool_name`` half of the observation tool name ---
+    def test_a_result_block_carrying_a_tool_name_keeps_it(self):
+        """or@409: the ``tool_name`` half of the fallback chain.
+
+        The line is ``block.get("tool_name") or block.get("name") or
+        ""``.  Under the mutant (``or`` -> ``and``) it becomes
+        ``block.get("tool_name") and block.get("name") or ""``: with a
+        ``tool_name`` present and no ``name``, the tool name would be
+        LOST -- and the observation key, which is (content, tool name),
+        would compare against a different tool's observations.
+        """
+        records = [
+            {
+                "type": "tool_result",
+                "agent": "main",
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "x",
+                        "content": "out",
+                        "is_error": False,
+                        "tool_name": "Bash",
+                    }
+                ],
+            }
+        ]
+        events = StuckDetector().normalised_events(records)
+        observation = next(e for e in events if e.kind == "observation")
+        self.assertEqual(observation.tool_name, "Bash")
+        self.assertEqual(observation.observation_key[1], "Bash")
+
+    def test_a_result_block_carrying_a_name_uses_it_as_the_tool_name(self):
+        """or@409: the other half -- the ``name`` key."""
+        records = [
+            {
+                "type": "tool_result",
+                "agent": "main",
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "x",
+                        "content": "out",
+                        "is_error": False,
+                        "name": "Grep",
+                    }
+                ],
+            }
+        ]
+        events = StuckDetector().normalised_events(records)
+        observation = next(e for e in events if e.kind == "observation")
+        self.assertEqual(observation.tool_name, "Grep")
+
+    # -- or@434: the ``tool_use_id`` of the error event ----------------
+    def test_an_error_event_keeps_the_call_id_of_its_result(self):
+        """or@434: the error event carries the call id.
+
+        The line is ``str(block.get("tool_use_id") or "")``.  Under the
+        mutant (``or`` -> ``and``) it becomes
+        ``str(block.get("tool_use_id") and "")`` -- the call id would be
+        LOST on every error event.  The id is what links an error to the
+        action that caused it.
+        """
+        records = self._pair("tu0", "Bash", {"command": "rm x"}, "boom", is_error=True)
+        events = StuckDetector().normalised_events(records)
+        error = next(e for e in events if e.kind == "error")
+        self.assertEqual(error.tool_use_id, "tu0")
+
+    # -- eq@440: the ``denial`` record type ---------------------------
+    def test_a_denial_record_becomes_an_error_event(self):
+        """eq@440: the ``denial`` record type is read.
+
+        The runtime writes refusals as ``denial`` records (see
+        ``loop.py``, which appends one with a ``reason``).  Under the
+        mutant (``==`` -> ``!=``) the denial branch is skipped
+        entirely, so a denial produces NO event at all -- a refusal
+        would be invisible to the detector.
+        """
+        records = [{"type": "denial", "reason": "boom", "tool": "Write"}]
+        events = StuckDetector().normalised_events(records)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].kind, "error")
+        self.assertEqual(events[0].error_key, ("boom",))
+
+    def test_three_context_window_denials_are_stuck(self):
+        """eq@440: the denial records reach the detector's verdict.
+
+        This is the end-to-end consequence of the denial branch being
+        read at all: three refusals naming a context-window signal are
+        the ``context_window_errors`` pattern.
+        """
+        records = [
+            {"type": "denial", "reason": "context window exceeded", "tool": "Bash"}
+        ] * 3
+        verdict = detect(records)
+        self.assertTrue(verdict.is_stuck)
+        self.assertEqual(verdict.pattern, PATTERN_CONTEXT_WINDOW_ERRORS)
+
+    # -- or@441: the ``reason`` half of the denial reason --------------
+    def test_a_denial_record_carrying_only_a_detail_still_becomes_an_error(self):
+        """or@441: the ``reason`` half of the fallback chain.
+
+        The line is ``record.get("reason") or record.get("detail") or
+        ""``.  Under the mutant (``or`` -> ``and``) a denial that
+        carries only a ``detail`` -- and no ``reason`` -- produces an
+        EMPTY reason, so the refusal's text is lost and a
+        context-window denial would no longer be recognised.
+        """
+        records = [{"type": "denial", "detail": "context window exceeded", "tool": "Bash"}]
+        events = StuckDetector().normalised_events(records)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].error_key, ("context window exceeded",))
+
+    def test_three_context_window_denials_with_only_a_detail_are_stuck(self):
+        """or@441: the end-to-end consequence."""
+        records = [
+            {"type": "denial", "detail": "context window exceeded", "tool": "Bash"}
+        ] * 3
+        verdict = detect(records)
+        self.assertTrue(verdict.is_stuck)
+        self.assertEqual(verdict.pattern, PATTERN_CONTEXT_WINDOW_ERRORS)
+
+    # -- or@447: the denial's tool name --------------------------------
+    def test_a_denial_record_keeps_its_tool_name(self):
+        """or@447: the denial names the tool it refused.
+
+        The line is ``str(record.get("tool") or "")``.  Under the mutant
+        (``or`` -> ``and``) it becomes
+        ``str(record.get("tool") and "")`` -- the tool name would be
+        LOST, so a refusal could no longer be attributed to the tool it
+        refused.
+        """
+        records = [{"type": "denial", "reason": "boom", "tool": "Write"}]
+        events = StuckDetector().normalised_events(records)
+        self.assertEqual(events[0].tool_name, "Write")
+
+    # -- and@482: the ``KIND_ACTION`` half of the tool-name map --------
+    def test_a_result_that_precedes_its_action_still_gets_the_tool_name(self):
+        """and@482: the discriminating half of the guard.
+
+        The tool-name map is built from the events in order: ``if
+        event.kind == KIND_ACTION and event.tool_use_id``.  When a
+        ``tool_result`` record precedes its ``tool_use`` record -- which
+        the transcript order does not forbid -- the ORIGINAL maps the
+        id by looking at the action events, so the observation is
+        resolved from the action that appears LATER.  Under the mutant
+        (``and`` -> ``or``) an observation event that carries a call id
+        would be entered into the map as an ACTION, so the map would
+        hold the OBSERVATION's (empty) tool name and the observation
+        would never be resolved to its real tool.
+        """
+        records = [
+            {
+                "type": "tool_result",
+                "agent": "main",
+                "role": "user",
+                "content": [
+                    {"type": "tool_result", "tool_use_id": "x", "content": "out", "is_error": False}
+                ],
+            },
+            {
+                "type": "assistant",
+                "agent": "main",
+                "role": "assistant",
+                "content": [{"type": "tool_use", "id": "x", "name": "Bash", "input": {}}],
+            },
+        ]
+        events = StuckDetector().normalised_events(records)
+        observation = next(e for e in events if e.kind == "observation")
+        self.assertEqual(observation.tool_name, "Bash")
+        self.assertEqual(observation.observation_key[1], "Bash")
+
+    # -- gt@574: the tie-break of the longest-run search ---------------
+    def test_the_earliest_of_two_equal_runs_is_the_one_reported(self):
+        """gt@574: the tie-break is STRICT.
+
+        ``_max_run`` keeps the FIRST longest run: a later run of the
+        same length does not replace it (``length > best[0]``).  Under
+        the mutant (``>`` -> ``>=``) the LAST longest run wins, so the
+        evidence pointer would name the second run instead of the
+        first -- the detector would point at the wrong repetition.
+        """
+        records: list[dict] = []
+        for index in range(4):
+            records.extend(self._pair(f"a{index}", "Bash", {"command": "ls"}, "aaa"))
+        for index in range(4):
+            records.extend(self._pair(f"b{index}", "Grep", {"command": "grep"}, "bbb"))
+        verdict = detect(records)
+        self.assertTrue(verdict.is_stuck)
+        self.assertEqual(verdict.pattern, PATTERN_REPEAT_ACTION_OBSERVATION)
+        self.assertEqual(verdict.evidence[0]["action_key"][0], "Bash")
+        self.assertEqual(verdict.evidence_pointer.first_index, 1)
+
+    # -- or@632: the ``pair.observation`` half of the error filter -----
+    def test_a_standalone_error_result_with_no_action_is_not_a_repeat(self):
+        """or@632: the discriminating half of the filter.
+
+        The filter is ``pair.action is None or pair.observation is None
+        or not pair.observation.is_error``.  The ORIGINAL skips a pair
+        with no action -- there is no action key to count it under.  A
+        ``tool_result`` whose call id matches no action in the window
+        gives exactly such a pair.  Under the mutant (``or`` -> ``and``)
+        the first two halves collapse into one, so a pair with no
+        action is NOT skipped and the loop dereferences a missing
+        action -- a crash on an unpaired result.
+        """
+        records = [
+            {
+                "type": "tool_result",
+                "agent": "main",
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "zz",
+                        "content": "boom",
+                        "is_error": True,
+                    }
+                ],
+            }
+        ] * 3
+        verdict = detect(records)
+        self.assertFalse(verdict.is_stuck)
+        self.assertEqual(verdict.pattern, "")
+
+    def test_an_unpaired_error_result_does_not_crash_the_detector(self):
+        """or@632: the same case, stated as the absence of a crash."""
+        records = [
+            {
+                "type": "tool_result",
+                "agent": "main",
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "zz",
+                        "content": "boom",
+                        "is_error": True,
+                    }
+                ],
+            }
+        ] * 3
+        # Must return a verdict rather than raising.
+        self.assertIsInstance(detect(records), type(detect([])))
+
+    # -- gt@637 / eq@639: the tie-break of the error-count search -----
+    def test_the_earliest_of_two_actions_with_the_same_error_count_wins(self):
+        """gt@637 / eq@639: the tie-break is STRICT and FIRST-WINS.
+
+        The error search keeps the first action key to reach the highest
+        count: ``if current > best[0]`` (strictly greater) and
+        ``elif current == best[0]`` extends the existing best's span
+        rather than replacing it.  Under the mutant (``>`` -> ``>=``)
+        the LATER action key would replace the earlier one; under the
+        other mutant (``==`` -> ``!=``) the tie branch would be skipped
+        and the span would never be extended.  Either way the evidence
+        pointer names a different repetition than the original: the
+        original spans the WHOLE run of the first action key, from its
+        first error to its last.
+        """
+        records: list[dict] = []
+        for index in range(3):
+            records.extend(
+                self._pair(f"a{index}", "Bash", {"command": "ls"}, "boom", is_error=True)
+            )
+        for index in range(3):
+            records.extend(
+                self._pair(f"b{index}", "Grep", {"command": "grep"}, "bang", is_error=True)
+            )
+        verdict = detect(records)
+        self.assertTrue(verdict.is_stuck)
+        self.assertEqual(verdict.pattern, PATTERN_REPEAT_ACTION_ERROR)
+        # The original keeps the span it had reached at the moment the
+        # first key tied the second; both mutants collapse the span onto
+        # the last pair.
+        self.assertEqual(verdict.evidence_pointer.first_index, 5)
+        self.assertEqual(verdict.evidence_pointer.last_index, 11)
+        self.assertEqual(verdict.evidence_pointer.count, 3)
+
+    # -- gt@681: the message-source index ------------------------------
+    # -- gt@681: an EQUIVALENT mutant, recorded -----------------------
+    def test_a_message_key_always_carries_its_source(self):
+        """gt@681: the boundary, and why the mutant is equivalent.
+
+        The line reads ``event.message_key[1] if len(event.message_key)
+        > 1 else ""``.  Under the mutant (``>`` -> ``>=``) the guard
+        becomes ``len(...) >= 1``, so a message key of length ONE would
+        be indexed at ``[1]`` and raise IndexError instead of falling
+        back to the empty source.
+
+        The planted fault at this site is an **EQUIVALENT mutant**: both
+        ``message_key=`` construction sites in the module build a
+        two-tuple -- ``(content, _source_of(record))`` -- so a message
+        key's length is ALWAYS 2 and the ``> 1`` guard is ALWAYS true.
+        The mutant's ``>= 1`` guard is also always true, and both
+        branches take the same path.  No input can distinguish them.
+        This test pins the shape that makes the equivalence provable
+        rather than assumed.
+        """
+        events = StuckDetector().normalised_events(
+            [self._message("one"), self._message("two"), self._message("three")]
+        )
+        messages = [event for event in events if event.kind == "message"]
+        self.assertEqual(len(messages), 3)
+        for message in messages:
+            self.assertEqual(len(message.message_key), 2)
+
+    def test_every_message_key_source_is_read_from_the_key(self):
+        """gt@681: the other side -- the source is the key's second part."""
+        events = StuckDetector().normalised_events([self._message("hi", agent="subagent")])
+        message = next(event for event in events if event.kind == "message")
+        self.assertEqual(message.message_key[1], "subagent")
+
+    def test_a_monologue_is_detected_with_a_normal_message_key(self):
+        """gt@681: the control -- the ordinary path still works."""
+        verdict = detect(
+            [self._message("one"), self._message("two"), self._message("three")]
+        )
+        self.assertTrue(verdict.is_stuck)
+        self.assertEqual(verdict.pattern, PATTERN_MONOLOGUE)
+
+    # -- gt@692: the tie-break of the monologue-run search ------------
+    def test_the_first_of_two_sources_with_equal_runs_is_the_one_reported(self):
+        """gt@692: the tie-break is STRICT.
+
+        The monologue search keeps the FIRST source with the longest run
+        (``len(runs[source]) > len(best)``).  Under the mutant
+        (``>`` -> ``>=``) the LATER source would replace the earlier one,
+        so the evidence would name the wrong agent's monologue.
+        """
+        records = [
+            self._message("one"),
+            self._message("two"),
+            self._message("three"),
+            self._message("a", agent="subagent"),
+            self._message("b", agent="subagent"),
+            self._message("c", agent="subagent"),
+        ]
+        verdict = detect(records)
+        self.assertTrue(verdict.is_stuck)
+        self.assertEqual(verdict.pattern, PATTERN_MONOLOGUE)
+        self.assertEqual(verdict.evidence[0]["message_key"][1], "main")
+        self.assertEqual(verdict.evidence_pointer.first_index, 0)
+
+    # -- lt@727: the alternating scan's bounds -------------------------
+    def test_the_alternating_scan_stops_at_the_end_of_the_key_list(self):
+        """lt@727: the scan's bound is STRICT.
+
+        The alternating scan is ``while start + 1 < len(keys)``: it needs
+        TWO keys to compare, so the last possible start is
+        ``len(keys) - 2``.  Under the mutant (``<`` -> ``<=``) the loop
+        also runs with ``start + 1 == len(keys)`` and reads
+        ``keys[start + 1]`` one past the end -- an IndexError on a
+        history whose pairs are all identical.
+        """
+        records: list[dict] = []
+        for index in range(3):
+            records.extend(self._pair(f"a{index}", "Bash", {"command": "ls"}, "same"))
+        # Must not raise; the answer is "not stuck" (one key, no ping-pong).
+        verdict = detect(records, StuckThresholds(alternating_cycles=1))
+        self.assertFalse(verdict.is_stuck)
+        self.assertEqual(verdict.pattern, "")
+
+    def test_the_alternating_scan_survives_a_two_key_history(self):
+        """lt@727: the control -- the shortest interesting history."""
+        records: list[dict] = []
+        records.extend(self._pair("a0", "Bash", {"command": "ls"}, "same"))
+        records.extend(self._pair("a1", "Bash", {"command": "ls"}, "same"))
+        verdict = detect(records, StuckThresholds(alternating_cycles=1))
+        self.assertFalse(verdict.is_stuck)
+
+    # -- gt@735: the tie-break of the alternating search --------------
+    def test_the_earliest_of_two_equal_alternating_runs_is_the_one_reported(self):
+        """gt@735: the tie-break is STRICT.
+
+        The alternating search keeps the FIRST longest alternation
+        (``length > best[0]``).  Under the mutant (``>`` -> ``>=``) the
+        LATER alternation would replace the earlier one, so the
+        evidence would name the wrong ping-pong.
+        """
+        records: list[dict] = []
+        for index in range(6):
+            records.extend(self._pair(f"a{index}", "Read", {"path": "a.py"}, "alpha"))
+            records.extend(self._pair(f"b{index}", "Grep", {"pattern": "x"}, "beta"))
+        for index in range(6):
+            records.extend(self._pair(f"c{index}", "Write", {"path": "c.py"}, "gamma"))
+            records.extend(self._pair(f"d{index}", "Edit", {"path": "d.py"}, "delta"))
+        verdict = detect(records)
+        self.assertTrue(verdict.is_stuck)
+        self.assertEqual(verdict.pattern, PATTERN_ALTERNATING)
+        self.assertEqual(verdict.evidence[0]["cycle_a"]["action_key"][0], "Read")
+        self.assertEqual(verdict.evidence_pointer.first_index, 1)
