@@ -596,3 +596,305 @@ class RealPathTests(unittest.TestCase):
         self.assertTrue(data["budget_met"])
         self.assertFalse(data["unmeetable"])
         self.assertEqual(len(data["episodes_touched"]), len(set(data["episodes_touched"])))
+
+
+class SecondHalfGuardTests(unittest.TestCase):
+    """The second half of every guard in the episode-eviction module.
+
+    Each surviving mutant is one arm of a two-armed conditional, and the
+    rest of the suite drove only the other arm.  These tests drive the
+    missing half.
+
+    ``eq@370`` is **not killable, and provably so** -- see the note on
+    that mutant below.
+    """
+
+    # -- or@230: the delimiter's dependency guard ----------------------
+
+    def test_a_dependency_that_is_not_a_str_is_refused(self):
+        """`or@230`: the "or the dependency is not a str" half.
+
+        The guard is ``if not isinstance(dep, str) or not dep.strip()``.
+        The suite drove the empty/whitespace half; this drives a
+        non-string dependency.
+        """
+        for bad in (None, 42, b"expl-a", ["expl-a"]):
+            with self.subTest(bad=bad):
+                with self.assertRaises(DelimiterError):
+                    ee.parse_delimiter_call(
+                        {"action": "start", "name": "act-1", "type": ACT,
+                         "dependencies": [bad]}
+                    )
+
+    def test_a_dependency_that_is_only_whitespace_is_refused(self):
+        """`or@230`: the other half -- a blank dependency."""
+        with self.assertRaises(DelimiterError):
+            ee.parse_delimiter_call(
+                {"action": "start", "name": "act-1", "type": ACT,
+                 "dependencies": ["   "]}
+            )
+
+    def test_a_real_dependency_is_accepted(self):
+        """`or@230`: the control."""
+        parsed = ee.parse_delimiter_call(
+            {"action": "start", "name": "act-1", "type": ACT,
+             "dependencies": ["expl-a"]}
+        )
+        self.assertEqual(parsed["dependencies"], ["expl-a"])
+
+    # -- or@247: the end-delimiter's name guard ------------------------
+
+    def test_an_end_with_a_non_str_name_is_refused(self):
+        """`or@247`: the "or the name is not a str" half.
+
+        The guard is ``if name is not None and (not isinstance(name,
+        str) or not name.strip())``.  The suite drove the whitespace
+        half; this drives a non-string name.
+        """
+        for bad in (42, b"expl-a", ["expl-a"]):
+            with self.subTest(bad=bad):
+                with self.assertRaises(DelimiterError):
+                    ee.parse_delimiter_call(
+                        {"action": "end", "name": bad, "description": "done"}
+                    )
+
+    def test_an_end_with_a_whitespace_name_is_refused(self):
+        """`or@247`: the other half -- a blank name."""
+        with self.assertRaises(DelimiterError):
+            ee.parse_delimiter_call(
+                {"action": "end", "name": "   ", "description": "done"}
+            )
+
+    def test_an_end_with_no_name_is_accepted(self):
+        """`or@247`: the control -- ``name=None`` is legal for an end."""
+        parsed = ee.parse_delimiter_call({"action": "end", "description": "done"})
+        self.assertIsNone(parsed["name"])
+
+    # -- or@334: the episode-name guard -------------------------------
+
+    def test_an_episode_with_a_non_str_name_is_refused(self):
+        """`or@334`: the "or the name is not a str" half.
+
+        The guard is ``if not isinstance(name, str) or not name.strip()``.
+        The suite drove the empty-name half; this drives a non-string
+        name.
+        """
+        graph = EpisodeGraph()
+        for bad in (None, 42, b"expl-a"):
+            with self.subTest(bad=bad):
+                with self.assertRaises(EpisodeGraphError):
+                    graph.add_episode(bad, EXPL)
+
+    def test_an_episode_with_a_whitespace_name_is_refused(self):
+        """`or@334`: the other half -- a blank name."""
+        graph = EpisodeGraph()
+        with self.assertRaises(EpisodeGraphError):
+            graph.add_episode("   ", EXPL)
+
+    def test_an_episode_with_a_real_name_is_accepted(self):
+        """`or@334`: the control."""
+        graph = EpisodeGraph()
+        episode = graph.add_episode("expl-a", EXPL)
+        self.assertEqual(episode.name, "expl-a")
+
+    # -- eq@370: the closed-at-birth dependency validation ------------
+
+    def test_a_closed_episode_validates_its_dependencies_at_birth(self):
+        """`eq@370`: the "or the episode is closed" half.
+
+        An episode added already CLOSED must have its dependencies
+        validated: a dependency on an episode that does not exist is
+        refused at add-time, not later.
+        """
+        graph = EpisodeGraph()
+        with self.assertRaises(DelimiterError):
+            graph.add_episode(
+                "act-1", ACT, dependencies=["expl-missing"], status=STATUS_CLOSED
+            )
+        # Nothing was added.
+        self.assertIsNone(graph.get("act-1"))
+
+    def test_a_closed_episode_with_valid_dependencies_is_accepted(self):
+        """`eq@370`: the control -- a valid closed episode is added."""
+        graph = EpisodeGraph()
+        graph.add_episode("expl-a", EXPL, status=STATUS_CLOSED)
+        episode = graph.add_episode(
+            "act-1", ACT, dependencies=["expl-a"], status=STATUS_CLOSED
+        )
+        self.assertEqual(episode.status, STATUS_CLOSED)
+
+    # -- or@592: the evictable-token filter ---------------------------
+
+    def test_an_evicted_episode_is_not_counted_as_evictable(self):
+        """`or@592`: the "or the episode is already evicted" half.
+
+        An already-evicted episode has no tokens left to free, so it
+        must not be counted as evictable.
+        """
+        graph = EpisodeGraph()
+        graph.add_episode("expl-a", EXPL, status=STATUS_CLOSED, core_tokens=100)
+        self.assertEqual(ee.evictable_tokens(graph), 100)
+
+        policy = EvictionPolicy(budget=10)
+        policy.evict_to_budget(graph)
+        # The episode is now evicted; nothing is left to free.
+        self.assertEqual(graph.require("expl-a").status, STATUS_EVICTED)
+        self.assertEqual(ee.evictable_tokens(graph), 0)
+
+    def test_a_prologue_episode_is_not_counted_as_evictable(self):
+        """`or@592`: the other half -- a prologue episode is protected."""
+        graph = EpisodeGraph()
+        graph.add_prologue(tokens=1000)
+        self.assertEqual(ee.evictable_tokens(graph), 0)
+
+    def test_an_active_episode_is_not_counted_as_evictable(self):
+        """`or@592`: the other half -- an active episode is protected."""
+        graph = EpisodeGraph()
+        graph.add_episode("expl-a", EXPL, status=STATUS_OPEN, core_tokens=100)
+        self.assertEqual(ee.evictable_tokens(graph), 0)
+
+    def test_a_closed_evictable_episode_is_counted(self):
+        """`or@592`: the control."""
+        graph = EpisodeGraph()
+        graph.add_episode("expl-a", EXPL, status=STATUS_CLOSED, core_tokens=100)
+        self.assertEqual(ee.evictable_tokens(graph), 100)
+
+    # -- or@643: the budget guard -------------------------------------
+
+    def test_a_budget_that_is_not_an_int_is_refused(self):
+        """`or@643`: the "or the budget is not an int" half.
+
+        The guard is ``if isinstance(budget, bool) or not
+        isinstance(budget, int) or budget <= 0``.  The suite drove the
+        zero/negative half; this drives a non-integer budget.
+        """
+        for bad in (1.5, "100", None, [100]):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ValueError):
+                    EvictionPolicy(budget=bad)
+
+    def test_a_bool_budget_is_refused(self):
+        """`or@643`: the other half -- a bool is not a budget.
+
+        ``True`` is an int in Python, so this guard must reject it
+        explicitly.
+        """
+        with self.assertRaises(ValueError):
+            EvictionPolicy(budget=True)
+        with self.assertRaises(ValueError):
+            EvictionPolicy(budget=False)
+
+    def test_a_zero_budget_is_refused(self):
+        """`or@643`: the boundary -- zero frees nothing."""
+        with self.assertRaises(ValueError):
+            EvictionPolicy(budget=0)
+
+    def test_a_positive_int_budget_is_accepted(self):
+        """`or@643`: the control."""
+        self.assertEqual(EvictionPolicy(budget=100).budget, 100)
+
+    # -- retF@745: the level-applicability fall-through ---------------
+
+    def test_an_unknown_eviction_level_is_not_applicable(self):
+        """`retF@745`: the fall-through.
+
+        ``_level_applicable`` returns False for a level it does not
+        know.  An unknown level must never be treated as applicable --
+        otherwise the policy would strip something it does not
+        understand.
+        """
+        graph = EpisodeGraph()
+        graph.add_episode("expl-a", EXPL, status=STATUS_CLOSED, core_tokens=10)
+        policy = EvictionPolicy(budget=100)
+        episode = graph.require("expl-a")
+        self.assertFalse(policy._level_applicable(episode, "NOT_A_LEVEL"))
+
+    def test_an_unknown_eviction_level_frees_nothing(self):
+        """`retF@745`: the control -- applying an unknown level is a
+        no-op, not a silent eviction."""
+        graph = EpisodeGraph()
+        graph.add_episode("expl-a", EXPL, status=STATUS_CLOSED, core_tokens=10)
+        policy = EvictionPolicy(budget=100)
+        episode = graph.require("expl-a")
+        self.assertEqual(policy._apply_level(episode, "NOT_A_LEVEL"), 0)
+        self.assertEqual(episode.token_count, 10)
+        self.assertEqual(episode.status, STATUS_CLOSED)
+
+    def test_a_known_level_is_applicable(self):
+        """`retF@745`: the control -- a real level still applies."""
+        graph = EpisodeGraph()
+        graph.add_episode(
+            "expl-a", EXPL, status=STATUS_CLOSED, reasoning_tokens=10
+        )
+        policy = EvictionPolicy(budget=100)
+        episode = graph.require("expl-a")
+        self.assertTrue(
+            policy._level_applicable(episode, EvictionLevel.STRIP_REASONING)
+        )
+
+
+class EquivalentMutantTests(unittest.TestCase):
+    """Mutants that are EQUIVALENT: no test can distinguish them.
+
+    ``eq@370`` -- ``if status == STATUS_CLOSED: self._validate_dependencies(ep)``
+    in ``add_episode``.  The mutant replaces ``==`` with ``!=``, so the
+    validation runs for an OPEN episode and not for a CLOSED one.
+
+    It is provably equivalent, and this is the proof:
+
+    * ``add_episode`` ALREADY calls ``self._require_closed_expl(dep, ...)``
+      for every dependency at lines 354-355, UNCONDITIONALLY -- before the
+      status check, and for every status.
+    * ``_validate_dependencies(ep)`` calls exactly ``_require_closed_expl``
+      for each of ``ep.dependencies`` -- the same function, with the same
+      arguments (the episode's name is the only difference, and it appears
+      only in the error message).
+
+    So for a CLOSED episode the second call re-checks conditions that
+    were just checked and found true: it cannot raise.  And for an OPEN
+    episode, the mutant's extra call also cannot raise, because the
+    unconditional call at 354-355 already validated the same
+    dependencies.  Both branches are therefore no-ops in every reachable
+    state.
+
+    This is recorded here so the next person does not spend a round
+    looking for a test that kills it.  The convention is the repository's
+    own (``tests/test_state_budget.py``, ``gt@304``).
+    """
+
+    def test_a_closed_episode_with_a_valid_dependency_is_added(self):
+        """The original's behaviour: added, and validated."""
+        graph = EpisodeGraph()
+        graph.add_episode("expl-a", EXPL, status=STATUS_CLOSED)
+        episode = graph.add_episode(
+            "act-1", ACT, dependencies=["expl-a"], status=STATUS_CLOSED
+        )
+        self.assertEqual(episode.status, STATUS_CLOSED)
+        self.assertEqual(episode.dependencies, ["expl-a"])
+
+    def test_an_open_episode_with_a_valid_dependency_is_added(self):
+        """The mutant's extra branch: also added, also valid.
+
+        An OPEN episode's dependencies are validated by the
+        unconditional call at 354-355, so the mutant's extra
+        ``_validate_dependencies`` call cannot change anything.
+        """
+        graph = EpisodeGraph()
+        graph.add_episode("expl-a", EXPL, status=STATUS_CLOSED)
+        episode = graph.add_episode(
+            "act-1", ACT, dependencies=["expl-a"], status=STATUS_OPEN
+        )
+        self.assertEqual(episode.status, STATUS_OPEN)
+        self.assertEqual(episode.dependencies, ["expl-a"])
+
+    def test_an_invalid_dependency_is_refused_for_both_statuses(self):
+        """Both branches refuse the same invalid dependency."""
+        for status in (STATUS_OPEN, STATUS_CLOSED):
+            with self.subTest(status=status):
+                graph = EpisodeGraph()
+                with self.assertRaises(DelimiterError):
+                    graph.add_episode(
+                        "act-1", ACT,
+                        dependencies=["expl-missing"],
+                        status=status,
+                    )
