@@ -834,3 +834,237 @@ class TestSweFailureModesGuardArms(unittest.TestCase):
         """`or@1316`: the other half, as the control."""
         with self.assertRaises(ValueError):
             ModeCost(mode=FailureMode.UNKNOWN, cost=1.0, resolved=2.0)
+
+
+class TestSweFailureModesLayerMatching(unittest.TestCase):
+    """The layer-matching helper and the wrong-layer rule.
+
+    The survivors here are the arms of the two-armed conditionals in
+    ``_layer_matches`` and in ``_classify_wrong_layer``:
+
+      retF@399  the "no layer at all" answer
+      retT@401  the "the test names the layer exactly" answer
+      retF@404  the "the layer has no usable stem" answer
+      or@381    ``target_file or file`` -- which of the two is authoritative
+      or@509    the "both layers must be declared" precondition
+      or@524    the "a green symptom and a red root" precondition
+      or@531    the "fall back to the symptom layer" file default
+
+    ``or@509`` is proved EQUIVALENT below, with a differential test that
+    runs the original and the mutant side by side.
+    """
+
+    def test_a_layer_matching_helper_is_used(self):
+        # the helper is private, but it is the unit under test here
+        from swe_failure_modes import _layer_matches
+
+        # --- retF@399: an empty layer matches nothing -------------------
+        # The guard is `if not layer: return False`.  Under the mutant
+        # (`return False` -> `return True`) an empty layer would match
+        # every test, and every failure would be read as a layer split.
+        self.assertFalse(
+            _layer_matches(TestOutcome(name="test_a", passed=False, file="a.py"), "")
+        )
+
+    def test_the_exact_match_arm_answers_true(self):
+        """`retT@401`: the test names the layer exactly.
+
+        The branch is ``if _layer_of(test) == layer: return True``.  Under
+        the mutant it returns False and falls through to the stem rule.
+        The layer ``"."`` has no usable stem (``_file_stem(".")`` is the
+        empty string), so the fall-through answers False -- the two
+        branches disagree, which is exactly what the mutant exposes.
+        """
+        from swe_failure_modes import _layer_matches
+
+        self.assertTrue(
+            _layer_matches(TestOutcome(name="test_a", passed=False, file="."), ".")
+        )
+
+    def test_a_layer_with_no_usable_stem_matches_nothing_else(self):
+        """`retF@404`: the "no usable stem" answer.
+
+        The branch is ``if not layer_stem: return False`` (where
+        ``_file_stem(".")`` is empty).  Under the mutant it returns True,
+        so every test would be read as belonging to a layer that has no
+        name at all.
+        """
+        from swe_failure_modes import _layer_matches
+
+        self.assertFalse(
+            _layer_matches(
+                TestOutcome(name="test_a", passed=False, file="tests/test_a.py"), "."
+            )
+        )
+
+    def test_the_target_file_is_the_authoritative_layer(self):
+        """`or@381`: ``target_file or file``.
+
+        The helper reads the test's ``target_file`` when the caller gave
+        one, and only then falls back to the test's own file.  Under the
+        mutant (``or`` -> ``and``) a test with a target file but no file
+        of its own resolves to the EMPTY string, and the requirement
+        that names the target file no longer matches it.
+        """
+        record = FailureRecord(
+            instruction="do the thing",
+            instruction_requirements=("enforce lease renewal",),
+            requirement_files={"enforce lease renewal": "api/auth.py"},
+            changes=(PatchChange(file="api/other.py"),),
+            failed_tests=(
+                TestOutcome(
+                    name="test_api_auth_flow",
+                    passed=False,
+                    file="",
+                    target_file="api/auth.py",
+                ),
+            ),
+        )
+        # the target file IS the implementing file, so the requirement
+        # was missed -- the patch never touched api/auth.py
+        result = classify(record)
+        self.assertIs(result.mode, FailureMode.REQUIREMENT_MISS)
+
+    def test_a_red_root_with_no_green_symptom_is_not_a_wrong_layer(self):
+        """`or@524`: the "green symptom AND red root" precondition.
+
+        The condition is ``if not symptom_green or not root_red: return
+        None``.  Under the mutant (``or`` -> ``and``) a failure with a
+        red root and NO green symptom is read as a wrong-layer fix --
+        the patch did not fix anything at the symptom layer at all.
+        """
+        record = FailureRecord(
+            instruction="do the thing",
+            all_tests=(
+                TestOutcome(
+                    name="test_store_case", passed=False, file="tests/test_store.py"
+                ),
+            ),
+            symptom_layer="ui/handler.py",
+            root_cause_layer="store/store.py",
+        )
+        result = classify(record)
+        self.assertIs(result.mode, FailureMode.UNKNOWN)
+        self.assertEqual(result.rule, RULE_NONE)
+
+    def test_the_symptom_evidence_falls_back_to_the_symptom_layer(self):
+        """`or@531`: the "fall back to the symptom layer" file default.
+
+        The evidence's file is ``t.file or record.symptom_layer``.  A
+        symptom test that carries no file of its own (it matched the
+        layer by its name) still has to be reported against the symptom
+        layer.  Under the mutant (``or`` -> ``and``) the fallback never
+        happens and the evidence names an empty file.
+        """
+        record = FailureRecord(
+            instruction="do the thing",
+            all_tests=(
+                TestOutcome(name="test_handler", passed=True, file=""),
+                TestOutcome(
+                    name="test_store", passed=False, file="tests/test_store.py"
+                ),
+            ),
+            symptom_layer="ui/handler.py",
+            root_cause_layer="store/store.py",
+        )
+        result = classify(record)
+        self.assertIs(result.mode, FailureMode.WRONG_LAYER)
+        symptom_evidence = [
+            e for e in result.evidence if e.kind == "symptom-test-passed"
+        ]
+        self.assertTrue(symptom_evidence)
+        self.assertEqual(symptom_evidence[0].file, "ui/handler.py")
+
+    # --- or@509: an EQUIVALENT mutant, proved by a differential test ---
+    def test_the_both_layers_precondition_is_equivalent(self):
+        """`or@509`: the "both layers declared" precondition.
+
+        The condition is ``if not record.symptom_layer or not
+        record.root_cause_layer: return None``.  The planted fault
+        (``or`` -> ``and``) is an **EQUIVALENT mutant**, and this test
+        proves it rather than asserting it.
+
+        Why it is equivalent: the mutant only lets a record through that
+        has exactly one layer declared (both declared is unchanged; both
+        missing is unchanged).  Such a record cannot produce a
+        classification under either version:
+
+        * symptom declared, root missing -- the root-side test list is
+          built with ``_layer_matches(t, "")``, and an empty layer
+          matches nothing (the ``retF@399`` guard), so the root list is
+          empty and the rule returns None;
+        * root declared, symptom missing -- the symptom-side list is
+          empty for the same reason, so the rule returns None.
+
+        So the mutant changes *when* the function returns None, never
+        *what* it returns.  The differential test below runs the
+        original and the mutant over a spread of records and asserts
+        identical verdicts.
+        """
+        import importlib.util
+        import os
+        import sys
+
+        module_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "swe_failure_modes.py",
+        )
+        with open(module_path, encoding="utf-8") as handle:
+            source = handle.read()
+        lines = source.splitlines(keepends=True)
+        index = 509 - 1
+        self.assertIn(" or ", lines[index], "the precondition moved")
+        lines[index] = lines[index].replace(" or ", " and ", 1)
+        mutant_source = "".join(lines)
+
+        spec = importlib.util.spec_from_loader(
+            "swe_failure_modes_or509_mutant", loader=None
+        )
+        mutant = importlib.util.module_from_spec(spec)
+        mutant.__dict__["__name__"] = "swe_failure_modes_or509_mutant"
+        sys.modules["swe_failure_modes_or509_mutant"] = mutant
+        exec(compile(mutant_source, module_path, "exec"), mutant.__dict__)
+
+        records = [
+            ("both declared", "ui/handler.py", "store/store.py"),
+            ("both declared, same", "store/store.py", "store/store.py"),
+            ("symptom only", "ui/handler.py", ""),
+            ("root only", "", "store/store.py"),
+            ("neither declared", "", ""),
+            ("whitespace symptom", "   ", "store/store.py"),
+        ]
+        for label, symptom, root in records:
+            original = classify(
+                FailureRecord(
+                    instruction="do the thing",
+                    all_tests=(
+                        TestOutcome(
+                            name="test_handler", passed=True, file="tests/test_handler.py"
+                        ),
+                        TestOutcome(
+                            name="test_store", passed=False, file="tests/test_store.py"
+                        ),
+                    ),
+                    symptom_layer=symptom,
+                    root_cause_layer=root,
+                )
+            )
+            mutant_record = mutant.FailureRecord(
+                instruction="do the thing",
+                all_tests=(
+                    mutant.TestOutcome(
+                        name="test_handler", passed=True, file="tests/test_handler.py"
+                    ),
+                    mutant.TestOutcome(
+                        name="test_store", passed=False, file="tests/test_store.py"
+                    ),
+                ),
+                symptom_layer=symptom,
+                root_cause_layer=root,
+            )
+            mutant_result = mutant.classify(mutant_record)
+            self.assertEqual(
+                original.as_dict(),
+                mutant_result.as_dict(),
+                f"or@509 changed the verdict for the {label} case",
+            )
