@@ -480,5 +480,95 @@ class MutantOrAt317VerifySignedReceiptKeyTests(unittest.TestCase):
         self.assertEqual(receipt.action, "dispatch")
 
 
+class MutantOrAt331PayloadGuardTests(unittest.TestCase):
+    """The second half of the signed-body payload guard.
+
+    The guard is
+
+        if not isinstance(payload, dict) or CANONICAL_PAYLOAD_KEY not in payload:
+
+    The FIRST half is "is the payload a mapping at all?" and the
+    SECOND is "does it carry the canonical receipt bytes?".  The suite
+    drove the first half -- a payload that is not a dict is refused --
+    and left the second, so a fault planted there survived.
+
+    The halves are NOT interchangeable, and the difference is what
+    the guard exists for.  Under ``or`` -> ``and`` the guard reads
+    "the payload is a mapping AND it carries the bytes", so a
+    well-formed mapping that does NOT carry the canonical bytes
+    passes the guard -- and the verifier then goes on to read
+    ``payload[CANONICAL_PAYLOAD_KEY]``, which raises ``KeyError``:
+    an unhandled error instead of the module's own explicit
+    ``CanonicalReceiptError``.
+
+    That matters because this module's contract is that the signed
+    path NEVER accepts silently and every defect is an EXPLICIT
+    exception.  A ``KeyError`` from deep inside is not that.
+    """
+
+    def _signed_with_payload(self, payload) -> SignedReceipt:
+        """A receipt signed over a payload of the caller's choosing."""
+        signed = _signed()
+        message = message_signing.sign_message(
+            "issuer-east",
+            _seed(),
+            signed_receipt.VERIFIER_RECIPIENT,
+            payload,
+        )
+        return dataclasses.replace(signed, message=message)
+
+    def test_a_signed_body_without_the_canonical_bytes_is_refused(self):
+        """`or@331`: the second half of the payload guard.
+
+        The signed body carries a mapping, but not the canonical
+        receipt bytes.  The verifier must refuse it with the module's
+        own ``CanonicalReceiptError``.
+
+        Under the mutant the guard passes, and the verifier raises a
+        bare ``KeyError`` -- which is not a
+        ``CanonicalReceiptError``, so the test fails on the type.
+        """
+        signed = self._signed_with_payload({"something_else": "not the receipt"})
+        with self.assertRaises(CanonicalReceiptError):
+            verify_signed_receipt(signed, signed.issuer_pubkey)
+
+    def test_a_signed_body_with_no_payload_at_all_is_refused(self):
+        """`or@331`: the first half, as the control.
+
+        A payload that is not a mapping is refused.  The payload is
+        part of the signing body, so the message has to be signed OVER
+        the non-mapping payload -- otherwise the signature check (which
+        comes first) would refuse it and the payload guard would never
+        be reached.
+        """
+        import json
+
+        from ed25519 import sign as ed_sign
+
+        signed = _signed()
+        unsigned = message_signing.SignedMessage(
+            sender_id=signed.message.sender_id,
+            recipient_id=signed.message.recipient_id,
+            payload="not a mapping",
+            timestamp=signed.message.timestamp,
+            nonce=signed.message.nonce,
+        )
+        body = json.dumps(unsigned._signing_body(), sort_keys=True).encode()
+        message = dataclasses.replace(
+            signed.message,
+            payload="not a mapping",
+            signature=ed_sign(_seed(), body).hex(),
+        )
+        forged = dataclasses.replace(signed, message=message)
+        with self.assertRaises(CanonicalReceiptError):
+            verify_signed_receipt(forged, signed.issuer_pubkey)
+
+    def test_a_signed_body_carrying_the_canonical_bytes_still_verifies(self):
+        """`or@331`: the control -- a real signed receipt verifies."""
+        signed = _signed()
+        receipt = verify_signed_receipt(signed, signed.issuer_pubkey)
+        self.assertEqual(receipt, signed.receipt)
+
+
 if __name__ == "__main__":
     unittest.main()
