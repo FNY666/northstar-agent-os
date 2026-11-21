@@ -1069,8 +1069,9 @@ class ScopeVerbatimEquivalenceHarnessControlTests(unittest.TestCase):
     is observable at once.
     """
 
-    #: The source line the control mutation rewrites.
-    _GUARD = "if end < 0:"
+    #: The two spellings of the end-marker guard.
+    _GUARD_ORIGINAL = "if end < 0:"
+    _GUARD_MUTANT = "if end <= 0:"
 
     def _load_with(self, source: str, name: str) -> types.ModuleType:
         """Load the module's own source, optionally rewritten."""
@@ -1081,10 +1082,24 @@ class ScopeVerbatimEquivalenceHarnessControlTests(unittest.TestCase):
         return module
 
     def _control_version(self) -> types.ModuleType:
-        """The CONTROL variant: the guard can never fire."""
+        """The CONTROL variant: the guard can never fire.
+
+        The guard is rewritten from WHICHEVER spelling is on disk -- the
+        shipped ``< 0`` or the planted ``<= 0`` -- to a bound that is
+        never true.  The comparison is symmetric on purpose: a control
+        that asserted the source carried one particular spelling would
+        fail the moment the mutation probe planted the other, and would
+        report a kill that is a difference in the FILE rather than in
+        the BEHAVIOUR.
+        """
         source = Path(svc.__file__).read_text(encoding="utf-8")
-        self.assertIn(self._GUARD, source, "the end-marker guard moved")
-        mutated = source.replace(self._GUARD, "if end < -1:", 1)
+        if self._GUARD_ORIGINAL in source:
+            mutated = source.replace(self._GUARD_ORIGINAL, "if end < -1:", 1)
+        else:
+            self.assertIn(
+                self._GUARD_MUTANT, source, "the end-marker guard moved"
+            )
+            mutated = source.replace(self._GUARD_MUTANT, "if end < -1:", 1)
         return self._load_with(mutated, "_svc_end_control")
 
     def test_the_control_mutation_changes_the_outcome(self):
