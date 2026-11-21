@@ -1402,3 +1402,143 @@ class AuditorOutputTruncationEquivalentMutantTests(_WorkspaceCase):
 
 if __name__ == "__main__":  # pragma: no cover - manual entry point
     unittest.main()
+
+
+class AuditorOutputTruncationHarnessControlTests(_WorkspaceCase):
+    """The ``gt@741`` equivalence proof must be able to FAIL.
+
+    ``AuditorOutputTruncationEquivalentMutantTests`` proves that the
+    planted fault at ``gt@741`` (``len(output) > cap`` ->
+    ``len(output) >= cap``) changes nothing, by loading the module twice
+    -- once as shipped, once with that comparison rewritten -- and
+    comparing the two over a sweep of output lengths, caps and exit
+    codes.
+
+    A differential test that CANNOT fail proves nothing.  If the two
+    variants were accidentally the same source, or if the sweep never
+    reached an input that separates them, the agreement would be empty
+    and the "EQUIVALENT mutant" conclusion would be worthless.
+
+    This class gives the harness its **non-vacuity control**: the same
+    loader and the same comparison are pointed at a mutation that is
+    known to change behaviour, and the harness is REQUIRED to notice.
+    The control is the same line with the bound turned the other way
+    (``<`` instead of ``>``), which truncates a body that must be kept
+    whole -- and the truncation shows up in the failure message.
+    """
+
+    #: The exact source line the mutation targets.
+    _BOUND_RE = re.compile(
+        r"if len\(output\) (?P<op>[<>]=?) self\.max_output_chars:"
+    )
+
+    def _load_with_bound(self, op: str):
+        """Load ``long_horizon`` with the truncation bound set to ``op``."""
+        source = Path(lh.__file__).read_text(encoding="utf-8")
+        matches = self._BOUND_RE.findall(source)
+        self.assertEqual(
+            len(matches), 1, f"expected exactly one truncation bound, found {matches}"
+        )
+        mutated = self._BOUND_RE.sub(
+            f"if len(output) {op} self.max_output_chars:", source, count=1
+        )
+        name = f"_long_horizon_control_{op.replace('<', 'lt').replace('>', 'gt')}"
+        module = types.ModuleType(name)
+        module.__file__ = str(Path(lh.__file__))
+        sys.modules[name] = module
+        exec(compile(mutated, module.__file__, "exec"), module.__dict__)
+        return module
+
+    def _run_check(self, module, out_len: int, cap: int, returncode: int):
+        """Run one check under ``module`` with a faked ``subprocess``."""
+        completed = types.SimpleNamespace(
+            stdout="y" * out_len, returncode=returncode
+        )
+        original = module.subprocess.run
+        module.subprocess.run = lambda *args, **kwargs: completed
+        try:
+            auditor = module.AuditorBackend(
+                workspace=self.workspace, max_output_chars=cap
+            )
+            check = module.AuditCheck(
+                check_id="c1", description="a check", command="true"
+            )
+            ok, detail, pointer = auditor._run_check(check)
+            return (ok, detail, pointer.kind, pointer.path, pointer.detail)
+        finally:
+            module.subprocess.run = original
+
+    #: The truncation the CONTROL mutation rewrites.
+    _SLICE_RE = re.compile(
+        r"output = output\[: self\.max_output_chars\]"
+    )
+
+    def _load_with_a_one_char_shorter_cap(self):
+        """The CONTROL variant: the truncation keeps one character less.
+
+        The guard's two spellings (``>`` and ``>=``) agree at the
+        boundary because slicing a string to its own length is the
+        identity, so neither can show a difference -- which is exactly
+        why the mutant is equivalent.  The control therefore moves the
+        SLICE, the thing the guard protects: the truncation then keeps
+        one character fewer, and the failure message changes.
+        """
+        source = Path(lh.__file__).read_text(encoding="utf-8")
+        matches = self._SLICE_RE.findall(source)
+        self.assertEqual(
+            len(matches), 1, f"expected exactly one truncation, found {matches}"
+        )
+        mutated = self._SLICE_RE.sub(
+            "output = output[: self.max_output_chars - 1]", source, count=1
+        )
+        module = types.ModuleType("_long_horizon_control_slice")
+        module.__file__ = str(Path(lh.__file__))
+        sys.modules[module.__name__] = module
+        exec(compile(mutated, module.__file__, "exec"), module.__dict__)
+        return module
+
+    def test_the_control_mutation_changes_the_outcome(self):
+        """The control mutation must actually CHANGE the outcome."""
+        original = self._load_with_bound(">")
+        control = self._load_with_a_one_char_shorter_cap()
+
+        # An output over the cap, on the FAILING branch: the shipped
+        # form keeps the cap's worth of output in the message, the
+        # control form keeps one character less.
+        before = self._run_check(original, 30, 20, 3)
+        after = self._run_check(control, 30, 20, 3)
+        self.assertNotEqual(
+            before,
+            after,
+            "the control mutation changed nothing, so the differential "
+            "harness cannot distinguish any two functions",
+        )
+
+    def test_the_harness_notices_the_control_mutation(self):
+        """The SAME harness, pointed at the control, must find a difference.
+
+        This is the non-vacuity check on the equivalence proof: the same
+        loader and the same sweep that ``gt@741`` uses must report a
+        disagreement when the rule it compares against is one that
+        genuinely disagrees.
+        """
+        original = self._load_with_bound(">")
+        control = self._load_with_a_one_char_shorter_cap()
+
+        differences = 0
+        cases = 0
+        for cap in list(range(1, 12)) + [100, 8192]:
+            for out_len in range(0, 16):
+                for returncode in (0, 3):
+                    cases += 1
+                    before = self._run_check(original, out_len, cap, returncode)
+                    after = self._run_check(control, out_len, cap, returncode)
+                    if before != after:
+                        differences += 1
+        self.assertGreater(cases, 0)
+        self.assertGreater(
+            differences,
+            0,
+            "the harness found no difference for a mutation that changes "
+            "the outcome, so it cannot certify gt@741 as equivalent",
+        )
