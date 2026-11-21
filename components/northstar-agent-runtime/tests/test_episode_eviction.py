@@ -898,3 +898,90 @@ class EquivalentMutantTests(unittest.TestCase):
                         dependencies=["expl-missing"],
                         status=status,
                     )
+
+
+class EpisodeEvictionEquivalenceHarnessControlTests(unittest.TestCase):
+    """The ``eq@370`` equivalence record must be able to FAIL.
+
+    ``EquivalentMutantTests`` records ``eq@370`` as an EQUIVALENT
+    mutant: ``add_episode`` validates an episode's dependencies twice
+    when it is added closed -- once unconditionally before the episode
+    is built, and once more under ``if status == STATUS_CLOSED`` -- and
+    the second call re-checks conditions the first already found true,
+    so it can never raise.
+
+    A proof that CANNOT fail proves nothing.  The existing record pins
+    that the two calls are the SAME function on the SAME arguments, and
+    it pins that both statuses behave the same way for a valid and for
+    an invalid dependency -- but it does NOT show that the validation
+    call has any effect at all.
+
+    This class closes that gap: it drives the validation call directly
+    with an invalid dependency and shows that it DOES refuse, and it
+    shows that the unconditional call already refuses the same input
+    before the conditional one is ever reached.  The second point is
+    what makes the extra call a no-op: the work is already done.
+
+    The control is behavioural: it drives the module's own methods and
+    never inspects the source text.
+    """
+
+    def test_the_validation_call_refuses_an_invalid_dependency(self):
+        """The validation call must have an EFFECT.
+
+        If it refused nothing, the equivalence claim would be resting on
+        a call that does not exist.
+        """
+        graph = EpisodeGraph()
+        graph.add_episode("expl-a", EXPL, status=STATUS_CLOSED)
+        episode = graph.require("expl-a")
+        episode.dependencies = ["expl-missing"]
+        with self.assertRaises(DelimiterError):
+            graph._validate_dependencies(episode)
+
+    def test_the_validation_call_accepts_a_valid_dependency(self):
+        """The control: a valid dependency passes the validation call."""
+        graph = EpisodeGraph()
+        graph.add_episode("expl-a", EXPL, status=STATUS_CLOSED)
+        episode = graph.add_episode(
+            "act-1", ACT, dependencies=["expl-a"], status=STATUS_OPEN
+        )
+        # No exception: the dependency is valid.
+        graph._validate_dependencies(episode)
+
+    def test_the_unconditional_call_already_refuses_the_same_input(self):
+        """The extra call is a NO-OP because the work is already done.
+
+        This is the heart of the equivalence: the unconditional
+        ``_require_closed_expl`` loop runs BEFORE the episode is built,
+        for every status, and refuses exactly what the conditional
+        second call would refuse.  So the mutant's extra call has
+        nothing left to catch.
+        """
+        graph = EpisodeGraph()
+        with self.assertRaises(DelimiterError):
+            graph.add_episode(
+                "act-1", ACT,
+                dependencies=["expl-missing"],
+                status=STATUS_OPEN,
+            )
+
+    def test_the_refusals_are_identical_for_both_statuses(self):
+        """Both statuses produce the SAME refusal, not merely "a refusal".
+
+        The mutant moves the validation from the closed branch to the
+        open branch.  If the two statuses produced DIFFERENT refusals,
+        the move would be observable -- so the refusal must be the same
+        one, down to its message.
+        """
+        messages = {}
+        for status in (STATUS_OPEN, STATUS_CLOSED):
+            graph = EpisodeGraph()
+            with self.assertRaises(DelimiterError) as caught:
+                graph.add_episode(
+                    "act-1", ACT,
+                    dependencies=["expl-missing"],
+                    status=status,
+                )
+            messages[status] = str(caught.exception)
+        self.assertEqual(messages[STATUS_OPEN], messages[STATUS_CLOSED])
