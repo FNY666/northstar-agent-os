@@ -23,8 +23,12 @@ from swe_failure_modes import (
     FailureMode,
     CheckInput,
     CheckItem,
+    CheckList,
     Classification,
+    DeliveryCost,
+    Evidence,
     FailureRecord,
+    ModeCost,
     PatchChange,
     TestOutcome,
     apportion_cost_by_mode,
@@ -655,3 +659,178 @@ class TestCostApportionedByMode(unittest.TestCase):
         )
         self.assertAlmostEqual(report.delivery.cost_per_delivery, 6.5)
         self.assertAlmostEqual(report.by_mode[-1].cost_per_delivery, 6.5)
+
+
+class TestSweFailureModesGuardArms(unittest.TestCase):
+    """The MISSING arm of every two-armed type guard in this module.
+
+    Each of the guards below is written ``if not isinstance(x, T) or
+    <second half>``.  The existing suite drove the FIRST half (a
+    wrong-typed value) and left the second half untested, so the
+    ``or`` -> ``and`` mutant at that line survived: under the mutant the
+    second half is never consulted, and the value the second half exists
+    to reject is accepted.
+
+    Two families live here:
+
+    * the ``bool`` half -- ``bool`` IS an ``int`` in Python, so
+      ``isinstance(True, int)`` is True and only the explicit ``bool``
+      half refuses a boolean;
+    * the "not an int" half -- a non-integer value of any other type.
+
+    The two halves are killed independently: each mutant at a given line
+    needs an input that the OTHER half already rejects.
+    """
+
+    # --- or@279: the "non-empty string" half of the evidence-kind guard --
+    def test_a_blank_evidence_kind_is_refused(self):
+        """`or@279`: the guard's second half -- a blank kind.
+
+        The guard is ``not isinstance(self.kind, str) or not
+        self.kind.strip()``.  The "not a string" half never refuses a
+        blank string -- only the ``.strip()`` half does.  Under the
+        mutant (``or`` -> ``and``) a whitespace-only kind is accepted.
+        """
+        with self.assertRaises(ValueError):
+            Evidence(kind="   ", detail="a detail")
+
+    def test_a_non_string_evidence_kind_is_refused(self):
+        """`or@279`: the other half, as the control."""
+        with self.assertRaises(ValueError):
+            Evidence(kind=42, detail="a detail")
+
+    # --- or@283: the "not an int" half of the evidence-line guard ------
+    def test_a_boolean_evidence_line_is_refused(self):
+        """`or@283`: **a bool IS an int in Python**.
+
+        The guard is ``not isinstance(self.line, int) or isinstance(self
+        .line, bool)``.  The "not an int" half never refuses a bool --
+        only the explicit ``bool`` half does.  Under the mutant a
+        boolean line is accepted and used as the integer 0 or 1.
+        """
+        with self.assertRaises(ValueError):
+            Evidence(kind="kind", detail="a detail", line=True)
+
+    def test_a_false_boolean_evidence_line_is_refused_too(self):
+        """`or@283`: the other boolean."""
+        with self.assertRaises(ValueError):
+            Evidence(kind="kind", detail="a detail", line=False)
+
+    def test_a_float_evidence_line_is_refused(self):
+        """`or@283`: the other half, as the control."""
+        with self.assertRaises(ValueError):
+            Evidence(kind="kind", detail="a detail", line=1.5)
+
+    # --- or@847: the "non-empty string" half of the check-name guard --
+    def test_a_blank_check_name_is_refused(self):
+        """`or@847`: the guard's second half -- a blank name.
+
+        ``not isinstance(self.name, str) or not self.name.strip()``.
+        Under the mutant a whitespace-only check name is accepted, and
+        the check becomes unnameable.
+        """
+        with self.assertRaises(ValueError):
+            CheckItem(name="   ", criterion="a criterion")
+
+    def test_a_non_string_check_name_is_refused(self):
+        """`or@847`: the other half, as the control."""
+        with self.assertRaises(ValueError):
+            CheckItem(name=7, criterion="a criterion")
+
+    # --- or@881: the "non-empty string" half of the route guard --------
+    def test_a_blank_route_is_refused(self):
+        """`or@881`: the guard's second half -- a blank route.
+
+        ``not isinstance(self.route, str) or not self.route.strip()``.
+        Under the mutant a whitespace-only route is accepted, and the
+        checklist claims to route somewhere that does not exist.
+        """
+        with self.assertRaises(ValueError):
+            CheckList(mode=FailureMode.UNKNOWN, route="   ")
+
+    def test_a_non_string_route_is_refused(self):
+        """`or@881`: the other half, as the control."""
+        with self.assertRaises(ValueError):
+            CheckList(mode=FailureMode.UNKNOWN, route=7)
+
+    # --- or@1264: the "not a bool" half of the total-cost guard -------
+    def test_a_boolean_total_cost_is_refused(self):
+        """`or@1264`: **a bool IS a number in Python**.
+
+        The guard is ``not isinstance(self.total_cost, (int, float)) or
+        isinstance(self.total_cost, bool)``.  The "not a number" half
+        never refuses a bool -- only the explicit ``bool`` half does.
+        Under the mutant a boolean total cost is accepted and booked as
+        the integer 1.
+        """
+        with self.assertRaises(ValueError):
+            DeliveryCost(total_cost=True, verified_deliveries=1)
+
+    def test_a_string_total_cost_is_refused(self):
+        """`or@1264`: the other half, as the control."""
+        with self.assertRaises(ValueError):
+            DeliveryCost(total_cost="1.0", verified_deliveries=1)
+
+    # --- or@1268: the "not an int" half of the delivery-count guard ---
+    def test_a_boolean_verified_delivery_count_is_refused(self):
+        """`or@1268`: **a bool IS an int in Python**.
+
+        The guard is ``not isinstance(self.verified_deliveries, int) or
+        isinstance(self.verified_deliveries, bool)``.  Under the mutant
+        ``verified_deliveries=True`` is accepted and used as 1.
+        """
+        with self.assertRaises(ValueError):
+            DeliveryCost(total_cost=1.0, verified_deliveries=True)
+
+    def test_a_float_verified_delivery_count_is_refused(self):
+        """`or@1268`: the other half, as the control."""
+        with self.assertRaises(ValueError):
+            DeliveryCost(total_cost=1.0, verified_deliveries=2.0)
+
+    # --- or@1274: the "not an int" half of the total-runs guard -------
+    def test_a_boolean_total_runs_count_is_refused(self):
+        """`or@1274`: **a bool IS an int in Python**.
+
+        The guard is ``not isinstance(self.total_runs, int) or isinstance
+        (self.total_runs, bool)``.  Under the mutant a boolean run
+        count is accepted and reported as 1.
+        """
+        with self.assertRaises(ValueError):
+            DeliveryCost(total_cost=1.0, verified_deliveries=1, total_runs=True)
+
+    def test_a_float_total_runs_count_is_refused(self):
+        """`or@1274`: the other half, as the control."""
+        with self.assertRaises(ValueError):
+            DeliveryCost(total_cost=1.0, verified_deliveries=1, total_runs=3.0)
+
+    # --- or@1314: the "not a bool" half of the mode-cost guard --------
+    def test_a_boolean_mode_cost_is_refused(self):
+        """`or@1314`: **a bool IS a number in Python**.
+
+        The guard is ``not isinstance(self.cost, (int, float)) or
+        isinstance(self.cost, bool)``.  Under the mutant a boolean cost
+        is accepted and apportioned as the integer 1.
+        """
+        with self.assertRaises(ValueError):
+            ModeCost(mode=FailureMode.UNKNOWN, cost=True, resolved=0)
+
+    def test_a_string_mode_cost_is_refused(self):
+        """`or@1314`: the other half, as the control."""
+        with self.assertRaises(ValueError):
+            ModeCost(mode=FailureMode.UNKNOWN, cost="1.0", resolved=0)
+
+    # --- or@1316: the "not an int" half of the resolved-count guard ---
+    def test_a_boolean_resolved_count_is_refused(self):
+        """`or@1316`: **a bool IS an int in Python**.
+
+        The guard is ``not isinstance(self.resolved, int) or isinstance
+        (self.resolved, bool)``.  Under the mutant a boolean resolution
+        count is accepted and used as 1.
+        """
+        with self.assertRaises(ValueError):
+            ModeCost(mode=FailureMode.UNKNOWN, cost=1.0, resolved=True)
+
+    def test_a_float_resolved_count_is_refused(self):
+        """`or@1316`: the other half, as the control."""
+        with self.assertRaises(ValueError):
+            ModeCost(mode=FailureMode.UNKNOWN, cost=1.0, resolved=2.0)

@@ -808,3 +808,795 @@ class DurableStateSeamTests(RuntimeTestCase):
         self.assertEqual(effects, [("run-A", "tool:1"), ("run-B", "tool:1")])
         run_b = store.list_checkpoints("run-B")[0]
         self.assertEqual(len(store.committed_writes(run_b.checkpoint_id)), 1)
+
+
+class DurableResumeSecondHalfTests(RuntimeTestCase):
+    """The SECOND half of each guard in ``durable_resume``.
+
+    A planted-fault probe over ``durable_resume.py`` reported these
+    survivors.  Each one is one arm of a two-armed guard, or one half of
+    a conjunction, that the first half of the suite drove but never the
+    other side.  The technique for each is named in the method's own
+    docstring, so the next person does not have to re-derive it.
+
+    The list:
+
+      or@164   the "not a string" half of the text guard
+      or@203   the "not an int" half of the idx guard
+      or@229   the "task_path is absent" half of the write reader
+      or@287   the "interrupt_answers is absent" half of the checkpoint reader
+      or@294   the "state is absent" half of the checkpoint reader
+      or@295   the "state_digest is absent" half of the checkpoint reader
+      or@299   the "task_path is absent" half of the checkpoint reader
+      retT@507 the "keep a write of another task" answer in ``clear_writes``
+      eq@566   the checkpoint's own run lookup
+      lt@659   the status band's upper bound, on the exception itself
+      lt@663   the status band's upper bound, on the response object
+      lt@701   an EQUIVALENT mutant, recorded (see the class docstring)
+      retF@703 the "we could not place it" answer
+      lt@735   the "initial_interval may be zero" bound
+      lt@737   the "backoff_factor may be one" bound
+      lt@739   the "max_interval may equal initial_interval" bound
+      lt@741   the "max_attempts may be one" bound
+      or@741   the "max_attempts is not a bool" half
+      and@804  the "the last attempt failed" half of ``succeeded``
+      and@884  the "there is a checkpoint to hang the write under" half
+      and@892  the "there is a checkpoint to clear under" half
+      or@919   the "run_id or task_id" fallback when no run id is given
+      or@920   the "state or {}" fallback when no state is given
+      or@1011  the "run_id or task_id" fallback on the resumed run
+      or@1034  the "state or {}" fallback on the interrupt record
+      retF@1179 the "the checkpoint does not verify" answer
+      retF@1182 the "the round index does not match" answer
+
+    Every one of these is driven by feeding the guard the *other* kind of
+    bad input -- a wrong type where the guard checks emptiness, an empty
+    value where the guard checks type -- or, where the two arms mask
+    each other, by reaching the arm the public API cannot otherwise
+    reach.
+    """
+
+    # -- or@164: the "not a string" half of the text guard ---------------
+    def test_a_write_with_a_non_string_task_id_is_refused(self) -> None:
+        """`or@164`: the wrong TYPE, not the empty string.
+
+        The guard is ``not isinstance(value, str) or not value.strip()``.
+        Under the mutant (``or`` -> ``and``) the wrong-type half no
+        longer refuses on its own: the guard goes on to call ``.strip()``
+        on a value that is not a string, so the refusal is replaced by
+        an ``AttributeError`` from the wrong place.
+        """
+        with self.assertRaises(DurableStoreError):
+            PendingWrite(task_id=None, idx=0, channel="files")  # type: ignore[arg-type]
+
+    def test_a_write_with_an_empty_task_id_is_refused(self) -> None:
+        """`or@164`: the other half, as the control.
+
+        An empty string IS a string, so only the emptiness half refuses
+        it.  Under the mutant the guard accepts it, and a write with no
+        task is written into the durable log.
+        """
+        with self.assertRaises(DurableStoreError):
+            PendingWrite(task_id="", idx=0, channel="files")
+
+    def test_a_write_with_an_empty_channel_is_refused(self) -> None:
+        """`or@164`: the same guard, on the other field."""
+        with self.assertRaises(DurableStoreError):
+            PendingWrite(task_id="t1", idx=0, channel="")
+
+    def test_a_checkpoint_with_a_non_string_id_is_refused(self) -> None:
+        """`or@164`: the guard is shared by the checkpoint's id."""
+        with self.assertRaises(DurableStoreError):
+            DurableCheckpoint(run_id="run-1", checkpoint_id=None, seq=1, state={})  # type: ignore[arg-type]
+
+    # -- or@203: the "not an int" half of the idx guard -------------------
+    def test_a_write_with_a_boolean_index_is_refused(self) -> None:
+        """`or@203`: **a bool IS an int in Python**.
+
+        The guard is ``isinstance(self.idx, bool) or not isinstance(self.idx, int) or self.idx < 0``.
+        ``isinstance(True, int)`` is True, so the "not an int" half
+        never refuses a bool -- only the explicit ``bool`` half does.
+        Under the mutant (``or`` -> ``and``) a boolean index is accepted
+        and used as the integer 1.
+        """
+        with self.assertRaises(DurableStoreError):
+            PendingWrite(task_id="t1", idx=True, channel="files")  # type: ignore[arg-type]
+
+    def test_a_write_with_a_float_index_is_refused(self) -> None:
+        """`or@203`: the other half, as the control.
+
+        A float is not an int and not a bool, so the "not an int" half
+        refuses it.  Under the mutant the index would be accepted and
+        then truncated by the record's own ``int(...)`` cast.
+        """
+        with self.assertRaises(DurableStoreError):
+            PendingWrite(task_id="t1", idx=1.5, channel="files")  # type: ignore[arg-type]
+
+    def test_a_write_with_a_negative_index_is_refused(self) -> None:
+        """`or@203`: the third arm, for completeness."""
+        with self.assertRaises(DurableStoreError):
+            PendingWrite(task_id="t1", idx=-1, channel="files")
+
+    # -- or@229 / or@299: the "task_path is absent" half -----------------
+    def test_a_read_write_keeps_its_task_path(self) -> None:
+        """`or@229`: the read side of a pending write.
+
+        The line is ``task_path=str(value.get("task_path", "") or "")``.
+        Under the mutant (``or`` -> ``and``) a task path that IS present
+        is replaced by the empty string, so the write loses the path
+        that orders it against its siblings.
+        """
+        write = PendingWrite.from_dict(
+            {
+                "task_id": "t1",
+                "idx": 0,
+                "channel": "files",
+                "value": 1,
+                "effect_key": "tool:a",
+                "task_path": "nested",
+            }
+        )
+        self.assertEqual(write.task_path, "nested")
+
+    def test_a_read_write_without_a_task_path_reads_as_empty(self) -> None:
+        """`or@229`: the other half, as the control.
+
+        An absent task path reads as the empty string either way -- the
+        difference is only visible when the path is present.
+        """
+        write = PendingWrite.from_dict({"task_id": "t1", "idx": 0, "channel": "files"})
+        self.assertEqual(write.task_path, "")
+
+    def test_a_read_checkpoint_keeps_its_task_path(self) -> None:
+        """`or@299`: the same reader, on the checkpoint.
+
+        ``task_path=str(value.get("task_path", "") or "")`` -- under the
+        mutant the checkpoint's own task path is dropped on the way in.
+        """
+        store = DurableStore()
+        record = store.put_checkpoint(run_id="run-1", state={}, task_path="nested").as_dict()
+        self.assertEqual(DurableCheckpoint.from_dict(record).task_path, "nested")
+
+    # -- or@287: the "interrupt_answers is absent" half -------------------
+    def test_a_read_checkpoint_keeps_its_interrupt_answers(self) -> None:
+        """`or@287`: the answers are the resume's whole memory.
+
+        The line is ``answers = value.get("interrupt_answers") or {}``.
+        Under the mutant (``or`` -> ``and``) a non-empty mapping is
+        replaced by the empty one, so every answer the interrupted
+        attempt was given is forgotten.
+        """
+        store = DurableStore()
+        record = store.put_checkpoint(run_id="run-1", state={}).as_dict()
+        record["interrupt_answers"] = {"t1#0": "green light"}
+        self.assertEqual(
+            DurableCheckpoint.from_dict(record).interrupt_answers,
+            {"t1#0": "green light"},
+        )
+
+    def test_a_read_checkpoint_without_answers_reads_as_empty(self) -> None:
+        """`or@287`: the other half, as the control.
+
+        An absent answers mapping reads as ``{}`` under the original
+        guard.  Under the mutant the absent key leaves ``None`` in its
+        place, and the reader refuses a checkpoint it just wrote.
+        """
+        store = DurableStore()
+        record = store.put_checkpoint(run_id="run-1", state={}).as_dict()
+        del record["interrupt_answers"]
+        self.assertEqual(DurableCheckpoint.from_dict(record).interrupt_answers, {})
+
+    # -- or@294: the "state is absent" half -------------------------------
+    def test_a_read_checkpoint_keeps_its_state(self) -> None:
+        """`or@294`: the committed state is the checkpoint's payload.
+
+        The line is ``state=dict(value.get("state") or {})``.  Under the
+        mutant (``or`` -> ``and``) a state that IS present is replaced
+        by the empty dict, so the checkpoint resumes onto nothing.
+        """
+        store = DurableStore()
+        record = store.put_checkpoint(run_id="run-1", state={"turns": 3}).as_dict()
+        self.assertEqual(DurableCheckpoint.from_dict(record).state, {"turns": 3})
+
+    def test_a_read_checkpoint_without_state_reads_as_empty(self) -> None:
+        """`or@294`: the other half, as the control.
+
+        An absent state reads as ``{}`` under the original guard.  Under
+        the mutant the absent key leaves ``None`` in its place and the
+        reader raises a ``TypeError`` from the wrong place.  The digest
+        goes with it: a record with no state has no digest to match.
+        """
+        store = DurableStore()
+        record = store.put_checkpoint(run_id="run-1", state={"turns": 3}).as_dict()
+        del record["state"]
+        del record["state_digest"]
+        self.assertEqual(DurableCheckpoint.from_dict(record).state, {})
+
+    # -- or@295: the "state_digest is absent" half ------------------------
+    def test_a_read_checkpoint_without_a_digest_recomputes_it(self) -> None:
+        """`or@295`: a record with no digest is still a record.
+
+        The line is ``state_digest=str(value.get("state_digest") or "")``.
+        Under the mutant (``or`` -> ``and``) an absent digest becomes
+        the string ``"None"`` instead of the empty string, and the
+        checkpoint refuses its own state as a mismatch.
+        """
+        store = DurableStore()
+        record = store.put_checkpoint(run_id="run-1", state={"turns": 3}).as_dict()
+        del record["state_digest"]
+        restored = DurableCheckpoint.from_dict(record)
+        self.assertEqual(restored.state, {"turns": 3})
+        self.assertEqual(restored.state_digest, state_digest({"turns": 3}))
+
+    # -- retT@507: the "keep a write of another task" answer -------------
+    def test_clearing_one_task_leaves_another_tasks_write_alone(self) -> None:
+        """`retT@507`: the *keep* answer, not the *drop* one.
+
+        ``clear_writes`` answers "keep" for a write that belongs to
+        another task, so that narrowing the clear to one task does not
+        throw away the other task's declaration.  Under the mutant
+        (``return True`` -> ``return False``) the other task's write is
+        dropped as well -- the clear takes more than it was asked for.
+        """
+        store = DurableStore()
+        checkpoint = store.put_checkpoint(run_id="run-1", state={})
+        store.put_writes(
+            checkpoint.checkpoint_id,
+            [_write("t1", 0, "tool:mine"), _write("t2", 0, "tool:theirs")],
+        )
+        dropped = store.clear_writes(checkpoint.checkpoint_id, reason="one task only", task_id="t1")
+        self.assertEqual([write.effect_key for write in dropped], ["tool:mine"])
+        self.assertEqual(
+            [write.effect_key for write in store.pending_writes(checkpoint.checkpoint_id)],
+            ["tool:theirs"],
+        )
+
+    # -- eq@566: the checkpoint's own run lookup --------------------------
+    def test_an_effect_key_is_scoped_to_the_run_that_declared_it(self) -> None:
+        """`eq@566`: the run lookup that the exactly-once guard rests on.
+
+        ``_run_of`` walks the checkpoints and returns the run of the one
+        whose id MATCHES.  Under the mutant (``==`` -> ``!=``) it returns
+        the run of the first checkpoint that does NOT match -- so two
+        different runs can be made to share one exactly-once scope, and
+        the second run's effect is silently dropped because the first
+        run committed an effect with the same key.
+
+        Three runs are needed: with two, the mutant merely swaps the two
+        runs' scopes and the swap cancels out.
+        """
+        store = DurableStore()
+        effects: list[str] = []
+        checkpoints = {
+            run: store.put_checkpoint(run_id=run, state={}).checkpoint_id
+            for run in ("run-A", "run-B", "run-C")
+        }
+        for run in ("run-A", "run-B", "run-C"):
+            store.put_writes(checkpoints[run], [_write("t1", 0, "tool:1")])
+            store.commit_writes(
+                checkpoints[run],
+                applier=lambda write: effects.append(write.effect_key or ""),
+            )
+
+        # Every run's own effect lands: the same key in three different
+        # runs is three different effects.
+        self.assertEqual(effects, ["tool:1", "tool:1", "tool:1"])
+        for run in ("run-A", "run-B", "run-C"):
+            self.assertEqual(len(store.committed_writes(checkpoints[run])), 1)
+
+    # -- lt@659 / lt@663: the status band's upper bound -------------------
+    def test_a_status_just_past_the_band_is_not_believed(self) -> None:
+        """`lt@659`: the band is ``100 <= status < 600``.
+
+        A status outside the band is not a status at all, so the
+        predicate falls through to the failure's own classification.
+        Under the mutant (``<`` -> ``<=``) 600 is inside the band, and
+        the classification is never consulted -- so a connection failure
+        that happens to carry an out-of-range status stops being
+        retried.
+        """
+        error = _RefusedWithStatus("no listener", 600)
+        self.assertTrue(default_retry_on(error))
+
+    def test_a_status_inside_the_band_is_believed(self) -> None:
+        """`lt@659`: the control -- 599 is inside the band."""
+        error = _RefusedWithStatus("no listener", 599)
+        self.assertFalse(default_retry_on(error))
+
+    def test_a_response_status_just_past_the_band_is_not_believed(self) -> None:
+        """`lt@663`: the same band, read off the response object.
+
+        The second copy of the guard reads ``response.status_code`` when
+        the exception itself carries no status.  Under the mutant
+        (``<`` -> ``<=``) the same out-of-range status is believed, and
+        the failure's own classification is skipped.
+        """
+        error = _RefusedWithResponse("no listener", 600)
+        self.assertTrue(default_retry_on(error))
+
+    def test_a_response_status_inside_the_band_is_believed(self) -> None:
+        """`lt@663`: the control."""
+        error = _RefusedWithResponse("no listener", 599)
+        self.assertFalse(default_retry_on(error))
+
+    # -- lt@701: an EQUIVALENT mutant, recorded ---------------------------
+    def test_the_four_hundred_band_boundary_is_unreachable(self) -> None:
+        """`lt@701`: the boundary, and why the mutant is equivalent.
+
+        The line is ``if 400 <= status < 500: return False``.  The
+        planted fault turns it into ``400 <= status <= 500``.  The two
+        differ at exactly one status: 500.  But 500 is in
+        ``SERVER_ERROR_STATUSES``, so the earlier branch answers it
+        first and the 4xx band is never consulted at 500.  The mutated
+        condition is therefore unreachable at the only value that could
+        distinguish it: an EQUIVALENT mutant, not a gap in the suite.
+
+        The proof is a DIFFERENTIAL test over the module's OWN source.
+        Two copies are built from it -- one with the strict bound, one
+        with the mutated bound -- and the two predicates are compared
+        over every status the predicate can be handed.  They must agree
+        everywhere.
+
+        A POSITIVE CONTROL keeps the differential test from passing
+        vacuously: with the server-error branch emptied, the two
+        variants must then DIFFER at 500 -- the only status the fault
+        touches.  If the control finds no difference, the fault was
+        never really applied and the agreement above would have meant
+        nothing.
+
+        This mutant is therefore EXPECTED TO SURVIVE the probe.  It is
+        recorded here so the next person does not spend a round looking
+        for a killer that cannot exist.
+        """
+        strict = _variant_default_retry_on("<")
+        mutated = _variant_default_retry_on("<=")
+        self.assertIsNotNone(strict, "the strict variant could not be built")
+        self.assertIsNotNone(mutated, "the mutated variant could not be built")
+        for status in range(100, 601):
+            error = _StatusError("x", status_code=status)
+            self.assertEqual(
+                strict(error),
+                mutated(error),
+                f"status {status} behaves differently under the mutant",
+            )
+
+        # -- the positive control: the fault really is in there ---------
+        import sys
+
+        module = sys.modules["durable_resume_mutated_le"]
+        saved = module.SERVER_ERROR_STATUSES
+        module.SERVER_ERROR_STATUSES = frozenset(status for status in saved if status != 500)
+        try:
+            error = _StatusError("x", status_code=500)
+            self.assertTrue(strict(error), "the control: 500 is a server error")
+            self.assertFalse(
+                mutated(error),
+                "the control: with the server-error branch emptied the fault "
+                "must show -- otherwise the differential test above was "
+                "comparing two identical functions",
+            )
+        finally:
+            module.SERVER_ERROR_STATUSES = saved
+
+    def test_the_shipped_predicate_agrees_with_the_strict_band(self) -> None:
+        """`lt@701`: the shipped predicate, pinned.
+
+        The predicate as shipped answers the same as the strict-bound
+        variant at every status -- which is the property the mutant
+        also has, and the reason the mutant is equivalent rather than
+        merely untested.
+        """
+        strict = _variant_default_retry_on("<")
+        self.assertIsNotNone(strict)
+        for status in range(100, 601):
+            error = _StatusError("x", status_code=status)
+            self.assertEqual(
+                default_retry_on(error),
+                strict(error),
+                f"status {status} behaves differently from the strict band",
+            )
+
+    def test_a_server_error_status_is_retried(self) -> None:
+        """`lt@701`: the value that makes the equivalence hold.
+
+        500 is the one status the mutated bound would treat differently,
+        and it is answered by the server-error branch before the band
+        is reached.
+        """
+        self.assertTrue(default_retry_on(_StatusError("server blew up", status_code=500)))
+
+    def test_a_client_error_status_is_not_retried(self) -> None:
+        """`lt@701`: the band still answers for the statuses in it."""
+        self.assertFalse(default_retry_on(_StatusError("bad request", status_code=400)))
+        self.assertFalse(default_retry_on(_StatusError("bad request", status_code=499)))
+
+    # -- retF@703: the "we could not place it" answer ---------------------
+    def test_a_status_the_predicate_cannot_place_is_not_retried(self) -> None:
+        """`retF@703`: the last answer, the one that gives up.
+
+        A status the predicate cannot place -- neither throttling, nor a
+        listed server error, nor a 4xx, nor a redirect -- is NOT
+        retried: "we could not tell" is not "transient".  Under the
+        mutant (``return False`` -> ``return True``) it becomes the
+        opposite, and every unplaceable failure turns into a request
+        storm against the thing that is already failing.
+        """
+        self.assertFalse(default_retry_on(_StatusError("not implemented", status_code=501)))
+        self.assertFalse(default_retry_on(_StatusError("moved", status_code=302)))
+
+    # -- lt@735 / lt@737 / lt@739 / lt@741: the bounds --------------------
+    def test_a_zero_initial_interval_is_allowed(self) -> None:
+        """`lt@735`: waiting zero seconds is waiting.
+
+        The guard is ``if self.initial_interval < 0``.  Under the mutant
+        (``<`` -> ``<=``) a zero initial interval is refused, so a
+        policy that wants to retry immediately cannot be built.
+        """
+        policy = RetryPolicy(initial_interval=0.0, jitter=False)
+        self.assertEqual(policy.delay(1), 0.0)
+
+    def test_a_backoff_factor_of_one_is_allowed(self) -> None:
+        """`lt@737`: a factor of one means "no growth".
+
+        The guard is ``if self.backoff_factor < 1.0``.  Under the
+        mutant (``<`` -> ``<=``) a flat schedule is refused.
+        """
+        policy = RetryPolicy(initial_interval=1.0, backoff_factor=1.0, jitter=False)
+        self.assertEqual(policy.delay(1), 1.0)
+        self.assertEqual(policy.delay(3), 1.0)
+
+    def test_a_max_interval_equal_to_the_initial_interval_is_allowed(self) -> None:
+        """`lt@739`: the ceiling may sit exactly on the floor.
+
+        The guard is ``if self.max_interval < self.initial_interval``.
+        Under the mutant (``<`` -> ``<=``) a policy whose ceiling equals
+        its first wait is refused.
+        """
+        policy = RetryPolicy(initial_interval=5.0, max_interval=5.0, jitter=False)
+        self.assertEqual(policy.delay(1), 5.0)
+
+    def test_a_max_attempts_of_one_is_allowed(self) -> None:
+        """`lt@741`: one attempt means "no retry", not "no policy".
+
+        The guard is ``... or self.max_attempts < 1``.  Under the
+        mutant (``<`` -> ``<=``) a policy that allows exactly one
+        attempt is refused, so a step that must not be retried cannot
+        be run at all.
+        """
+        policy = RetryPolicy(max_attempts=1)
+        self.assertEqual(policy.as_dict()["max_attempts"], 1)
+
+    def test_a_boolean_max_attempts_is_refused(self) -> None:
+        """`or@741`: the "not a bool" half.
+
+        The guard is ``isinstance(self.max_attempts, bool) or not
+        isinstance(self.max_attempts, int) or self.max_attempts < 1``.
+        ``isinstance(True, int)`` is True, so only the explicit ``bool``
+        half refuses a boolean.  Under the mutant (``or`` -> ``and``) a
+        boolean attempt count is accepted and used as the integer 1.
+        """
+        with self.assertRaises(DurableStoreError):
+            RetryPolicy(max_attempts=True)  # type: ignore[arg-type]
+
+    def test_a_float_max_attempts_is_refused(self) -> None:
+        """`or@741`: the other half, as the control."""
+        with self.assertRaises(DurableStoreError):
+            RetryPolicy(max_attempts=2.5)  # type: ignore[arg-type]
+
+    # -- and@804: the "the last attempt failed" half ----------------------
+    def test_a_result_whose_last_attempt_failed_did_not_succeed(self) -> None:
+        """`and@804`: the "the last attempt failed" half.
+
+        ``succeeded`` is ``bool(self.attempts) and self.attempts[-1].error is None``.
+        Under the mutant (``and`` -> ``or``) a result whose last attempt
+        FAILED reads as succeeded, because the first half is already
+        true.  The runner never hands out such a result -- it raises
+        instead -- so the property is pinned directly on the record.
+        """
+        from durable_resume import Attempt, StepResult
+
+        failed = StepResult(
+            value=None,
+            attempts=(Attempt(index=1, error=RuntimeError("boom")),),
+        )
+        self.assertFalse(failed.succeeded)
+
+    def test_a_result_with_no_attempts_did_not_succeed(self) -> None:
+        """`and@804`: the other half, as the control.
+
+        A result with no attempts at all has not succeeded either.  Under
+        the mutant the second half is evaluated on an empty tuple, so
+        the property raises instead of answering.
+        """
+        from durable_resume import StepResult
+
+        self.assertFalse(StepResult().succeeded)
+
+    # -- and@884: the "there is a checkpoint to hang it under" half -------
+    def test_a_write_declared_before_a_checkpoint_exists_is_kept_in_memory(self) -> None:
+        """`and@884`: the "there is a checkpoint" half.
+
+        ``declare`` hangs the write under the current checkpoint, but
+        only if there IS one.  Under the mutant (``and`` -> ``or``) the
+        store is consulted whenever the store exists at all, and a
+        declaration made before the first checkpoint is refused with
+        "no checkpoint None to hang writes under".
+        """
+        store = DurableStore()
+        runner = DurableRunner(store=store)
+        write = _write("t1", 0, "tool:early")
+        self.assertIs(runner.declare(write), write)
+        # Nothing was hung under anything: there is no checkpoint yet.
+        self.assertEqual(store.pending_writes("ck-000001"), ())
+
+    # -- and@892: the "there is a checkpoint to clear under" half ----------
+    def test_a_failure_without_a_store_does_not_reach_the_store(self) -> None:
+        """`and@892`: the "there is a checkpoint" half.
+
+        ``_clear_pending`` clears the store's pending writes, but only
+        if there is a store AND a checkpoint to clear under.  Under the
+        mutant (``and`` -> ``or``) the store is consulted whenever
+        either half is true, so a runner whose store has been detached
+        crashes with an ``AttributeError`` on the failure path -- and
+        the failure the caller was told about is lost behind it.
+
+        The store is detached through its public attribute; the
+        checkpoint id stays behind, so the mutant's second arm is true
+        while the first is false.
+        """
+        store = DurableStore()
+        runner = DurableRunner(
+            store=store,
+            policy=RetryPolicy(max_attempts=3, jitter=False),
+            sleep=lambda _s: None,
+        )
+        runner.run(task_id="t1", step=lambda: "ok", state={}, run_id="run-1")
+        runner.store = None
+
+        def failing() -> str:
+            raise _StatusError("bad key", status_code=401)
+
+        # The caller still sees the failure the step raised.
+        with self.assertRaises(_StatusError):
+            runner.run(task_id="t1", step=failing, state={}, run_id="run-1")
+
+    # -- and@946: the "there is a checkpoint to commit under" half -------
+    def test_a_success_without_a_store_commits_nothing_and_still_returns(self) -> None:
+        """`and@946`: the "there is a checkpoint" half.
+
+        The runner commits the pending writes only if there is a store
+        AND a checkpoint to commit under.  Under the mutant (``and`` ->
+        ``or``) the store is consulted whenever either half is true, so
+        a runner whose store has been detached crashes with an
+        ``AttributeError`` on the SUCCESS path -- and the step's value
+        is lost behind it.
+
+        The store is detached through its public attribute; the
+        checkpoint id stays behind from the earlier run, so the
+        mutant's second arm is true while the first is false.
+        """
+        store = DurableStore()
+        runner = DurableRunner(store=store)
+        runner.run(task_id="t1", step=lambda: "ok", state={}, run_id="run-1")
+        runner.store = None
+
+        result = runner.run(task_id="t1", step=lambda: "still ok", state={}, run_id="run-1")
+        self.assertEqual(result.value, "still ok")
+        self.assertEqual(result.committed, ())
+
+    # -- or@919 / or@920: the run's own fallbacks -------------------------
+    def test_a_run_without_a_run_id_falls_back_to_the_task_id(self) -> None:
+        """`or@919`: the fallback, and why it is not a fallback to nothing.
+
+        ``run_id=run_id or task_id`` -- a run with no run id of its own
+        is stored under its task's id.  Under the mutant (``or`` ->
+        ``and``) the fallback becomes ``None``, and the store refuses
+        the checkpoint with a ``MissingRunIdError``.
+        """
+        store = DurableStore()
+        runner = DurableRunner(store=store)
+        result = runner.run(task_id="t1", step=lambda: "ok", state={})
+        self.assertEqual(result.value, "ok")
+        self.assertEqual(len(store.list_checkpoints("t1")), 1)
+
+    def test_a_run_without_a_state_starts_from_an_empty_state(self) -> None:
+        """`or@920`: the same fallback, on the state.
+
+        ``state=dict(state or {})`` -- a run with no state starts from
+        the empty state.  Under the mutant (``or`` -> ``and``) the
+        fallback becomes ``None``, and the store refuses the state with
+        a ``TypeError``.
+        """
+        store = DurableStore()
+        runner = DurableRunner(store=store)
+        result = runner.run(task_id="t1", step=lambda: "ok", state=None, run_id="run-1")
+        self.assertEqual(result.value, "ok")
+        self.assertEqual(store.list_checkpoints("run-1")[0].state, {})
+
+    # -- or@1011: the resumed run's own run id ---------------------------
+    def test_a_second_interrupt_on_resume_is_recorded_under_the_runs_id(self) -> None:
+        """`or@1011`: the run id the resumed run carries.
+
+        The resume re-enters the step with ``run_id=run_id or task_id``.
+        Under the mutant (``or`` -> ``and``) a resume that NAMED a run
+        falls back to the task's id instead, and the second interrupt's
+        checkpoint is filed under the task rather than under the run --
+        so the run's own history loses a boundary.
+
+        The step is made to interrupt again by answering an interrupt it
+        does not ask for: the answers are keyed by index, so answering
+        ``t1#1`` leaves the step's own ``t1#0`` question open.
+        """
+        store = DurableStore()
+        runner = DurableRunner(store=store)
+
+        def step() -> str:
+            return runner.interrupt("what now?")
+
+        with self.assertRaises(GraphInterrupt):
+            runner.run(task_id="t1", step=step, state={}, run_id="run-1")
+
+        with self.assertRaises(GraphInterrupt):
+            runner.resume(
+                Command(resume={"t1#1": "answer"}),
+                task_id="t1",
+                step=step,
+                state={},
+                run_id="run-1",
+            )
+
+        # Every checkpoint of the sequence belongs to the run the caller
+        # named -- and none of them belongs to the task.
+        self.assertEqual(len(store.list_checkpoints("run-1")), 3)
+        self.assertEqual(store.list_checkpoints("t1"), ())
+
+    # -- or@1034: the interrupt record's own state -----------------------
+    def test_an_interrupt_recorded_with_no_state_reads_as_empty(self) -> None:
+        """`or@1034`: the same fallback, on the interrupt's record.
+
+        ``_record_interrupt`` stores ``dict(state or {})``.  Under the
+        mutant (``or`` -> ``and``) the fallback becomes ``None`` and the
+        interrupt's checkpoint is refused with a ``TypeError`` -- the
+        pause nobody can leave, raised at the wrong moment.
+        """
+        store = DurableStore()
+        runner = DurableRunner(store=store)
+
+        def step() -> str:
+            return runner.interrupt("what now?")
+
+        with self.assertRaises(GraphInterrupt):
+            runner.run(task_id="t1", step=step, state=None, run_id="run-1")
+        checkpoint = store.latest_checkpoint("run-1")
+        self.assertIsNotNone(checkpoint)
+        self.assertEqual(checkpoint.state, {})
+
+    # -- retF@1179 / retF@1182: the verified checkpoint's answers --------
+    def test_a_checkpoint_whose_digest_no_longer_matches_is_refused(self) -> None:
+        """`retF@1179`: the "the checkpoint does not verify" answer.
+
+        ``verify_verified_checkpoint`` answers False for a checkpoint
+        whose state was edited under it.  Under the mutant (``return
+        False`` -> ``return True``) an edited checkpoint reads as
+        verified, and a resume would inherit counters describing a
+        different history.
+        """
+        store = DurableStore()
+        checkpoint = store.put_checkpoint(run_id="run-1", state={"round_index": 0})
+        object.__setattr__(checkpoint, "state", {"round_index": 0, "verified_progress": [{"summary": "s"}]})
+        self.assertFalse(
+            verify_verified_checkpoint(store, checkpoint, expected_round_index=0)
+        )
+
+    def test_a_checkpoint_of_another_round_is_refused(self) -> None:
+        """`retF@1182`: the "the round index does not match" answer.
+
+        Under the mutant (``return False`` -> ``return True``) a
+        checkpoint from a different round reads as the one asked for, so
+        a loop would resume onto the wrong round's counters.
+        """
+        store = DurableStore()
+        checkpoint = store.put_checkpoint(
+            run_id="run-1",
+            state={"round_index": 5, "verified_progress": [{"summary": "s"}]},
+        )
+        self.assertFalse(
+            verify_verified_checkpoint(store, checkpoint, expected_round_index=0)
+        )
+
+    def test_the_matching_round_is_verified(self) -> None:
+        """`retF@1179` / `retF@1182`: the control, the other side."""
+        store = DurableStore()
+        checkpoint = store.put_checkpoint(
+            run_id="run-1",
+            state={"round_index": 0, "verified_progress": [{"summary": "s"}]},
+        )
+        self.assertTrue(
+            verify_verified_checkpoint(store, checkpoint, expected_round_index=0)
+        )
+
+
+class _RefusedWithStatus(ConnectionRefusedError):
+    """A connection failure that also carries an HTTP status.
+
+    ``ConnectionRefusedError`` is the runtime's own example of a failure
+    raised *before* the connection was established, so it is retried.
+    The status here is deliberately out of the valid band, so the status
+    must be ignored and the failure's own classification must decide.
+    """
+
+    def __init__(self, message: str, status_code: int) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class _RefusedWithResponse(ConnectionRefusedError):
+    """A connection failure whose status lives on a response object."""
+
+    def __init__(self, message: str, status_code: int) -> None:
+        super().__init__(message)
+        self.response = _Response(status_code)
+
+
+class _Response:
+    """The shape an SDK's response object has."""
+
+    def __init__(self, status_code: int) -> None:
+        self.status_code = status_code
+
+
+def _variant_default_retry_on(bound: str):
+    """``default_retry_on`` with the 4xx band's upper bound as given.
+
+    The module's own source is read and the band's upper bound is
+    replaced with ``bound`` (``"<"`` for the shipped, strict form;
+    ``"<="`` for the planted fault); the variant is then executed under
+    a private name.  The predicate it exposes is the module's own
+    behaviour with that bound in place -- not a hand-written copy of
+    it, which could drift from the code it is about.
+
+    The band is matched in EITHER form, so the helper still works when
+    the source it reads already carries the planted fault -- the
+    equivalence must be provable against the shipped code and against
+    the mutated code alike, and that is what lets the mutant be shown
+    to be equivalent rather than merely untested.
+
+    Returns ``None`` when the variant cannot be built, so the caller can
+    say so rather than silently comparing a function with itself.
+    """
+    import importlib.util
+    import re
+    import shutil
+    import sys
+    import tempfile
+    from pathlib import Path
+
+    import durable_resume
+
+    source_path = Path(durable_resume.__file__)
+    lines = source_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    pattern = re.compile(r"400 <= status <=? 500")
+    target = None
+    for index, line in enumerate(lines):
+        if pattern.search(line):
+            target = index
+            break
+    if target is None:
+        return None
+    mutated_line = pattern.sub(f"400 <= status {bound} 500", lines[target], count=1)
+    wanted = f"400 <= status {bound} 500"
+    if wanted not in mutated_line:
+        return None
+    lines[target] = mutated_line
+
+    root = Path(tempfile.mkdtemp(prefix="durable-resume-mutant-"))
+    try:
+        name = f"durable_resume_mutated_{'le' if bound == '<=' else 'lt'}"
+        (root / f"{name}.py").write_text("".join(lines), encoding="utf-8")
+        spec = importlib.util.spec_from_file_location(name, root / f"{name}.py")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+        return module.default_retry_on
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
