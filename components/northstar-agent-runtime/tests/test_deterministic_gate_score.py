@@ -625,3 +625,168 @@ class MutantOrAt197CaseSpecIdTests(unittest.TestCase):
         # The control: the happy path must survive the guard being pinned.
         spec = CaseSpec(case_id="ok-case", artifact_digest=DIGEST_A)
         self.assertEqual(spec.case_id, "ok-case")
+
+
+class LedgerGuardSecondHalfTests(unittest.TestCase):
+    """The second half of every guard in the ledger.
+
+    Every guard in the module is a PAIR of conditions joined by ``or``
+    (or a chain of three).  The suite drove one half of each and left
+    the other, so a fault planted in the half nobody drove survived.
+
+    The recurring shape is a TYPE half ("is it a str / an int at all?")
+    joined to a VALUE half ("is it in range / does it match?").  The
+    halves are NOT interchangeable:
+
+    * ``or`` -> ``and`` in a REFUSAL guard means the value is accepted
+      when only ONE of the two conditions holds -- a malformed pin
+      slips through;  and
+    * the BOOLEAN trap: ``isinstance(True, int)`` is True, so a "must
+      be an int" guard has to name the bool explicitly.
+    """
+
+    # -- the metric guard -------------------------------------------------
+
+    def test_a_metric_that_is_a_boolean_is_refused(self):
+        """`or@213`: the type half of the metric guard, on a bool.
+
+        ``isinstance(True, (int, float))`` is True, so the bool half is
+        the only thing that refuses a boolean metric.  Under the
+        mutant (``or`` -> ``and``) the boolean is accepted, and
+        ``True`` is a metric of 1.0 -- a perfect score from a value
+        that is not a score.
+        """
+        with self.assertRaises(BadMetricError):
+            CaseOutcome(case_id="c", outcome=OUTCOME_SCORED, passed=True,
+                        metric=True)
+
+    def test_a_metric_that_is_not_a_number_is_refused(self):
+        """`or@213`: the type half, on a string."""
+        with self.assertRaises(BadMetricError):
+            CaseOutcome(case_id="c", outcome=OUTCOME_SCORED, passed=True,
+                        metric="1.0")
+
+    # -- the seq guard ----------------------------------------------------
+
+    def test_a_seq_that_is_a_boolean_is_refused(self):
+        """`or@532`: the type half of the seq guard, on a bool.
+
+        ``isinstance(True, int)`` is True, so the bool half is the
+        only thing that refuses a boolean seq.  Under the mutant
+        (``or`` -> ``and``) a boolean seq is accepted -- and ``True``
+        is seq 1, so the ledger's strictly-increasing discipline is
+        quietly broken.
+        """
+        ledger = GateScoreLedger()
+        with self.assertRaises(SeqOrderError):
+            ledger.mark_unscored("c", DIGEST_A, "no verdict", True)
+
+    def test_a_seq_that_is_not_an_int_is_refused(self):
+        """`or@532`: the type half, on a float and on a string."""
+        ledger = GateScoreLedger()
+        with self.assertRaises(SeqOrderError):
+            ledger.mark_unscored("c", DIGEST_A, "no verdict", 1.5)
+        ledger = GateScoreLedger()
+        with self.assertRaises(SeqOrderError):
+            ledger.mark_unscored("c", DIGEST_A, "no verdict", "0")
+
+    def test_a_seq_of_exactly_zero_is_accepted(self):
+        """`or@532`: the bound half -- seq 0 is legal.
+
+        The guard is ``seq < 0``, so zero must be ACCEPTED.  Under the
+        mutant the whole chain becomes ``and`` and the bound is
+        checked against a different value.
+        """
+        ledger = GateScoreLedger()
+        outcome = ledger.mark_unscored("c", DIGEST_A, "no verdict", 0)
+        self.assertEqual(outcome.outcome, OUTCOME_UNSCORED)
+
+    # -- the digest pin guards --------------------------------------------
+
+    def test_an_unscored_booking_needs_a_real_digest_pin(self):
+        """`or@631`: the type half of the unscored digest guard.
+
+        ``not isinstance(artifact_digest, str) or not
+        _DIGEST_RE.match(artifact_digest)`` -- the type half and the
+        shape half.  Under the mutant (``or`` -> ``and``) a digest
+        that is a string but does NOT match the pattern satisfies only
+        the second half, so the booking is refused; and a digest that
+        is not a string satisfies only the first half.
+
+        The discriminating input is a digest pin of the right TYPE but
+        the wrong SHAPE -- a pin that names no real artifact.
+        """
+        ledger = GateScoreLedger()
+        with self.assertRaises(BadCaseError):
+            ledger.mark_unscored("c", "sha256:not-a-hex-digest", "no verdict", 0)
+
+    def test_an_errored_booking_needs_a_real_digest_pin(self):
+        """`or@655`: the same guard on the errored path."""
+        ledger = GateScoreLedger()
+        with self.assertRaises(BadCaseError):
+            ledger.mark_errored("c", "sha256:not-a-hex-digest", "boom", 0)
+
+    def test_an_unscored_booking_accepts_a_real_digest_pin(self):
+        """`or@631`: the control -- a real pin is accepted."""
+        ledger = GateScoreLedger()
+        outcome = ledger.mark_unscored("c", DIGEST_A, "no verdict", 0)
+        self.assertEqual(outcome.outcome, OUTCOME_UNSCORED)
+
+    def test_an_errored_booking_accepts_a_real_digest_pin(self):
+        """`or@655`: the control -- a real pin is accepted."""
+        ledger = GateScoreLedger()
+        outcome = ledger.mark_errored("c", DIGEST_A, "boom", 0)
+        self.assertEqual(outcome.outcome, OUTCOME_ERRORED)
+
+    # -- the score-on-error guard -----------------------------------------
+
+    def test_a_partial_state_is_scored_when_score_on_error_is_set(self):
+        """`or@714`: the "the caller wants the partial scored" half.
+
+        ``if score_on_error and partial is not None:`` -- the caller's
+        opt-in AND the accessor's presence.  Under the mutant
+        (``or`` -> ``and``) a caller that asked for the partial state
+        to be scored but supplied no accessor gets ``partial()`` on
+        None -- an AttributeError instead of a booked error.
+
+        The discriminating input is ``score_on_error=True`` with NO
+        accessor: the real code books the error; the mutant raises.
+        """
+        ledger = GateScoreLedger()
+
+        def exploding():
+            raise RuntimeError("the solver died")
+
+        outcome = score_case(ledger, "c", DIGEST_A, three_gates(), exploding, 0,
+                             score_on_error=True)
+        self.assertEqual(outcome.outcome, OUTCOME_ERRORED)
+        self.assertIn("the solver died", outcome.error)
+
+    def test_a_partial_state_is_scored_when_an_accessor_is_supplied(self):
+        """`or@714`: the other half, as the control.
+
+        With the opt-in AND the accessor, the reached state is scored
+        and the case lands in the denominator.
+        """
+        ledger = GateScoreLedger()
+
+        def exploding():
+            raise RuntimeError("the solver died")
+
+        outcome = score_case(ledger, "c", DIGEST_A, three_gates(), exploding, 0,
+                             score_on_error=True,
+                             partial=lambda: good_artifact())
+        self.assertEqual(outcome.outcome, OUTCOME_SCORED)
+        self.assertTrue(outcome.passed)
+        self.assertIn("the solver died", outcome.error)
+
+    def test_a_partial_state_is_not_scored_without_the_opt_in(self):
+        """`or@714`: the control -- no opt-in means no partial scoring."""
+        ledger = GateScoreLedger()
+
+        def exploding():
+            raise RuntimeError("the solver died")
+
+        outcome = score_case(ledger, "c", DIGEST_A, three_gates(), exploding, 0,
+                             partial=lambda: good_artifact())
+        self.assertEqual(outcome.outcome, OUTCOME_ERRORED)
