@@ -494,3 +494,274 @@ class ResumingConfigTests(unittest.TestCase):
         outcome = run_with_retry(lambda: "ok", writes=writes, policies=())
         self.assertNotIn(CONFIG_KEY_RESUMING, outcome.config.get("configurable", {}))
         self.assertFalse(outcome.resumed)
+
+
+class _TruthyResponse:
+    """A response object that is always truthy.
+
+    ``requests.Response.__bool__`` reports ``status < 400``, so a real
+    response with a 5xx status is FALSY and the module's
+    ``if exc.response`` check sends it to the "no response" arm.  This
+    stand-in keeps the band check reachable.
+    """
+
+    def __init__(self, status_code: int):
+        self.status_code = status_code
+
+
+class _FakeHttpxResponse:
+    """A response object for the stand-in httpx module."""
+
+    def __init__(self, status_code: int):
+        self.status_code = status_code
+
+
+class _FakeHttpxHTTPStatusError(Exception):
+    """The httpx-shaped status error used by the stand-in module."""
+
+    def __init__(self, response):
+        super().__init__("http status error")
+        self.response = response
+
+
+class _FakeHttpxModule:
+    """A stand-in for the ``httpx`` module.
+
+    The predicate imports ``httpx`` INSIDE its own body, so a stand-in
+    placed in ``sys.modules`` is what that import finds.  The arm is
+    therefore exercised whether or not the real httpx is installed.
+    """
+
+    HTTPStatusError = _FakeHttpxHTTPStatusError
+
+
+class _httpx_installed:
+    """Context manager: the stand-in httpx is importable inside the block."""
+
+    def __init__(self):
+        self.previous = None
+
+    def __enter__(self):
+        import sys
+
+        self.previous = sys.modules.get("httpx")
+        sys.modules["httpx"] = _FakeHttpxModule()
+        return self
+
+    def __exit__(self, *exc_info):
+        import sys
+
+        if self.previous is None:
+            sys.modules.pop("httpx", None)
+        else:
+            sys.modules["httpx"] = self.previous
+        return False
+
+
+def _httpx_retry_on(status_code: int) -> bool:
+    """What the default predicate says about an httpx-shaped 5xx/4xx error.
+
+    The stand-in httpx is installed for the whole PREDICATE CALL, because
+    the predicate imports httpx inside its own body -- installing it only
+    while the exception was built would not be seen by that import.
+    """
+    with _httpx_installed():
+        error = _FakeHttpxHTTPStatusError(_FakeHttpxResponse(status_code))
+        return default_retry_on(error)
+
+
+class SecondHalfGuardTests(unittest.TestCase):
+    """The second half of each guard in the retry-clears-writes module.
+
+    Each guard below is a conjunction or a two-armed conditional, and the
+    rest of the suite drives only one of the arms.  These tests drive the
+    other arm, so both halves of every guard are covered.
+    """
+
+    # -- retT@155: the "the write was recorded" half --------------------
+
+    def test_a_write_to_an_unsealed_set_is_recorded(self):
+        """`retT@155`: the success half of ``write``.
+
+        The suite drives the sealed half -- a write to a sealed set returns
+        False.  The other half is the ordinary case: an unsealed write is
+        recorded and reports success.
+        """
+        writes = PendingWrites()
+        self.assertTrue(writes.write("k", "v"))
+        self.assertEqual([w.key for w in writes.pending()], ["k"])
+        self.assertEqual(writes.get("k"), "v")
+
+    # -- eq@191: the "the key matches" half of ``commit`` ---------------
+
+    def test_commit_by_key_commits_only_the_named_key(self):
+        """`eq@191`: the key-matching half of the selective commit.
+
+        Committing everything (the ``key is None`` arm) was already
+        covered; committing ONE key by name is the other arm.
+        """
+        writes = PendingWrites()
+        writes.write("a", 1)
+        writes.write("b", 2)
+        selected = writes.commit("b")
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(selected[0].key, "b")
+        self.assertEqual(writes.keys(), ("a",))
+        self.assertEqual(writes.committed()[0].key, "b")
+
+    def test_commit_by_an_absent_key_commits_nothing(self):
+        """`eq@191`: the negative half -- no matching key means no commit."""
+        writes = PendingWrites()
+        writes.write("a", 1)
+        self.assertEqual(writes.commit("zzz"), ())
+        self.assertEqual(writes.keys(), ("a",))
+        self.assertEqual(writes.committed(), ())
+
+    # -- lt@233 / lt@235: the 5xx band's lower edge ----------------------
+
+    def test_a_500_status_is_retried(self):
+        """`lt@233`: the lower edge of the retryable 5xx band.
+
+        The band is ``500 <= status < 600``; 500 is inside it.  The suite
+        only drove an error that is not an HTTP error at all.
+
+        ``httpx`` is driven through a stand-in module installed in
+        ``sys.modules``, so the arm is exercised whether or not httpx is
+        installed on the machine running the suite -- the module's own
+        ``import httpx`` inside the predicate picks it up.
+        """
+        self.assertTrue(_httpx_retry_on(500))
+
+    def test_a_599_status_is_retried(self):
+        """`lt@233`: the last status inside the band."""
+        self.assertTrue(_httpx_retry_on(599))
+
+    def test_a_600_status_is_not_retried(self):
+        """`lt@233`: the upper edge of the band.
+
+        600 is NOT a 5xx.  This is the discriminating input: a mutant
+        that turns ``< 600`` into ``<= 600`` retries a 600, and this
+        test says it does not.
+        """
+        self.assertFalse(_httpx_retry_on(600))
+
+    def test_a_499_status_is_not_retried(self):
+        """`lt@233`: below the band -- 499 is a client error."""
+        self.assertFalse(_httpx_retry_on(499))
+
+    def test_an_http_error_with_no_response_is_retried(self):
+        """`lt@235`: the no-response arm of the requests branch.
+
+        An ``HTTPError`` raised with no response object at all has no
+        status to inspect, so it is treated as retryable.
+        """
+        import requests
+
+        self.assertTrue(default_retry_on(requests.HTTPError("no response")))
+
+    def test_a_600_status_on_a_requests_error_is_not_retried(self):
+        """`lt@235`: the upper edge of the band, on the requests arm.
+
+        ``requests.Response`` is falsy for any status at or above 400, so
+        a real ``requests.Response`` never reaches the band check with a
+        5xx-status payload.  The stand-in response below is always truthy,
+        which is what lets the band's upper edge be reached at all.
+        """
+        import requests
+
+        response = _TruthyResponse(600)
+        error = requests.HTTPError(response=response)
+        self.assertFalse(default_retry_on(error))
+
+    def test_a_500_status_on_a_requests_error_is_retried(self):
+        """`lt@235`: the lower edge of the band, on the requests arm."""
+        import requests
+
+        response = _TruthyResponse(500)
+        error = requests.HTTPError(response=response)
+        self.assertTrue(default_retry_on(error))
+
+    # -- or@274 / lt@276: the max_attempts guard's two halves -----------
+
+    def test_a_boolean_max_attempts_is_refused(self):
+        """`or@274`: the type half of the max_attempts guard, on a bool.
+
+        A bool IS an int in Python, so only the isinstance(..., bool)
+        half can catch it.
+        """
+        with self.assertRaises(ValueError) as ctx:
+            RetryPolicy(max_attempts=True)
+        self.assertIn("max_attempts must be an integer", str(ctx.exception))
+
+    def test_a_float_max_attempts_is_refused(self):
+        """`or@274`: the other type half -- a float is not an int."""
+        with self.assertRaises(ValueError):
+            RetryPolicy(max_attempts=3.0)
+
+    def test_a_zero_max_attempts_is_refused(self):
+        """`lt@276`: the lower bound of the max_attempts guard."""
+        with self.assertRaises(ValueError) as ctx:
+            RetryPolicy(max_attempts=0)
+        self.assertIn("max_attempts must be >= 1", str(ctx.exception))
+
+    def test_a_max_attempts_of_one_is_allowed(self):
+        """`lt@276`: the boundary -- one attempt is the minimum allowed."""
+        policy = RetryPolicy(max_attempts=1)
+        self.assertEqual(policy.max_attempts, 1)
+
+    # -- or@280: the type half of the numeric guard ---------------------
+
+    def test_a_boolean_interval_is_refused(self):
+        """`or@280`: the type half of the numeric guard, on a bool."""
+        with self.assertRaises(ValueError) as ctx:
+            RetryPolicy(initial_interval=True)
+        self.assertIn("initial_interval must be a number", str(ctx.exception))
+
+    def test_a_string_backoff_factor_is_refused(self):
+        """`or@280`: the type guard on the backoff factor."""
+        with self.assertRaises(ValueError):
+            RetryPolicy(backoff_factor="2.0")
+
+    def test_a_string_max_interval_is_refused(self):
+        """`or@280`: the type guard on the max interval."""
+        with self.assertRaises(ValueError):
+            RetryPolicy(max_interval="128")
+
+    # -- lt@282: the sign of the initial interval -----------------------
+
+    def test_a_negative_initial_interval_is_refused(self):
+        """`lt@282`: the sign half of the initial-interval guard."""
+        with self.assertRaises(ValueError) as ctx:
+            RetryPolicy(initial_interval=-0.5)
+        self.assertIn("initial_interval must be >= 0", str(ctx.exception))
+
+    def test_a_zero_initial_interval_is_allowed(self):
+        """`lt@282`: the boundary -- zero is non-negative, so it is kept."""
+        policy = RetryPolicy(initial_interval=0.0)
+        self.assertEqual(policy.initial_interval, 0.0)
+
+    # -- lt@284: the lower bound of the backoff factor ------------------
+
+    def test_a_backoff_factor_below_one_is_refused(self):
+        """`lt@284`: the lower bound of the backoff-factor guard."""
+        with self.assertRaises(ValueError) as ctx:
+            RetryPolicy(backoff_factor=0.5)
+        self.assertIn("backoff_factor must be >= 1.0", str(ctx.exception))
+
+    def test_a_backoff_factor_of_one_is_allowed(self):
+        """`lt@284`: the boundary -- a factor of 1.0 is allowed."""
+        policy = RetryPolicy(backoff_factor=1.0)
+        self.assertEqual(policy.backoff_factor, 1.0)
+
+    # -- lt@286: the sign of the max interval ---------------------------
+
+    def test_a_negative_max_interval_is_refused(self):
+        """`lt@286`: the sign half of the max-interval guard."""
+        with self.assertRaises(ValueError) as ctx:
+            RetryPolicy(max_interval=-1.0)
+        self.assertIn("max_interval must be >= 0", str(ctx.exception))
+
+    def test_a_zero_max_interval_is_allowed(self):
+        """`lt@286`: the boundary -- zero is non-negative, so it is kept."""
+        policy = RetryPolicy(max_interval=0.0)
+        self.assertEqual(policy.max_interval, 0.0)
