@@ -16,6 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import evidence_independence  # noqa: E402
 from evidence_independence import (  # noqa: E402
     SCHEMA_PIN,
     UNATTRIBUTED,
@@ -341,3 +342,279 @@ class TestEndToEndPath(unittest.TestCase):
         loose = list(retrieved) + [item("orphan")]
         self.assertEqual(independent_origin_count(loose), 2)
         self.assertIn(UNATTRIBUTED, group_by_origin(loose))
+
+
+class TestOriginResolutionGuards(unittest.TestCase):
+    """The second half of every guard in the origin resolver.
+
+    The resolver's guards are all of one shape:
+
+        if isinstance(value, str) and value.strip():
+
+    The FIRST half is "is it a string at all?" and the SECOND half is
+    "is it non-blank?".  The suite drove the string half and left the
+    blank half, so a fault planted in the blank half survived.
+
+    The two halves are NOT interchangeable, and the difference is
+    observable:
+
+    * ``and`` -> ``or`` means a BLANK value takes the branch.  For a
+      source system that raises -- an empty origin is refused -- and for
+      a locator it means the resolver evaluates ``.strip()`` on a
+      value that is not a string and crashes.
+    * A blank source system is not an origin, so the resolver must fall
+      THROUGH it and return None.
+
+    Every test here names a value that sits exactly on that boundary.
+    """
+
+    @staticmethod
+    def _blank():
+        """An object whose every provenance field is blank or absent."""
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            source_system=" ",
+            source=" ",
+            upstream=" ",
+            upstream_source=" ",
+            provenance=" ",
+            generator=" ",
+            uri=None,
+            url=None,
+            locator=None,
+        )
+
+    def test_an_object_with_only_blank_provenance_has_no_origin(self):
+        """`and@284` / `and@294`: the blank half of the attribute guards.
+
+        The object declares every provenance field, but every one of
+        them is blank.  The resolver must find nothing and return None.
+
+        Under the mutant (``and`` -> ``or``) the blank source system
+        takes the branch and ``Origin(source_system=" ")`` refuses an
+        empty origin -- so the resolver raises instead of returning
+        None.  Under the mutant at the locator guard the resolver
+        evaluates ``.strip()`` on the absent locator attribute and
+        raises ``AttributeError``.
+
+        Both faults turn "this evidence has no origin" into a crash.
+        """
+        self.assertIsNone(item_origin(self._blank()))
+
+    def test_an_object_with_a_blank_source_system_and_a_blank_locator_has_no_origin(self):
+        """`and@294`: the locator guard, on a blank locator.
+
+        The source fields are all blank and the locator is blank too.
+        The resolver must return None.
+
+        Under the mutant the blank locator takes the branch, the
+        canonical host comes back empty, and the resolver moves on to
+        the next locator -- where it evaluates ``.strip()`` on an
+        absent attribute.
+        """
+        from types import SimpleNamespace
+
+        obj = SimpleNamespace(
+            source_system=" ",
+            source=" ",
+            upstream=" ",
+            upstream_source=" ",
+            provenance=" ",
+            generator=" ",
+            uri=" ",
+            url=None,
+            locator=None,
+        )
+        self.assertIsNone(item_origin(obj))
+
+    def test_an_object_without_an_owner_has_an_origin_with_no_owner(self):
+        """`and@288`: the blank half of the owner guard.
+
+        The object names a real source system and declares NO owner
+        attribute at all.  The resolver must fall back to an empty
+        owner, so the origin key is the bare source system.
+
+        Under the mutant the resolver evaluates ``.strip()`` on the
+        absent owner attribute and raises ``AttributeError``.
+        """
+        from types import SimpleNamespace
+
+        obj = SimpleNamespace(source_system="news.example.com")
+        origin = item_origin(obj)
+        self.assertIsNotNone(origin)
+        self.assertEqual(origin.key, "news.example.com")
+        self.assertEqual(origin.owner, "")
+
+    def test_a_mapping_without_an_owner_has_an_origin_with_no_owner(self):
+        """`and@321`: the blank half of the top-level owner guard.
+
+        The mapping names a real source system and carries no owner key.
+        The resolver must fall back to an empty owner.
+
+        Under the mutant the resolver evaluates ``.strip()`` on the
+        absent owner key and raises ``AttributeError``.
+        """
+        origin = item_origin({"evidence_id": "r1", "source_system": "news.example.com"})
+        self.assertIsNotNone(origin)
+        self.assertEqual(origin.key, "news.example.com")
+        self.assertEqual(origin.owner, "")
+
+    def test_a_nested_provenance_without_an_owner_has_an_origin_with_no_owner(self):
+        """`and@311`: the blank half of the nested owner guard.
+
+        The nested provenance mapping names a real source system and
+        carries no owner key.  The resolver must fall back to an empty
+        owner.
+
+        Under the mutant the resolver evaluates ``.strip()`` on the
+        absent owner key and raises ``AttributeError``.
+        """
+        record = {
+            "evidence_id": "r1",
+            "provenance": {"source_system": "news.example.com"},
+        }
+        origin = item_origin(record)
+        self.assertIsNotNone(origin)
+        self.assertEqual(origin.key, "news.example.com")
+        self.assertEqual(origin.owner, "")
+
+    def test_a_nested_provenance_with_only_blank_fields_has_no_origin(self):
+        """`and@307`: the blank half of the nested source guard.
+
+        The nested provenance mapping declares every source field, and
+        every one of them is blank.  The resolver must find nothing and
+        return None -- the record is unattributed, not an empty origin.
+
+        Under the mutant the blank nested source system takes the
+        branch and ``Origin(source_system=" ")`` refuses an empty
+        origin, so the resolver raises instead of returning None.
+        """
+        record = {
+            "evidence_id": "r1",
+            "provenance": {
+                "source_system": " ",
+                "source": " ",
+                "upstream": " ",
+                "upstream_source": " ",
+                "provenance": " ",
+                "generator": " ",
+            },
+        }
+        self.assertIsNone(item_origin(record))
+
+    def test_a_mapping_with_only_a_non_string_locator_has_no_origin(self):
+        """`and@327`: the blank half of the mapping locator guard.
+
+        The mapping carries no source system and a locator that is not
+        a string.  The resolver must return None.
+
+        Under the mutant the resolver evaluates ``.strip()`` on the
+        non-string locator and raises ``AttributeError``.
+        """
+        self.assertIsNone(item_origin({"evidence_id": "r1", "uri": None}))
+
+
+class TestCorrelatedFieldFallbacks(unittest.TestCase):
+    """The second half of the correlated-field fallback chain.
+
+    ``correlated_fields`` reads the upstream field of an item, and the
+    field has TWO spellings: ``upstream_field`` and ``field``.  The
+    fallback is a CHAIN -- ``a or b or ""`` -- so the fault is in the
+    chain itself.
+
+    Under the mutant (``or`` -> ``and``) the chain becomes
+    ``a and b and ""``: a record that declares ONLY ``upstream_field``
+    yields an empty field, and the item is grouped under the origin's
+    bare key instead of under ``origin#field``.  That silently merges
+    two genuinely different correlation dimensions -- the exact blind
+    spot the view exists to expose.
+    """
+
+    def test_a_mapping_that_declares_only_upstream_field_keeps_its_field(self):
+        """`or@413`: the mapping fallback chain."""
+        record = {
+            "evidence_id": "r1",
+            "source_system": "news.example.com",
+            "upstream_field": "headline",
+        }
+        buckets = correlated_fields([record])
+        self.assertEqual(list(buckets), ["news.example.com#headline"])
+
+    def test_a_mapping_that_declares_only_field_keeps_its_field(self):
+        """`or@413`: the other spelling, as the control."""
+        record = {
+            "evidence_id": "r1",
+            "source_system": "news.example.com",
+            "field": "body",
+        }
+        buckets = correlated_fields([record])
+        self.assertEqual(list(buckets), ["news.example.com#body"])
+
+    def test_an_object_that_declares_only_upstream_field_keeps_its_field(self):
+        """`or@416`: the attribute fallback chain."""
+        from types import SimpleNamespace
+
+        obj = SimpleNamespace(
+            source_system="news.example.com",
+            upstream_field="headline",
+        )
+        buckets = correlated_fields([obj])
+        self.assertEqual(list(buckets), ["news.example.com#headline"])
+
+    def test_an_object_that_declares_only_field_keeps_its_field(self):
+        """`or@416`: the other spelling, as the control."""
+        from types import SimpleNamespace
+
+        obj = SimpleNamespace(
+            source_system="news.example.com",
+            field="body",
+        )
+        buckets = correlated_fields([obj])
+        self.assertEqual(list(buckets), ["news.example.com#body"])
+
+
+class TestSelfCheckAsserts(unittest.TestCase):
+    """The self-check's own asserts are guards too.
+
+    ``assert independent_origin_count(ten) == 1`` is a fault site like
+    any other.  Under the mutant (``==`` -> ``!=``) the self-check
+    asserts the opposite of what it means, and on the real inputs it
+    FAILS -- which is how the fault is detected.
+
+    The discriminator is that the self-check must complete on the real
+    code.  A self-check that raises is a broken self-check, and a
+    self-check that cannot raise is a self-check that proves nothing.
+    """
+
+    def test_the_self_check_completes_on_the_real_code(self):
+        """`eq@512` / `eq@521` / `eq@529` / `eq@550`: the counting asserts.
+
+        Each of these four asserts states a counting rule.  Under the
+        mutant it states the opposite, and the real inputs make it
+        fail -- so the self-check raises and the module's last line of
+        defence is gone.
+        """
+        import io
+        from contextlib import redirect_stdout
+
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            evidence_independence.main()
+        self.assertIn("evidence-independence OK", buffer.getvalue())
+
+    def test_running_the_module_as_a_script_runs_the_self_check(self):
+        """`eq@564`: the ``__main__`` guard.
+
+        ``if __name__ == "__main__":`` becomes ``!=`` under the mutant,
+        and then the self-check runs on EVERY import and NEVER runs when
+        the module is run as a script -- which is how it is used.
+        """
+        import io
+        import runpy
+        from contextlib import redirect_stdout
+
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            runpy.run_module("evidence_independence", run_name="__main__")
+        self.assertIn("evidence-independence OK", buffer.getvalue())
