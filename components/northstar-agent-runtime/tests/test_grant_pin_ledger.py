@@ -687,6 +687,153 @@ class ColumnGuardSecondHalfTests(unittest.TestCase):
         self.assertIn("unknown audit kind", str(caught.exception))
 
 
+class IsolatedGuardTests(unittest.TestCase):
+    """Three guards that no ordinary input can reach on its own.
+
+    Each of these is masked by something else in the module -- an equal
+    constant, a guard that cannot raise, or a second copy of the same
+    guard further down the call path.  The tests below isolate the guard
+    so that the mutant is observable.
+    """
+
+    # -- eq@142: the limit choice, with distinguishable limits ----------
+
+    def test_the_grant_id_is_measured_against_the_id_limit(self):
+        """`eq@142`: the limit choice, made observable.
+
+        The line is ``limit = _MAX_ID_CHARS if name == "grant_id" else
+        _MAX_VERSION_CHARS``.  Both constants are 256 today, so the two
+        branches are indistinguishable -- a mutant that swaps the
+        condition (``==`` -> ``!=``) is invisible to any ordinary
+        input.
+
+        The branches are made distinguishable by giving the two
+        constants DIFFERENT values for the duration of the test.  The
+        constants are module globals read at call time, so the swap is
+        observable: a grant id of 15 characters is too long when the id
+        limit is 10, and a version of 15 characters is fine when the
+        version limit is 20.
+        """
+        import grant_pin_ledger as gpl
+
+        original_id = gpl._MAX_ID_CHARS
+        original_version = gpl._MAX_VERSION_CHARS
+        gpl._MAX_ID_CHARS = 10
+        gpl._MAX_VERSION_CHARS = 20
+        try:
+            # The grant id is measured against the ID limit (10), so 15
+            # characters is too long.  Under the mutant the grant id
+            # would be measured against the version limit (20) and
+            # would be accepted.
+            with self.assertRaises(MalformedPinError) as caught:
+                GrantPin("g" * 15, "v1", 1)
+            self.assertIn("grant_id is too long", str(caught.exception))
+
+            # The version is measured against the VERSION limit (20), so
+            # 15 characters is fine.  Under the mutant the version
+            # would be measured against the id limit (10) and refused.
+            pin = GrantPin("grant-1", "v" * 15, 1)
+            self.assertEqual(len(pin.version), 15)
+
+            # And the other way round, to pin the direction.
+            with self.assertRaises(MalformedPinError) as caught:
+                GrantPin("grant-1", "v" * 25, 1)
+            self.assertIn("version is too long", str(caught.exception))
+        finally:
+            gpl._MAX_ID_CHARS = original_id
+            gpl._MAX_VERSION_CHARS = original_version
+
+    # -- retF@322: the digest that cannot be computed ------------------
+
+    def test_a_row_whose_digest_cannot_be_computed_does_not_verify(self):
+        """`retF@322`: the "the digest could not be derived" half.
+
+        ``verify()`` re-derives the row digest and compares it.  When
+        the derivation itself raises -- a payload that is not JSON
+        serialisable -- the row must NOT verify: an unverifiable row is
+        not a verified row.
+
+        Under the mutant (``return False`` -> ``return True``) such a
+        row would report itself as verified.
+        """
+        import grant_pin_ledger as gpl
+
+        class UnserialisablePin:
+            def to_dict(self):
+                # A set is not JSON serialisable: json.dumps raises
+                # TypeError, which verify() catches.
+                return {"fields": {1, 2, 3}}
+
+        row = gpl.SealedGrantRow(
+            seq=1,
+            pin=UnserialisablePin(),
+            outcome="executed",
+            digest="sha256:whatever",
+        )
+        self.assertFalse(row.verify())
+
+    def test_a_row_whose_digest_cannot_be_computed_raises_nothing(self):
+        """`retF@322`: the control -- verify() never raises."""
+        import grant_pin_ledger as gpl
+
+        class UnserialisablePin:
+            def to_dict(self):
+                return {"fields": {1, 2, 3}}
+
+        row = gpl.SealedGrantRow(
+            seq=1,
+            pin=UnserialisablePin(),
+            outcome="executed",
+            digest="sha256:whatever",
+        )
+        # The call returns a bool; it does not propagate the TypeError.
+        self.assertIsInstance(row.verify(), bool)
+
+    # -- or@400: the seal's own outcome guard --------------------------
+
+    def test_the_seal_layer_refuses_a_non_string_outcome_on_its_own(self):
+        """`or@400`: the seal layer's own outcome guard, isolated.
+
+        ``seal()`` guards its outcome at line 400, and then calls
+        ``resolve_seal_outcome()``, which guards the SAME outcome with
+        the SAME message.  The second guard therefore masks the first:
+        a mutant of line 400 alone is invisible, because the refusal
+        still comes from line 342.
+
+        The mask is removed here by replacing ``resolve_seal_outcome``
+        with a permissive stand-in, so the seal layer's own guard is
+        the only thing that can refuse.  Under the mutant (``or`` ->
+        ``and``) the guard never fires -- an outcome that is neither a
+        string nor empty cannot be both -- and the seal lands a row.
+        """
+        import grant_pin_ledger as gpl
+
+        original = gpl.resolve_seal_outcome
+        gpl.resolve_seal_outcome = lambda pin, outcome: outcome
+        try:
+            ledger = GrantPinLedger()
+            with self.assertRaises(GrantPinError) as caught:
+                ledger.seal(GrantPin("grant-1", "v1", 1), outcome=42)
+            self.assertIn("outcome must be a non-empty string", str(caught.exception))
+            self.assertEqual(len(ledger), 0)
+        finally:
+            gpl.resolve_seal_outcome = original
+
+    def test_the_seal_layer_refuses_an_empty_outcome_on_its_own(self):
+        """`or@400`: the same guard, on the emptiness half."""
+        import grant_pin_ledger as gpl
+
+        original = gpl.resolve_seal_outcome
+        gpl.resolve_seal_outcome = lambda pin, outcome: outcome
+        try:
+            ledger = GrantPinLedger()
+            with self.assertRaises(GrantPinError):
+                ledger.seal(GrantPin("grant-1", "v1", 1), outcome="")
+            self.assertEqual(len(ledger), 0)
+        finally:
+            gpl.resolve_seal_outcome = original
+
+
 class StdlibOnlyGuardTests(unittest.TestCase):
     """The stdlib-only guard's second half.
 
