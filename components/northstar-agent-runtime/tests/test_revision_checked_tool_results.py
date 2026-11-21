@@ -634,3 +634,431 @@ class OrphanAdoptionTests(unittest.TestCase):
         slot = ledger.evidence_slot
         slot.retain(stale)
         self.assertEqual(len(slot), 1)
+
+
+class GuardBoundMutantTests(unittest.TestCase):
+    """The *bounds* of the module's guards, and the self-check's asserts.
+
+    The planted-fault probe reports four surviving mutants in the module
+    that are all **bound** comparisons rather than guard arms:
+
+    * ``lt@118`` -- ``if value < 0:`` becomes ``if value <= 0:``.  The
+      boundary value is revision **0**, and the mutant refuses it.
+    * ``gt@120`` -- ``if value > _MAX_REVISION:`` becomes ``if value >=
+      _MAX_REVISION:``.  The boundary value is ``_MAX_REVISION`` itself,
+      and the mutant refuses it.
+    * ``gt@132`` -- ``if len(value) > 1024:`` becomes ``if len(value) >=
+      1024:``.  The boundary is a tool call id of exactly **1024**
+      characters, and the mutant refuses it.
+
+    And the module's own ``main()`` self-check carries four more:
+
+    * ``and@549`` / ``eq@550`` / ``eq@551`` -- the first commit's
+      assertions,
+    * ``and@559`` / ``eq@560`` -- the stale commit's assertions,
+    * ``eq@563`` / ``eq@564`` / ``and@564`` / ``eq@565`` / ``and@565`` --
+      the reconciliation assertions,
+    * ``eq@570`` -- the ``__main__`` guard.
+
+    The self-check assertions are only reachable through ``main()``, so
+    each test arranges the state that makes exactly ONE of the two
+    operands of the conjunction false while the other holds, and then
+    runs ``main()`` and requires the ``AssertionError``.  Under the
+    ``and`` -> ``or`` mutant the assertion passes instead, and under an
+    ``==`` -> ``!=`` mutant the assertion's operand flips.
+    """
+
+    # --- the module's own bounds ------------------------------------------
+
+    def test_revision_zero_is_a_valid_revision(self):
+        """`lt@118`: the boundary -- revision 0 is a real revision.
+
+        The guard is ``if value < 0:``.  Under the mutant (``<`` ->
+        ``<=``) revision **0** is refused as "non-negative", which would
+        make the very first revision of a state unusable.
+        """
+        result = RevisionCheckedResult(tool_call_id="call-a", read_revision=0)
+        self.assertEqual(result.read_revision, 0)
+        # And it is usable: the ledger starts at 0 and commits it.
+        ledger = RevisionCheckedToolResults(current_revision=0)
+        outcome = ledger.commit(result, 0, lambda res: None)
+        self.assertTrue(outcome.committed)
+        self.assertEqual(outcome.result_revision, 1)
+
+    def test_a_ledger_may_start_at_revision_zero(self):
+        """`lt@118`: the same bound on the ledger's own revision."""
+        ledger = RevisionCheckedToolResults(current_revision=0)
+        self.assertEqual(ledger.current_revision, 0)
+
+    def test_the_largest_representable_revision_is_accepted(self):
+        """`gt@120`: the boundary -- ``_MAX_REVISION`` itself is valid.
+
+        The guard is ``if value > _MAX_REVISION:``.  Under the mutant
+        (``>`` -> ``>=``) the largest representable revision is refused
+        as "too large", so the module's own documented ceiling becomes
+        unreachable.
+        """
+        import revision_checked_tool_results as mod
+
+        result = RevisionCheckedResult(
+            tool_call_id="call-a", read_revision=mod._MAX_REVISION
+        )
+        self.assertEqual(result.read_revision, mod._MAX_REVISION)
+
+    def test_a_revision_above_the_ceiling_is_refused(self):
+        """`gt@120`: the other side of the bound, as the control."""
+        import revision_checked_tool_results as mod
+
+        with self.assertRaises(InvalidRevisionError):
+            RevisionCheckedResult(
+                tool_call_id="call-a", read_revision=mod._MAX_REVISION + 1
+            )
+
+    def test_a_tool_call_id_of_exactly_1024_characters_is_accepted(self):
+        """`gt@132`: the boundary -- 1024 characters is within the limit.
+
+        The guard is ``if len(value) > 1024:``.  Under the mutant
+        (``>`` -> ``>=``) a 1024-character id is refused as too long.
+        """
+        tool_call_id = "c" * 1024
+        result = RevisionCheckedResult(
+            tool_call_id=tool_call_id, read_revision=41
+        )
+        self.assertEqual(result.tool_call_id, tool_call_id)
+        self.assertEqual(len(result.tool_call_id), 1024)
+
+    def test_a_tool_call_id_longer_than_1024_characters_is_refused(self):
+        """`gt@132`: the other side of the bound, as the control."""
+        with self.assertRaises(InvalidToolCallIdError):
+            RevisionCheckedResult(
+                tool_call_id="c" * 1025, read_revision=41
+            )
+
+    def test_the_evidence_slot_name_is_bound_checked_too(self):
+        """`gt@132`: the same bound on the slot's own name.
+
+        The evidence slot is constructed with the same id check, so its
+        name is refused at exactly the same length.
+        """
+        EvidenceSlot("s" * 1024)
+        with self.assertRaises(InvalidToolCallIdError):
+            EvidenceSlot("s" * 1025)
+
+    # --- the self-check's assertions ---------------------------------------
+
+    def _run_main(self):
+        """Run the module's own self-check, capturing its stdout."""
+        import io
+        from contextlib import redirect_stdout
+
+        import revision_checked_tool_results as mod
+
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            mod.main()
+        return buffer.getvalue()
+
+    def test_the_self_check_passes_against_the_unchanged_module(self):
+        """The control: the self-check is green before any patching."""
+        self.assertIn("revision-checked-tool-results OK", self._run_main())
+
+    def test_and_at_549_fails_when_the_outcome_is_neither_committed_nor_rejected(self):
+        """`and@549`: the first assertion of the self-check.
+
+        The assertion is ``assert outcome.committed and not
+        outcome.rejected``.  The commit is patched so that its outcome
+        says **neither** -- ``committed`` false and ``rejected`` false --
+        while the write still landed and the revision was still
+        allocated.  The first operand is false and the second is true,
+        so the mutant (``or``) passes the assertion and carries on to
+        the end of the self-check, while the original raises
+        ``AssertionError`` at line 549.
+        """
+        import revision_checked_tool_results as mod
+
+        original_commit = mod.RevisionCheckedToolResults.commit
+        calls = []
+
+        def patched_commit(self, result, current_revision, apply):
+            calls.append(result)
+            outcome = original_commit(self, result, current_revision, apply)
+            if len(calls) != 1:
+                # Only the FIRST commit is patched: the stale commit that
+                # follows must behave normally, so the mutant's
+                # continued execution is the only thing under test.
+                return outcome
+            # The write landed and the revision was allocated; only the
+            # VERDICT is rewritten, to the shape the mutant accepts.
+            return mod.CommitOutcome(
+                committed=False,
+                rejected=False,
+                tool_call_id=outcome.tool_call_id,
+                read_revision=outcome.read_revision,
+                current_revision=outcome.current_revision,
+                result_revision=outcome.result_revision,
+                expected_revision=outcome.expected_revision,
+                reason=outcome.reason,
+                evidence_slot=outcome.evidence_slot,
+            )
+
+        mod.RevisionCheckedToolResults.commit = patched_commit
+        try:
+            with self.assertRaises(AssertionError):
+                self._run_main()
+        finally:
+            mod.RevisionCheckedToolResults.commit = original_commit
+
+    def test_eq_at_550_fails_when_the_allocated_revision_is_wrong(self):
+        """`eq@550`: the allocated revision.
+
+        The assertion is ``assert outcome.result_revision == 42``.  The
+        commit is patched so that the new revision is **43** instead of
+        42: the first commit still succeeds, so the assertion is
+        reached and the comparison is false.  Under the mutant
+        (``==`` -> ``!=``) the assertion passes.
+        """
+        import revision_checked_tool_results as mod
+
+        original_commit = mod.RevisionCheckedToolResults.commit
+
+        def patched_commit(self, result, current_revision, apply):
+            outcome = original_commit(self, result, current_revision, apply)
+            # Shift the allocated revision by one: 42 -> 43.
+            return mod.CommitOutcome(
+                committed=outcome.committed,
+                rejected=outcome.rejected,
+                tool_call_id=outcome.tool_call_id,
+                read_revision=outcome.read_revision,
+                current_revision=outcome.current_revision,
+                result_revision=(
+                    None
+                    if outcome.result_revision is None
+                    else outcome.result_revision + 1
+                ),
+                expected_revision=outcome.expected_revision,
+                reason=outcome.reason,
+                evidence_slot=outcome.evidence_slot,
+            )
+
+        mod.RevisionCheckedToolResults.commit = patched_commit
+        try:
+            with self.assertRaises(AssertionError):
+                self._run_main()
+        finally:
+            mod.RevisionCheckedToolResults.commit = original_commit
+
+    def test_eq_at_551_fails_when_the_state_was_not_updated(self):
+        """`eq@551`: the state's own value.
+
+        The assertion is ``assert state["goal"] == "new"``.  The commit's
+        ``apply`` callable is patched so that it writes nothing: the
+        commit still succeeds (so the earlier assertions hold) but the
+        state keeps its old goal.  Under the mutant (``==`` -> ``!=``)
+        the assertion passes.
+        """
+        import revision_checked_tool_results as mod
+
+        original_commit = mod.RevisionCheckedToolResults.commit
+
+        def patched_commit(self, result, current_revision, apply):
+            # Swallow the write: the state is never updated.
+            return original_commit(self, result, current_revision, lambda res: None)
+
+        mod.RevisionCheckedToolResults.commit = patched_commit
+        try:
+            with self.assertRaises(AssertionError):
+                self._run_main()
+        finally:
+            mod.RevisionCheckedToolResults.commit = original_commit
+
+    def test_and_at_559_fails_when_the_stale_outcome_is_neither_committed_nor_rejected(self):
+        """`and@559`: the stale commit's assertion.
+
+        The assertion is ``assert outcome.rejected and not
+        outcome.committed``.  The commit is patched so that its outcome
+        says **neither** -- ``rejected`` false and ``committed`` false --
+        while the stale result is still not applied and the state still
+        holds the newer goal.  The first operand is false and the second
+        is true, so the mutant (``or``) passes the assertion and carries
+        on, while the original raises ``AssertionError`` at line 559.
+        """
+        import revision_checked_tool_results as mod
+
+        original_commit = mod.RevisionCheckedToolResults.commit
+
+        def patched_commit(self, result, current_revision, apply):
+            outcome = original_commit(self, result, current_revision, apply)
+            if not outcome.committed:
+                # The stale result was NOT applied and the state is
+                # untouched; only the verdict shape is rewritten.
+                return mod.CommitOutcome(
+                    committed=False,
+                    rejected=False,
+                    tool_call_id=outcome.tool_call_id,
+                    read_revision=outcome.read_revision,
+                    current_revision=outcome.current_revision,
+                    result_revision=outcome.result_revision,
+                    expected_revision=outcome.expected_revision,
+                    reason=outcome.reason,
+                    evidence_slot=outcome.evidence_slot,
+                )
+            return outcome
+
+        mod.RevisionCheckedToolResults.commit = patched_commit
+        try:
+            with self.assertRaises(AssertionError):
+                self._run_main()
+        finally:
+            mod.RevisionCheckedToolResults.commit = original_commit
+
+    def test_eq_at_560_fails_when_the_stale_result_was_applied(self):
+        """`eq@560`: the stale write must not have landed.
+
+        The assertion is ``assert state["goal"] == "new"`` -- after the
+        stale commit.  The commit is patched so that the stale result IS
+        applied (the state ends up holding the stale goal) while the
+        outcome still reports "rejected".  The original raises
+        ``AssertionError``; under the mutant (``==`` -> ``!=``) it
+        passes.
+        """
+        import revision_checked_tool_results as mod
+
+        original_commit = mod.RevisionCheckedToolResults.commit
+
+        def patched_commit(self, result, current_revision, apply):
+            outcome = original_commit(self, result, current_revision, apply)
+            if outcome.rejected:
+                # Apply the stale result anyway, behind the ledger's back.
+                apply(result)
+            return outcome
+
+        mod.RevisionCheckedToolResults.commit = patched_commit
+        try:
+            with self.assertRaises(AssertionError):
+                self._run_main()
+        finally:
+            mod.RevisionCheckedToolResults.commit = original_commit
+
+    def test_eq_at_563_fails_when_the_reconciliation_names_another_call(self):
+        """`eq@563`: the reconciliation's tool call id.
+
+        The assertion is ``assert rec.tool_call_id == "call-b"``.  The
+        reconciliation is patched to name a different tool call, so the
+        comparison is false.  Under the mutant (``==`` -> ``!=``) it
+        passes.
+        """
+        import revision_checked_tool_results as mod
+
+        original_reconcile = mod.RevisionCheckedToolResults.reconcile
+
+        def patched_reconcile(self, rejected_result, current_state=None):
+            rec = original_reconcile(self, rejected_result, current_state)
+            return mod.Reconciliation(
+                tool_call_id="call-other",
+                read_revision=rec.read_revision,
+                current_revision=rec.current_revision,
+                applicable=rec.applicable,
+                status=rec.status,
+                replay_recommendation=rec.replay_recommendation,
+                evidence_slot=rec.evidence_slot,
+                reason=rec.reason,
+            )
+
+        mod.RevisionCheckedToolResults.reconcile = patched_reconcile
+        try:
+            with self.assertRaises(AssertionError):
+                self._run_main()
+        finally:
+            mod.RevisionCheckedToolResults.reconcile = original_reconcile
+
+    def test_eq_at_564_fails_when_the_reconciliation_read_revision_is_wrong(self):
+        """`eq@564`: the reconciliation's read revision.
+
+        The assertion is ``assert rec.read_revision == 41 and
+        rec.current_revision == 42``.  The reconciliation is patched so
+        that its read revision is **40**: the first operand is false and
+        the second holds, so the mutant (``or``) passes while the
+        original raises.
+        """
+        import revision_checked_tool_results as mod
+
+        original_reconcile = mod.RevisionCheckedToolResults.reconcile
+
+        def patched_reconcile(self, rejected_result, current_state=None):
+            rec = original_reconcile(self, rejected_result, current_state)
+            return mod.Reconciliation(
+                tool_call_id=rec.tool_call_id,
+                read_revision=rec.read_revision - 1,
+                current_revision=rec.current_revision,
+                applicable=rec.applicable,
+                status=rec.status,
+                replay_recommendation=rec.replay_recommendation,
+                evidence_slot=rec.evidence_slot,
+                reason=rec.reason,
+            )
+
+        mod.RevisionCheckedToolResults.reconcile = patched_reconcile
+        try:
+            with self.assertRaises(AssertionError):
+                self._run_main()
+        finally:
+            mod.RevisionCheckedToolResults.reconcile = original_reconcile
+
+    def test_eq_at_565_fails_when_the_stale_result_reads_as_applicable(self):
+        """`eq@565`: the reconciliation's applicability verdict.
+
+        The assertion is ``assert not rec.applicable and
+        rec.status == "stale_evidence"``.  The reconciliation is patched
+        so that the stale result reads as **applicable**: the first
+        operand (``not rec.applicable``) is false and the second holds,
+        so the mutant (``or``) passes while the original raises.
+        """
+        import revision_checked_tool_results as mod
+
+        original_reconcile = mod.RevisionCheckedToolResults.reconcile
+
+        def patched_reconcile(self, rejected_result, current_state=None):
+            rec = original_reconcile(self, rejected_result, current_state)
+            return mod.Reconciliation(
+                tool_call_id=rec.tool_call_id,
+                read_revision=rec.read_revision,
+                current_revision=rec.current_revision,
+                applicable=True,
+                status=rec.status,
+                replay_recommendation=rec.replay_recommendation,
+                evidence_slot=rec.evidence_slot,
+                reason=rec.reason,
+            )
+
+        mod.RevisionCheckedToolResults.reconcile = patched_reconcile
+        try:
+            with self.assertRaises(AssertionError):
+                self._run_main()
+        finally:
+            mod.RevisionCheckedToolResults.reconcile = original_reconcile
+
+    def test_eq_at_570_fails_when_the_module_is_run_as_a_script(self):
+        """`eq@570`: the ``__main__`` guard.
+
+        The guard is ``if __name__ == "__main__":``.  Run as a script the
+        module MUST execute its self-check: the original prints the OK
+        banner and exits 0.  Under the mutant (``==`` -> ``!=``) the
+        guard is false when ``__name__`` is ``"__main__"``, so the
+        self-check never runs and nothing is printed -- the mutant is
+        killed by the difference.
+        """
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        import revision_checked_tool_results as mod
+
+        root = Path(mod.__file__).resolve().parent
+        proc = subprocess.run(
+            [sys.executable, str(root / "revision_checked_tool_results.py")],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        self.assertIn("revision-checked-tool-results OK", proc.stdout)
