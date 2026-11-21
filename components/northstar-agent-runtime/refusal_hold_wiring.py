@@ -451,6 +451,18 @@ class RefusalHoldRegistry:
         """The scope kind this registry's refusals live under."""
         return self._scope_kind
 
+    @property
+    def is_refusal_registry(self) -> bool:
+        """This registry is the **refusal** family, not the cancellation one.
+
+        The seal ledger's injection point holds **two** gate families --
+        the cancellation tombstone and the refusal hold -- and they are
+        both ``TombstoneSet``-shaped.  The ledger tells them apart by
+        this flag, so installing a refusal gate does not displace an
+        installed cancellation gate (and neither displaces the other).
+        """
+        return True
+
     def key_for(
         self, grant_id: str, action: str, subject: Optional[str] = None
     ) -> RefusalHoldKey:

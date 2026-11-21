@@ -1192,5 +1192,162 @@ class WiringGuardTests(unittest.TestCase):
         self.assertIn("refusal-hold-wiring self-check: ok", buffer.getvalue())
 
 
+class TwoGateFamiliesTests(unittest.TestCase):
+    """The ledger has **two** gate families and only **one** slot.
+
+    The cancellation tombstone and the refusal hold are both
+    ``TombstoneSet``-shaped objects, and both are installed at the
+    ledger's single injection point (``set_tombstones``).  The second
+    install **replaced** the first, so a host that wired the refusal
+    gate after the cancellation gate silently **lost** the cancellation
+    block: the ledger sealed the very action the tombstone covered.
+
+    Measured 2026-11-21 on this branch:
+
+        ledger.set_tombstones(tombstone_set)   # cancellation gate
+        ledger.set_tombstones(refusal_registry)  # refusal gate
+        ledger.append_grant(grant_id="grant-1", action="dispatch")
+        -> len(ledger) == 1     # the tombstone block was LOST
+
+    The fix is structural: the ledger keeps **both** families, consults
+    **both**, and a second install of a *different* family refuses
+    instead of silently replacing the first.
+    """
+
+    def _tombstone_set(self, grant_id="grant-1", action="dispatch", subject=""):
+        from cancellation_tombstone import Tombstone, TombstoneSet
+
+        return TombstoneSet(
+            [
+                Tombstone(
+                    grant_id=grant_id,
+                    action=action,
+                    subject=subject,
+                    declarer="ops",
+                    declarer_channel="ops-channel",
+                )
+            ]
+        )
+
+    def test_the_second_install_does_not_drop_the_first_gate(self):
+        """The fail-open itself: both gates are consulted."""
+        ledger = make_ledger()
+        tombstones = self._tombstone_set()
+        registry = RefusalHoldRegistry()
+        ledger.set_tombstones(tombstones)
+        ledger.set_tombstones(registry)
+        before = len(ledger)
+        with self.assertRaises(ForwardSealError):
+            seal(ledger, grant_id="grant-1", action="dispatch", subject="")
+        self.assertEqual(len(ledger), before)
+
+    def test_the_refusal_gate_still_blocks_after_the_tombstone_gate(self):
+        """The other direction: the refusal is not dropped either."""
+        ledger = make_ledger()
+        tombstones = self._tombstone_set(grant_id="grant-9", action="other")
+        registry = RefusalHoldRegistry()
+        registry.record("grant-1", "dispatch", "", row=make_row())
+        ledger.set_tombstones(tombstones)
+        ledger.set_tombstones(registry)
+        before = len(ledger)
+        with self.assertRaises(ForwardSealError):
+            seal(ledger, grant_id="grant-1", action="dispatch", subject="")
+        self.assertEqual(len(ledger), before)
+
+    def test_both_gates_are_reachable_at_once(self):
+        """Both registries are kept, not just the last one installed."""
+        ledger = make_ledger()
+        tombstones = self._tombstone_set()
+        registry = RefusalHoldRegistry()
+        ledger.set_tombstones(tombstones)
+        ledger.set_tombstones(registry)
+        self.assertIs(ledger.tombstones, registry)
+        self.assertIs(ledger.refusals, registry)
+        self.assertIs(ledger.cancellations, tombstones)
+
+    def test_installing_the_same_registry_twice_is_not_an_error(self):
+        """Re-installing the SAME object is idempotent, not a refusal."""
+        ledger = make_ledger()
+        registry = RefusalHoldRegistry()
+        ledger.set_tombstones(registry)
+        ledger.set_tombstones(registry)
+        self.assertIs(ledger.refusals, registry)
+
+    def test_a_second_refusal_registry_is_refused_not_swapped(self):
+        """A second registry of the same family must not displace the first."""
+        ledger = make_ledger()
+        registry = RefusalHoldRegistry()
+        ledger.set_tombstones(registry)
+        with self.assertRaises(ForwardSealError):
+            ledger.set_tombstones(RefusalHoldRegistry())
+        self.assertIs(ledger.refusals, registry)
+
+    def test_a_second_cancellation_registry_is_refused_not_swapped(self):
+        """The same rule for the cancellation family."""
+        ledger = make_ledger()
+        tombstones = self._tombstone_set()
+        ledger.set_tombstones(tombstones)
+        with self.assertRaises(ForwardSealError):
+            ledger.set_tombstones(self._tombstone_set(grant_id="grant-2"))
+        self.assertIs(ledger.cancellations, tombstones)
+
+    def test_a_gate_can_still_be_cleared_explicitly(self):
+        """Clearing is a deliberate act, and it clears both families."""
+        ledger = make_ledger()
+        registry = RefusalHoldRegistry()
+        ledger.set_tombstones(registry)
+        ledger.set_tombstones(None)
+        self.assertIsNone(ledger.refusals)
+        self.assertIsNone(ledger.cancellations)
+
+    def test_an_uncovered_action_still_seals_with_both_gates_installed(self):
+        """The control: the fix does not block everything."""
+        ledger = make_ledger()
+        tombstones = self._tombstone_set(grant_id="grant-9", action="other")
+        registry = RefusalHoldRegistry()
+        registry.record("grant-1", "checkout", "order-7", row=make_row())
+        ledger.set_tombstones(tombstones)
+        ledger.set_tombstones(registry)
+        seal(ledger, grant_id="grant-1", action="dispatch", subject="")
+        self.assertEqual(len(ledger), 1)
+
+    def test_an_old_pickle_still_refuses(self):
+        """A checkpoint written before the split still blocks.
+
+        The legacy state carried ONE ``_tombstones`` slot.  It is
+        restored into the family its shape names, so a checkpoint taken
+        before this change keeps refusing what it used to refuse.
+
+        The registry itself holds a lock and is not picklable, so the
+        restoration is driven through ``__setstate__`` directly -- which
+        is the half of the pickle contract that changed.
+        """
+        ledger = make_ledger()
+        registry = RefusalHoldRegistry()
+        registry.record("grant-1", "checkout", "order-7", row=make_row())
+        legacy_state = ledger.__getstate__()
+        legacy_state.pop("_cancellations", None)
+        legacy_state.pop("_refusals", None)
+        legacy_state["_tombstones"] = registry
+        restored = _legacy_ledger(legacy_state)
+        self.assertIs(restored.refusals, registry)
+        self.assertIsNone(restored.cancellations)
+        before = len(restored)
+        with self.assertRaises(ForwardSealError):
+            seal(restored)
+        self.assertEqual(len(restored), before)
+
+
+def _legacy_ledger(state):
+    """A ledger rebuilt from a legacy (pre-split) pickle state."""
+    import forward_seal_ledger
+
+    ledger = forward_seal_ledger.ForwardSealLedger.__new__(
+        forward_seal_ledger.ForwardSealLedger
+    )
+    ledger.__setstate__(state)
+    return ledger
+
+
 if __name__ == "__main__":
     unittest.main()

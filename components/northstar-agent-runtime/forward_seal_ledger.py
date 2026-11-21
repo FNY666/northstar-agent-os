@@ -189,6 +189,26 @@ def _seal_checkpoint(key: bytes, payload: bytes) -> bytes:
     return hmac.new(key, _CHECKPOINT_TAG + payload, hashlib.sha256).digest()
 
 
+def _is_refusal_registry(registry: Any) -> bool:
+    """Is this registry the **refusal** family rather than the cancellation one?
+
+    The two families are both ``TombstoneSet``-shaped: they answer
+    ``blocked(grant_id, action, subject)``.  They are told apart by what
+    they return when they block: a **refusal** comes back with the row
+    that refused (``row`` and ``row_digest``), a **cancellation** comes
+    back with the tombstone that cancelled (neither).
+
+    The test is made on the *declared* surface of the object, not on its
+    class name, so a host that writes its own registry is classified by
+    what it actually returns rather than by what it is called.
+    """
+    if getattr(registry, "row", None) is not None:
+        return True
+    if getattr(registry, "row_digest", None) is not None:
+        return True
+    return bool(getattr(registry, "is_refusal_registry", False))
+
+
 class ForwardSealError(Exception):
     """Fail-closed: any integrity failure raises, never returns bad data."""
 
@@ -250,27 +270,87 @@ class ForwardSealLedger:
         self._checkpoints: List[Checkpoint] = []
         # Genesis pin: fixed, public, identifies the (empty) chain start.
         self._genesis = _sha256_hex(b"northstar-forward-seal:v1:genesis")
-        # The optional tombstone registry.  It is injected, and it is empty
-        # by default: a ledger with no tombstones behaves exactly as before.
-        # The registry is consulted *inside* the append's critical section,
-        # which is the whole point -- a check performed before the send
-        # still leaves the race open.
-        self._tombstones = tombstones
+        # The optional gate registries.  They are injected, and they are
+        # empty by default: a ledger with no gates behaves exactly as before.
+        # The registries are consulted *inside* the append's critical
+        # section, which is the whole point -- a check performed before the
+        # send still leaves the race open.
+        #
+        # There are TWO families and they are kept SEPARATE.  The
+        # cancellation tombstone and the refusal hold are both
+        # ``TombstoneSet``-shaped, and both are installed here, so a
+        # single slot let the second install silently REPLACE the first --
+        # and a host that wired the refusal gate after the cancellation
+        # gate lost the cancellation block.  Measured 2026-11-21: the
+        # ledger sealed the very action the tombstone covered.
+        #
+        # So each family has its own slot, and a registry is filed into
+        # the family its shape names.  See :meth:`set_tombstones`.
+        self._cancellations: Any = None
+        self._refusals: Any = None
+        if tombstones is not None:
+            self._cancellations = tombstones
 
     @property
     def tombstones(self) -> Any:
-        """The tombstone registry this ledger consults (may be ``None``)."""
-        return self._tombstones
+        """The tombstone registry this ledger consults (may be ``None``).
+
+        The historical name of the slot.  It is the **cancellation**
+        family when that is what was installed, and the refusal family
+        when the refusal gate is the only one present -- so a caller
+        that reads it back sees the gate that is actually consulted.
+        """
+        if self._refusals is not None:
+            return self._refusals
+        return self._cancellations
+
+    @property
+    def cancellations(self) -> Any:
+        """The cancellation-tombstone registry (may be ``None``)."""
+        return self._cancellations
+
+    @property
+    def refusals(self) -> Any:
+        """The refusal-hold registry (may be ``None``)."""
+        return self._refusals
 
     def set_tombstones(self, registry: Any) -> None:
-        """Install (or clear) the tombstone registry.
+        """Install (or clear) a gate registry.
 
         The registry is read under the ledger's lock at commit time, so it
         may be swapped between appends without a window in which a check
         sees a stale registry.
+
+        The registry is filed into the family its **shape** names, and the
+        two families are kept side by side rather than one replacing the
+        other.  A ``TombstoneSet``-shaped registry that carries a refusal
+        row (``row``/``row_digest``) is the **refusal** family; one that
+        does not is the **cancellation** family.  Installing into a family
+        that already holds a *different* object is refused, so a host
+        cannot silently disable a gate that is already installed.
+
+        Passing ``None`` clears **both** families: clearing is a
+        deliberate act, and it must not leave one gate behind.
         """
         with self._lock:
-            self._tombstones = registry
+            if registry is None:
+                self._cancellations = None
+                self._refusals = None
+                return
+            if _is_refusal_registry(registry):
+                if self._refusals is not None and self._refusals is not registry:
+                    raise ForwardSealError(
+                        "a refusal registry is already installed on this ledger; "
+                        "installing a second one would silently drop the first"
+                    )
+                self._refusals = registry
+                return
+            if self._cancellations is not None and self._cancellations is not registry:
+                raise ForwardSealError(
+                    "a cancellation registry is already installed on this ledger; "
+                    "installing a second one would silently drop the first"
+                )
+            self._cancellations = registry
 
     def __getstate__(self) -> dict:
         """Support pickle for checkpoint/resume (excludes the lock)."""
@@ -279,8 +359,27 @@ class ForwardSealLedger:
         return state
 
     def __setstate__(self, state: dict) -> None:
-        """Restore after unpickle (recreates the lock)."""
+        """Restore after unpickle (recreates the lock).
+
+        A pickle written before the two-family split carries a single
+        ``_tombstones`` slot.  It is restored into the **cancellation**
+        family -- the slot it was written for -- so an old checkpoint
+        still loads and still blocks what it used to block.
+        """
+        state = dict(state)
+        legacy = state.pop("_tombstones", None)
         self.__dict__.update(state)
+        if legacy is not None:
+            # The legacy slot held ONE registry, of either family.  It is
+            # filed into the family its shape names, so an old checkpoint
+            # still blocks exactly what it used to block.
+            if _is_refusal_registry(legacy):
+                if self.__dict__.get("_refusals") is None:
+                    self._refusals = legacy
+            elif self.__dict__.get("_cancellations") is None:
+                self._cancellations = legacy
+        self.__dict__.setdefault("_cancellations", None)
+        self.__dict__.setdefault("_refusals", None)
         self._lock = threading.RLock()
 
     # -- introspection (pure reads) ------------------------------------
@@ -515,21 +614,41 @@ class ForwardSealLedger:
     ) -> str:
         """The authorization string for one grant seal, under the ledger lock.
 
-        Returns the rendered grant pin when no tombstone covers the action.
-        When a tombstone covers it, the seal is refused unless this same
+        Returns the rendered grant pin when no gate covers the action.
+        When a gate covers it, the seal is refused unless this same
         call carries a valid named lift -- and then the authorization
         records both the pin and the lift, so the sealed row says which
         tombstone was lifted and on whose authority.
+
+        **Both** gate families are consulted: the cancellation tombstone
+        and the refusal hold.  A seal is refused when *either* family
+        blocks, because the two families answer different questions
+        ("was this action cancelled?" and "was this action refused?")
+        and a host that installs both means to be stopped by both.
         """
         rendered = pin.render()
-        registry = self._tombstones
+        subject_value = subject or ""
+
+        # The refusal family first: a refusal is not a cancellation and
+        # cannot be lifted by a tombstone lift, so it is checked on its
+        # own terms and never through the lift path below.
+        refusal = self._refusals
+        if refusal is not None:
+            result = refusal.check(pin.grant_id, action, subject_value, now=now)
+            if getattr(result, "blocked", False):
+                raise ForwardSealError(
+                    f"action {pin.grant_id!r}/{action!r} is refused: a recorded "
+                    f"refusal covers it ({getattr(result, 'reason', 'blocked')}); "
+                    "the seal is refused and no record lands"
+                )
+
+        registry = self._cancellations
         if registry is None:
             if lift is not None:
                 raise ForwardSealError(
                     "a lift was offered but this ledger holds no tombstone registry, so nothing can be lifted"
                 )
             return rendered
-        subject_value = subject or ""
         tombstone = registry.blocked(pin.grant_id, action, subject_value, now=now)
         if tombstone is None:
             if lift is not None:
