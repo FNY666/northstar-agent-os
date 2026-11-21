@@ -95,10 +95,14 @@ class Base(unittest.TestCase):
 class SingleDefinitionTests(unittest.TestCase):
     def test_components_hold_exactly_one_experience_layering(self):
         components = COMPONENT_ROOT.parent
+        # Build artifacts are copies of the source, not second definitions:
+        # `pip install .` leaves setuptools copies under build/lib, and a
+        # later test run must not read those as a second implementation.
+        generated = {"__pycache__", "build", "dist"}
         found = sorted(
             p.relative_to(components).as_posix()
             for p in components.rglob("experience_layering.py")
-            if "__pycache__" not in p.parts
+            if not generated.intersection(p.parts)
         )
         self.assertEqual(
             found,
