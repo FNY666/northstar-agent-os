@@ -722,3 +722,254 @@ class CommittedEvidenceIsSelfContainedTests(unittest.TestCase):
             receipt = TOOL.reconcile_code_evidence(evidence)
             self.assertEqual(receipt["classification"], "invalid_evidence")
             self.assertTrue(receipt["integrity_errors"])
+
+
+class VerifierGuardArmsTests(unittest.TestCase):
+    """The arm of each verifier guard that the existing suite never drove.
+
+    Four planted faults survived this slice's suite:
+
+      eq@259   the ``error_class`` of a FAILED host check
+      or@317   the "an incomplete pin" guard
+      or@324   the "(missing)" rendering of an unresolvable pin
+      eq@365   the ``seal``/``verify`` dispatch in ``main``
+
+    Each is driven below with a control on the other side of it.
+    """
+
+    def _sealed(self, parent: Path) -> tuple[Path, Path, dict]:
+        """A sealed delivery in a throwaway repository."""
+        root, start, delivery = _make_repository(parent)
+        evidence = parent / "evidence"
+        seal = TOOL.seal_delivery(
+            repository=root,
+            start_commit=start,
+            delivery_commit=delivery,
+            evidence_dir=evidence,
+            check_inputs=("helper.py",),
+            checks=("python3 check.py",),
+            goal="deliver the value change",
+        )
+        return root, evidence, seal
+
+    # --- eq@259: the error_class of a FAILED check ---------------------
+    def test_a_failed_host_check_records_its_exit_code_as_the_error_class(self):
+        """`eq@259`: a failed check is classified by its exit code.
+
+        The line is::
+
+            error_class="" if process.returncode == 0 else f"exit{process.returncode}"
+
+        The existing suite drove only the SUCCESSFUL case, where the
+        ``error_class`` is the empty string -- so the two arms of the
+        conditional were indistinguishable.  Under the mutant
+        (``==`` -> ``!=``) the empty string is written for a FAILED
+        check and ``exitN`` for a successful one: the effect receipt
+        says a failing check succeeded.
+
+        The killer runs a check that exits 3 and asserts the receipt's
+        ``error_class`` is ``"exit3"`` and its ``status`` is
+        ``"failed"``.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root, start, delivery = _make_repository(parent)
+            evidence = parent / "evidence"
+            with self.assertRaises(TOOL.SealError):
+                TOOL.seal_delivery(
+                    repository=root,
+                    start_commit=start,
+                    delivery_commit=delivery,
+                    evidence_dir=evidence,
+                    check_inputs=("helper.py",),
+                    checks=("python3 -c \"import sys; sys.exit(3)\"",),
+                    goal="deliver the value change",
+                )
+            phases = json.loads((evidence / "phases.json").read_text(encoding="utf-8"))
+            effects = phases["effects"]
+            self.assertEqual(len(effects), 1)
+            self.assertEqual(effects[0]["status"], "failed")
+            self.assertEqual(effects[0]["error_class"], "exit3")
+
+    def test_a_successful_host_check_records_an_empty_error_class(self):
+        """`eq@259`: the other side of the conditional, as the control."""
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root, evidence, _ = self._sealed(parent)
+            phases = json.loads((evidence / "phases.json").read_text(encoding="utf-8"))
+            effects = phases["effects"]
+            self.assertEqual(len(effects), 1)
+            self.assertEqual(effects[0]["status"], "completed")
+            self.assertEqual(effects[0]["error_class"], "")
+
+    # --- or@317: the "an incomplete pin" guard --------------------------
+    def test_a_pin_with_no_baseline_is_reported_as_incomplete(self):
+        """`or@317`: an incomplete pin is refused, not compared.
+
+        The guard is ``if not path or not baseline:`` -- a pin with
+        EITHER half missing is incomplete and is reported as such.  The
+        existing suite drove the pin-with-a-wrong-baseline case, where
+        both halves are present and the comparison runs; it never drove
+        the incomplete case.
+
+        Under the mutant (``or`` -> ``and``) the guard fires only when
+        BOTH halves are missing, so a pin with a path but no baseline
+        slips through to the comparison and is reported as a MISMATCH
+        instead of as incomplete -- and a pin with neither half is
+        reported as a mismatch with an empty expectation.
+
+        The killer blanks the baseline and asserts the problem is the
+        "incomplete" one, not a mismatch.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root, evidence, _ = self._sealed(parent)
+            seal_path = evidence / "delivery-seal.json"
+            seal = json.loads(seal_path.read_text(encoding="utf-8"))
+            seal["check_input_pins"][0]["baseline_blob_sha"] = ""
+            seal_path.write_text(json.dumps(seal), encoding="utf-8")
+            receipt = TOOL.verify_delivery(evidence, root)
+            self.assertFalse(receipt["ok"])
+            self.assertTrue(
+                any("is incomplete" in problem for problem in receipt["problems"]),
+                receipt["problems"],
+            )
+
+    def test_a_pin_with_no_path_is_reported_as_incomplete(self):
+        """`or@317`: the other half of the guard."""
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root, evidence, _ = self._sealed(parent)
+            seal_path = evidence / "delivery-seal.json"
+            seal = json.loads(seal_path.read_text(encoding="utf-8"))
+            seal["check_input_pins"][0]["path"] = ""
+            seal_path.write_text(json.dumps(seal), encoding="utf-8")
+            receipt = TOOL.verify_delivery(evidence, root)
+            self.assertFalse(receipt["ok"])
+            self.assertTrue(
+                any("is incomplete" in problem for problem in receipt["problems"]),
+                receipt["problems"],
+            )
+
+    def test_a_pin_with_a_wrong_baseline_is_reported_as_a_mismatch(self):
+        """`or@317`: the other side of the guard, as the control."""
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root, evidence, _ = self._sealed(parent)
+            seal_path = evidence / "delivery-seal.json"
+            seal = json.loads(seal_path.read_text(encoding="utf-8"))
+            seal["check_input_pins"][0]["baseline_blob_sha"] = "1" * 40
+            seal_path.write_text(json.dumps(seal), encoding="utf-8")
+            receipt = TOOL.verify_delivery(evidence, root)
+            self.assertFalse(receipt["ok"])
+            self.assertTrue(
+                any("does not match" in problem for problem in receipt["problems"]),
+                receipt["problems"],
+            )
+
+    # --- or@324: the "(missing)" rendering -----------------------------
+    def test_an_unresolvable_pin_path_is_reported_as_missing(self):
+        """`or@324`: a pin that resolves to nothing says so.
+
+        The message is::
+
+            f"expected {baseline}, got {actual or '(missing)'}"
+
+        ``_git(..., check=False)`` returns an EMPTY string when the
+        path does not exist at the start commit, and the empty string is
+        rendered as the literal ``(missing)``.  Under the mutant
+        (``or`` -> ``and``) the rendering becomes ``actual and
+        '(missing)'``, which for an empty ``actual`` evaluates to the
+        empty string -- so the message reads "got " with nothing after
+        it, and the reader is left to guess that the file was absent.
+
+        The killer points a pin at a path that does not exist at the
+        start commit and asserts the message says ``(missing)``.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root, evidence, _ = self._sealed(parent)
+            seal_path = evidence / "delivery-seal.json"
+            seal = json.loads(seal_path.read_text(encoding="utf-8"))
+            seal["check_input_pins"][0]["path"] = "no-such-file.py"
+            seal_path.write_text(json.dumps(seal), encoding="utf-8")
+            receipt = TOOL.verify_delivery(evidence, root)
+            self.assertFalse(receipt["ok"])
+            mismatches = [
+                problem for problem in receipt["problems"] if "does not match" in problem
+            ]
+            self.assertEqual(len(mismatches), 1)
+            self.assertIn("(missing)", mismatches[0])
+
+    def test_a_pin_that_resolves_reports_its_object_id(self):
+        """`or@324`: the other side of the rendering, as the control."""
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root, evidence, _ = self._sealed(parent)
+            seal_path = evidence / "delivery-seal.json"
+            seal = json.loads(seal_path.read_text(encoding="utf-8"))
+            seal["check_input_pins"][0]["path"] = "helper.py"
+            seal["check_input_pins"][0]["baseline_blob_sha"] = "1" * 40
+            seal_path.write_text(json.dumps(seal), encoding="utf-8")
+            receipt = TOOL.verify_delivery(evidence, root)
+            self.assertFalse(receipt["ok"])
+            mismatches = [
+                problem for problem in receipt["problems"] if "does not match" in problem
+            ]
+            self.assertEqual(len(mismatches), 1)
+            self.assertIn("1" * 40, mismatches[0])
+            self.assertNotIn("(missing)", mismatches[0])
+
+    # --- eq@365: the seal/verify dispatch ------------------------------
+    def test_the_verify_subcommand_verifies_and_the_seal_subcommand_seals(self):
+        """`eq@365`: ``main`` dispatches on the subcommand.
+
+        The line is ``if args.command == "seal":``.  Under the mutant
+        (``==`` -> ``!=``) the dispatch is INVERTED: ``verify`` runs the
+        SEAL path (which demands ``--start-commit`` and
+        ``--delivery-commit`` that the ``verify`` subparser never
+        defines, so the command dies with an ``AttributeError``) and
+        ``seal`` runs the verify path.
+
+        The killer drives the ``verify`` subcommand through ``main`` and
+        asserts it returns 0 on a good seal.  Under the mutant it dies
+        with ``AttributeError: 'Namespace' object has no attribute
+        'start_commit'``.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root, evidence, _ = self._sealed(parent)
+            self.assertEqual(
+                TOOL.main(
+                    [
+                        "verify",
+                        "--evidence-dir",
+                        str(evidence),
+                        "--repository",
+                        str(root),
+                    ]
+                ),
+                0,
+            )
+
+    def test_the_verify_subcommand_reports_a_bad_seal_with_a_nonzero_exit(self):
+        """`eq@365`: the other side of the dispatch, as the control."""
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root, evidence, _ = self._sealed(parent)
+            seal_path = evidence / "delivery-seal.json"
+            seal = json.loads(seal_path.read_text(encoding="utf-8"))
+            seal["ok"] = False
+            seal_path.write_text(json.dumps(seal), encoding="utf-8")
+            self.assertEqual(
+                TOOL.main(
+                    [
+                        "verify",
+                        "--evidence-dir",
+                        str(evidence),
+                        "--repository",
+                        str(root),
+                    ]
+                ),
+                1,
+            )
