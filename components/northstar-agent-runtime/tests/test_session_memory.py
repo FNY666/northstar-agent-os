@@ -941,3 +941,208 @@ class PublicSurfaceTests(unittest.TestCase):
             store = _store()
             store.add_items([_item(role, "x")])
             self.assertEqual(store.get_items()[0].role, role)
+
+
+class MutantArmCoverageTests(unittest.TestCase):
+    """Each guard in this module has two arms. The suite above drove one
+    arm of each; this class drives the *other* arm, so a fault planted in
+    either half of a conjunction or disjunction is noticed.
+
+    The targets, one test method per mutant site:
+
+    - ``or@300``  ``Session.__post_init__``: the session-id guard. A
+      session ID that is a string but does not match the pattern must be
+      refused, and a non-string ID must raise ``SessionConfigError`` and
+      not a ``TypeError`` from the regex engine.
+    - ``and@355`` ``SessionStore.__init__``: the seq counter is seeded
+      only from a row whose ``seq`` is a real int and not a bool. A
+      reopened store over a backend holding a bool or a string ``seq``
+      must still start its counter at zero.
+    - ``or@389`` ``get_items``: an invalid ``limit`` argument must be
+      refused, whether it is a bool or a non-int.
+    - ``or@437`` ``_decode_row``: a row whose ``seq`` is a bool or a
+      string must refuse the whole call.
+    - ``or@441`` ``_decode_row``: a row whose ``digest`` is empty or is
+      not a string must refuse the whole call.
+    - ``and@490`` ``_split_item``: a pair must have exactly two
+      elements, and only a tuple or a list is a pair.
+    - ``or@667`` ``run_session``: with no explicit ``new_items``, the
+      turn's new input is what gets booked.
+    """
+
+    class ExposedBackend(MemorySessionBackend):
+        """A backend whose row list a test can seed or tamper with."""
+
+        @property
+        def rows(self):
+            return self._rows
+
+    # -- or@300 --------------------------------------------------------
+    def test_a_malformed_string_session_id_is_refused(self):
+        """[Northstar] A session ID that is a string but does not match
+        the pattern is refused; the type arm alone must not be the only
+        thing that refuses."""
+        for bad in ("", "has space", "a" * 200, "-leading-dash"):
+            with self.assertRaises(SessionConfigError):
+                session_memory.Session(session_id=bad)
+
+    def test_a_non_string_session_id_is_refused_as_a_config_error(self):
+        """A non-string session ID must be refused as a configuration
+        error, not crash inside the regex engine."""
+        for bad in (123, None, ["session"], b"session"):
+            with self.assertRaises(SessionConfigError):
+                session_memory.Session(session_id=bad)
+
+    def test_a_valid_session_object_is_accepted(self):
+        session = session_memory.Session(session_id="s-1")
+        self.assertEqual(session.session_id, "s-1")
+        self.assertEqual(len(session), 0)
+
+    # -- and@355 -------------------------------------------------------
+    def test_a_reopened_store_ignores_a_bool_seq_when_seeding_the_counter(self):
+        """A bool is an int subclass in Python: a row whose ``seq`` is a
+        bool must not seed the sequence counter. The reopened store
+        starts at zero and books the next item at seq 0."""
+        backend = self.ExposedBackend()
+        backend.rows.append(
+            {"seq": True, "role": "user", "content": "旧", "digest": "sha256:x"}
+        )
+        reopened = SessionStore(backend)
+        booked = reopened.add_items([_item("user", "新")])
+        self.assertEqual(booked[0].seq, 0)
+
+    def test_a_reopened_store_ignores_a_non_integer_seq_when_seeding_the_counter(self):
+        """A row whose ``seq`` is not an int must not seed the counter,
+        and must not make the reopened store fail."""
+        backend = self.ExposedBackend()
+        backend.rows.append(
+            {"seq": "0", "role": "user", "content": "旧", "digest": "sha256:x"}
+        )
+        reopened = SessionStore(backend)
+        booked = reopened.add_items([_item("user", "新")])
+        self.assertEqual(booked[0].seq, 0)
+
+    # -- or@389 -------------------------------------------------------
+    def test_a_bool_limit_on_get_items_is_refused(self):
+        """``True`` is not a limit of one: a bool limit must be refused."""
+        store = _store()
+        store.add_items([_item("user", "a")])
+        with self.assertRaises(SessionConfigError):
+            store.get_items(limit=True)
+
+    def test_a_non_integer_limit_on_get_items_is_refused(self):
+        """A non-int limit must be refused as a configuration error, not
+        crash later when the history is sliced."""
+        store = _store()
+        store.add_items([_item("user", "a")])
+        for bad in ("3", 1.5, [1]):
+            with self.assertRaises(SessionConfigError):
+                store.get_items(limit=bad)
+
+    # -- or@437 -------------------------------------------------------
+    def _row_with(self, **fields):
+        content = fields.get("content", "x")
+        seq = fields.get("seq", 0)
+        role = fields.get("role", "user")
+        digest = fields.get(
+            "digest",
+            session_memory._pin(seq, role, session_memory._canonical(content)),
+        )
+        return {
+            "seq": seq,
+            "role": role,
+            "content": content,
+            "digest": digest,
+        }
+
+    def test_a_row_with_a_bool_seq_refuses_the_whole_call(self):
+        """A bool ``seq`` is refused: ``True`` is not a sequence number."""
+        backend = self.ExposedBackend()
+        backend.rows.append(self._row_with(seq=True))
+        store = SessionStore(backend)
+        with self.assertRaises(SessionIntegrityError):
+            store.get_items()
+
+    def test_a_row_with_a_non_integer_seq_refuses_the_whole_call(self):
+        """A string ``seq`` is refused, even when its digest pin is
+        internally consistent."""
+        backend = self.ExposedBackend()
+        backend.rows.append(self._row_with(seq="0"))
+        store = SessionStore(backend)
+        with self.assertRaises(SessionIntegrityError):
+            store.get_items()
+
+    # -- or@441 -------------------------------------------------------
+    def test_a_row_with_an_empty_digest_refuses_the_whole_call(self):
+        """An empty digest pin is no pin at all."""
+        backend = self.ExposedBackend()
+        backend.rows.append(self._row_with(digest=""))
+        store = SessionStore(backend)
+        with self.assertRaises(SessionIntegrityError) as ctx:
+            store.get_items()
+        self.assertIn("no digest pin", str(ctx.exception))
+
+    def test_a_row_with_a_non_string_digest_refuses_the_whole_call(self):
+        """A digest that is not a string is refused as an integrity
+        error, not as a crash inside the comparison."""
+        backend = self.ExposedBackend()
+        backend.rows.append(self._row_with(digest=123))
+        store = SessionStore(backend)
+        with self.assertRaises(SessionIntegrityError):
+            store.get_items()
+
+    # -- and@490 ------------------------------------------------------
+    def test_a_three_element_sequence_is_not_a_pair(self):
+        """A pair has exactly two elements."""
+        store = _store()
+        with self.assertRaises(SessionConfigError):
+            store.add_items([("user", "a", "b")])
+
+    def test_a_one_element_sequence_is_not_a_pair(self):
+        store = _store()
+        with self.assertRaises(SessionConfigError):
+            store.add_items([("user",)])
+
+    def test_a_two_character_string_is_not_a_pair(self):
+        """Only a tuple or a list is a pair: a two-character string has
+        the right length but is not a pair."""
+        store = _store()
+        with self.assertRaises(SessionConfigError) as ctx:
+            store.add_items(["ab"])
+        self.assertIn("cannot read a session item", str(ctx.exception))
+
+    def test_a_two_element_pair_is_still_accepted(self):
+        """The other arm: a genuine two-element pair is accepted."""
+        store = _store()
+        store.add_items([("user", "a"), ["assistant", "b"]])
+        self.assertEqual(
+            [item.content for item in store.get_items()], ["a", "b"]
+        )
+
+    # -- or@667 -------------------------------------------------------
+    def test_run_session_books_the_new_input_when_no_new_items_are_given(self):
+        """With no explicit ``new_items``, the turn's new input is what
+        gets booked."""
+        store = _store()
+        result = run_session(store, [("user", "q")])
+        self.assertEqual([item.content for item in result.stored], ["q"])
+        self.assertEqual([item.content for item in store.get_items()], ["q"])
+
+    def test_run_session_with_no_input_at_all_books_nothing(self):
+        """No input and no new items books nothing, and does not fail."""
+        store = _store()
+        result = run_session(store, None)
+        self.assertEqual(result.stored, [])
+        self.assertEqual(result.model_input, [])
+        self.assertEqual(store.get_items(), [])
+
+    def test_run_session_books_the_new_input_together_with_a_history(self):
+        """The booked batch is the new input only; the history is not
+        re-booked."""
+        store = _store()
+        store.add_items([_item("user", "旧")])
+        result = run_session(store, [("user", "新")])
+        self.assertEqual([item.content for item in result.stored], ["新"])
+        self.assertEqual(
+            [item.content for item in store.get_items()], ["旧", "新"]
+        )
