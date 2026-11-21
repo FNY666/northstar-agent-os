@@ -81012,6 +81012,10 @@ Tests only: drop the cached probe so a fixture can re-run discovery.
 
 Discover what isolation this host can provide (cached after first call).
 
+#### `resolve_effective_backend(requested: str, *, capabilities: SandboxCapabilities | None=None, seccomp: str='auto', capdrop_whitelist: Sequence[str] | None=None)`
+
+Resolve the backend a request will actually use, and say what changed.
+
 #### `resolve_backend(requested: str, *, capabilities: SandboxCapabilities | None=None)`
 
 Map ``auto|bwrap|process`` to the backend that will actually run.
