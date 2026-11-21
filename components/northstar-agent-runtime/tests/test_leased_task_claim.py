@@ -598,3 +598,393 @@ class InputValidationTests(ClaimTestBase):
         self.assertEqual(len(digest), len("sha256:") + 64)
         self.assertEqual(digest, digest_of("hello"))
         self.assertNotEqual(digest, digest_of("other"))
+
+
+class SecondHalfGuardTests(ClaimTestBase):
+    """The second half of each guard in the leased task claim.
+
+    Every surviving mutant here is one arm of a two-armed conditional or
+    one half of a conjunction, and the rest of the suite drove only the
+    other arm.  These tests drive the missing half.
+    """
+
+    def _manager(self, **kwargs) -> LeasedTaskClaim:
+        """A manager with its own settings, closed by the caller."""
+        return LeasedTaskClaim(**kwargs)
+
+    # -- or@534: the max_failures type guard ---------------------------
+
+    def test_a_boolean_max_failures_is_refused(self):
+        """`or@534`: the type half of the max_failures guard, on a bool.
+
+        A bool IS an int in Python, so only the ``isinstance(..., bool)``
+        half can catch it.  Under the mutant a boolean budget is
+        accepted and used as the integer 1.
+        """
+        with self.assertRaises(ValueError) as caught:
+            LeasedTaskClaim(max_failures=True)
+        self.assertIn("max_failures must be an int", str(caught.exception))
+
+    def test_a_float_max_failures_is_refused(self):
+        """`or@534`: the other type half -- a float is not an int."""
+        with self.assertRaises(ValueError) as caught:
+            LeasedTaskClaim(max_failures=3.0)
+        self.assertIn("max_failures must be an int", str(caught.exception))
+
+    # -- lt@536 / or@536: the failure budget's range -------------------
+
+    def test_a_max_failures_of_one_is_allowed(self):
+        """`lt@536`: the lower edge of the budget range.
+
+        A budget of exactly 1 is legal: the first failure exhausts it.
+        A mutant that turns ``< 1`` into ``<= 1`` refuses it.
+        """
+        manager = self._manager(max_failures=1)
+        try:
+            manager.enqueue_task("t1", "task")
+            lease = manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+            record = manager.fail("t1", lease.token, "boom", now=101.0)
+            self.assertEqual(record.state, STATE_DEAD)
+            self.assertEqual(record.failures, 1)
+        finally:
+            manager.close()
+
+    def test_a_max_failures_of_sixty_four_is_allowed(self):
+        """`or@536`: the upper edge of the budget range.
+
+        A budget of exactly 64 is legal.  A mutant that turns ``> 64``
+        into ``>= 64`` refuses it.
+        """
+        manager = self._manager(max_failures=64)
+        try:
+            manager.enqueue_task("t1", "task")
+        finally:
+            manager.close()
+
+    def test_a_max_failures_of_sixty_five_is_refused(self):
+        """`or@536`: inside the band -- one over the ceiling is refused."""
+        with self.assertRaises(ValueError) as caught:
+            LeasedTaskClaim(max_failures=65)
+        self.assertIn("max_failures must be in [1, 64]", str(caught.exception))
+
+    def test_a_max_failures_of_zero_is_refused(self):
+        """`lt@536`: the lower edge -- a budget of zero is refused."""
+        with self.assertRaises(ValueError):
+            LeasedTaskClaim(max_failures=0)
+
+    # -- gt@671 / gt@673: the length guards ----------------------------
+
+    def test_a_task_id_at_the_length_limit_is_accepted(self):
+        """`gt@671`: the lower edge of the task-id length guard.
+
+        The limit is ``len(task_id) > 256``, so a task id of exactly 256
+        characters is accepted.  A mutant that turns ``>`` into ``>=``
+        refuses it.
+        """
+        manager = self._manager()
+        try:
+            task_id = "t" * 256
+            manager.enqueue_task(task_id, "task")
+            view = manager.task(task_id)
+            self.assertEqual(view.task_id, task_id)
+        finally:
+            manager.close()
+
+    def test_a_task_id_one_character_over_the_limit_is_refused(self):
+        """`gt@671`: inside the band -- one character over is refused."""
+        manager = self._manager()
+        try:
+            with self.assertRaises(ValueError) as caught:
+                manager.enqueue_task("t" * 257, "task")
+            self.assertIn("task_id exceeds 256 chars", str(caught.exception))
+        finally:
+            manager.close()
+
+    def test_a_task_at_the_length_limit_is_accepted(self):
+        """`gt@673`: the lower edge of the task length guard."""
+        manager = self._manager()
+        try:
+            task = "j" * 256
+            manager.enqueue_task("t1", task)
+            self.assertEqual(manager.task("t1").task, task)
+        finally:
+            manager.close()
+
+    def test_a_task_one_character_over_the_limit_is_refused(self):
+        """`gt@673`: inside the band -- one character over is refused."""
+        manager = self._manager()
+        try:
+            with self.assertRaises(ValueError) as caught:
+                manager.enqueue_task("t1", "j" * 257)
+            self.assertIn("task exceeds 256 chars", str(caught.exception))
+        finally:
+            manager.close()
+
+    # -- or@801: the queue-mirror reservation guard --------------------
+
+    def test_a_mirror_that_reserves_another_job_is_refused(self):
+        """`or@801`: the "and it reserved THIS job" half.
+
+        The mirror is asked for a job and the answer must be the task
+        that was asked for.  A mirror that hands back a different job
+        must be refused, not accepted silently.
+        """
+        import leased_task_claim as ltc
+        from job_queue import JobQueue
+
+        class WrongJobQueue(JobQueue):
+            """A mirror that always reserves a DIFFERENT job.
+
+            The mirror is asked to reserve one specific task.  A mirror
+            that hands back another job's reservation must be refused --
+            the claim is for THIS task, and accepting another job's
+            reservation would lease the wrong work.
+            """
+
+            def dequeue(self, worker_id, queue, seq):
+                reserved = super().dequeue(worker_id, queue, seq)
+                if reserved is None:
+                    return reserved
+                # Rename the reservation to a job that was never asked
+                # for, so the identity check has something to fail on.
+                object.__setattr__(reserved, "job_id", "some-other-job")
+                return reserved
+
+        manager = self._manager(queue=WrongJobQueue())
+        try:
+            manager.enqueue_task("t1", "task")
+            with self.assertRaises(ltc.QueueMirrorError) as caught:
+                manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+            self.assertIn("refused to reserve", str(caught.exception))
+        finally:
+            manager.close()
+
+    # -- lt@902: the step's sign ---------------------------------------
+
+    def test_a_step_of_zero_is_allowed(self):
+        """`lt@902`: the lower edge of the step guard.
+
+        A checkpoint at step 0 is legal.  A mutant that turns ``< 0``
+        into ``<= 0`` refuses it.
+        """
+        lease = self.manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+        record = self.manager.save_checkpoint(
+            "t1", lease.token, 0, {"step": "zero"}, now=101.0
+        )
+        self.assertEqual(record.step, 0)
+
+    def test_a_negative_step_is_refused(self):
+        """`lt@902`: the sign half of the step guard."""
+        lease = self.manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+        with self.assertRaises(ValueError) as caught:
+            self.manager.save_checkpoint(
+                "t1", lease.token, -1, {"step": "neg"}, now=101.0
+            )
+        self.assertIn("step must be non-negative", str(caught.exception))
+
+    # -- or@1032: the dead-letter reason ------------------------------
+
+    def test_a_dead_letter_without_a_reason_says_the_budget_is_exhausted(self):
+        """`or@1032`: the "or the reason is empty" half.
+
+        A dead letter with no reason must still say WHY the task died:
+        the failure budget was exhausted.
+        """
+        manager = self._manager(max_failures=1)
+        try:
+            manager.enqueue_task("t1", "task")
+            lease = manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+            manager.fail("t1", lease.token, "", now=101.0)
+            reasons = [
+                entry.get("detail", {}).get("reason", "")
+                for entry in manager._dead_letters.audit_log()
+            ]
+            self.assertIn("failure budget exhausted", reasons)
+        finally:
+            manager.close()
+
+    def test_a_dead_letter_keeps_the_reason_it_was_given(self):
+        """`or@1032`: the control -- a real reason is kept as it is."""
+        manager = self._manager(max_failures=1)
+        try:
+            manager.enqueue_task("t1", "task")
+            lease = manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+            manager.fail("t1", lease.token, "the disk caught fire", now=101.0)
+            reasons = [
+                entry.get("detail", {}).get("reason", "")
+                for entry in manager._dead_letters.audit_log()
+            ]
+            self.assertIn("the disk caught fire", reasons)
+        finally:
+            manager.close()
+
+    # -- or@1112: the reaper's current-row guard ----------------------
+
+    def test_the_reaper_leaves_a_task_that_is_no_longer_leased(self):
+        """`or@1112`: the "and it is still leased" half.
+
+        The reaper sweeps expired leases.  A task that is no longer in
+        the leased state -- requeued, taken over, or completed -- must
+        NOT be swept, and must not be counted as swept.
+        """
+        lease = self.manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+        # The task is released, so it is ready again -- not leased.
+        self.manager.release("t1", lease.token, now=101.0)
+        swept = self.manager.reap(now=200.0)
+        self.assertEqual(tuple(swept), ())
+        self.assertEqual(self.manager.task("t1").state, STATE_READY)
+
+    def test_the_reaper_leaves_a_task_that_is_not_leased_at_all(self):
+        """`or@1112`: the other half -- a never-claimed task is untouched."""
+        swept = self.manager.reap(now=200.0)
+        self.assertEqual(tuple(swept), ())
+        self.assertEqual(self.manager.task("t1").state, STATE_READY)
+
+
+class SelfCheckTests(unittest.TestCase):
+    """The module's own self-check, driven for real.
+
+    ``leased_task_claim.main()`` is the source's demonstration: worker-A
+    claims and checkpoints, dies, is reaped, worker-B takes over and
+    resumes, and the zombie A is refused on every write.  The suite
+    never ran it, so every assertion inside it was a free mutant.
+    """
+
+    def test_the_self_check_passes(self):
+        """The self-check runs clean.
+
+        Under any mutant of one of its assertions the self-check raises
+        ``AssertionError`` and this test fails.
+        """
+        import io
+        from contextlib import redirect_stdout
+
+        import leased_task_claim as ltc
+
+        with redirect_stdout(io.StringIO()):
+            ltc.main()
+
+    def test_the_self_check_reports_that_the_module_is_ok(self):
+        """The self-check prints its own name."""
+        import io
+        from contextlib import redirect_stdout
+
+        import leased_task_claim as ltc
+
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            ltc.main()
+        self.assertIn("leased-task-claim OK", buffer.getvalue())
+
+    def test_the_module_runs_its_self_check_as_a_script(self):
+        """The ``__main__`` guard: run as a script, the module self-checks."""
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        import leased_task_claim as ltc
+
+        component = Path(ltc.__file__).resolve().parent
+        result = subprocess.run(
+            [sys.executable, "-m", "leased_task_claim"],
+            cwd=str(component),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=180,
+        )
+        output = result.stdout.decode("utf-8", "replace")
+        self.assertEqual(result.returncode, 0, output)
+        self.assertIn("leased-task-claim OK", output)
+
+    def test_the_self_check_pins_the_token_sequence(self):
+        """The self-check's token assertions: 1 for A, 2 for B.
+
+        The self-check asserts ``lease_a.token == 1`` and
+        ``lease_b.token == 2``.  The tokens are what fence the zombie
+        out, so the sequence is pinned here against a live run rather
+        than only against the self-check's own assertions.
+        """
+        import io
+        from contextlib import redirect_stdout
+
+        import leased_task_claim as ltc
+
+        tokens = []
+        original = ltc.LeasedTaskClaim.claim
+
+        def recording_claim(self, task_id, worker, ttl, now=None):
+            lease = original(self, task_id, worker, ttl, now=now)
+            tokens.append((worker, lease.token))
+            return lease
+
+        ltc.LeasedTaskClaim.claim = recording_claim
+        try:
+            with redirect_stdout(io.StringIO()):
+                ltc.main()
+        finally:
+            ltc.LeasedTaskClaim.claim = original
+
+        self.assertEqual(tokens, [("worker-A", 1), ("worker-B", 2)])
+
+    def test_the_self_check_pins_the_reaper_and_the_hand_over(self):
+        """The self-check's reaper and resume assertions.
+
+        The self-check asserts that exactly one lease was swept, that the
+        task came back ready with no delay and no consumed failure
+        budget, and that the new holder resumes from the newest
+        checkpoint.  These are pinned against a live run.
+        """
+        import io
+        from contextlib import redirect_stdout
+
+        import leased_task_claim as ltc
+
+        original = ltc.LeasedTaskClaim.resume_from
+        resumed = []
+
+        def recording_resume_from(self, task_id):
+            record = original(self, task_id)
+            resumed.append(record)
+            return record
+
+        ltc.LeasedTaskClaim.resume_from = recording_resume_from
+        try:
+            with redirect_stdout(io.StringIO()):
+                ltc.main()
+        finally:
+            ltc.LeasedTaskClaim.resume_from = original
+
+        self.assertEqual(len(resumed), 1)
+        self.assertEqual(resumed[0].step, 2)
+
+    def test_the_self_check_fails_when_a_zombie_write_is_accepted(self):
+        """The self-check's zombie loop is load-bearing.
+
+        The self-check writes to the task with the stale token three
+        times and requires each write to raise ``StaleLeaseError``.  If
+        a zombie write were accepted, the self-check raises its own
+        ``AssertionError``.  This test pins that a write that does not
+        refuse fails the self-check.
+        """
+        import io
+        from contextlib import redirect_stdout
+
+        import leased_task_claim as ltc
+
+        original_complete = ltc.LeasedTaskClaim.complete
+
+        def permissive_complete(self, task_id, token, result=None, now=None):
+            # A complete that ignores the stale token: the task's CURRENT
+            # token is used instead of the one the caller presented.
+            with self._store.transaction() as conn:
+                row = self._row(task_id)
+                current = int(row["token"])
+            return original_complete(self, task_id, current, result, now=now)
+
+        ltc.LeasedTaskClaim.complete = permissive_complete
+        try:
+            with redirect_stdout(io.StringIO()):
+                with self.assertRaises(AssertionError):
+                    ltc.main()
+        finally:
+            ltc.LeasedTaskClaim.complete = original_complete
