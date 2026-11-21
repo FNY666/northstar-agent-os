@@ -411,3 +411,114 @@ class SourceShapeTests(unittest.TestCase):
                 ),
                 5,
             )
+
+
+class GuardArmsTests(unittest.TestCase):
+    """The arm of each guard that the existing suite never drove.
+
+    Two planted faults survived this slice's suite:
+
+      and@159  the ``kind is None`` arm of the text-block reader
+      retF@225 the "an empty stream is not an ending" return
+
+    Both are driven below, with a control on the other side of each.
+    """
+
+    # --- and@159: the `kind is None` arm -------------------------------
+    def test_a_thinking_block_that_carries_a_text_key_is_not_prose(self):
+        """`and@159`: a thinking block is not prose, even with a text key.
+
+        The reader is::
+
+            kind = block.get("type")
+            if kind == TEXT_BLOCK_TYPE:
+                text = block.get("text", "")
+            elif kind is None and "text" in block:
+                text = block.get("text", "")
+            else:
+                return ""
+
+        The second arm is the one that reads a block whose ``type`` key
+        is absent but which carries a ``text`` key.  The existing suite
+        drove only the FIRST arm (``type == "text"``) and the ``else``;
+        the ``elif`` was never reached.
+
+        Under the mutant (``and`` -> ``or``) the condition becomes
+        ``kind is None or "text" in block``, so the arm fires for ANY
+        block that carries a ``text`` key -- including a THINKING block.
+        That matters because a thinking block CAN carry a ``text`` key:
+        the Anthropic provider reads a thinking block's text from
+        ``thinking`` and falls back to ``text``
+        (``providers/anthropic.py``: ``_field(block, "thinking",
+        _field(block, "text", ""))``).  A thinking block is still not
+        prose, so the mutant turns a silent failure into a session that
+        "spoke".
+
+        The killer is the thinking block with a ``text`` key.
+        """
+        events = [
+            {
+                "type": "assistant",
+                "content": [{"type": "thinking", "text": "the model thought"}],
+            }
+        ]
+        self.assertFalse(has_prose(events))
+        # No prose anywhere in the stream: this is a silent failure.
+        self.assertTrue(is_silent_failure(events))
+
+    def test_a_typeless_block_with_a_text_key_is_prose(self):
+        """`and@159`: the other side of the same arm.
+
+        A block with NO ``type`` key at all but with a ``text`` key IS
+        prose -- that is what the ``elif`` arm exists for.  Under the
+        mutant this case still passes, but so does every other case,
+        which is why the case above is the killer and this one is the
+        control.
+        """
+        events = [
+            {
+                "type": "assistant",
+                "content": [{"text": "an untyped block that speaks"}],
+            }
+        ]
+        self.assertTrue(has_prose(events))
+        self.assertFalse(is_silent_failure(events))
+
+    def test_a_tool_use_block_with_a_text_key_is_not_prose(self):
+        """`and@159`: a third shape, as a second control.
+
+        A tool-use block that happens to carry a ``text`` key is still
+        not prose: it is a tool call.
+        """
+        events = [
+            {
+                "type": "assistant",
+                "content": [
+                    {"type": "tool_use", "id": "t1", "name": "read_file",
+                     "input": {}, "text": "read_file was called"}
+                ],
+            }
+        ]
+        self.assertFalse(has_prose(events))
+
+    # --- retF@225: an empty stream is not an ending --------------------
+    def test_an_empty_stream_ends_with_no_prose(self):
+        """`retF@225`: the empty-stream answer.
+
+        ``ended_with_no_prose`` asks whether the stream's LAST record is
+        not a prose-carrying assistant message.  An EMPTY stream has no
+        last record, so it has not "ended with no prose" -- it has not
+        ended at all.  The existing suite drove the non-empty cases
+        only.
+
+        Under the mutant (``return False`` -> ``return True``) an empty
+        stream reads as "ended with no prose", which is a claim about a
+        stream that has no end.  The killer asserts the empty case.
+        """
+        self.assertFalse(ended_with_no_prose([]))
+        self.assertFalse(ended_with_no_prose(iter([])))
+
+    def test_a_non_empty_stream_still_reports_its_ending(self):
+        """`retF@225`: the other side of the guard, as the control."""
+        self.assertTrue(ended_with_no_prose([assistant("said it"), tool_result()]))
+        self.assertFalse(ended_with_no_prose([assistant("said it")]))
