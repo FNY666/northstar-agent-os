@@ -571,7 +571,10 @@ def run_turn(
             failure=None,
         )
     try:
-        before = len(executor.receipts())
+        # `dispatch` returns the receipts of THIS call only; `receipts()` is
+        # the executor's cumulative log.  Slicing the per-call list with a
+        # cumulative offset silently drops every receipt from the second
+        # turn onward, so a sink failure there was never reported.
         receipts = executor.dispatch(directives)
     except Exception as exc:  # noqa: BLE001 - a post-commit failure is reported
         return TurnResult(
@@ -584,7 +587,7 @@ def run_turn(
     # A sink that refused an effect is a post-commit failure: the commit
     # stands (it cannot be undone) but the failure is reported, not hidden.
     failed = [
-        r for r in receipts[before:] if not r.executed and r.detail.startswith("effect failed")
+        r for r in receipts if not r.executed and r.detail.startswith("effect failed")
     ]
     if failed:
         return TurnResult(

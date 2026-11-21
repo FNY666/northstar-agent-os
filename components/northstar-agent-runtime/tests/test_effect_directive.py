@@ -708,6 +708,39 @@ class SecondHalfGuardTests(unittest.TestCase):
         self.assertIsNone(second.failure)
         self.assertEqual(second.step, "settle")
 
+    def test_a_failure_on_a_later_turn_is_still_reported(self):
+        """`and@587`: the case the slice's own suite missed.
+
+        ``dispatch()`` returns the receipts of THIS call; ``receipts()``
+        is the executor's cumulative log.  The old filter sliced the
+        per-call list with a cumulative offset, so from the SECOND turn
+        onward the slice was empty and a sink failure there was never
+        reported -- the turn settled as if the effect had worked.
+        """
+        directive = mint("Emit", {"text": "hi"}, capability=HOST)
+
+        def action(state, signal):
+            return {"n": state.get("n", 0) + 1}, (directive,)
+
+        router = SignalRouter({"say": action})
+        sink = RecordingSink(fail_on="Emit")
+        executor = DirectiveExec(sink)
+
+        first = run_turn({"n": 0}, Signal("say", "hi"), router, executor=executor)
+        self.assertTrue(first.committed)
+        self.assertIsNotNone(first.failure)
+        self.assertIn("post-commit", first.failure)
+
+        # The SECOND turn also dispatches, and it also fails.
+        second = run_turn({"n": 1}, Signal("say", "hi"), router, executor=executor)
+        self.assertTrue(second.committed)
+        self.assertIsNotNone(
+            second.failure,
+            "a sink failure on the second turn was silently swallowed",
+        )
+        self.assertIn("post-commit", second.failure)
+        self.assertEqual(second.step, "dispatch_directive")
+
     def test_a_receipt_whose_effect_failed_is_a_post_commit_failure(self):
         """`and@587`: the control -- the failed effect is reported."""
         directive = mint("Emit", {"text": "hi"}, capability=HOST)
