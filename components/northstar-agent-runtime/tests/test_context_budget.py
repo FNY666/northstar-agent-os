@@ -462,3 +462,202 @@ class ContextGuardSecondHalfTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ContextBudgetSecondHalfTests(unittest.TestCase):
+    """The second half of each guard in the context-budget module.
+
+    Every surviving mutant here is one arm of a two-armed conditional or
+    one half of a conjunction, and the rest of the suite drove only the
+    other half.  These tests drive the missing half.
+    """
+
+    def _pressured_limits(self) -> ContextThresholds:
+        return ContextThresholds(context_window_tokens=1000, window_pressure_fraction=0.85)
+
+    # -- or@386: the "and the payload is a mapping" half ---------------
+
+    def test_a_write_call_with_a_non_mapping_payload_is_not_truncated(self):
+        """`or@386`: the payload half of the write-call guard.
+
+        The suite drove the tool-name half (a Read call is never
+        truncated).  A WRITE-like call whose payload is not a mapping has
+        no content to reduce, so it is left alone.
+        """
+        limits = self._pressured_limits()
+        call = ToolUseBlock(id="t1", name="Write", input="not a mapping")
+        reduced, changed = truncate_write_like_calls(
+            [call], input_tokens=900, limits=limits
+        )
+        self.assertEqual(changed, [])
+        self.assertEqual(reduced[0].input, call.input)
+
+    # -- or@390: the "and the content is non-empty" half ----------------
+
+    def test_a_write_call_with_empty_content_is_not_truncated(self):
+        """`or@390`: the content half of the write-call guard.
+
+        An empty content string has no tokens to save, so the call is
+        left alone rather than replaced by a pointer.
+        """
+        limits = self._pressured_limits()
+        call = ToolUseBlock(id="t1", name="Write", input={"path": "a.txt", "content": ""})
+        reduced, changed = truncate_write_like_calls(
+            [call], input_tokens=900, limits=limits
+        )
+        self.assertEqual(changed, [])
+        self.assertEqual(reduced[0].input["content"], "")
+
+    def test_a_write_call_with_a_non_string_content_is_not_truncated(self):
+        """`or@390`: the type half of the content guard."""
+        limits = self._pressured_limits()
+        call = ToolUseBlock(id="t1", name="Write", input={"path": "a.txt", "content": 42})
+        reduced, changed = truncate_write_like_calls(
+            [call], input_tokens=900, limits=limits
+        )
+        self.assertEqual(changed, [])
+        self.assertEqual(reduced[0].input["content"], 42)
+
+    # -- gt@487: the strictness of the path-only threshold --------------
+
+    def test_a_reread_at_exactly_the_threshold_keeps_its_content(self):
+        """`gt@487`: the lower edge of the path-only band.
+
+        The band is ``tokens > threshold``: a file AT the threshold keeps
+        its content.  A mutant that turns ``>`` into ``>=`` would strip
+        this file's content, and this test says it does not.
+        """
+        limits = ContextThresholds(reread_path_only_tokens=100)
+        content = "x" * (100 * 4)
+        self.assertEqual(estimate_text_tokens(content), 100)
+        decisions, skipped = plan_rereads([("a.txt", content)], limits=limits)
+        self.assertEqual(decisions[0].tokens, 100)
+        self.assertFalse(decisions[0].path_only)
+        self.assertEqual(skipped, [])
+
+    def test_a_reread_one_token_over_the_threshold_is_path_only(self):
+        """`gt@487`: inside the band -- one token over is path-only."""
+        limits = ContextThresholds(reread_path_only_tokens=100)
+        content = "x" * (101 * 4)
+        decisions, _skipped = plan_rereads([("a.txt", content)], limits=limits)
+        self.assertTrue(decisions[0].path_only)
+
+    # -- gt@530 / gt@533: the skill-body cap's edges --------------------
+
+    def test_a_skill_body_at_exactly_the_cap_is_not_truncated(self):
+        """`gt@530`: the lower edge of the per-skill cap.
+
+        The cap is ``tokens > max``: a body AT the cap is kept whole.
+        A mutant that turns ``>`` into ``>=`` truncates it, and this
+        test says it must not.
+        """
+        limits = ContextThresholds(skill_body_max_tokens=100)
+        body = "x" * (100 * 4)
+        kept, dropped = cap_skill_bodies([("s", body)], limits=limits)
+        self.assertEqual(dropped, [])
+        self.assertEqual(kept[0][1], body)
+        self.assertNotIn("truncated", kept[0][1])
+
+    def test_a_skill_body_one_token_over_the_cap_is_truncated(self):
+        """`gt@530`: inside the cap band -- one token over is truncated."""
+        limits = ContextThresholds(skill_body_max_tokens=100)
+        body = "x" * (101 * 4)
+        kept, dropped = cap_skill_bodies([("s", body)], limits=limits)
+        self.assertEqual(dropped, [])
+        self.assertIn("truncated", kept[0][1])
+
+    def test_a_skill_body_at_exactly_the_total_cap_is_kept(self):
+        """`gt@533`: the lower edge of the total budget.
+
+        The total is ``spent + tokens > total_max``: a body that brings
+        the running total exactly TO the cap is still kept.
+        """
+        limits = ContextThresholds(
+            skill_body_max_tokens=1_000,
+            skill_body_total_max_tokens=100,
+        )
+        body = "x" * (100 * 4)
+        kept, dropped = cap_skill_bodies([("s", body)], limits=limits)
+        self.assertEqual(dropped, [])
+        self.assertEqual(len(kept), 1)
+
+    def test_a_skill_body_one_token_over_the_total_cap_is_dropped(self):
+        """`gt@533`: inside the budget band -- one token over is dropped."""
+        limits = ContextThresholds(
+            skill_body_max_tokens=1_000,
+            skill_body_total_max_tokens=100,
+        )
+        body = "x" * (101 * 4)
+        kept, dropped = cap_skill_bodies([("s", body)], limits=limits)
+        self.assertEqual(kept, [])
+        self.assertEqual(dropped, ["s"])
+
+    # -- lt@579: the byte cap of auto-memory ---------------------------
+
+    def test_auto_memory_at_exactly_the_byte_limit_is_not_cut(self):
+        """`lt@579`: the lower edge of the byte cap.
+
+        The byte cap is ``bytes_kept < body_bytes``: a body of exactly
+        the cap is kept whole.  A mutant that turns ``<`` into ``<=``
+        cuts it, and this test says it must not.
+        """
+        limits = ContextThresholds(auto_memory_max_bytes=100)
+        text = "y" * 100
+        capped, record = cap_auto_memory(text, limits=limits)
+        self.assertEqual(capped, text)
+        self.assertFalse(record["truncated"])
+        self.assertEqual(record["kept_bytes"], 100)
+
+    def test_auto_memory_one_byte_over_the_limit_is_cut(self):
+        """`lt@579`: inside the cap band -- one byte over is cut."""
+        limits = ContextThresholds(auto_memory_max_bytes=100)
+        text = "y" * 101
+        capped, record = cap_auto_memory(text, limits=limits)
+        self.assertEqual(len(capped.encode("utf-8")), 100)
+        self.assertTrue(record["truncated"])
+
+    # -- or@682: the type half of the memory-tax source guard ----------
+
+    def test_a_non_string_source_is_refused(self):
+        """`or@682`: the type half of the source guard."""
+        ledger = MemoryTaxLedger()
+        with self.assertRaises(ValueError) as ctx:
+            ledger.record(source=42, tokens=10)
+        self.assertIn("source must be a non-empty string", str(ctx.exception))
+
+    def test_an_empty_source_is_refused(self):
+        """`or@682`: the emptiness half of the source guard."""
+        ledger = MemoryTaxLedger()
+        with self.assertRaises(ValueError):
+            ledger.record(source="", tokens=10)
+
+    # -- lt@684: the sign of the memory-tax token count ----------------
+
+    def test_a_negative_token_count_is_refused(self):
+        """`lt@684`: the sign half of the token-count guard."""
+        ledger = MemoryTaxLedger()
+        with self.assertRaises(ValueError) as ctx:
+            ledger.record(source="m", tokens=-1)
+        self.assertIn("tokens must be a non-negative int", str(ctx.exception))
+
+    def test_a_zero_token_count_is_allowed(self):
+        """`lt@684`: the boundary -- zero tokens is not a negative count."""
+        ledger = MemoryTaxLedger()
+        self.assertEqual(ledger.record(source="m", tokens=0), 0)
+        self.assertEqual(ledger.injected_tokens, 0)
+
+    def test_a_boolean_token_count_is_refused(self):
+        """`or@684`: the type half of the token-count guard, on a bool.
+
+        A bool IS an int in Python, so only the isinstance(..., bool)
+        half can catch it.
+        """
+        ledger = MemoryTaxLedger()
+        with self.assertRaises(ValueError):
+            ledger.record(source="m", tokens=True)
+
+    def test_a_float_token_count_is_refused(self):
+        """`or@684`: the other type half -- a float is not an int."""
+        ledger = MemoryTaxLedger()
+        with self.assertRaises(ValueError):
+            ledger.record(source="m", tokens=10.0)
