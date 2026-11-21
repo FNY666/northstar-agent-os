@@ -405,3 +405,133 @@ class ModuleShapeTests(unittest.TestCase):
         self.assertEqual(horizon_gate.BASICALLY_PINNED_TASK_COUNT, 150)
         self.assertEqual(horizon_gate.PINNED_TASK_COUNT, 1000)
         self.assertEqual(horizon_gate.DEFAULT_MARGIN_MINUTES, 10)
+
+
+class SecondHalfGuardTests(unittest.TestCase):
+    """The second half of each guard in the horizon gate.
+
+    Every guard in this module is a conjunction of two independent
+    conditions, and a suite that drives only one of them leaves the
+    other half free.  The tests below drive the half the rest of the
+    suite does not, so each guard's two halves are both covered.
+    """
+
+    # -- lt@250: the sign half of the number guard --------------------
+
+    def test_a_negative_interval_bound_is_refused(self):
+        """`lt@250`: the sign half of the non-negative number guard.
+
+        The type half is covered elsewhere; this is the input that is a
+        perfectly good number of the right type and is still refused.
+        """
+        with self.assertRaises(HorizonDeclarationError) as ctx:
+            make_gate(horizon_interval=(-1, HIGH))
+        self.assertIn("non-negative", str(ctx.exception))
+
+    def test_a_zero_interval_low_is_allowed(self):
+        """`lt@250`: the boundary -- zero is non-negative, so it is kept.
+
+        This is the discriminating input: a mutant that turns ``< 0``
+        into ``<= 0`` refuses a zero bound, and this test says a zero
+        bound is a legal interval.
+        """
+        gate = make_gate(horizon_interval=(0, HIGH))
+        self.assertEqual(gate.interval_low_minutes, 0.0)
+
+    def test_a_negative_interval_top_is_refused(self):
+        """`lt@250`: the same guard, on the interval's other bound."""
+        with self.assertRaises(HorizonDeclarationError):
+            make_gate(horizon_interval=(LOW, -1))
+
+    def test_a_negative_margin_is_refused(self):
+        """`lt@403`: the sign half of the non-negative margin guard.
+
+        The margin is an int of the right type; only its sign is wrong.
+        """
+        with self.assertRaises(HorizonDeclarationError) as ctx:
+            make_gate(margin_minutes=-1)
+        self.assertIn("non-negative", str(ctx.exception))
+
+    def test_a_zero_margin_is_allowed(self):
+        """`lt@403`: the boundary -- zero is non-negative, so it is kept.
+
+        This is the discriminating input: a mutant that turns ``< 0``
+        into ``<= 0`` refuses zero, and this test says zero is fine.
+        """
+        gate = make_gate(margin_minutes=0)
+        self.assertEqual(gate.margin_minutes, 0)
+
+    # -- and@284: the sequence half of the interval-shape guard -------
+
+    def test_a_list_of_two_bounds_is_an_interval(self):
+        """`and@284`: the "and it is a list" half.
+
+        The suite elsewhere drives the mapping half.  A list of two
+        bounds is the other shape the guard accepts.
+        """
+        gate = make_gate(horizon_interval=[LOW, HIGH])
+        self.assertEqual(gate.interval_low_minutes, float(LOW))
+        self.assertEqual(gate.interval_high_minutes, float(HIGH))
+
+    def test_a_two_element_tuple_is_an_interval(self):
+        """`and@284`: the "and it has two elements" half."""
+        gate = make_gate(horizon_interval=(LOW, HIGH))
+        self.assertEqual(gate.interval_low_minutes, float(LOW))
+
+    def test_a_one_element_list_is_not_an_interval(self):
+        """`and@284`: the length half -- one bound is not an interval."""
+        with self.assertRaises(HorizonDeclarationError) as ctx:
+            make_gate(horizon_interval=[LOW])
+        self.assertIn("pair", str(ctx.exception))
+
+    def test_a_three_element_list_is_not_an_interval(self):
+        """`and@284`: the length half -- three bounds are not an interval."""
+        with self.assertRaises(HorizonDeclarationError):
+            make_gate(horizon_interval=[LOW, HIGH, 90])
+
+    # -- gt@292: the strictness of the ordering guard -----------------
+
+    def test_an_interval_whose_bounds_are_equal_is_refused_for_width(self):
+        """`gt@292`: the "low must not exceed high" half.
+
+        With equal bounds the ordering guard must not fire -- the width
+        guard is the one that refuses a point estimate.  The message
+        names which rule applied.
+        """
+        with self.assertRaises(HorizonDeclarationError) as ctx:
+            make_gate(horizon_interval=(60, 60))
+        message = str(ctx.exception)
+        self.assertIn("width", message)
+        self.assertNotIn("must not exceed", message)
+
+    def test_a_reversed_interval_is_refused_by_the_ordering_rule(self):
+        """`gt@292`: the ordering half fires on a genuinely reversed pair.
+
+        The message is the discriminator: the ordering rule says the low
+        bound "must not exceed" the high bound.
+        """
+        with self.assertRaises(HorizonDeclarationError) as ctx:
+            make_gate(horizon_interval=(74, 38))
+        self.assertIn("must not exceed", str(ctx.exception))
+
+    # -- or@399: the type half of the margin guard --------------------
+
+    def test_a_boolean_margin_is_refused(self):
+        """`or@399`: the type half of the margin guard, on a bool.
+
+        A bool IS an int in Python, so the ``isinstance(..., bool)``
+        half is the only thing that can catch it.
+        """
+        with self.assertRaises(HorizonDeclarationError) as ctx:
+            make_gate(margin_minutes=True)
+        self.assertIn("margin_minutes must be an int", str(ctx.exception))
+
+    def test_a_float_margin_is_refused(self):
+        """`or@399`: the other half -- a float is not an int margin."""
+        with self.assertRaises(HorizonDeclarationError):
+            make_gate(margin_minutes=10.0)
+
+    def test_a_string_margin_is_refused(self):
+        """`or@399`: the type guard on a non-numeric margin."""
+        with self.assertRaises(HorizonDeclarationError):
+            make_gate(margin_minutes="10")
