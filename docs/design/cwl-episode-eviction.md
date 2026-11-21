@@ -204,6 +204,42 @@ One level per round is what makes "re-check the budget after each
 applicable strip" observable: the receipt's `levels_applied` list is the
 exact sequence the policy took, and it is reproducible.
 
+### The loop's termination guarantee
+
+The loop's natural exits are steps 2's "budget is met" and step 3's "no
+candidate remains". Both depend on an invariant that **spans two
+methods**: a level that `_level_applicable` reports must be one that
+`_apply_level` **strictly reduces**. `_level_applicable` asks whether
+`reasoning_tokens > 0`; `_apply_level` sets it to `0`. The two agree
+because they are edited in the same file — and nothing *enforced* that
+agreement.
+
+Measured 2026-11-21: **eleven mutations** of this module broke that
+invariant, and each one turned the loop into an **infinite** one. With
+`gt@735` mutated (`reasoning_tokens > 0` → `>= 0`), `_level_applicable`
+kept reporting `STRIP_REASONING` after `_apply_level` had already zeroed
+the field, and the loop never ended.
+
+The consequence was not a wrong answer but a **hung test run**, and it
+had a second-order effect: the mutation probe reports a timed-out test as
+`SKIP (test timeout)`, which is neither a kill nor a survival. So the
+slice's whole-file census **never produced a number** — eleven sites
+each burned the probe's 180-second timeout, every run, forever. The
+slice's own accept metric said `1/1` only because the accept probe stops
+at the first kill, which came long before the hanging sites.
+
+The fix is a **bound**: `EvictionPolicy` takes `max_rounds` (default
+`DEFAULT_MAX_EVICTION_ROUNDS = 64`), and the loop runs at most that many
+rounds. The bound turns "the loop terminates" from a coincidence of two
+methods agreeing into a property of the loop itself. It is generous —
+every episode takes at most four levels, so 64 rounds cover sixteen
+episodes — and the bound is a **parameter**, so a caller that knows its
+graph shape can raise it.
+
+The bound also makes the mutants killable: with the loop bounded, the
+hanging mutants now *fail* the suite instead of hanging it, and the
+census completes.
+
 ### The dependency constraint, precisely
 
 `EpisodeGraph.dependents(name)` lists the episodes that declare `name` as a

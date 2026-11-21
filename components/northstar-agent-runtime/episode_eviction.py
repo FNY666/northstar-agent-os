@@ -63,6 +63,7 @@ from typing import Any, Iterable, Mapping, Sequence
 from context_budget import estimate_text_tokens
 
 __all__ = [
+    "DEFAULT_MAX_EVICTION_ROUNDS",
     "DEFAULT_TOKEN_BUDGET",
     "DelimiterError",
     "Episode",
@@ -84,6 +85,22 @@ __all__ = [
 #: The paper's budget ceiling: "tau = 80,000 tokens ... roughly 30% of the
 #: evaluated models' context window".
 DEFAULT_TOKEN_BUDGET = 80_000
+
+#: The most rounds the eviction loop may take.
+#:
+#: The loop's normal exit is the budget being met, or the candidate list
+#: running dry.  Its termination therefore rests on an invariant that
+#: spans two methods: a level that ``_level_applicable`` reports must be
+#: one that ``_apply_level`` STRICTLY reduces.  Nothing enforced that
+#: invariant, and eleven mutations of this module broke it -- each one
+#: turning the loop into an infinite one.
+#:
+#: The bound is what makes the termination guarantee the loop's own
+#: property rather than a coincidence of two methods agreeing.  It is
+#: generous: every episode takes at most four levels, so a graph of N
+#: episodes needs at most ``4 * N`` rounds to be fully evicted, and
+#: ``64`` rounds cover sixteen episodes.
+DEFAULT_MAX_EVICTION_ROUNDS = 64
 
 EXPL = "expl"
 ACT = "act"
@@ -639,10 +656,22 @@ class EvictionPolicy:
     of degrading silently.
     """
 
-    def __init__(self, *, budget: int = DEFAULT_TOKEN_BUDGET) -> None:
+    def __init__(
+        self,
+        *,
+        budget: int = DEFAULT_TOKEN_BUDGET,
+        max_rounds: int = DEFAULT_MAX_EVICTION_ROUNDS,
+    ) -> None:
         if isinstance(budget, bool) or not isinstance(budget, int) or budget <= 0:
             raise ValueError("budget must be a positive int")
+        if (
+            isinstance(max_rounds, bool)
+            or not isinstance(max_rounds, int)
+            or max_rounds < 1
+        ):
+            raise ValueError("max_rounds must be a positive int")
         self.budget = budget
+        self.max_rounds = max_rounds
 
     # ------------------------------------------------------------------
     def candidates(self, graph: EpisodeGraph) -> list[Episode]:
@@ -677,7 +706,18 @@ class EvictionPolicy:
 
     def evict_to_budget(self, graph: EpisodeGraph) -> EvictionReceipt:
         """Evict until the graph fits the budget, or until nothing is left
-        to evict."""
+        to evict.
+
+        The loop is bounded by ``max_rounds``.  Its natural exits are the
+        budget being met and the candidate list running dry, but both
+        rest on an invariant that spans two methods -- a level that
+        ``_level_applicable`` reports must be one ``_apply_level``
+        strictly reduces -- and nothing enforced that invariant.  The
+        bound is what makes the termination guarantee the loop's own
+        property: a level that does not reduce the episode can make the
+        loop spin, and then the bound stops it and the receipt says the
+        budget was not met.
+        """
 
         before = count_tokens(graph)
         receipt = EvictionReceipt(
@@ -689,7 +729,9 @@ class EvictionPolicy:
         if receipt.budget_met:
             return receipt
 
-        while True:
+        rounds = 0
+        while rounds < self.max_rounds:
+            rounds += 1
             target = self.select_target(graph)
             if target is None:
                 break

@@ -605,7 +605,7 @@ class SecondHalfGuardTests(unittest.TestCase):
     rest of the suite drove only the other arm.  These tests drive the
     missing half.
 
-    ``eq@370`` is **not killable, and provably so** -- see the note on
+    ``eq@387`` is **not killable, and provably so** -- see the note on
     that mutant below.
     """
 
@@ -697,10 +697,10 @@ class SecondHalfGuardTests(unittest.TestCase):
         episode = graph.add_episode("expl-a", EXPL)
         self.assertEqual(episode.name, "expl-a")
 
-    # -- eq@370: the closed-at-birth dependency validation ------------
+    # -- eq@387: the closed-at-birth dependency validation ------------
 
     def test_a_closed_episode_validates_its_dependencies_at_birth(self):
-        """`eq@370`: the "or the episode is closed" half.
+        """`eq@387`: the "or the episode is closed" half.
 
         An episode added already CLOSED must have its dependencies
         validated: a dependency on an episode that does not exist is
@@ -715,7 +715,7 @@ class SecondHalfGuardTests(unittest.TestCase):
         self.assertIsNone(graph.get("act-1"))
 
     def test_a_closed_episode_with_valid_dependencies_is_accepted(self):
-        """`eq@370`: the control -- a valid closed episode is added."""
+        """`eq@387`: the control -- a valid closed episode is added."""
         graph = EpisodeGraph()
         graph.add_episode("expl-a", EXPL, status=STATUS_CLOSED)
         episode = graph.add_episode(
@@ -836,14 +836,14 @@ class SecondHalfGuardTests(unittest.TestCase):
 class EquivalentMutantTests(unittest.TestCase):
     """Mutants that are EQUIVALENT: no test can distinguish them.
 
-    ``eq@370`` -- ``if status == STATUS_CLOSED: self._validate_dependencies(ep)``
+    ``eq@387`` -- ``if status == STATUS_CLOSED: self._validate_dependencies(ep)``
     in ``add_episode``.  The mutant replaces ``==`` with ``!=``, so the
     validation runs for an OPEN episode and not for a CLOSED one.
 
     It is provably equivalent, and this is the proof:
 
     * ``add_episode`` ALREADY calls ``self._require_closed_expl(dep, ...)``
-      for every dependency at lines 354-355, UNCONDITIONALLY -- before the
+      for every dependency at lines 371-372, UNCONDITIONALLY -- before the
       status check, and for every status.
     * ``_validate_dependencies(ep)`` calls exactly ``_require_closed_expl``
       for each of ``ep.dependencies`` -- the same function, with the same
@@ -853,7 +853,7 @@ class EquivalentMutantTests(unittest.TestCase):
     So for a CLOSED episode the second call re-checks conditions that
     were just checked and found true: it cannot raise.  And for an OPEN
     episode, the mutant's extra call also cannot raise, because the
-    unconditional call at 354-355 already validated the same
+    unconditional call at 371-372 already validated the same
     dependencies.  Both branches are therefore no-ops in every reachable
     state.
 
@@ -876,7 +876,7 @@ class EquivalentMutantTests(unittest.TestCase):
         """The mutant's extra branch: also added, also valid.
 
         An OPEN episode's dependencies are validated by the
-        unconditional call at 354-355, so the mutant's extra
+        unconditional call at 371-372, so the mutant's extra
         ``_validate_dependencies`` call cannot change anything.
         """
         graph = EpisodeGraph()
@@ -901,9 +901,9 @@ class EquivalentMutantTests(unittest.TestCase):
 
 
 class EpisodeEvictionEquivalenceHarnessControlTests(unittest.TestCase):
-    """The ``eq@370`` equivalence record must be able to FAIL.
+    """The ``eq@387`` equivalence record must be able to FAIL.
 
-    ``EquivalentMutantTests`` records ``eq@370`` as an EQUIVALENT
+    ``EquivalentMutantTests`` records ``eq@387`` as an EQUIVALENT
     mutant: ``add_episode`` validates an episode's dependencies twice
     when it is added closed -- once unconditionally before the episode
     is built, and once more under ``if status == STATUS_CLOSED`` -- and
@@ -985,3 +985,273 @@ class EpisodeEvictionEquivalenceHarnessControlTests(unittest.TestCase):
                 )
             messages[status] = str(caught.exception)
         self.assertEqual(messages[STATUS_OPEN], messages[STATUS_CLOSED])
+
+
+class EvictionLoopTerminationTests(unittest.TestCase):
+    """The eviction loop must TERMINATE.
+
+    ``EvictionPolicy.evict_to_budget`` is a ``while True`` loop.  It stops
+    when the budget is met, when no candidate remains, or when no level
+    applies.  The third exit depends on an **invariant that spans two
+    methods**: a level that ``_level_applicable`` reports must be one that
+    ``_apply_level`` **strictly reduces**.
+
+    Nothing enforces that invariant.  It is spread across two methods, and
+    the only thing tying them together is that they are edited in the same
+    file.
+
+    **What that costs.**  Eleven mutants in this module break the
+    invariant, and the consequence is not a wrong answer -- it is a
+    **hang**.  With ``gt@735`` mutated (``reasoning_tokens > 0`` ->
+    ``reasoning_tokens >= 0``), ``_level_applicable`` keeps reporting
+    ``STRIP_REASONING`` after ``_apply_level`` has zeroed the field, so
+    the loop never ends.
+
+    Measured 2026-11-21: the whole-file mutant sweep of this slice never
+    finished.  Eleven sites each burned the probe's 180-second timeout
+    and were reported as ``SKIP (test timeout)`` -- which is neither a
+    kill nor a survival, so the slice's census number was never
+    measurable.  The slice's own accept metric said ``1/1`` because the
+    accept probe stops at the first kill, and the first kill came long
+    before the hanging sites.
+
+    So the fix is not in the module -- the module is correct.  The fix is
+    that a **hanging** eviction must be a **failing** test.  Then the
+    mutant is killed, the sweep completes, and the census becomes a
+    measurement instead of a timeout.
+
+    The watchdog runs the eviction on a worker thread and fails the test
+    if the thread is still alive after a bounded wait.  The worker is a
+    daemon, so a genuinely stuck run cannot keep the suite alive; and
+    the eviction it runs is a real one over a real graph, so the timeout
+    means a real hang rather than a slow machine.
+    """
+
+    #: How long the eviction gets.  The real eviction over this graph
+    #: takes well under a millisecond; the bound is generous so a loaded
+    #: machine is not mistaken for a hang.
+    TIMEOUT_SECONDS = 10.0
+
+    def _run_within(self, call):
+        """Run ``call`` on a worker thread; return ``(result, hung)``.
+
+        ``hung`` is True when the worker did not finish in time -- which
+        is the failure this class exists to detect.
+        """
+        import threading
+
+        box = {}
+
+        def worker():
+            try:
+                box["result"] = call()
+            except BaseException as error:  # noqa: BLE001 - carried to the caller
+                box["error"] = error
+
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+        thread.join(timeout=self.TIMEOUT_SECONDS)
+        hung = thread.is_alive()
+        if "error" in box:
+            raise box["error"]
+        return box.get("result"), hung
+
+    def _an_over_budget_graph(self):
+        """A graph that forces the loop to run at least one round."""
+        graph = EpisodeGraph()
+        graph.add_episode(
+            "expl-a",
+            EXPL,
+            status=STATUS_CLOSED,
+            reasoning_tokens=10,
+            bulk_output_tokens=20,
+            intermediate_tokens=30,
+            core_tokens=40,
+        )
+        return graph
+
+    def test_the_eviction_loop_terminates(self):
+        """The loop must finish; a hang is a failure, not a timeout.
+
+        The graph is over budget, so the loop must round at least once --
+        stripping the reasoning trace, re-counting, and stopping when the
+        budget is met.
+
+        The assertion is deliberately about **termination** and not about
+        the receipt's contents: a hang leaves the worker alive, and the
+        worker being alive is the failure.
+        """
+        graph = self._an_over_budget_graph()
+        policy = EvictionPolicy(budget=30)
+        receipt, hung = self._run_within(lambda: policy.evict_to_budget(graph))
+        self.assertFalse(
+            hung,
+            "evict_to_budget did not finish within %s seconds -- the "
+            "eviction loop has no termination guarantee"
+            % self.TIMEOUT_SECONDS,
+        )
+        self.assertIsNotNone(receipt)
+
+    def test_a_second_eviction_round_over_the_same_graph_terminates(self):
+        """The same guard on a graph the policy has already touched.
+
+        The loop's exit condition is re-evaluated every round, so a
+        second pass over a partially-evicted graph is a distinct shape
+        from the first: the episodes are already partly stripped, and the
+        levels that applied no longer apply.
+        """
+        graph = self._an_over_budget_graph()
+        policy = EvictionPolicy(budget=30)
+        first, hung = self._run_within(lambda: policy.evict_to_budget(graph))
+        self.assertFalse(hung, "the first eviction did not finish")
+        second, hung = self._run_within(lambda: policy.evict_to_budget(graph))
+        self.assertFalse(
+            hung,
+            "the second eviction did not finish within %s seconds"
+            % self.TIMEOUT_SECONDS,
+        )
+        self.assertIsNotNone(second)
+
+    def test_the_loop_terminates_on_an_unmeetable_budget(self):
+        """The unmeetable exit also terminates.
+
+        Protected content (the prologue, an open episode, a user turn)
+        can never be evicted, so the budget can never be met.  The loop
+        must still stop -- it exhausts the evictable episodes and reports
+        the condition rather than spinning on the protected ones.
+        """
+        graph = EpisodeGraph()
+        graph.add_episode(
+            "act-a",
+            ACT,
+            status=STATUS_OPEN,
+            core_tokens=900,
+        )
+        policy = EvictionPolicy(budget=1)
+        receipt, hung = self._run_within(lambda: policy.evict_to_budget(graph))
+        self.assertFalse(
+            hung,
+            "an unmeetable eviction did not finish within %s seconds"
+            % self.TIMEOUT_SECONDS,
+        )
+        self.assertIsNotNone(receipt)
+        self.assertTrue(receipt.unmeetable)
+
+
+class MaxRoundsBoundTests(unittest.TestCase):
+    """The round bound that makes the eviction loop's termination its own.
+
+    The bound is the fix for the hang: the loop's natural exits depend on
+    an invariant that spans two methods, and eleven mutations of this
+    module broke it -- each one turning the loop into an infinite one.
+    The bound turns "the loop terminates" from a coincidence of two
+    methods agreeing into a property of the loop itself.
+
+    These tests pin the bound's own edges, and they are the tests that
+    kill the two mutants the bound introduced:
+
+    * ``lt@670`` -- ``max_rounds < 1`` -> ``max_rounds <= 1``: the bound
+      would accept ``max_rounds=1``, which is not a bound at all (one
+      round cannot evict a graph whose episodes each take four levels).
+    * ``lt@733`` -- ``rounds < self.max_rounds`` ->
+      ``rounds <= self.max_rounds``: the loop would take one round MORE
+      than the bound allows, so the bound would be off by one.
+    """
+
+    def _an_over_budget_graph(self):
+        graph = EpisodeGraph()
+        graph.add_episode(
+            "expl-a",
+            EXPL,
+            status=STATUS_CLOSED,
+            reasoning_tokens=10,
+            bulk_output_tokens=20,
+            intermediate_tokens=30,
+            core_tokens=40,
+        )
+        return graph
+
+    # -- lt@670: the bound must be a positive int -----------------------
+
+    def test_a_max_rounds_of_zero_is_refused(self):
+        """The bound must be a positive int.
+
+        Zero rounds cannot evict anything, and a negative round count is
+        not a count at all; both are refused.  The guard's own message
+        names the parameter, so a caller knows which one was wrong.
+        """
+        for bad in (0, -1):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ValueError) as caught:
+                    EvictionPolicy(budget=50, max_rounds=bad)
+                self.assertIn("max_rounds", str(caught.exception))
+
+    def test_a_max_rounds_of_one_is_accepted(self):
+        """The boundary the mutant moves.
+
+        ``max_rounds < 1`` refuses ``0`` and negatives and accepts ``1``.
+        Under the planted fault (``<= 1``) ``1`` would be REFUSED -- so
+        the mutant over-refuses a legitimate bound, and the one-round
+        bound a caller may legitimately ask for stops working.
+        """
+        policy = EvictionPolicy(budget=50, max_rounds=1)
+        self.assertEqual(policy.max_rounds, 1)
+
+    def test_a_non_numeric_max_rounds_is_refused(self):
+        for bad in (None, "8", 8.0, True):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ValueError):
+                    EvictionPolicy(budget=50, max_rounds=bad)
+
+    def test_a_max_rounds_of_two_is_accepted(self):
+        """The control: the guard is not over-strict."""
+        policy = EvictionPolicy(budget=50, max_rounds=2)
+        self.assertEqual(policy.max_rounds, 2)
+
+    # -- lt@733: the loop must take AT MOST the bound -------------------
+
+    def test_the_loop_takes_at_most_the_bound(self):
+        """The bound is an upper bound, and the loop honours it exactly.
+
+        The graph needs four levels to be fully evicted, so a bound of one
+        round must leave the receipt showing exactly ONE applied level.
+        Under the planted fault the loop would take a second round and
+        the receipt would show two.
+        """
+        graph = self._an_over_budget_graph()
+        policy = EvictionPolicy(budget=1, max_rounds=1)
+        receipt = policy.evict_to_budget(graph)
+        self.assertEqual(
+            len(receipt.levels_applied),
+            1,
+            "the loop took %d rounds under a bound of 1"
+            % len(receipt.levels_applied),
+        )
+        self.assertFalse(receipt.budget_met)
+        self.assertTrue(receipt.unmeetable)
+
+    def test_a_bound_of_two_takes_at_most_two_rounds(self):
+        graph = self._an_over_budget_graph()
+        policy = EvictionPolicy(budget=1, max_rounds=2)
+        receipt = policy.evict_to_budget(graph)
+        self.assertLessEqual(len(receipt.levels_applied), 2)
+
+    def test_the_default_bound_is_generous_enough_for_a_real_graph(self):
+        """The control: the bound does not truncate a normal eviction.
+
+        The default bound must cover the four levels every episode takes,
+        so a normal eviction is unaffected by the bound.
+        """
+        graph = self._an_over_budget_graph()
+        policy = EvictionPolicy(budget=30)
+        receipt = policy.evict_to_budget(graph)
+        self.assertTrue(receipt.budget_met)
+        self.assertEqual(
+            receipt.levels_applied,
+            [
+                EvictionLevel.STRIP_REASONING,
+                EvictionLevel.STRIP_BULK_OUTPUT,
+                EvictionLevel.STRIP_INTERMEDIATE,
+                EvictionLevel.REMOVE_EPISODE,
+            ],
+        )
