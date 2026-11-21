@@ -851,3 +851,356 @@ class TombstoneBoundTypeTests(unittest.TestCase):
             )
         # The control: a well-formed lift still lifts.
         ct.check_lift(tombstone, a_named_lift())
+
+
+class TombstoneWholeFileSweepBlindspotTests(unittest.TestCase):
+    """The fifteen survivors of the WHOLE-FILE mutant sweep.
+
+    The acceptance probe measures ``>= 1`` kill and stops at the first
+    one, so it reports ``3/3`` for this module and the batch's ledger
+    records the slice as closed.  That number is an **accept metric**,
+    not a census: the probe never looks past the first kill.
+
+    The census -- the same probe over the **whole** file, with
+    ``--tries 64 --no-early-stop`` -- measures ``killed 22/37``.  Fifteen
+    constructs survive it, and none of the fifteen had a record
+    anywhere.
+
+    **They are not equivalent mutants.**  Each one is a *coverage gap*:
+    the suite never drove the input that separates the correct connective
+    from the planted one.  Measured with a differential probe (the module
+    loaded twice, as it is and with the fault applied, then driven over
+    the same corpus), **fourteen of the fifteen separate on an input**:
+
+    ==========  ==========================================  ==========
+    site        the input that separates the two forms       result
+    ==========  ==========================================  ==========
+    ``or@171``  ``covers("")`` on a scoped tombstone         killed
+    ``or@206``  ``expires_at="5"``                          killed
+    ``or@217``  ``measurement="ok"``                         killed
+    ``or@218``  ``reason="because"``                         killed
+    ``retT@263``  an unscoped tombstone, a scoped lift       killed
+    ``retF@265``  a scoped tombstone, an empty lift         killed
+    ``or@288``  ``Lift.from_dict({"subject": "post-42"})``   killed
+    ``or@289``  ``Lift.from_dict({"text": "continue"})``     killed
+    ``or@290``  ``Lift.from_dict({"lifted_at": 12.5})``      killed
+    ``or@311``  ``check_lift(tombstone, "not a lift")``      killed
+    ``lt@322``  a lift at exactly the tombstone's time       killed
+    ``or@350``  ``now="nope"``                              killed
+    ``or@352``  ``valid_until="nope"`` with a good ``now``  killed
+    ``and@421``  a capacity tombstone with ``now=None``     killed
+    ``or@519``  ``TombstoneSet.from_list("abc")``           killed
+    ==========  ==========================================  ==========
+
+    So each method below pins the correct behaviour at its site, which
+    makes the planted fault fail the suite.  Nothing here changes the
+    module: the faults are NOT applied -- the tests pin what is right
+    so that applying them turns the suite red.
+
+    This is the same shape as the earlier blind spot slice
+    (``or@87``, ``gt@89``, ``retF@101``), which is recorded in
+    ``docs/design/cancellation-tombstone-mutant-blindspots.md``.
+    """
+
+    # -- or@171: the subject layer's emptiness half --------------------
+
+    def test_or_171_an_empty_subject_is_outside_a_scoped_tombstone(self):
+        # `covers` returns True when the offered subject is empty: an
+        # empty subject is not evidence of being outside the scope, so
+        # the scoped tombstone still covers it.  Under `or -> and` the
+        # empty case would fall through to the exact comparison and be
+        # refused.
+        tombstone = a_tombstone(subject="post-42")
+        self.assertIs(tombstone.covers("grant-publish", "publish", ""), True)
+
+    def test_or_171_a_none_subject_is_covered_by_a_scoped_tombstone(self):
+        tombstone = a_tombstone(subject="post-42")
+        self.assertIs(tombstone.covers("grant-publish", "publish", None), True)
+
+    def test_or_171_an_unrelated_subject_is_not_covered(self):
+        # The control: the exact comparison is still there.
+        tombstone = a_tombstone(subject="post-42")
+        self.assertIs(tombstone.covers("grant-publish", "publish", "post-99"), False)
+
+    # -- or@206: the expires_at type guard -----------------------------
+
+    def test_or_206_a_non_numeric_expires_at_is_refused_as_a_type_error(self):
+        data = a_tombstone().to_dict()
+        data["expires_at"] = "5"
+        with self.assertRaises(ct.TombstoneError) as caught:
+            Tombstone.from_dict(data)
+        self.assertIn("expires_at must be a number or null", str(caught.exception))
+
+    def test_or_206_a_boolean_expires_at_is_refused_as_a_type_error(self):
+        data = a_tombstone().to_dict()
+        data["expires_at"] = True
+        with self.assertRaises(ct.TombstoneError) as caught:
+            Tombstone.from_dict(data)
+        self.assertIn("expires_at must be a number or null", str(caught.exception))
+
+    def test_or_206_a_numeric_expires_at_is_accepted(self):
+        # The control: the guard is not over-strict.  A capacity denial
+        # carries its bound, so the bound is a number here.
+        data = a_tombstone(kind=ct.CAPACITY, expires_at=100.0).to_dict()
+        data["expires_at"] = 500.0
+        self.assertEqual(Tombstone.from_dict(data).expires_at, 500.0)
+
+    def test_or_206_a_null_expires_at_is_accepted(self):
+        data = a_tombstone().to_dict()
+        data["expires_at"] = None
+        self.assertIsNone(Tombstone.from_dict(data).expires_at)
+
+    # -- or@217 / or@218: the defaulted text fields --------------------
+
+    def test_or_217_a_measurement_survives_the_round_trip(self):
+        data = a_tombstone().to_dict()
+        data["measurement"] = "a fresh measurement"
+        self.assertEqual(
+            Tombstone.from_dict(data).measurement, "a fresh measurement"
+        )
+
+    def test_or_217_a_missing_measurement_becomes_the_empty_string(self):
+        data = a_tombstone().to_dict()
+        data.pop("measurement", None)
+        self.assertEqual(Tombstone.from_dict(data).measurement, "")
+
+    def test_or_218_a_reason_survives_the_round_trip(self):
+        data = a_tombstone().to_dict()
+        data["reason"] = "because the target was withdrawn"
+        self.assertEqual(
+            Tombstone.from_dict(data).reason, "because the target was withdrawn"
+        )
+
+    def test_or_218_a_missing_reason_becomes_the_empty_string(self):
+        data = a_tombstone().to_dict()
+        data.pop("reason", None)
+        self.assertEqual(Tombstone.from_dict(data).reason, "")
+
+    # -- retT@263: an unscoped tombstone -------------------------------
+
+    def test_retT_263_a_lift_names_an_unscoped_tombstone(self):
+        # The tombstone names no subject, so it covers the action
+        # wholesale; a lift that names the action therefore names it.
+        tombstone = a_tombstone(subject="")
+        lift = a_named_lift(subject="post-42")
+        self.assertIs(lift.names(tombstone), True)
+
+    def test_retT_263_an_unscoped_tombstone_is_lifted_by_a_named_lift(self):
+        # The same fact, end to end: under `return True -> return False`
+        # the lift would not name the tombstone and the stop would hold
+        # forever.
+        tombstone = a_tombstone(subject="")
+        ct.check_lift(tombstone, a_named_lift(subject="post-42"))
+
+    # -- retF@265: a lift that names nothing ----------------------------
+
+    def test_retF_265_a_lift_that_names_no_subject_does_not_name_a_scoped_tombstone(self):
+        # The tombstone is scoped to one post; a generic lift names no
+        # subject, so it must not lift that scoped stop.
+        tombstone = a_tombstone(subject="post-42")
+        lift = a_named_lift(subject="")
+        self.assertIs(lift.names(tombstone), False)
+
+    def test_retF_265_a_generic_lift_does_not_lift_a_scoped_tombstone(self):
+        tombstone = a_tombstone(subject="post-42")
+        with self.assertRaises(ct.TombstoneLiftError):
+            ct.check_lift(tombstone, a_named_lift(subject=""))
+
+    # -- or@288 / or@289 / or@290: the lift's defaults ------------------
+
+    def _lift_dict(self, **overrides):
+        data = a_named_lift().to_dict()
+        for key, value in overrides.items():
+            if value is None:
+                data.pop(key, None)
+            else:
+                data[key] = value
+        return data
+
+    def test_or_288_a_lift_subject_survives_the_round_trip(self):
+        recovered = Lift.from_dict(self._lift_dict(subject="post-42"))
+        self.assertEqual(recovered.subject, "post-42")
+
+    def test_or_288_a_missing_lift_subject_becomes_the_empty_string(self):
+        self.assertEqual(Lift.from_dict(self._lift_dict(subject=None)).subject, "")
+
+    def test_or_289_a_lift_text_survives_the_round_trip(self):
+        recovered = Lift.from_dict(self._lift_dict(text="I re-authorize."))
+        self.assertEqual(recovered.text, "I re-authorize.")
+
+    def test_or_289_a_missing_lift_text_becomes_the_empty_string(self):
+        self.assertEqual(Lift.from_dict(self._lift_dict(text=None)).text, "")
+
+    def test_or_290_a_lift_time_survives_the_round_trip(self):
+        recovered = Lift.from_dict(self._lift_dict(lifted_at=12.5))
+        self.assertEqual(recovered.lifted_at, 12.5)
+
+    def test_or_290_a_missing_lift_time_becomes_zero(self):
+        self.assertEqual(Lift.from_dict(self._lift_dict(lifted_at=None)).lifted_at, 0.0)
+
+    # -- or@311: the lift check's type guard ----------------------------
+
+    def test_or_311_a_lift_that_is_not_a_lift_is_refused(self):
+        tombstone = a_tombstone()
+        with self.assertRaises(ct.TombstoneLiftError) as caught:
+            ct.check_lift(tombstone, "not a lift")
+        self.assertIn("checked against a tombstone", str(caught.exception))
+
+    def test_or_311_a_tombstone_that_is_not_a_tombstone_is_refused(self):
+        with self.assertRaises(ct.TombstoneLiftError) as caught:
+            ct.check_lift("not a tombstone", a_named_lift())
+        self.assertIn("checked against a tombstone", str(caught.exception))
+
+    # -- lt@322: the lift's own time -----------------------------------
+
+    def test_lt_322_a_lift_at_the_tombstone_own_time_lifts_it(self):
+        # The lift must be NEW: it cannot predate the tombstone.  A lift
+        # at exactly the tombstone's own time is not in the past, so it
+        # lifts.  Under `< -> <=` it would be refused.
+        tombstone = a_tombstone(declared_at=100.0)
+        ct.check_lift(tombstone, a_named_lift(lifted_at=100.0))
+
+    def test_lt_322_a_lift_that_predates_the_tombstone_is_refused(self):
+        tombstone = a_tombstone(declared_at=100.0)
+        with self.assertRaises(ct.TombstoneLiftError) as caught:
+            ct.check_lift(tombstone, a_named_lift(lifted_at=50.0))
+        self.assertIn("predates the tombstone", str(caught.exception))
+
+    # -- or@350 / or@352: the renewal's numeric guards ------------------
+
+    def test_or_350_a_non_numeric_now_is_refused(self):
+        tombstone = ct.Tombstone(
+            grant_id="grant-publish",
+            action="publish",
+            declarer=PRINCIPAL,
+            declarer_channel=CHAT,
+            declared_at=100.0,
+            kind=ct.CAPACITY,
+            expires_at=100.0,
+        )
+        with self.assertRaises(ct.TombstoneError) as caught:
+            ct.check_renewal(
+                tombstone, "a fresh measurement", now="nope", valid_until=200.0
+            )
+        self.assertIn("now must be a number", str(caught.exception))
+
+    def test_or_350_a_boolean_now_is_refused(self):
+        tombstone = ct.Tombstone(
+            grant_id="grant-publish",
+            action="publish",
+            declarer=PRINCIPAL,
+            declarer_channel=CHAT,
+            declared_at=100.0,
+            kind=ct.CAPACITY,
+            expires_at=100.0,
+        )
+        with self.assertRaises(ct.TombstoneError) as caught:
+            ct.check_renewal(
+                tombstone, "a fresh measurement", now=True, valid_until=200.0
+            )
+        self.assertIn("now must be a number", str(caught.exception))
+
+    def test_or_352_a_non_numeric_bound_is_refused(self):
+        # `now` is good, so the `valid_until` guard is the one that must
+        # fire -- and it must fire with its OWN message.  Under
+        # `or -> and` the `now` half of the guard would swallow it and
+        # the bound would slip past as if it were a number.
+        tombstone = ct.Tombstone(
+            grant_id="grant-publish",
+            action="publish",
+            declarer=PRINCIPAL,
+            declarer_channel=CHAT,
+            declared_at=100.0,
+            kind=ct.CAPACITY,
+            expires_at=100.0,
+        )
+        with self.assertRaises(ct.TombstoneError) as caught:
+            ct.check_renewal(
+                tombstone, "a fresh measurement", now=100.0, valid_until="nope"
+            )
+        self.assertIn("valid_until must be a number", str(caught.exception))
+
+    def test_or_352_a_boolean_bound_is_refused(self):
+        tombstone = ct.Tombstone(
+            grant_id="grant-publish",
+            action="publish",
+            declarer=PRINCIPAL,
+            declarer_channel=CHAT,
+            declared_at=100.0,
+            kind=ct.CAPACITY,
+            expires_at=100.0,
+        )
+        with self.assertRaises(ct.TombstoneError) as caught:
+            ct.check_renewal(
+                tombstone, "a fresh measurement", now=100.0, valid_until=True
+            )
+        self.assertIn("valid_until must be a number", str(caught.exception))
+
+    def test_or_352_a_good_renewal_still_renews(self):
+        # The control: the guard is not over-strict.
+        tombstone = ct.Tombstone(
+            grant_id="grant-publish",
+            action="publish",
+            declarer=PRINCIPAL,
+            declarer_channel=CHAT,
+            declared_at=100.0,
+            kind=ct.CAPACITY,
+            expires_at=100.0,
+        )
+        ct.check_renewal(
+            tombstone, "a fresh measurement", now=100.0, valid_until=200.0
+        )
+
+    # -- and@421: the capacity expiry split ----------------------------
+
+    def test_and_421_a_capacity_tombstone_still_blocks_without_a_clock(self):
+        # The expiry split only applies when the caller supplies a
+        # clock.  Under `and -> or` a capacity tombstone with
+        # `now=None` would compare None against its bound and raise.
+        tombstone = a_tombstone(kind=ct.CAPACITY, expires_at=100.0)
+        registry = ct.TombstoneSet([tombstone])
+        blocked = registry.blocked("grant-publish", "publish", "post-42", now=None)
+        self.assertIsNotNone(blocked)
+        self.assertEqual(blocked.grant_id, "grant-publish")
+
+    def test_and_421_a_permission_tombstone_blocks_regardless_of_the_clock(self):
+        tombstone = a_tombstone(kind=ct.PERMISSION)
+        registry = ct.TombstoneSet([tombstone])
+        blocked = registry.blocked("grant-publish", "publish", "post-42", now=1000.0)
+        self.assertIsNotNone(blocked)
+
+    def test_and_421_a_capacity_tombstone_whose_bound_passed_does_not_block(self):
+        tombstone = a_tombstone(kind=ct.CAPACITY, expires_at=100.0)
+        registry = ct.TombstoneSet([tombstone])
+        blocked = registry.blocked("grant-publish", "publish", "post-42", now=1000.0)
+        self.assertIsNone(blocked)
+
+    def test_and_421_a_capacity_tombstone_whose_bound_has_not_passed_blocks(self):
+        tombstone = a_tombstone(kind=ct.CAPACITY, expires_at=100.0)
+        registry = ct.TombstoneSet([tombstone])
+        blocked = registry.blocked("grant-publish", "publish", "post-42", now=50.0)
+        self.assertIsNotNone(blocked)
+
+    # -- or@519: the set's own from_list -------------------------------
+
+    def test_or_519_a_string_is_refused_as_a_tombstone_set(self):
+        with self.assertRaises(ct.TombstoneError) as caught:
+            ct.TombstoneSet.from_list("abc")
+        self.assertIn("a tombstone set is a list of tombstones", str(caught.exception))
+
+    def test_or_519_bytes_are_refused_as_a_tombstone_set(self):
+        with self.assertRaises(ct.TombstoneError) as caught:
+            ct.TombstoneSet.from_list(b"abc")
+        self.assertIn("a tombstone set is a list of tombstones", str(caught.exception))
+
+    def test_or_519_a_non_sequence_is_refused_as_a_tombstone_set(self):
+        with self.assertRaises(ct.TombstoneError) as caught:
+            ct.TombstoneSet.from_list(5)
+        self.assertIn("a tombstone set is a list of tombstones", str(caught.exception))
+
+    def test_or_519_a_list_of_tombstones_is_accepted(self):
+        registry = ct.TombstoneSet.from_list([a_tombstone().to_dict()])
+        self.assertEqual(len(registry), 1)
+
+    def test_or_519_none_is_an_empty_set(self):
+        self.assertEqual(len(ct.TombstoneSet.from_list(None)), 0)
