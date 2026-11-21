@@ -430,5 +430,148 @@ class CheckpointIntGuardSecondHalfTests(unittest.TestCase):
             Checkpoint(position=sc.POSITION_AFTER_MODEL, cycle_index=True)
 
 
+class SecondHalfGuardTests(unittest.TestCase):
+    """The three constructs the planted-fault probe found still uncovered.
+
+    The probe (``b173-mutant.py``, ``--tries 64 --no-early-stop``) measured
+    16/19 on this slice and named the survivors: ``or@375``, ``lt@377`` and
+    ``and@626``.  Each one is an arm the existing suite never drove.
+
+    * ``or@375`` -- the ``bool`` half of the ``max_attempts`` type guard.
+      ``bool`` IS an ``int`` in Python, so under the mutant (``or`` ->
+      ``and``) the guard is *never* true: ``isinstance(x, bool) AND not
+      isinstance(x, int)`` cannot hold for a bool, because a bool is an
+      int.  The whole guard goes dead and a boolean -- or any non-int --
+      is accepted as an attempt count.
+    * ``lt@377`` -- the lower bound of ``max_attempts``.  The mutant
+      (``<`` -> ``<=``) refuses the value exactly AT the bound, i.e. 1.
+    * ``and@626`` -- the second half of :attr:`ResumePlan.resumes`.  The
+      mutant (``and`` -> ``or``) lets a plan that is NOT a checkpoint
+      claim to resume, whenever it carries any marker at all.
+
+    The existing test methods are untouched; this class only adds the
+    missing arms.
+    """
+
+    # --- or@375: the `bool` half of the max_attempts type guard --------
+    def test_a_boolean_max_attempts_is_refused(self):
+        """`or@375`: **a bool IS an int in Python**.
+
+        The guard is::
+
+            if isinstance(max_attempts, bool) or not isinstance(max_attempts, int):
+
+        The "not an int" half never refuses a bool -- only the explicit
+        ``bool`` half does.  Under the mutant (``or`` -> ``and``) the two
+        halves cannot both hold for a bool, so the guard is dead and
+        ``True`` -- which is the integer 1 -- is accepted as the attempt
+        count.
+        """
+        with self.assertRaises(ValueError):
+            ModelRetryStrategy(max_attempts=True)
+
+    def test_a_float_max_attempts_is_refused(self):
+        """`or@375`: the other half of the same guard.
+
+        Under the mutant the guard is dead for EVERY value, so a float
+        sails through and is stored as the attempt count.  This is the
+        "not an int" half, driven from its own side.
+        """
+        with self.assertRaises(ValueError):
+            ModelRetryStrategy(max_attempts=1.5)
+
+    def test_a_string_max_attempts_is_refused(self):
+        """`or@375`: the "not an int" half, from a third side."""
+        with self.assertRaises(ValueError):
+            ModelRetryStrategy(max_attempts="6")
+
+    def test_an_integer_max_attempts_is_accepted(self):
+        """`or@375`: the control -- an ordinary int is legal."""
+        strategy = ModelRetryStrategy(max_attempts=4)
+        self.assertEqual(strategy.max_attempts, 4)
+
+    # --- lt@377: the lower bound of max_attempts -----------------------
+    def test_exactly_one_attempt_is_accepted(self):
+        """`lt@377`: the bound is STRICT.
+
+        ``max_attempts`` counts the attempts *including the first try*, so
+        1 is the smallest legal value: the run is tried once and never
+        retried.  Under the mutant (``<`` -> ``<=``) the value exactly AT
+        the bound is refused, so a strategy that must never retry could
+        not be constructed at all.
+        """
+        strategy = ModelRetryStrategy(max_attempts=1)
+        self.assertEqual(strategy.max_attempts, 1)
+
+    def test_one_attempt_means_the_first_failure_is_the_last(self):
+        """`lt@377`: the consequence of the boundary value.
+
+        With ``max_attempts=1`` the very first throttled failure exhausts
+        the budget, so the strategy must NOT ask for a retry.
+        """
+        strategy = ModelRetryStrategy(max_attempts=1)
+        decision = strategy.after_model_call({"error": ThrottledError("slow down")})
+        self.assertFalse(decision.retry)
+        self.assertEqual(decision.attempt, 1)
+
+    def test_zero_attempts_is_refused(self):
+        """`lt@377`: the other side of the bound.
+
+        Zero attempts is not a count of anything, so it stays refused
+        under both the original and the mutant -- the control that shows
+        the boundary test above is about the value AT the bound.
+        """
+        with self.assertRaises(ValueError):
+            ModelRetryStrategy(max_attempts=0)
+
+    # --- and@626: the second half of `ResumePlan.resumes` --------------
+    def test_a_cancelled_plan_does_not_resume_even_with_a_marker(self):
+        """`and@626`: the kill switch, stated on the plan itself.
+
+        :attr:`ResumePlan.resumes` is
+
+            self.outcome == OUTCOME_CHECKPOINT and self.marker is not None
+
+        The "the marker is there" half is necessary but NOT sufficient:
+        the outcome must say ``checkpoint``.  Under the mutant
+        (``and`` -> ``or``) a plan whose outcome is ``cancelled`` would
+        claim to resume as long as it carries any marker at all -- the
+        exact failure the module exists to prevent.
+        """
+        plan = sc.ResumePlan(
+            outcome=sc.OUTCOME_CANCELLED,
+            marker=Checkpoint(position=sc.POSITION_AFTER_MODEL, cycle_index=3),
+        )
+        self.assertFalse(plan.resumes)
+
+    def test_an_interrupt_plan_does_not_resume_even_with_a_marker(self):
+        """`and@626`: the other non-checkpoint outcome.
+
+        An interrupt wins over a checkpoint, so a plan carrying an
+        interrupt outcome must not claim to resume from a marker either.
+        """
+        plan = sc.ResumePlan(
+            outcome=sc.OUTCOME_INTERRUPT,
+            marker=Checkpoint(position=sc.POSITION_AFTER_MODEL, cycle_index=3),
+        )
+        self.assertFalse(plan.resumes)
+
+    def test_a_checkpoint_plan_without_a_marker_does_not_resume(self):
+        """`and@626`: the other half of the conjunction, as the control.
+
+        The outcome alone is not sufficient either: a plan that says
+        ``checkpoint`` but carries no marker has nothing to resume
+        FROM, so ``resumes`` is false.
+        """
+        plan = sc.ResumePlan(outcome=sc.OUTCOME_CHECKPOINT, marker=None)
+        self.assertFalse(plan.resumes)
+
+    def test_a_checkpoint_plan_with_a_marker_resumes(self):
+        """`and@626`: the control -- both halves hold."""
+        marker = Checkpoint(position=sc.POSITION_AFTER_MODEL, cycle_index=3)
+        plan = sc.ResumePlan(outcome=sc.OUTCOME_CHECKPOINT, marker=marker)
+        self.assertTrue(plan.resumes)
+
+
 if __name__ == "__main__":  # pragma: no cover - manual run
     unittest.main()
