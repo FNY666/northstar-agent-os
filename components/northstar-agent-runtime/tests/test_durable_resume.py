@@ -1600,3 +1600,232 @@ def _variant_default_retry_on(bound: str):
         return module.default_retry_on
     finally:
         shutil.rmtree(root, ignore_errors=True)
+
+
+class DurableResumeRecordRoundTripTests(RuntimeTestCase):
+    """The record round trip: what the store writes is what it reads.
+
+    The first half of this file proved the guards of
+    ``durable_resume.py``; this class proves the records themselves --
+    that a checkpoint and a pending write survive the trip through
+    ``as_dict`` / ``from_dict`` and through the durable log on disk
+    without losing a field, changing one, or gaining one.
+
+    These are the properties a resumed run depends on: the resume
+    re-enters a step from a checkpoint that was read back off the
+    disk, so a field that does not survive the trip is a field the
+    resume cannot use.
+    """
+
+    def test_a_checkpoint_survives_its_own_round_trip(self) -> None:
+        """Every field of a checkpoint is preserved by the round trip."""
+        store = DurableStore()
+        original = store.put_checkpoint(
+            run_id="run-1",
+            state={"turns": 3, "cost_usd": 0.25},
+            parent_checkpoint_id="ck-000001",
+            interrupted_task="t1",
+            interrupt_value="what now?",
+            task_path="nested/path",
+            interrupt_answers={"t1#0": "green light"},
+        )
+        restored = DurableCheckpoint.from_dict(original.as_dict())
+
+        self.assertEqual(restored.run_id, original.run_id)
+        self.assertEqual(restored.checkpoint_id, original.checkpoint_id)
+        self.assertEqual(restored.seq, original.seq)
+        self.assertEqual(restored.state, original.state)
+        self.assertEqual(restored.state_digest, original.state_digest)
+        self.assertEqual(restored.parent_checkpoint_id, original.parent_checkpoint_id)
+        self.assertEqual(restored.interrupted_task, original.interrupted_task)
+        self.assertEqual(restored.interrupt_value, original.interrupt_value)
+        self.assertEqual(restored.task_path, original.task_path)
+        self.assertEqual(restored.interrupt_answers, original.interrupt_answers)
+
+    def test_a_write_survives_its_own_round_trip(self) -> None:
+        """Every field of a pending write is preserved too."""
+        original = PendingWrite(
+            task_id="t1",
+            idx=3,
+            channel="files",
+            value={"path": "/tmp/x", "nested": [1, 2]},
+            effect_key="tool:a",
+            task_path="nested/path",
+        )
+        restored = PendingWrite.from_dict(original.as_dict())
+        self.assertEqual(restored, original)
+
+    def test_a_checkpoint_read_back_from_the_disk_log_is_usable(self) -> None:
+        """The log on disk is the store's own record, not a copy of it.
+
+        Every record the store appends names its kind, and the kinds
+        appear in the order the run produced them: the checkpoint
+        first, then the pending writes, then the committed writes.
+        """
+        root = self.temp_dir()
+        log = root / "durable.jsonl"
+        store = DurableStore(path=log)
+        checkpoint = store.put_checkpoint(run_id="run-1", state={"turns": 1})
+        store.put_writes(checkpoint.checkpoint_id, [_write("t1", 0, "tool:a")])
+        store.commit_writes(checkpoint.checkpoint_id)
+
+        records = [
+            json.loads(line)
+            for line in log.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        self.assertEqual(
+            [record["kind"] for record in records],
+            ["checkpoint", "pending_writes", "committed_writes"],
+        )
+        # The checkpoint record carries the schema pin, and its own state.
+        self.assertEqual(records[0]["schema"], "northstar.durable-resume.v1")
+        self.assertEqual(records[0]["state"], {"turns": 1})
+        # And the write records name the checkpoint they hang under.
+        self.assertEqual(records[1]["checkpoint_id"], checkpoint.checkpoint_id)
+        self.assertEqual(records[2]["checkpoint_id"], checkpoint.checkpoint_id)
+
+    def test_a_cleared_write_is_recorded_as_cleared_and_never_committed(self) -> None:
+        """The log tells the two apart: dropped, and landed.
+
+        A write that was dropped appears under the cleared-writes kind
+        and never under the committed-writes kind, so "the write was
+        dropped" and "the write never happened" stay distinguishable
+        after the fact.
+        """
+        root = self.temp_dir()
+        log = root / "durable.jsonl"
+        store = DurableStore(path=log)
+        checkpoint = store.put_checkpoint(run_id="run-1", state={})
+        store.put_writes(checkpoint.checkpoint_id, [_write("t1", 0, "tool:a")])
+        store.clear_writes(checkpoint.checkpoint_id, reason="the step failed")
+
+        records = [
+            json.loads(line)
+            for line in log.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        kinds = [record["kind"] for record in records]
+        self.assertIn("cleared_writes", kinds)
+        self.assertNotIn("committed_writes", kinds)
+        cleared = next(record for record in records if record["kind"] == "cleared_writes")
+        self.assertEqual(cleared["reason"], "the step failed")
+        self.assertEqual([w["effect_key"] for w in cleared["writes"]], ["tool:a"])
+
+    def test_a_checkpoint_with_an_unknown_schema_is_refused(self) -> None:
+        """A record from another schema is not read as this one.
+
+        The schema pin is what makes the log's records readable at all;
+        a record that does not carry it is refused rather than
+        interpreted.
+        """
+        store = DurableStore()
+        record = store.put_checkpoint(run_id="run-1", state={}).as_dict()
+        record["schema"] = "northstar.some-other-schema.v1"
+        with self.assertRaises(DurableStoreError):
+            DurableCheckpoint.from_dict(record)
+
+    def test_a_checkpoint_with_non_mapping_answers_is_refused(self) -> None:
+        """The answers must be a mapping, not a list of pairs."""
+        store = DurableStore()
+        record = store.put_checkpoint(run_id="run-1", state={}).as_dict()
+        record["interrupt_answers"] = ["t1#0", "green light"]
+        with self.assertRaises(DurableStoreError):
+            DurableCheckpoint.from_dict(record)
+
+    def test_a_run_of_one_cannot_see_another_runs_checkpoints(self) -> None:
+        """The run id is the primary key on the reading side too.
+
+        ``list_checkpoints`` and ``latest_checkpoint`` are both scoped
+        to a run, so a run's history cannot be read as another run's --
+        and the newest checkpoint of a run is that run's own newest,
+        not the store's.
+        """
+        store = DurableStore()
+        store.put_checkpoint(run_id="run-A", state={"n": 1})
+        store.put_checkpoint(run_id="run-B", state={"n": 2})
+        store.put_checkpoint(run_id="run-A", state={"n": 3})
+
+        self.assertEqual(len(store.list_checkpoints("run-A")), 2)
+        self.assertEqual(len(store.list_checkpoints("run-B")), 1)
+        self.assertEqual(store.latest_checkpoint("run-A").state, {"n": 3})
+        self.assertEqual(store.latest_checkpoint("run-B").state, {"n": 2})
+
+    def test_deleting_a_thread_forgets_that_run_only(self) -> None:
+        """``delete_thread`` takes one run and leaves the others alone.
+
+        The effect keys of the deleted run go with it, so a later run
+        that reuses the key starts clean.
+        """
+        store = DurableStore()
+        effects: list[str] = []
+        kept = store.put_checkpoint(run_id="run-B", state={})
+        gone = store.put_checkpoint(run_id="run-A", state={})
+        store.put_writes(kept.checkpoint_id, [_write("t1", 0, "tool:1")])
+        store.put_writes(gone.checkpoint_id, [_write("t1", 0, "tool:1")])
+        store.commit_writes(kept.checkpoint_id, applier=lambda w: effects.append("kept"))
+
+        store.delete_thread("run-A")
+
+        self.assertEqual(store.list_checkpoints("run-A"), ())
+        self.assertEqual(len(store.list_checkpoints("run-B")), 1)
+        self.assertEqual(store.pending_writes(gone.checkpoint_id), ())
+        # And run-A's effect key is free again.
+        store.put_checkpoint(run_id="run-A", state={})
+        self.assertEqual(len(store.list_checkpoints("run-A")), 1)
+
+    def test_a_write_hung_under_an_unknown_checkpoint_is_refused(self) -> None:
+        """A write with nowhere to hang is refused, not silently kept.
+
+        ``put_writes`` names the checkpoint the writes hang under; a
+        checkpoint that does not exist cannot hold them, and the store
+        says so instead of keeping them in memory where no resume can
+        find them.
+        """
+        store = DurableStore()
+        with self.assertRaises(DurableStoreError):
+            store.put_writes("ck-999999", [_write("t1", 0, "tool:a")])
+
+    def test_the_writes_of_a_checkpoint_keep_their_declaration_order(self) -> None:
+        """The order a step declared its writes in is the order kept.
+
+        Two calls to ``put_writes`` under one checkpoint append: the
+        first declaration stays first, so the second call's write is
+        not applied before the first one.
+        """
+        store = DurableStore()
+        checkpoint = store.put_checkpoint(run_id="run-1", state={})
+        store.put_writes(checkpoint.checkpoint_id, [_write("t1", 0, "tool:first")])
+        store.put_writes(checkpoint.checkpoint_id, [_write("t1", 1, "tool:second")])
+        self.assertEqual(
+            [write.effect_key for write in store.pending_writes(checkpoint.checkpoint_id)],
+            ["tool:first", "tool:second"],
+        )
+
+    def test_moving_a_writes_record_re_parents_it_and_leaves_a_trace(self) -> None:
+        """Re-parenting the writes leaves the old record empty.
+
+        The move is an append, so the log shows both what was pending
+        when the step started and what was pending when it paused; the
+        live view shows the writes under their new checkpoint only.
+        """
+        store = DurableStore()
+        first = store.put_checkpoint(run_id="run-1", state={})
+        store.put_writes(first.checkpoint_id, [_write("t1", 0, "tool:inflight")])
+        second = store.put_checkpoint(run_id="run-1", state={}, parent_checkpoint_id=first.checkpoint_id)
+
+        moved = store.move_writes(first.checkpoint_id, second.checkpoint_id)
+        self.assertEqual([write.effect_key for write in moved], ["tool:inflight"])
+        self.assertEqual(store.pending_writes(first.checkpoint_id), ())
+        self.assertEqual(
+            [write.effect_key for write in store.pending_writes(second.checkpoint_id)],
+            ["tool:inflight"],
+        )
+
+    def test_moving_the_writes_of_a_checkpoint_with_none_is_a_no_op(self) -> None:
+        """There is nothing to move, so nothing is moved."""
+        store = DurableStore()
+        first = store.put_checkpoint(run_id="run-1", state={})
+        second = store.put_checkpoint(run_id="run-1", state={})
+        self.assertEqual(store.move_writes(first.checkpoint_id, second.checkpoint_id), ())
+        self.assertEqual(store.pending_writes(second.checkpoint_id), ())
