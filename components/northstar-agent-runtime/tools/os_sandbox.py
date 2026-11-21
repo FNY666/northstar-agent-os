@@ -351,6 +351,56 @@ def probe_capabilities(*, force: bool = False, bwrap_bin: str | None = None) -> 
     return caps
 
 
+def resolve_effective_backend(
+    requested: str,
+    *,
+    capabilities: SandboxCapabilities | None = None,
+    seccomp: str = "auto",
+    capdrop_whitelist: Sequence[str] | None = None,
+) -> tuple[str, tuple[str, ...]]:
+    """Resolve the backend a request will actually use, and say what changed.
+
+    ``resolve_backend`` answers "which backend does *auto* prefer"; it does
+    not know whether that backend can enforce the controls the request asks
+    for. On a host where bubblewrap is present but its own BPF filter is
+    rejected by the kernel, auto picks bwrap and every shell request is
+    refused. The process backend applies the same denylist through its own
+    prctl wrapper, so auto falls back to it — and says so.
+
+    An operator who names a backend explicitly never gets a fallback: they
+    asked for it by name, and a refusal is the honest answer.
+
+    Returns the backend that will run plus the warnings that must be shown.
+    """
+    caps = capabilities or probe_capabilities()
+    choice = (requested or "auto").strip().lower()
+    if choice not in BACKENDS:
+        raise SandboxError(
+            f"unknown sandbox backend {requested!r}; choose one of {', '.join(BACKENDS)}"
+        )
+    chosen = resolve_backend(choice, capabilities=caps)
+    if choice != "auto" or chosen != "bwrap":
+        return chosen, ()
+    seccomp_mode = (seccomp or "auto").strip().lower()
+    if seccomp_mode != "off" and not caps.bwrap_seccomp:
+        return "process", (
+            "auto backend fell back from bwrap to process: bwrap could not enforce "
+            f"the seccomp denylist on this host ({caps.bwrap_seccomp_detail}); "
+            "the process backend applies the same denylist through its own prctl "
+            "wrapper, but the host filesystem stays reachable (process isolation, "
+            "not OS isolation)",
+        )
+    if capdrop_whitelist is not None and not caps.bwrap_cap_drop:
+        return "process", (
+            "auto backend fell back from bwrap to process: bwrap could not enforce "
+            f"the capability drop on this host ({caps.bwrap_detail}); "
+            "the process backend applies the same capability drop through its own "
+            "launcher, but the host filesystem stays reachable (process isolation, "
+            "not OS isolation)",
+        )
+    return chosen, ()
+
+
 def resolve_backend(requested: str, *, capabilities: SandboxCapabilities | None = None) -> str:
     """Map ``auto|bwrap|process`` to the backend that will actually run."""
     choice = (requested or "auto").strip().lower()
@@ -950,31 +1000,12 @@ def run_sandboxed(
         except (PledgeError, PledgeViolation) as error:
             raise SandboxError(f"pledge refused: {error}") from error
 
-    fallback_warnings: list[str] = []
-    if chosen == "bwrap" and (backend or "auto").strip().lower() == "auto":
-        # Auto picked bubblewrap, but bwrap cannot enforce the configured
-        # seccomp denylist on this kernel: its own BPF filter is rejected
-        # (prctl EINVAL). Refusing to run would make every shell request
-        # unusable, so fall back to the process backend, which applies the
-        # same denylist through its own prctl wrapper. Say so loudly.
-        if seccomp_mode != "off" and not caps.bwrap_seccomp:
-            chosen = "process"
-            fallback_warnings.append(
-                "auto backend fell back from bwrap to process: bwrap could not enforce "
-                f"the seccomp denylist on this host ({caps.bwrap_seccomp_detail}); "
-                "the process backend applies the same denylist through its own prctl "
-                "wrapper, but the host filesystem stays reachable (process isolation, "
-                "not OS isolation)"
-            )
-        elif request.capdrop_whitelist is not None and not caps.bwrap_cap_drop:
-            chosen = "process"
-            fallback_warnings.append(
-                "auto backend fell back from bwrap to process: bwrap could not enforce "
-                f"the capability drop on this host ({caps.bwrap_detail}); "
-                "the process backend applies the same capability drop through its own "
-                "launcher, but the host filesystem stays reachable (process isolation, "
-                "not OS isolation)"
-            )
+    chosen, fallback_warnings = resolve_effective_backend(
+        backend,
+        capabilities=caps,
+        seccomp=seccomp_mode,
+        capdrop_whitelist=request.capdrop_whitelist,
+    )
 
     if chosen == "bwrap":
         assert caps.bwrap_path  # resolve_backend guaranteed usable
@@ -1319,5 +1350,6 @@ __all__ = [
     "probe_capabilities",
     "reset_capabilities_cache",
     "resolve_backend",
+    "resolve_effective_backend",
     "run_sandboxed",
 ]
