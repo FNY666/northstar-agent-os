@@ -18,10 +18,12 @@ What these tests pin:
 
 import importlib.util
 import json
+import random
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 RUNTIME = Path(__file__).resolve().parent.parent
@@ -1232,6 +1234,689 @@ class TestThePinRefusesEveryMalformedField(_HolderCase):
                 seq_first=1,
                 seq_last=3,
             )
+
+
+class _StubLedger:
+    """A minimal ledger stand-in for ``ledger_head_pin``.
+
+    The real ``forward_seal_ledger`` is not needed to drive the ledger
+    guard's two halves: what matters is that ``genesis`` and the head's
+    ``record_hash`` can be set independently, so the *empty* half and the
+    *wrong-type* half of each guard can be driven one at a time.
+    """
+
+    def __init__(self, genesis, head_hash):
+        self.genesis = genesis
+        self._head_hash = head_hash
+
+    def __len__(self):
+        return 1
+
+    def record(self, index):
+        class _Head:
+            pass
+
+        head = _Head()
+        head.record_hash = self._head_hash
+        return head
+
+
+class TestTheSecondArmOfEveryRemainingGuard(_HolderCase):
+    """The mutant-lift for the ``audit-head`` slice, round two.
+
+    The slice's own tests (plus the round-one lift) drove ONE arm of each
+    two-armed guard.  The planted faults that SURVIVED the suite are
+    exactly the arms nobody drove.  This class drives each of them:
+
+    * the EMPTY half of every ``not isinstance(...) or <empty>`` guard
+      (``or@178``, ``or@263``, ``or@265``, ``or@1189``, ``or@1248``) --
+      an empty string is a ``str``, so the type half does not fire and
+      only the emptiness half can refuse it;
+    * the BOOL half of every ``isinstance(value, bool) or not
+      isinstance(value, int)`` guard (``or@184``, ``or@274``,
+      ``or@285``) -- ``True`` IS an ``int`` in Python, so only the
+      explicit ``bool`` half refuses it;
+    * the BOUNDARY of every ``< 0`` guard (``lt@278``, ``lt@287``,
+      ``lt@806``) -- a count of exactly zero must be accepted;
+    * the LENGTH half of the pair guard (``or@281``) -- a pair of the
+      wrong length must be refused, not half-accepted;
+    * the SECOND half of the two-sided monotonicity guard (``or@527``)
+      -- a record count that regresses while the seq does not;
+    * the OVERFLOW half of the receipt-size guards (``gt@621``,
+      ``gt@631``) -- a store exactly at the limit must still be read;
+    * the ``or -> and`` half of the "keep the caller's value" guards
+      (``and@1194``, ``and@1253``, ``or@1200``, ``or@1259``) -- an
+      explicit argument must not be overwritten by the manifest's;
+    * the ``or -> and`` half of the "accept the observed pair" guards
+      (``and@1202``, ``and@1261``, ``eq@1261``) -- a two-character
+      STRING is not a pair;
+    * the FIRST half of the two-sided anchor guards (``or@1189``,
+      ``or@1248``, ``or@1198``, ``or@1257``);
+    * the TYPE half of the fresh-start and ledger guards (``or@1070``,
+      ``or@1072``, ``or@1317``, ``or@1324``, ``or@1345``), where the
+      two halves are told apart by WHICH guard refuses -- the
+      module's messages are the observable that distinguishes them.
+
+    Each test names the mutant it kills and says why the mutant's
+    behaviour is wrong.
+    """
+
+    # -- HeadPin: the empty half of the genesis guard -------------------
+    def test_an_empty_genesis_is_refused(self):
+        """``or@178``: the EMPTY half of the genesis guard.
+
+        The guard is ``not isinstance(self.genesis, str) or not
+        self.genesis``.  An empty string IS a ``str``, so the type half
+        does not fire; only the emptiness half refuses it.  Under the
+        mutant (``or`` -> ``and``) an empty genesis is accepted and the
+        pin seals a chain with no genesis at all.
+        """
+        with self.assertRaises(ahh.HeadHolderError):
+            ahh.HeadPin(
+                head_hash=HEAD_A,
+                seq=3,
+                records_sealed=3,
+                genesis="",
+                seq_first=1,
+                seq_last=3,
+            )
+
+    # -- HeadPin: the bool half of the int guard ------------------------
+    def test_a_boolean_seq_is_refused(self):
+        """``or@184``: the ``bool`` half, on the seq.
+
+        ``True`` is an ``int`` in Python, so the "not an int" half
+        never refuses it -- only the explicit ``bool`` half does.  The
+        pin below is otherwise perfectly legal (a one-record chain:
+        ``seq == seq_last == records_sealed == 1``), so under the
+        mutant (``or`` -> ``and``) it is built as a pin whose ``seq``
+        is ``True``.
+        """
+        with self.assertRaises(ahh.HeadHolderError):
+            ahh.HeadPin(
+                head_hash=HEAD_A,
+                seq=True,
+                records_sealed=1,
+                genesis=GENESIS,
+                seq_first=1,
+                seq_last=1,
+            )
+
+    def test_a_boolean_record_count_on_an_empty_range_is_refused(self):
+        """``or@184``: the same ``bool`` half, on the record count.
+
+        The pin below is otherwise legal (an empty range ``[1..0]``),
+        and ``False`` satisfies the empty-range consistency rule, so
+        under the mutant (``or`` -> ``and``) it is built as a pin whose
+        record count is ``False``.
+        """
+        with self.assertRaises(ahh.HeadHolderError):
+            ahh.HeadPin(
+                head_hash=HEAD_A,
+                seq=0,
+                records_sealed=False,
+                genesis=GENESIS,
+                seq_first=1,
+                seq_last=0,
+            )
+
+    # -- HeadPin: the empty-range consistency guard --------------------
+    def test_an_empty_range_that_claims_a_record_is_refused(self):
+        """``or@194``: the RECORD-COUNT half of the empty-range guard.
+
+        The guard is ``if self.seq or self.records_sealed:`` -- an empty
+        range ``[1..0]`` means nothing was sealed, so neither the seq
+        nor the record count may claim otherwise.  The pin below claims
+        a seq of 0 but a record count of 1.  Under the mutant
+        (``or`` -> ``and``) only a pin that claims BOTH is refused, so
+        this inconsistent pin is built and reads as a sealed chain.
+        """
+        with self.assertRaises(ahh.HeadHolderError):
+            ahh.HeadPin(
+                head_hash=HEAD_A,
+                seq=0,
+                records_sealed=1,
+                genesis=GENESIS,
+                seq_first=1,
+                seq_last=0,
+            )
+
+    # -- AnchorReceipt: the empty halves --------------------------------
+    def test_an_empty_anchor_is_refused(self):
+        """``or@263``: the EMPTY half of the anchor guard.
+
+        ``not isinstance(self.anchor, str) or not self.anchor``: an
+        empty anchor IS a string, so only the emptiness half refuses
+        it.  Under the mutant (``or`` -> ``and``) a receipt with no
+        anchor at all is accepted.
+        """
+        with self.assertRaises(ahh.HeadHolderError):
+            ahh.AnchorReceipt(anchor="", anchor_id="a1")
+
+    def test_an_empty_anchor_id_is_refused(self):
+        """``or@265``: the EMPTY half of the anchor-id guard."""
+        with self.assertRaises(ahh.HeadHolderError):
+            ahh.AnchorReceipt(anchor="northstar-audit-anchor/1", anchor_id="")
+
+    # -- AnchorReceipt: the bool half of the int guard ------------------
+    def test_a_boolean_record_count_is_refused_on_a_receipt(self):
+        """``or@274``: the ``bool`` half of the receipt's count guard.
+
+        ``True`` is an ``int`` in Python; the guard has to exclude it
+        explicitly or a receipt would commit to the count one.
+        """
+        with self.assertRaises(ahh.HeadHolderError):
+            ahh.AnchorReceipt(
+                anchor="northstar-audit-anchor/1",
+                anchor_id="a1",
+                records_sealed=True,
+            )
+
+    # -- AnchorReceipt: the zero boundary -------------------------------
+    def test_a_zero_record_count_is_accepted(self):
+        """``lt@278``: the ZERO boundary of the count guard.
+
+        The guard is ``if self.records_sealed < 0:`` -- a count of
+        exactly zero is a legal observation (the anchor saw a chain
+        with no records).  Under the mutant (``<`` -> ``<=``) a zero
+        count is refused, so a fresh, empty chain cannot be anchored.
+        """
+        receipt = ahh.AnchorReceipt(
+            anchor="northstar-audit-anchor/1",
+            anchor_id="a1",
+            records_sealed=0,
+        )
+        self.assertEqual(receipt.records_sealed, 0)
+
+    # -- AnchorReceipt: the pair guard ----------------------------------
+    def test_a_seq_range_of_the_wrong_length_is_refused(self):
+        """``or@281``: the LENGTH half of the pair guard.
+
+        The guard is ``not isinstance(self.seq_range, (tuple, list)) or
+        len(self.seq_range) != 2``.  An empty tuple IS a tuple, so the
+        type half does not fire; only the length half refuses it.
+        Under the mutant (``or`` -> ``and``) the empty tuple slips
+        through the guard and the receipt then fails to unpack --
+        raising a bare ``ValueError`` out of the fail-closed API
+        instead of a :class:`HeadHolderError`.
+        """
+        with self.assertRaises(ahh.HeadHolderError):
+            ahh.AnchorReceipt(
+                anchor="northstar-audit-anchor/1",
+                anchor_id="a1",
+                seq_range=(),
+            )
+
+    def test_a_string_is_not_a_seq_range(self):
+        """``or@281``: the TYPE half, on the same guard."""
+        with self.assertRaises(ahh.HeadHolderError):
+            ahh.AnchorReceipt(
+                anchor="northstar-audit-anchor/1",
+                anchor_id="a1",
+                seq_range="ab",
+            )
+
+    # -- AnchorReceipt: the bool/float halves of the bounds guard -------
+    def test_a_boolean_seq_range_bound_is_refused(self):
+        """``or@285``: the ``bool`` half of the range-bounds guard.
+
+        ``True`` is an ``int`` in Python, so the "not an int" half does
+        not refuse it.  Under the mutant (``or`` -> ``and``) a range
+        whose lower bound is ``True`` is accepted.
+        """
+        with self.assertRaises(ahh.HeadHolderError):
+            ahh.AnchorReceipt(
+                anchor="northstar-audit-anchor/1",
+                anchor_id="a1",
+                seq_range=(True, 3),
+            )
+
+    def test_a_float_seq_range_bound_is_refused(self):
+        """``or@285``: the "not an int" half, on the same guard."""
+        with self.assertRaises(ahh.HeadHolderError):
+            ahh.AnchorReceipt(
+                anchor="northstar-audit-anchor/1",
+                anchor_id="a1",
+                seq_range=(1.5, 3),
+            )
+
+    def test_a_zero_seq_range_bound_is_accepted(self):
+        """``lt@287``: the ZERO boundary of the bounds guard.
+
+        The guard is ``if value < 0:`` -- a bound of exactly zero is a
+        legal observed range (``[0..N]``).  Under the mutant (``<`` ->
+        ``<=``) a zero bound is refused.
+        """
+        receipt = ahh.AnchorReceipt(
+            anchor="northstar-audit-anchor/1",
+            anchor_id="a1",
+            seq_range=(0, 0),
+        )
+        self.assertEqual(receipt.seq_range, (0, 0))
+
+    # -- the store: the prev_head round trip ---------------------------
+    def test_a_published_head_keeps_its_prev_head(self):
+        """``or@678``: the read path's ``prev_head`` fallback.
+
+        The read path does ``prev_head=record.get("prev_head") or ""``.
+        A head that carries a ``prev_head`` (a fresh-start re-mint) has
+        a truthy one, so under the mutant (``or`` -> ``and``) the
+        fallback wins and the loaded head's ``prev_head`` is silently
+        emptied -- the link to the history it replaces is gone.
+        """
+        holder = self.holder()
+        previous = _pin(head=HEAD_A, seq=3, records=3)
+        fresh = ahh.fresh_start_pin(previous, genesis=GENESIS, head_hash=HEAD_B)
+        self.assertEqual(fresh.prev_head, HEAD_A)
+        holder.publish_head(fresh, receipt=_receipt(fresh))
+        receipts = holder.receipts()
+        self.assertEqual(len(receipts), 1)
+        self.assertEqual(receipts[0].pin.prev_head, HEAD_A)
+
+    # -- the store: the size guards' boundary ---------------------------
+    def _published_store(self):
+        holder = self.holder()
+        pin = _pin(seq=3, records=3)
+        holder.publish_head(pin, receipt=_receipt(pin))
+        return holder
+
+    def test_a_store_line_exactly_at_the_maximum_size_is_read(self):
+        """``gt@631``: the OVERFLOW boundary of the line-size guard.
+
+        The guard is ``if len(line.encode("utf-8")) > _MAX_RECEIPT_BYTES:``
+        -- the maximum is the largest line that FITS, so a line of
+        exactly that size must be read.  Under the mutant (``>`` ->
+        ``>=``) the line is refused as oversized and the whole store
+        becomes unreadable.  The limit is lowered to the store's own
+        line length so the boundary is reached without writing a
+        64 KiB file.
+        """
+        holder = self._published_store()
+        raw = holder.path.read_bytes()
+        line_length = len(raw) - 1  # the trailing newline is not part of the line
+        with mock.patch.object(ahh, "_MAX_RECEIPT_BYTES", line_length):
+            receipts = holder.receipts()
+        self.assertEqual(len(receipts), 1)
+
+    def test_a_store_exactly_at_the_maximum_total_size_is_read(self):
+        """``gt@621``: the OVERFLOW boundary of the total-size guard.
+
+        The guard is ``if len(raw) > _MAX_RECEIPT_BYTES * 1024:`` -- a
+        store of exactly the maximum size is not "implausibly large".
+        Under the mutant (``>`` -> ``>=``) it is refused.  The store is
+        padded with blank lines to land exactly on the limit.
+        """
+        holder = self._published_store()
+        raw = holder.path.read_bytes()
+        line_length = len(raw) - 1
+        limit = line_length * 1024
+        holder.path.write_bytes(raw + b"\n" * (limit - len(raw)))
+        with mock.patch.object(ahh, "_MAX_RECEIPT_BYTES", line_length):
+            receipts = holder.receipts()
+        self.assertEqual(len(receipts), 1)
+
+    # -- the tail check: the row-count guard ----------------------------
+    def test_a_boolean_writer_row_count_is_refused(self):
+        """``or@804``: the ``bool`` half of the writer-rows guard.
+
+        ``True`` is an ``int`` in Python, so the "not an int" half does
+        not refuse it.  Under the mutant (``or`` -> ``and``) a boolean
+        row count is accepted and compared as the integer one.
+        """
+        holder = self.holder()
+        with self.assertRaises(ahh.HeadHolderError):
+            holder.tail_check(_pin(), writer_rows=True)
+
+    def test_a_float_writer_row_count_is_refused(self):
+        """``or@804``: the "not an int" half, on the same guard."""
+        holder = self.holder()
+        with self.assertRaises(ahh.HeadHolderError):
+            holder.tail_check(_pin(), writer_rows=1.5)
+
+    def test_a_zero_writer_row_count_is_accepted(self):
+        """``lt@806``: the ZERO boundary of the writer-rows guard.
+
+        The guard is ``if writer_rows < 0:`` -- zero rows is a legal
+        count (a writer that holds nothing yet).  Under the mutant
+        (``<`` -> ``<=``) a zero row count is refused outright instead
+        of being reported as a mismatch.
+        """
+        holder = self.holder()
+        report = holder.tail_check(_pin(), writer_rows=0)
+        self.assertFalse(report.ok)
+
+    # -- the fresh-start path: which guard refuses ----------------------
+    def test_an_empty_genesis_is_refused_before_the_head_hash(self):
+        """``or@1070``: the EMPTY half of the fresh-start genesis guard.
+
+        The guard is ``not isinstance(genesis, str) or not genesis`` and
+        it is the FIRST of the two argument checks.  An empty genesis
+        IS a string, so only the emptiness half fires -- and under the
+        mutant (``or`` -> ``and``) the check is skipped and the NEXT
+        guard (the head hash) refuses instead.  The message is the
+        observable that tells the two guards apart.
+        """
+        with self.assertRaises(ahh.HeadHolderError) as ctx:
+            ahh.fresh_start_pin(_pin(), genesis="", head_hash="")
+        self.assertIn("genesis", str(ctx.exception))
+        self.assertNotIn("head_hash", str(ctx.exception))
+
+    def test_an_empty_head_hash_is_refused_before_the_seq_check(self):
+        """``or@1072``: the EMPTY half of the fresh-start head-hash guard.
+
+        The guard is ``not isinstance(head_hash, str) or not head_hash``.
+        An empty head hash IS a string, so only the emptiness half
+        fires.  Under the mutant (``or`` -> ``and``) the check is
+        skipped, and the call falls through to the "no previous head
+        cannot claim a seq" guard instead -- a different refusal for
+        the same bad argument.
+        """
+        with self.assertRaises(ahh.HeadHolderError) as ctx:
+            ahh.fresh_start_pin(None, genesis=GENESIS, head_hash="", seq=1)
+        self.assertIn("head_hash", str(ctx.exception))
+
+    # -- the offline anchor receipt -------------------------------------
+    def test_a_manifest_that_pins_no_head_is_refused(self):
+        """``or@1189``: the EMPTY half of the manifest's head guard.
+
+        The guard is ``not isinstance(committed, str) or not committed``.
+        An empty hash IS a string, so only the emptiness half refuses
+        it.  Under the mutant (``or`` -> ``and``) a manifest pinning an
+        empty head produces a receipt that names no head -- a receipt
+        that cannot seal anything, but looks well-formed.
+        """
+        with self.assertRaises(ahh.HeadHolderError):
+            ahh.offline_anchor_receipt(
+                anchor_id="a1", manifest={"head_chain_hash": ""}
+            )
+
+    def test_the_caller_record_count_is_not_overwritten_by_the_manifest(self):
+        """``and@1194``: the "the manifest has the key" half.
+
+        The guard is ``if records_sealed is None and "records_sealed"
+        in manifest:`` -- the manifest's count is only taken when the
+        caller did not supply one.  Under the mutant (``and`` ->
+        ``or``) the manifest's count OVERWRITES the caller's explicit
+        count, so the receipt commits to a count the caller never
+        asked for.
+        """
+        receipt = ahh.offline_anchor_receipt(
+            anchor_id="a1",
+            manifest={"head_chain_hash": HEAD_A, "records_sealed": 3},
+            records_sealed=5,
+        )
+        self.assertEqual(receipt.records_sealed, 5)
+
+    def test_a_non_integer_manifest_count_is_refused_by_the_manifest_guard(self):
+        """``or@1198``: the BOOL/float half of the manifest's count guard.
+
+        The guard is ``if isinstance(count, bool) or not isinstance(count,
+        int):`` and it belongs to the MANIFEST layer: its message is
+        "records must be an int".  Under the mutant (``or`` -> ``and``)
+        a float count slips past the manifest guard and is refused by
+        the receipt layer instead, with a different message -- the
+        manifest's own check no longer happens.
+        """
+        with self.assertRaises(ahh.HeadHolderError) as ctx:
+            ahh.offline_anchor_receipt(
+                anchor_id="a1",
+                manifest={"head_chain_hash": HEAD_A, "records": 1.5},
+            )
+        self.assertIn("records must be an int", str(ctx.exception))
+
+    def test_the_caller_seq_range_is_not_overwritten_by_the_manifest(self):
+        """``or@1200``: the "the manifest has a range" half.
+
+        The guard is ``if seq_range is None and manifest.get("seq_range")
+        is not None:`` -- the manifest's range is only taken when the
+        caller did not supply one.  Under the mutant (``or`` ->
+        ``and``) the manifest's range OVERWRITES the caller's explicit
+        range.
+        """
+        receipt = ahh.offline_anchor_receipt(
+            anchor_id="a1",
+            manifest={"head_chain_hash": HEAD_A, "seq_range": [1, 3]},
+            seq_range=(2, 5),
+        )
+        self.assertEqual(receipt.seq_range, (2, 5))
+
+    def test_a_two_character_string_is_not_a_seq_range(self):
+        """``and@1202``: the LENGTH half of the observed-pair guard.
+
+        The guard is ``if isinstance(observed, (tuple, list)) and len(observed)
+        == 2:`` -- a manifest's range is only taken when it really is a
+        pair.  ``"ab"`` has length 2 but is a string, so under the
+        mutant (``and`` -> ``or``) it is unpacked into the characters
+        ``('a', 'b')`` and the receipt is refused further down with a
+        different error; in the original the range is simply not taken
+        and the receipt carries no range.
+        """
+        receipt = ahh.offline_anchor_receipt(
+            anchor_id="a1",
+            manifest={"head_chain_hash": HEAD_A, "seq_range": "ab"},
+        )
+        self.assertIsNone(receipt.seq_range)
+
+    # -- the external (Rekor) anchor receipt ----------------------------
+    def test_the_external_anchor_payload_is_read(self):
+        """``or@1246``: the "the anchor has a payload" half.
+
+        The line is ``payload = anchor.get("payload") or {}``.  A Rekor
+        entry HAS a payload, so the payload is the truthy operand and
+        under the mutant (``or`` -> ``and``) the ``{}`` wins instead:
+        the payload is thrown away and the receipt cannot name the
+        head it anchored.
+        """
+        receipt = ahh.external_anchor_receipt(
+            anchor_id="a1",
+            anchor={"payload": {"head_chain_hash": HEAD_A}},
+        )
+        self.assertEqual(receipt.head_hash, HEAD_A)
+
+    def test_an_external_anchor_that_pins_no_head_is_refused(self):
+        """``or@1248``: the EMPTY half of the external anchor's head guard."""
+        with self.assertRaises(ahh.HeadHolderError):
+            ahh.external_anchor_receipt(
+                anchor_id="a1",
+                anchor={"payload": {"head_chain_hash": ""}},
+            )
+
+    def test_the_caller_record_count_is_not_overwritten_by_the_payload(self):
+        """``and@1253``: the "the payload has a count" half."""
+        receipt = ahh.external_anchor_receipt(
+            anchor_id="a1",
+            anchor={"payload": {"head_chain_hash": HEAD_A, "records_sealed": 3}},
+            records_sealed=5,
+        )
+        self.assertEqual(receipt.records_sealed, 5)
+
+    def test_a_non_integer_payload_count_is_refused_by_the_payload_guard(self):
+        """``or@1257``: the BOOL/float half of the external count guard.
+
+        Same shape as the offline manifest's guard: the message tells
+        the payload-level check apart from the receipt-level one.
+        """
+        with self.assertRaises(ahh.HeadHolderError) as ctx:
+            ahh.external_anchor_receipt(
+                anchor_id="a1",
+                anchor={"payload": {"head_chain_hash": HEAD_A, "records": 1.5}},
+            )
+        self.assertIn("records must be an int", str(ctx.exception))
+
+    def test_the_caller_seq_range_is_not_overwritten_by_the_payload(self):
+        """``or@1259``: the "the payload has a range" half."""
+        receipt = ahh.external_anchor_receipt(
+            anchor_id="a1",
+            anchor={"payload": {"head_chain_hash": HEAD_A, "seq_range": [1, 3]}},
+            seq_range=(2, 5),
+        )
+        self.assertEqual(receipt.seq_range, (2, 5))
+
+    def test_a_three_element_payload_range_is_not_a_pair(self):
+        """``eq@1261``: the LENGTH half of the observed-pair guard.
+
+        The guard is ``if isinstance(observed, (tuple, list)) and len(observed)
+        == 2:``.  Under the mutant (``==`` -> ``!=``) a range of THREE
+        bounds is accepted and the receipt is refused further down with
+        a different error; in the original the range is simply not
+        taken.
+        """
+        receipt = ahh.external_anchor_receipt(
+            anchor_id="a1",
+            anchor={"payload": {"head_chain_hash": HEAD_A, "seq_range": [1, 2, 3]}},
+        )
+        self.assertIsNone(receipt.seq_range)
+
+    def test_a_two_character_payload_range_is_not_a_pair(self):
+        """``and@1261``: the TYPE half of the observed-pair guard.
+
+        ``"ab"`` has length 2 but is a string: under the mutant
+        (``and`` -> ``or``) it is unpacked into characters.
+        """
+        receipt = ahh.external_anchor_receipt(
+            anchor_id="a1",
+            anchor={"payload": {"head_chain_hash": HEAD_A, "seq_range": "ab"}},
+        )
+        self.assertIsNone(receipt.seq_range)
+
+    # -- the ledger pin -------------------------------------------------
+    def test_an_empty_ledger_genesis_is_refused_by_the_ledger_guard(self):
+        """``or@1317``: the EMPTY half of the ledger's genesis guard.
+
+        The guard is ``not isinstance(genesis, str) or not genesis`` and
+        its message is the ledger's own ("ledger must provide a genesis
+        pin").  An empty genesis IS a string, so under the mutant
+        (``or`` -> ``and``) the ledger guard is skipped and the PIN's
+        guard refuses instead -- a different refusal for the same
+        ledger.
+        """
+        with self.assertRaises(ahh.HeadHolderError) as ctx:
+            ahh.ledger_head_pin(_StubLedger("", HEAD_A))
+        self.assertIn("genesis pin", str(ctx.exception))
+
+    def test_an_empty_ledger_record_hash_is_refused_by_the_ledger_guard(self):
+        """``or@1324``: the EMPTY half of the ledger's head-hash guard.
+
+        The guard is ``not isinstance(head_hash, str) or not head_hash``
+        and its message is the ledger's own ("ledger head must carry a
+        record_hash").  Under the mutant (``or`` -> ``and``) the ledger
+        guard is skipped and the PIN's guard refuses instead.
+        """
+        with self.assertRaises(ahh.HeadHolderError) as ctx:
+            ahh.ledger_head_pin(_StubLedger(GENESIS, ""))
+        self.assertIn("record_hash", str(ctx.exception))
+
+    def test_an_empty_pin_is_refused_before_the_digest_check(self):
+        """``or@1345``: the EMPTY half of the bare-hex guard.
+
+        The guard is ``not isinstance(value, str) or not value`` and its
+        message is the pin's own ("pin must be a non-empty str").  An
+        empty value IS a string, so under the mutant (``or`` -> ``and``)
+        the guard is skipped and the digest check refuses instead --
+        a different refusal for the same value.  (The public entry
+        point, ``head_feed_bytes``, cannot reach this guard with an
+        empty value -- ``HeadPin`` already refuses an empty head hash
+        -- so the helper is exercised directly.)
+        """
+        with self.assertRaises(ahh.HeadHolderError) as ctx:
+            ahh._bare_hex("")
+        self.assertIn("non-empty", str(ctx.exception))
+
+
+class TestEquivalentMutantsAreRecorded(_HolderCase):
+    """The surviving mutants that are EQUIVALENT, and the proof.
+
+    Two of the planted faults in this slice cannot be killed, because
+    the original code and the mutated code agree on every reachable
+    input.  They are recorded here so the next person does not spend a
+    round looking for a killer that does not exist.  (The convention
+    follows ``tests/test_state_budget.py``'s ``gt@304`` case.)
+    """
+
+    def test_the_monotonicity_guard_is_equivalent_under_the_and_mutant(self):
+        """``or@527``: an EQUIVALENT mutant, proven differentially.
+
+        The guard is::
+
+            if pin.seq < last.pin.seq or pin.records_sealed < last.pin.records_sealed:
+
+        A :class:`HeadPin` ALWAYS has ``seq == records_sealed`` (the
+        empty range forces both to 0, and every other range forces
+        ``records_sealed == seq_last == seq``), so the two halves of
+        the disjunction are the SAME predicate and ``or`` and ``and``
+        cannot differ.  This test proves it differentially: it drives
+        a randomised sequence of pins through the real publish path and
+        checks that the observed refusals agree with the MUTANT's
+        predicate (``and``) on every step -- which, by the invariant
+        above, means they agree with the original's (``or``) too.
+        """
+        rng = random.Random(173)
+        holder = self.holder()
+        last = None
+        for step in range(60):
+            seq = rng.randint(0, 8)
+            head = "sha256:" + ("%02x" % seq) * 32
+            pin = _pin(head=head, seq=seq, records=seq, first=1, last=seq)
+            # The invariant the equivalence rests on.
+            self.assertEqual(pin.seq, pin.records_sealed)
+            mutant_refuses = (
+                last is not None
+                and pin.seq < last.seq
+                and pin.records_sealed < last.records_sealed
+            )
+            refused = False
+            try:
+                holder.publish_head(pin, receipt=_receipt(pin))
+            except ahh.HeadHolderError:
+                refused = True
+            self.assertEqual(
+                refused,
+                mutant_refuses,
+                f"step {step}: the original and the mutant disagree",
+            )
+            if not refused:
+                last = pin
+
+    def test_the_monotonicity_guard_still_refuses_a_rollback(self):
+        """``or@527``: the control -- a rollback really is refused.
+
+        The equivalence above is only worth anything if the guard is
+        not vacuous, so the refusal itself is pinned.
+        """
+        holder = self.holder()
+        holder.publish_head(_pin(head=HEAD_A, seq=3, records=3), receipt=_receipt())
+        with self.assertRaises(ahh.HeadHolderError):
+            holder.publish_head(
+                _pin(head=HEAD_B, seq=1, records=1),
+                receipt=_receipt(_pin(head=HEAD_B, seq=1, records=1)),
+            )
+
+    def test_the_shortened_and_extended_reasons_are_distinct(self):
+        """``lt@928``: an EQUIVALENT mutant, and why.
+
+        The line is ``shortened = writer_rows < independent_rows``.  It
+        is reached only from::
+
+            if writer_rows != independent_rows:
+
+        so at that point ``writer_rows`` and ``independent_rows`` are
+        DIFFERENT, and for two different integers ``a != b`` implies
+        ``a < b`` iff ``a <= b``.  The mutation (``<`` -> ``<=``)
+        therefore changes nothing reachable: the reason text says
+        "chain shortened" exactly when the writer holds fewer rows
+        than the independent holder counted, in both versions.  This
+        test pins both texts so the equivalence is visible rather than
+        assumed.
+        """
+        holder = self.holder()
+        pin = _pin(seq=3, records=3)
+        holder.publish_head(pin, receipt=_receipt(pin))
+        short = holder.tail_check(pin, writer_rows=2)
+        self.assertFalse(short.ok)
+        self.assertIn("chain shortened", short.reason)
+        long = holder.tail_check(pin, writer_rows=4)
+        self.assertFalse(long.ok)
+        self.assertIn("chain extended past the anchored head", long.reason)
 
 
 if __name__ == "__main__":
