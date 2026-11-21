@@ -18,9 +18,12 @@ on an event rather than a subprocess.
 from __future__ import annotations
 
 import dataclasses
+import io
+import runpy
 import sys
 import threading
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -43,6 +46,7 @@ from retry_config import (  # noqa: E402
     classify_call,
     run_with_timeout,
 )
+import retry_config as rc  # noqa: E402
 from retry_contract import Failure, FailureClass, FailurePhase  # noqa: E402
 from retry_contract import classify_response  # noqa: E402
 
@@ -534,6 +538,412 @@ class EndToEndPathTests(unittest.TestCase):
         self.assertIs(outcome.verdict.decision, RetryDecision.INDETERMINATE)
         self.assertTrue(outcome.may_have_executed)
         self.assertEqual(outcome.attempts, 1)
+
+
+class RetryGuardSecondHalfTests(unittest.TestCase):
+    """The second half of every guard in ``retry_config``.
+
+    Every guard in the module is a PAIR of conditions joined by ``or``:  a
+    TYPE half ("is this a number at all?") and a BOUND half ("is it in
+    range?").  The suite drove one half and left the other, so a fault
+    planted in the half nobody drove survived.
+
+    Two rules for every test here:
+
+    * it must be a DISCRIMINATOR -- it passes on the real code and fails
+      on the mutant, so it names the exact value that sits on the
+      boundary the guard is about;  and
+    * the BOOLEAN trap is respected.  ``isinstance(True, int)`` is True
+      in Python, so the type half of a "must be a number" guard has to
+      name the bool explicitly or it never refuses a boolean at all.
+    """
+
+    # -- the configuration guards --------------------------------------
+
+    def test_max_retries_refuses_a_boolean(self):
+        """`lt@167`: the type half of the budget guard, on a bool.
+
+        ``max_retries=True`` is a bool, and bool IS an int, so the
+        ``isinstance(self.max_retries, bool)`` half is the only thing
+        that refuses it.  With that half inverted the boolean slips
+        through and the config is accepted.
+        """
+        with self.assertRaises(RetryConfigError):
+            RetryConfig(max_retries=True)
+
+    def test_max_retries_of_exactly_zero_is_accepted(self):
+        """`lt@167`: the boundary -- zero retries is legal.
+
+        The budget guard is ``< 0``, so zero must be ACCEPTED.  Under
+        the mutant (``<`` -> ``<=``) zero is refused, which turns a
+        legal "never retry" configuration into a hard error.
+        """
+        config = RetryConfig(max_retries=0)
+        self.assertEqual(config.max_retries, 0)
+        self.assertEqual(config.schedule(), ())
+
+    def test_a_wait_seconds_value_that_is_a_boolean_is_refused(self):
+        """`or@171`: the type half, on a bool.
+
+        ``isinstance(True, (int, float))`` is True, so the bool half of
+        the guard is the only thing that refuses a boolean wait.  With
+        it inverted the boolean is accepted as a wait of ``True``
+        seconds.
+        """
+        with self.assertRaises(RetryConfigError):
+            RetryConfig(initial_wait_seconds=True)
+        with self.assertRaises(RetryConfigError):
+            RetryConfig(max_wait_seconds=True)
+
+    def test_a_wait_seconds_value_that_is_not_a_number_is_refused(self):
+        """`or@171`: the type half, on a string and on None."""
+        with self.assertRaises(RetryConfigError):
+            RetryConfig(initial_wait_seconds="2.0")  # type: ignore[arg-type]
+        with self.assertRaises(RetryConfigError):
+            RetryConfig(max_wait_seconds=None)  # type: ignore[arg-type]
+
+    def test_a_wait_seconds_value_of_exactly_the_initial_wait_is_accepted(self):
+        """`lt@175`: the boundary -- the two waits may be equal.
+
+        ``max_wait_seconds < initial_wait_seconds`` refuses a ceiling
+        BELOW the first wait.  Equal is legal and must be accepted; the
+        mutant (``<`` -> ``<=``) refuses it.
+        """
+        config = RetryConfig(initial_wait_seconds=5.0, max_wait_seconds=5.0)
+        self.assertEqual(config.max_wait_seconds, 5.0)
+        self.assertEqual(config.schedule()[0].nominal, 5.0)
+
+    def test_a_ceiling_below_the_first_wait_is_refused(self):
+        """`lt@175`: the other side of the same boundary."""
+        with self.assertRaises(RetryConfigError):
+            RetryConfig(initial_wait_seconds=10.0, max_wait_seconds=9.0)
+
+    def test_an_exponential_base_that_is_a_boolean_is_refused(self):
+        """`or@177`: the type half, on a bool."""
+        with self.assertRaises(RetryConfigError):
+            RetryConfig(exponential_base=True)
+
+    def test_an_exponential_base_that_is_not_a_number_is_refused(self):
+        """`or@177`: the type half, on a string."""
+        with self.assertRaises(RetryConfigError):
+            RetryConfig(exponential_base="2.0")  # type: ignore[arg-type]
+
+    def test_an_exponential_base_of_exactly_one_is_accepted(self):
+        """`or@181`: the lower bound of the range -- exactly 1.0 is legal.
+
+        The guard is ``1.0 <= base <= 4.0``.  Exactly 1.0 is inside the
+        range and must be accepted; the mutant (``or`` -> ``and``) lets
+        the two bound checks fight each other and refuses it.
+        """
+        config = RetryConfig(exponential_base=1.0)
+        self.assertEqual(config.exponential_base, 1.0)
+
+    def test_an_exponential_base_of_exactly_four_is_accepted(self):
+        """`or@181`: the upper bound of the range -- exactly 4.0 is legal."""
+        config = RetryConfig(exponential_base=4.0)
+        self.assertEqual(config.exponential_base, 4.0)
+
+    def test_an_exponential_base_above_four_is_refused(self):
+        """`or@181`: the other side of the upper bound."""
+        with self.assertRaises(RetryConfigError):
+            RetryConfig(exponential_base=4.0001)
+
+    def test_a_jitter_that_is_a_boolean_is_refused(self):
+        """`or@181`: the type half, on a bool."""
+        with self.assertRaises(RetryConfigError):
+            RetryConfig(jitter=True)
+
+    def test_a_jitter_that_is_not_a_number_is_refused(self):
+        """`or@181`: the type half, on a string."""
+        with self.assertRaises(RetryConfigError):
+            RetryConfig(jitter="0.5")  # type: ignore[arg-type]
+
+    def test_a_jitter_of_exactly_zero_is_accepted(self):
+        """`or@181`: the lower bound of the jitter range -- exactly 0.0.
+
+        ``jitter = 0`` declares an exact wait, which the schedule
+        documents as legal.  Under the mutant (``or`` -> ``and``) it is
+        refused.
+        """
+        config = RetryConfig(jitter=0.0)
+        self.assertEqual(config.jitter, 0.0)
+        window = config.schedule()[0]
+        self.assertEqual(window.low, window.nominal)
+
+    def test_a_jitter_of_exactly_one_is_accepted(self):
+        """`or@181`: the upper bound of the jitter range -- exactly 1.0."""
+        config = RetryConfig(jitter=1.0)
+        self.assertEqual(config.jitter, 1.0)
+        self.assertEqual(config.schedule()[0].low, 0.0)
+
+    def test_a_jitter_above_one_is_refused(self):
+        """`or@181`: the other side of the upper bound."""
+        with self.assertRaises(RetryConfigError):
+            RetryConfig(jitter=1.0001)
+
+    # -- the timeout guard ---------------------------------------------
+
+    def test_a_timeout_seconds_that_is_a_boolean_is_refused(self):
+        """`or@665`: the type half, on a bool.
+
+        ``isinstance(True, (int, float))`` is True, so the bool half is
+        the only thing that refuses a boolean timeout.  Under the
+        mutant (``or`` -> ``and``) a boolean timeout is accepted, and
+        ``True`` seconds means "one second".
+        """
+        with self.assertRaises(RetryConfigError):
+            run_with_timeout(lambda: None, True)  # type: ignore[arg-type]
+
+    def test_a_timeout_seconds_that_is_not_a_number_is_refused(self):
+        """`or@665`: the type half, on a string."""
+        with self.assertRaises(RetryConfigError):
+            run_with_timeout(lambda: None, "1.0")  # type: ignore[arg-type]
+
+    # -- the gate: a RETRY verdict that carries no window --------------
+
+    @staticmethod
+    def _windowless_retry_verdict() -> RetryVerdict:
+        """A verdict that says RETRY but declares no wait.
+
+        ``classify_call`` never produces one -- a RETRY verdict always
+        carries a window -- so the only way to reach the gate's window
+        half is to substitute one.  That is the point: the guard has to
+        hold for a verdict the classifier did not produce.
+        """
+        return RetryVerdict(
+            decision=RetryDecision.RETRY,
+            kind=CallKind.SESSION_LIFECYCLE,
+            failure_class=FailureClass.RETRYABLE,
+            reason="a retry that declares no wait",
+            window=None,
+        )
+
+    def _with_classify_call(self, replacement):
+        """Run a callable with ``retry_config.classify_call`` replaced."""
+
+        class _Patch:
+            def __enter__(self):
+                self.original = rc.classify_call
+                rc.classify_call = replacement
+                return self
+
+            def __exit__(self, *exc):
+                rc.classify_call = self.original
+                return False
+
+        return _Patch()
+
+    def test_a_retry_verdict_without_a_window_ends_the_gate(self):
+        """`or@530`: the window half of the gate's stop rule.
+
+        The gate stops when the verdict is not RETRY **or** the verdict
+        carries no window.  The second half is what stops a RETRY
+        verdict that has no declared wait -- retrying with no schedule
+        would wait an undeclared amount of time.
+
+        The discriminator is a verdict whose decision is RETRY and whose
+        window is None.  Under the mutant (``or`` -> ``and``) the gate
+        goes on to sleep on a missing window, so the outcome claims a
+        retry that was never scheduled.
+        """
+        gate = RetryGate(RetryConfig(max_retries=5), sleep=lambda _s: None)
+
+        def fake_classify_call(*_args, **_kwargs):
+            return self._windowless_retry_verdict()
+
+        with self._with_classify_call(fake_classify_call):
+            outcome = gate.execute(
+                CallKind.SESSION_LIFECYCLE,
+                lambda: (_ for _ in ()).throw(RuntimeError("throttled")),
+            )
+
+        self.assertFalse(outcome.ok)
+        self.assertEqual(outcome.attempts, 1)
+        self.assertEqual(outcome.windows, ())
+        self.assertIsNotNone(outcome.verdict)
+        self.assertIs(outcome.verdict.decision, RetryDecision.RETRY)
+
+    def test_a_retry_verdict_without_a_window_ends_the_classify_path_too(self):
+        """`or@552`: the same window half on the returned-value path.
+
+        The gate has two copies of the stop rule -- one for a raised
+        exception and one for a returned value the caller classified as
+        a failure -- and both have the window half.
+        """
+        gate = RetryGate(RetryConfig(max_retries=5), sleep=lambda _s: None)
+
+        def fake_classify_call(*_args, **_kwargs):
+            return self._windowless_retry_verdict()
+
+        with self._with_classify_call(fake_classify_call):
+            outcome = gate.execute(
+                CallKind.SESSION_LIFECYCLE,
+                lambda: "a value the caller rejects",
+                classify=lambda _value: throttle(),
+            )
+
+        self.assertFalse(outcome.ok)
+        self.assertEqual(outcome.attempts, 1)
+        self.assertEqual(outcome.windows, ())
+        self.assertIsNotNone(outcome.verdict)
+        self.assertIs(outcome.verdict.decision, RetryDecision.RETRY)
+
+    # -- the gate: the may-have-executed flag ---------------------------
+
+    def test_the_gate_keeps_the_indeterminate_flag_from_the_verdict(self):
+        """`or@538`: the flag half of the outcome, on the classify path.
+
+        The outcome's ``may_have_executed`` is the verdict's flag **or**
+        the failure's flag.  The verdict half is what carries an
+        indeterminate classification the raw failure does not repeat, so
+        dropping it reports an unknown outcome as a definite one.
+
+        The discriminator: the failure does NOT carry the flag, but the
+        verdict does.  Under the mutant (``or`` -> ``and``) the outcome
+        reports ``may_have_executed=False`` for a call the gate itself
+        called indeterminate.
+        """
+        post_write_without_the_flag = Failure(
+            classification=FailureClass.NON_RETRYABLE,
+            phase=FailurePhase.POST_WRITE,
+            reason="the connection dropped after the request was written",
+            may_have_executed=False,
+        )
+        gate = RetryGate(RetryConfig(max_retries=5), sleep=lambda _s: None)
+
+        outcome = gate.execute(
+            CallKind.SESSION_LIFECYCLE,
+            lambda: "a value the caller rejects",
+            classify=lambda _value: post_write_without_the_flag,
+        )
+
+        self.assertFalse(outcome.ok)
+        self.assertIs(outcome.verdict.decision, RetryDecision.INDETERMINATE)
+        self.assertTrue(outcome.may_have_executed)
+
+    def test_the_gate_keeps_the_indeterminate_flag_on_the_raised_path(self):
+        """`or@560`: the flag half of the outcome, on the exception path.
+
+        The same flag half exists on the raised-exception path.  The
+        discriminator is a verdict that carries the flag while the
+        classified failure does not: the exception is classified as an
+        ordinary transport failure (flag False) and the verdict is the
+        one that knows the call may have run.
+        """
+        gate = RetryGate(RetryConfig(max_retries=5), sleep=lambda _s: None)
+
+        def fake_classify_call(*_args, **_kwargs):
+            return RetryVerdict(
+                decision=RetryDecision.INDETERMINATE,
+                kind=CallKind.SESSION_LIFECYCLE,
+                failure_class=FailureClass.NON_RETRYABLE,
+                reason="the call may already have executed",
+                may_have_executed=True,
+            )
+
+        with self._with_classify_call(fake_classify_call):
+            outcome = gate.execute(
+                CallKind.SESSION_LIFECYCLE,
+                lambda: (_ for _ in ()).throw(ValueError("a plain transport failure")),
+            )
+
+        self.assertFalse(outcome.ok)
+        self.assertIs(outcome.verdict.decision, RetryDecision.INDETERMINATE)
+        self.assertTrue(outcome.may_have_executed)
+
+    # -- the self-check ------------------------------------------------
+
+    def test_the_self_check_passes_on_the_real_code(self):
+        """`eq@702` / `eq@703` / `eq@704`: the self-check's own asserts.
+
+        The self-check is the module's last line of defence.  Its
+        asserts are real code, and a fault planted in one of them turns
+        the self-check into a no-op that still prints "OK".
+        """
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            runpy.run_module("retry_config", run_name="__main__")
+        self.assertIn("retry-config OK", buffer.getvalue())
+
+    def test_the_self_check_fails_when_the_default_retry_count_is_wrong(self):
+        """`eq@702`: the self-check's first assert.
+
+        ``assert config.max_retries == 5`` becomes ``!= 5`` under the
+        mutant.  With a six-retry default the mutant's assert PASSES
+        (6 != 5) and the other two asserts still hold, so the
+        self-check completes without raising -- which is exactly the
+        "no-op self-check" the mutation creates.  On the real code the
+        assert fires.
+        """
+        original = rc.RetryConfig
+
+        class SixRetries(original):
+            def __init__(self, **kwargs):
+                kwargs.setdefault("max_retries", 6)
+                super().__init__(**kwargs)
+
+        rc.RetryConfig = SixRetries
+        try:
+            with self.assertRaises(AssertionError):
+                rc.main()
+        finally:
+            rc.RetryConfig = original
+
+    def test_the_self_check_fails_when_the_first_wait_is_wrong(self):
+        """`eq@703`: the self-check's first schedule assert.
+
+        ``assert config.schedule()[0].nominal == 2.0`` becomes ``!= 2.0``
+        under the mutant.  With a four-second first wait the mutant's
+        assert PASSES (4.0 != 2.0) and the other two asserts still
+        hold, so the self-check completes without raising.
+        """
+        original = rc.RetryConfig
+
+        class ShiftyFirstWait(original):
+            def __init__(self, **kwargs):
+                kwargs.setdefault("initial_wait_seconds", 4.0)
+                super().__init__(**kwargs)
+
+        rc.RetryConfig = ShiftyFirstWait
+        try:
+            with self.assertRaises(AssertionError):
+                rc.main()
+        finally:
+            rc.RetryConfig = original
+
+    def test_the_self_check_fails_when_the_last_wait_is_wrong(self):
+        """`eq@704`: the self-check's last schedule assert.
+
+        ``assert config.schedule()[-1].nominal == 32.0`` becomes ``!=
+        32.0`` under the mutant.  With a sixteen-second ceiling the
+        mutant's assert PASSES (16.0 != 32.0) and the other two asserts
+        still hold, so the self-check completes without raising.
+        """
+        original = rc.RetryConfig
+
+        class LowCeiling(original):
+            def __init__(self, **kwargs):
+                kwargs.setdefault("max_wait_seconds", 16.0)
+                super().__init__(**kwargs)
+
+        rc.RetryConfig = LowCeiling
+        try:
+            with self.assertRaises(AssertionError):
+                rc.main()
+        finally:
+            rc.RetryConfig = original
+
+    def test_running_the_module_as_a_script_runs_the_self_check(self):
+        """`eq@714`: the ``__main__`` guard.
+
+        ``if __name__ == "__main__":`` becomes ``!=`` under the mutant,
+        and then the self-check runs on EVERY import and NEVER runs when
+        the module is run as a script -- which is how it is used.
+        """
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            runpy.run_module("retry_config", run_name="__main__")
+        self.assertIn("retry-config OK", buffer.getvalue())
 
 
 if __name__ == "__main__":
