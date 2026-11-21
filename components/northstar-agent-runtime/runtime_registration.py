@@ -863,6 +863,7 @@ REGISTRY = (
     _registration("fhe_interface", "runtime", "2026-10-07", "Fully homomorphic encryption interface (simulated)."),
     _registration("fhe_wrapper", "runtime", "2026-10-07", "Homomorphic-encryption wrapper (simulated interface)."),
     _registration("finance_agents", "one-hundred-fifty-fifth", "2026-10-04", "Finance AI discipline (one-hundred-fifty-fifth batch)."),
+    _registration("finding_gate", "bughunter-finding-gate", "2026-11-21", "Finding gate: seven questions asked in order before a finding ships."),
     _registration("fingerprinting", "runtime", "2026-10-08", "Content fingerprinting: deterministic perceptual-hash-style ledger."),
     _registration("flag_service", "runtime", "2026-10-07", "LaunchDarkly-style feature flag service: targeting, rules, percentage rollouts."),
     _registration("flag_targeting", "runtime", "2026-10-08", "Advanced feature-flag targeting: rule engine, staged gradual rollouts, multi-variation."),

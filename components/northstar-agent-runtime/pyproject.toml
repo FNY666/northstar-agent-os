@@ -742,6 +742,7 @@ py-modules = [
     "fhe_interface",
     "fhe_wrapper",
     "finance_agents",
+    "finding_gate",
     "fingerprinting",
     "flag_service",
     "flag_targeting",

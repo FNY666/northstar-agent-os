@@ -205,7 +205,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "failure_bundle", "failure_detector", "fairness_eval", "fe_interface",
         "feature_engineering", "feature_flags", "feature_store", "feature_viz",
         "federated_attack_detector", "federated_learning", "fedramp", "few_shot_learning",
-        "fhe", "fhe_interface", "fhe_wrapper", "finance_agents",
+        "fhe", "fhe_interface", "fhe_wrapper", "finance_agents", "finding_gate",
         "fingerprinting", "flag_service", "flag_targeting", "flow_control",
         "forensics", "forest_fish", "formal_verif", "forward_seal_ledger",
         "fragile_watermark", "fraud_detector", "frontmatter", "full_text_search",

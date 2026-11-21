@@ -42904,6 +42904,60 @@ Quotes bind key pricing factors and year-over-year changes.
 
 Lawful silence is declared; unexplained silence fails.
 
+### `finding_gate`
+
+Source: `components/northstar-agent-runtime/finding_gate.py`
+
+Finding gate: seven questions asked in order before a finding ships.
+
+#### `FindingGateError`
+
+A finding is malformed and cannot be gated.
+
+#### `Verdict`
+
+The gate's answer about one finding.
+
+- `killed` (property)
+  - True when the finding is held rather than shipped.
+- `shipped` (property)
+  - True when the finding may be shipped (PASS or DOWNGRADE).
+- `as_dict()`
+  - The verdict as a plain dict.
+#### `Finding`
+
+One finding, carrying exactly what the gate's questions need.
+
+- `from_mapping(value: Mapping[str, Any])`
+  - Build a finding from a plain mapping.
+- `with_severity(severity: str)`
+  - A copy of this finding at another severity.
+- `as_dict()`
+  - The finding as a plain dict (the fields it was built from).
+#### `evaluate_finding(finding: Any)`
+
+Run the gate over one finding and return its verdict.
+
+#### `GateDecision`
+
+What the gate did with one finding at the seam.
+
+- `held` (property)
+  - True when the finding is held rather than shipped.
+- `shipped` (property)
+  - True when the finding may be shipped.
+- `needs_chain` (property)
+  - True when the finding is routed to the chain builder.
+- `as_dict()`
+  - The decision as a plain dict.
+#### `finding_digest(finding: Finding)`
+
+A stable digest of one finding.
+
+#### `apply_finding_gate(finding: Any, *, registry: Any=None, grant_id: str='', action: str='ship_finding', subject: str='', now: Optional[float]=None)`
+
+Run the gate at the refusal-hold seam.
+
 ### `fingerprinting`
 
 Source: `components/northstar-agent-runtime/fingerprinting.py`

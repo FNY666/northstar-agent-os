@@ -226,17 +226,17 @@ class InstalledSurfaceRegistrationTests(unittest.TestCase):
         self.assertIn("runtime_registration", names)
 
     def test_the_installed_surface_is_larger_than_the_flat_one(self):
-        # The three views agree -- so the registry "covered" 1613 modules.
-        # The installed surface is 1636, and the difference is exactly the
+        # The three views agree -- so the registry "covered" 1615 modules.
+        # The installed surface is 1638, and the difference is exactly the
         # 23 package members.  The registry now covers both halves.
         flat = set(rr.declared_py_modules())
         members = _installed_package_members(COMPONENT)
         installed = flat | members
         # RE-MEASURED 2026-11-16: `policy` joined the package members
         # (the `runtime-data-files` slice), so 22 -> 23 and 1635 -> 1636.
-        self.assertEqual(len(flat), 1614)
+        self.assertEqual(len(flat), 1615)
         self.assertEqual(len(members), 23)
-        self.assertEqual(len(installed), 1637)
+        self.assertEqual(len(installed), 1638)
         registered = set(rr.registered_module_names())
         self.assertEqual(
             registered,
