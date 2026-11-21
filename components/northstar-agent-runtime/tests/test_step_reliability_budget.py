@@ -17,6 +17,7 @@ import math
 import unittest
 from decimal import Decimal, getcontext
 
+import step_reliability_budget
 from step_reliability_budget import (
     AdmissionVerdict,
     StepReliabilityError,
@@ -310,3 +311,203 @@ class SourceMappingTests(unittest.TestCase):
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
+
+
+class StepReliabilityBudgetSecondHalfTests(unittest.TestCase):
+    """The SECOND half of each guard in ``step_reliability_budget``.
+
+    Two planted faults survived this slice's suite:
+
+      or@83   the ``isinf`` half of the "must be finite" guard
+      lt@152  the ``measured < 1.0`` bound inside ``max_steps``
+
+    The first is killable and is driven below.
+
+    ``lt@152`` is **not killable, and provably so**: the line is
+    ``return math.floor(0.0 / math.log(measured)) if measured < 1.0 else
+    None``, but the guard three lines above it already returns ``None``
+    for every ``measured >= 1.0``.  So ``measured`` is *always* strictly
+    below 1.0 at that point, the ``else None`` arm is UNREACHABLE, and
+    ``measured < 1.0`` and ``measured <= 1.0`` select the same arm for
+    every input that can reach the line.  It is an EQUIVALENT mutant,
+    not a gap in the suite, and no test can distinguish it.  It is
+    recorded here so the next person does not spend a round looking for
+    one.
+    """
+
+    # --- or@83: the `isinf` half ----------------------------------------
+    def test_an_infinite_rate_is_refused_as_non_finite(self):
+        """`or@83`: **the ``isinf`` half of the finite guard**.
+
+        The guard is ``if math.isnan(rate) or math.isinf(rate):``.  The
+        ``isnan`` half refuses a NaN; only the ``isinf`` half refuses
+        an infinity.  Under the mutant (``or`` -> ``and``) an infinity
+        is no longer caught by the finite guard at all -- it falls
+        through to the range check and is refused *there* instead, with
+        a different message ("must be in (0, 1]" rather than "must be
+        finite").  The refusal still happens, so the test asserts the
+        MESSAGE: a non-finite rate must be reported as non-finite.
+        """
+        with self.assertRaises(StepReliabilityError) as caught:
+            run_failure_probability(float("inf"), 30)
+        self.assertIn("finite", str(caught.exception))
+
+    def test_a_negative_infinite_rate_is_refused_as_non_finite(self):
+        """`or@83`: the other infinity."""
+        with self.assertRaises(StepReliabilityError) as caught:
+            run_failure_probability(float("-inf"), 30)
+        self.assertIn("finite", str(caught.exception))
+
+    def test_an_infinite_rate_is_refused_as_non_finite_in_every_entry_point(self):
+        """`or@83`: the same guard, reached through the other functions.
+
+        Every public function routes its rate argument through
+        ``_check_rate``, so the same finite-guard half is on the path of
+        each of them.  ``admit`` takes two rates, so both are checked.
+        """
+        for call in (
+            lambda: required_step_rate(float("inf"), 30),
+            lambda: max_steps(float("inf"), 0.8),
+            lambda: admit(float("inf"), 0.8, 30),
+            lambda: admit(0.95, float("inf"), 30),
+        ):
+            with self.assertRaises(StepReliabilityError) as caught:
+                call()
+            self.assertIn("finite", str(caught.exception))
+
+    def test_a_nan_rate_is_refused_as_non_finite(self):
+        """`or@83`: the control -- the ``isnan`` half, which still works.
+
+        Both halves of the guard refuse a non-finite rate; this pins the
+        half the existing suite already covered, so the two tests
+        together cover the whole disjunction.
+        """
+        with self.assertRaises(StepReliabilityError) as caught:
+            run_failure_probability(float("nan"), 30)
+        self.assertIn("finite", str(caught.exception))
+
+    def test_a_finite_rate_is_not_reported_as_non_finite(self):
+        """`or@83`: the control -- a finite rate is not refused at all."""
+        self.assertAlmostEqual(run_failure_probability(0.95, 30), 0.785, delta=5e-4)
+
+    # --- lt@152: an EQUIVALENT mutant, recorded ------------------------
+    def test_the_perfect_target_gives_zero_steps_for_every_rate_below_one(self):
+        """`lt@152`: the behaviour the line produces, and why it is equivalent.
+
+        ``max_steps(p_meas, 1.0)`` is the number of steps a run of
+        ``p_meas``-reliable steps may have and still succeed *every*
+        time.  A target of 1.0 is met only by a flawless step, so the
+        answer is 0 for every rate below 1, and ``None`` (unbounded) for
+        a flawless step.
+
+        The planted fault at this site (``<`` -> ``<=``) is an
+        EQUIVALENT mutant: the guard three lines above already returns
+        ``None`` for every ``measured >= 1.0``, so ``measured`` is
+        always strictly below 1.0 when this line is reached, the
+        ``else None`` arm is unreachable, and ``<`` and ``<=`` pick the
+        same arm for every input that can arrive here.  This test pins
+        the behaviour so the equivalence is visible rather than
+        assumed.
+        """
+        for measured in (0.001, 0.01, 0.1, 0.5, 0.9, 0.99, 0.999, 0.9999):
+            self.assertEqual(max_steps(measured, 1.0), 0, msg=f"measured={measured}")
+        self.assertIsNone(max_steps(1.0, 1.0))
+
+    def test_the_perfect_target_gives_zero_steps_through_admit(self):
+        """`lt@152`: the same line, reached through the admission gate."""
+        for measured in (0.5, 0.9, 0.999):
+            verdict = admit(measured, 1.0, 30)
+            self.assertEqual(verdict.max_steps, 0, msg=f"measured={measured}")
+        self.assertIsNone(admit(1.0, 1.0, 30).max_steps)
+
+    def test_the_perfect_target_zero_step_ceiling_is_the_last_holding_length(self):
+        """`lt@152`: the zero ceiling is consistent with the formula.
+
+        The ceiling is the last length whose run-level success still
+        meets the target.  For a target of 1.0 and a rate below 1, only
+        the zero-step run qualifies, so the ceiling is 0 and one step is
+        over it.
+        """
+        for measured in (0.5, 0.9, 0.999):
+            self.assertEqual(max_steps(measured, 1.0), 0)
+            self.assertGreaterEqual(measured**0, 1.0)
+            self.assertLess(measured**1, 1.0)
+
+    def test_the_lt_152_mutant_is_differentially_equivalent(self):
+        """`lt@152`: PROOF that the planted fault changes nothing.
+
+        The planted fault rewrites ``measured < 1.0`` as
+        ``measured <= 1.0``.  This test builds that opposite variant of
+        the module and compares the two versions over a large set of
+        valid inputs: if the fault changed any result, this test would
+        fail.
+
+        It does not: over the grid and 200,000 randomised rate pairs the
+        two versions agree on every value and every exception.  That is
+        the differential proof that ``lt@152`` is an EQUIVALENT mutant
+        and not a gap in the suite.
+
+        The variant is built by swapping the comparison on the ``max_steps``
+        line whichever way it currently reads, so the test compares two
+        genuinely different sources when the module is unmutated, and
+        degrades to comparing the module with itself when it is not --
+        it never asserts that the source text differs, because that
+        would be a structural check rather than a behavioural one.
+        """
+        import importlib.util
+        import random
+        import sys
+        import types
+
+        module_path = step_reliability_budget.__file__
+        with open(module_path, encoding="utf-8") as handle:
+            source = handle.read()
+
+        def opposite_variant(text):
+            """Swap ``< 1.0`` / ``<= 1.0`` on the ``max_steps`` line."""
+            out_lines = []
+            swapped = 0
+            for line in text.splitlines(keepends=True):
+                if "math.floor(0.0 / math.log(measured)) if measured <" in line:
+                    if "measured <= 1.0" in line:
+                        line = line.replace("measured <= 1.0", "measured < 1.0")
+                    else:
+                        line = line.replace("measured < 1.0", "measured <= 1.0")
+                    swapped += 1
+                out_lines.append(line)
+            return "".join(out_lines), swapped
+
+        variant, swapped = opposite_variant(source)
+        self.assertEqual(swapped, 1, "the lt@152 mutant site was not found")
+
+        def load(name, text):
+            spec = importlib.util.spec_from_loader(name, loader=None)
+            module = types.ModuleType(name)
+            module.__file__ = f"<{name}>"
+            sys.modules[name] = module
+            exec(compile(text, module.__file__, "exec"), module.__dict__)
+            return module
+
+        original_module = load("srb_original", source)
+        variant_module = load("srb_variant", variant)
+
+        def outcome(module, function, *args):
+            try:
+                return ("ok", getattr(module, function)(*args))
+            except Exception as exc:  # noqa: BLE001
+                return ("raise", type(exc).__name__, str(exc))
+
+        grid = (0.001, 0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.99, 0.999, 0.9999, 1.0)
+        pairs = [(a, b) for a in grid for b in grid]
+        random.seed(7)
+        for _ in range(200000):
+            measured = min(1.0, random.choice(grid) * random.uniform(0.2, 1.8))
+            target = min(1.0, random.choice(grid) * random.uniform(0.2, 1.8))
+            pairs.append((measured, target))
+        for measured, target in pairs:
+            self.assertEqual(
+                outcome(original_module, "max_steps", measured, target),
+                outcome(variant_module, "max_steps", measured, target),
+                msg=f"measured={measured} target={target}",
+            )
+        self.assertGreater(len(pairs), 200000)
