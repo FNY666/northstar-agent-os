@@ -40,15 +40,15 @@ def _caps(**overrides):
 
 class DoctorCapabilityGuardTests(unittest.TestCase):
     def test_a_host_with_every_capability_is_not_skipped(self):
-        import test_cli
+        import support
 
-        reason = test_cli._doctor_capability_skip_reason(_caps())
+        reason = support.doctor_capability_skip_reason(_caps())
         self.assertIsNone(reason)
 
     def test_a_host_without_seccomp_is_skipped(self):
         import test_cli
 
-        reason = test_cli._doctor_capability_skip_reason(
+        reason = support.doctor_capability_skip_reason(
             _caps(bwrap_seccomp=False, bwrap_seccomp_detail="prctl(PR_SET_SECCOMP) reported EINVAL")
         )
         self.assertIsNotNone(reason)
@@ -57,7 +57,7 @@ class DoctorCapabilityGuardTests(unittest.TestCase):
     def test_the_reason_quotes_the_probe(self):
         import test_cli
 
-        reason = test_cli._doctor_capability_skip_reason(
+        reason = support.doctor_capability_skip_reason(
             _caps(bwrap_seccomp=False, bwrap_seccomp_detail="prctl(PR_SET_SECCOMP) reported EINVAL")
         )
         self.assertIn("EINVAL", reason)
@@ -65,7 +65,7 @@ class DoctorCapabilityGuardTests(unittest.TestCase):
     def test_an_unusable_bwrap_is_reported(self):
         import test_cli
 
-        reason = test_cli._doctor_capability_skip_reason(
+        reason = support.doctor_capability_skip_reason(
             _caps(bwrap_usable=False, bwrap_detail="bwrap failed probe")
         )
         self.assertIsNotNone(reason)
