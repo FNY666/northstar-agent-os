@@ -916,3 +916,242 @@ class PublicSurfaceTests(unittest.TestCase):
         self.assertIsInstance(outcome, RunOutcome)
         self.assertEqual(outcome.checkpoint_count, 1)
         self.assertIsNone(outcome.receipt_for("ck-999999"))
+
+
+class SecondHalfGuardTests(unittest.TestCase):
+    """The second half of every guard in the durability controller.
+
+    Seven planted faults survived this suite.  They fall into three
+    shapes, and each one is a PAIR of conditions joined by ``or`` or
+    ``and`` where the suite drove only one half:
+
+    * a "the payload is a mapping" half joined to a "the key is
+      present" half;
+    * a "there is a stored id" half joined to a "the store still has
+      it" half;
+    * a "the caller gave a state" half joined to a "the builder made
+      one" half.
+    """
+
+    # -- the FileSink's existence probe ---------------------------------
+
+    def test_a_file_sink_says_a_checkpoint_that_is_there_exists(self):
+        """`retF@382`: the "it IS there" half of the existence probe.
+
+        ``exists()`` loads the checkpoint and returns False only when
+        the load RAISES.  Under the mutant the successful path returns
+        False -- so every checkpoint the sink actually stored is
+        reported as absent, and a run that wrote five checkpoints
+        believes it wrote none.
+        """
+        from checkpoint_store import FileCheckpointStorage
+
+        with tempfile.TemporaryDirectory() as directory:
+            storage = FileCheckpointStorage(Path(directory) / "checkpoints")
+            sink = FileSink(storage)
+            sink.write("ck-1", {"state": {"n": 1}})
+            self.assertTrue(sink.exists("ck-1"))
+
+    def test_a_file_sink_says_a_checkpoint_that_is_not_there_does_not_exist(self):
+        """`retF@382`: the control -- the absent case."""
+        from checkpoint_store import FileCheckpointStorage
+
+        with tempfile.TemporaryDirectory() as directory:
+            storage = FileCheckpointStorage(Path(directory) / "checkpoints")
+            sink = FileSink(storage)
+            self.assertFalse(sink.exists("ck-999"))
+
+    # -- the durable-store sink's task path -----------------------------
+
+    def test_the_durable_store_sink_keeps_a_declared_task_path(self):
+        """`or@420`: the "the payload has a task path" half.
+
+        The task path is read as ``payload.get("task_path", "") or ""``.
+        Under the mutant (``or`` -> ``and``) the expression becomes
+        ``payload.get("task_path", "") and ""``: a DECLARED task path is
+        truthy, so the ``and`` yields ``""`` and the path is dropped.
+
+        The discriminating input is a payload that DOES declare a task
+        path.  The real code carries it through to the durable store;
+        the mutant stores an empty one -- so the checkpoint a resume
+        reads no longer says which task it interrupted.
+        """
+        from durable_resume import DurableStore
+
+        store = DurableStore()
+        sink = DurableStoreSink(store, run_id="run-1")
+        sink.write("ck-1", {"state": {"n": 1}, "task_path": "fetch > summarise"})
+        checkpoint = store.list_checkpoints("run-1")[0]
+        self.assertEqual(checkpoint.task_path, "fetch > summarise")
+
+    def test_the_durable_store_sink_keeps_an_empty_task_path_empty(self):
+        """`or@420`: the other half, as the control.
+
+        A payload with NO task path must store an empty one.
+        """
+        from durable_resume import DurableStore
+
+        store = DurableStore()
+        sink = DurableStoreSink(store, run_id="run-1")
+        sink.write("ck-1", {"state": {"n": 1}})
+        checkpoint = store.list_checkpoints("run-1")[0]
+        self.assertEqual(checkpoint.task_path, "")
+
+    def test_the_durable_store_sink_accepts_a_payload_that_is_not_a_mapping(self):
+        """`or@420`: the mapping guard, as the control.
+
+        A payload that is not a mapping at all must still be written,
+        with an empty state and an empty task path.
+        """
+        from durable_resume import DurableStore
+
+        store = DurableStore()
+        sink = DurableStoreSink(store, run_id="run-1")
+        sink.write("ck-1", "not a mapping")
+        checkpoint = store.list_checkpoints("run-1")[0]
+        self.assertEqual(checkpoint.task_path, "")
+        self.assertEqual(dict(checkpoint.state), {})
+
+    # -- the durable-store sink's existence probe ------------------------
+
+    def test_the_durable_store_sink_says_a_checkpoint_that_is_there_exists(self):
+        """`retF@431`: the "the store still has it" half.
+
+        ``exists()`` returns False when the sink has no mapping for
+        the id, and otherwise asks the store whether the checkpoint is
+        still there.  Under the mutant (``return False`` -> ``return
+        True``) the second branch is unreachable -- the sink reports
+        every checkpoint it knows about as present, including the ones
+        the store has since dropped.
+        """
+        from durable_resume import DurableStore
+
+        store = DurableStore()
+        sink = DurableStoreSink(store, run_id="run-1")
+        sink.write("ck-1", {"state": {"n": 1}})
+        self.assertTrue(sink.exists("ck-1"))
+
+    def test_the_durable_store_sink_says_an_unknown_checkpoint_does_not_exist(self):
+        """`retF@431`: the control -- the absent case."""
+        from durable_resume import DurableStore
+
+        store = DurableStore()
+        sink = DurableStoreSink(store, run_id="run-1")
+        self.assertFalse(sink.exists("ck-999"))
+
+    # -- the controller's run id -----------------------------------------
+
+    def test_a_controller_with_no_run_id_falls_back_to_its_thread_id(self):
+        """`or@521`: the "the caller gave a run id" half.
+
+        ``self.run_id = run_id or thread_id`` -- the caller's run id,
+        or the thread id when there is none.  Under the mutant
+        (``or`` -> ``and``) a controller with no run id gets a run id
+        of ``None``, and every checkpoint it writes lands under no run
+        at all -- a checkpoint nobody can find again is not a
+        checkpoint.
+
+        The discriminating input is a controller built with a run id
+        and a DIFFERENT thread id: the real code keeps the run id.
+        """
+        sink = MemorySink()
+        controller = DurabilityController(
+            sink=sink, mode=DurabilityMode.SYNC, thread_id="thread-1"
+        )
+        self.assertEqual(controller.run_id, "thread-1")
+
+        sink = MemorySink()
+        controller = DurabilityController(
+            sink=sink,
+            mode=DurabilityMode.SYNC,
+            thread_id="thread-1",
+            run_id="run-9",
+        )
+        self.assertEqual(controller.run_id, "run-9")
+
+    def test_a_written_checkpoint_carries_the_run_id(self):
+        """`or@521`: the control -- the run id reaches the payload."""
+        sink = MemorySink()
+        controller = DurabilityController(
+            sink=sink,
+            mode=DurabilityMode.SYNC,
+            thread_id="thread-1",
+            run_id="run-9",
+        )
+        controller.run(_steps(2), initial_state={"n": 0})
+        for checkpoint_id in sink.ids():
+            self.assertEqual(sink.load(checkpoint_id)["run_id"], "run-9")
+
+    # -- the interrupt and exit state -------------------------------------
+
+    def test_an_interrupt_with_no_state_uses_the_state_builder(self):
+        """`or@773`: the "the caller gave a state" half.
+
+        ``dict(state or self._state_for(index))`` -- the caller's
+        state, or the one the builder makes.  Under the mutant
+        (``or`` -> ``and``) a caller that DID give a state gets
+        ``{}`` instead, so the interrupt checkpoint carries no state
+        and a resume that reads it finds nothing.
+
+        The discriminating input is a caller that DID give a state.
+        """
+        sink = MemorySink()
+        controller = DurabilityController(
+            sink=sink,
+            mode=DurabilityMode.SYNC,
+            state_builder=lambda index: {"built": index},
+        )
+        controller.start({"n": 0})
+        receipt = controller.interrupt(1, value="need a human", state={"asked": True})
+        self.assertIsNotNone(receipt)
+        payload = sink.load(receipt.checkpoint_id)
+        self.assertEqual(payload["state"], {"asked": True})
+
+    def test_an_interrupt_with_no_state_still_builds_one(self):
+        """`or@773`: the other half, as the control."""
+        sink = MemorySink()
+        controller = DurabilityController(
+            sink=sink,
+            mode=DurabilityMode.SYNC,
+            state_builder=lambda index: {"built": index},
+        )
+        controller.start({"n": 0})
+        receipt = controller.interrupt(1, value="need a human")
+        self.assertIsNotNone(receipt)
+        payload = sink.load(receipt.checkpoint_id)
+        self.assertEqual(payload["state"], {"built": 1})
+
+    def test_the_exit_checkpoint_with_no_state_uses_the_state_builder(self):
+        """`or@795`: the "the caller gave a state" half, on the exit write.
+
+        The exit write has its own copy of the same chain, and it is
+        the one checkpoint a run leaves behind under ``EXIT`` -- so a
+        dropped state here loses the whole run.
+
+        The discriminating input is a caller that DID give a state.
+        """
+        sink = MemorySink()
+        controller = DurabilityController(
+            sink=sink,
+            mode=DurabilityMode.EXIT,
+            state_builder=lambda index: {"built": index},
+        )
+        controller.start({"n": 0})
+        receipt = controller.finish(reason="completed", state={"final": True})
+        self.assertIsNotNone(receipt)
+        payload = sink.load(receipt.checkpoint_id)
+        self.assertEqual(payload["state"], {"final": True})
+
+    def test_the_exit_checkpoint_with_no_state_still_builds_one(self):
+        """`or@795`: the other half, as the control."""
+        sink = MemorySink()
+        controller = DurabilityController(
+            sink=sink,
+            mode=DurabilityMode.EXIT,
+            state_builder=lambda index: {"built": index},
+        )
+        controller.start({"n": 0})
+        receipt = controller.finish(reason="completed")
+        self.assertIsNotNone(receipt)
+        payload = sink.load(receipt.checkpoint_id)
+        self.assertEqual(payload["state"], {"built": -1})
