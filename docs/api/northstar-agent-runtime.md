@@ -29011,6 +29011,10 @@ One validated ``[[hooks]]`` entry, ready to be registered.
 
 - `as_dict()`
   - Display form only: the resolved absolute script path is never printed.
+#### `sealed_snapshot_supported()`
+
+Report whether this host can seal a script snapshot for real.
+
 #### `parse_hooks(raw: Sequence[Any], *, workspace: str | Path, known_tools: Sequence[str]=(), reviewed_digests: Mapping[str, str] | None=None)`
 
 Validate a raw ``hooks`` list from the policy file. Raises on anything suspect.
@@ -44577,6 +44581,10 @@ Temp workspaces + scripted providers for one suite run.
 - `workspace(files: dict[str, str] | None=None)`
 - `provider(turns: Sequence[Any], **kwargs: Any)`
 - `runtime(*, workspace: Path, turns: Sequence[Any], tools: Any=None, config_kwargs: dict[str, Any] | None=None, tool_limits: ToolLimits | None=None, can_use_tool: Any=None, hooks: HookRegistry | None=None, sessions: Any=None)`
+#### `seccomp_filter_loadable()`
+
+Report whether this host can actually install the seccomp denylist.
+
 #### `run_offline_bundle()`
 
 Signed offline policy bundles (ninety-seventh batch).
@@ -81003,6 +81011,10 @@ Tests only: drop the cached probe so a fixture can re-run discovery.
 #### `probe_capabilities(*, force: bool=False, bwrap_bin: str | None=None)`
 
 Discover what isolation this host can provide (cached after first call).
+
+#### `resolve_effective_backend(requested: str, *, capabilities: SandboxCapabilities | None=None, seccomp: str='auto', capdrop_whitelist: Sequence[str] | None=None)`
+
+Resolve the backend a request will actually use, and say what changed.
 
 #### `resolve_backend(requested: str, *, capabilities: SandboxCapabilities | None=None)`
 
