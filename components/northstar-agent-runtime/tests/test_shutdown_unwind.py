@@ -527,5 +527,95 @@ class UnwindGuardSecondHalfTests(unittest.TestCase):
         self.assertFalse(UnwindOutcome().interrupted)
 
 
+class UnwindFallbackArmTests(unittest.TestCase):
+    """The MISSING arms of the three surviving ``or`` guards.
+
+    Each of the three guards below is a two-armed ``or``: the first arm is the
+    value the module has, the second arm is the fallback it substitutes when
+    that value is absent.  A mutant that flips ``or`` to ``and`` keeps the
+    first arm for every truthy value and breaks only on the FALSY one -- the
+    fallback path.  The suite so far only ever handed these guards truthy
+    values, so the planted faults survived it:
+
+      or@230  ``str(getattr(block, "tool_use_id", "") or "")``
+              The already-unwound branch rebuilds a record's ``tool_use_id``
+              from the synthetic block.  With ``or -> and`` the fallback ``""``
+              becomes the *conjunction's* right operand, so a real id is
+              REPLACED by the empty string: the record would claim the call
+              had no id at all.
+      or@232  ``block.tool_denial_kind or INTERRUPTED_DENIAL_KIND``
+              The same branch's denial kind.  With ``or -> and`` a synthetic
+              block that carries no denial kind of its own yields ``""``
+              instead of the default: the record would claim the call was
+              denied for no reason rather than because it was interrupted.
+      or@277  ``f"{name or '(unnamed)'}[{call_id}]"``
+              The refusal message names the pending calls.  With
+              ``or -> and`` a call with an empty name yields ``""`` instead
+              of ``"(unnamed)"``, so the message would read ``[]`` and the
+              reader would not know which call was refused.
+
+    Each test below fails when its planted fault is applied alone.
+    """
+
+    def already_unwound_transcript(self, **block_kwargs) -> list:
+        """A transcript whose only call is already answered by a synthetic result.
+
+        The answering result is synthetic, so ``unwind`` takes the
+        "already unwound" branch: no pending call, but a synthetic result
+        present -- the case where the record is rebuilt from the block.
+        """
+        block = ToolResultBlock(tool_use_id="t1", content="[interrupted]", is_error=True, **block_kwargs)
+        return [assistant_with_call("t1"), UserMessage(content=(block,))]
+
+    def test_the_rebuilt_record_keeps_the_synthetic_block_tool_use_id(self):
+        """`or@230`: the id the block actually carries.
+
+        The record rebuilt from an already-unwound transcript must name the
+        call it is about.  With ``or -> and`` the id is replaced by the
+        empty fallback, so the record loses the very id that ties it to the
+        tool call it says never ran.
+        """
+        transcript = self.already_unwound_transcript(synthetic=True, tool_denial_kind=INTERRUPTED_DENIAL_KIND)
+
+        unwound, outcome = unwind(transcript)
+
+        self.assertEqual(outcome.classification, RESUME_INTERRUPTED)
+        self.assertEqual(outcome.count, 1)
+        self.assertEqual(outcome.synthesised[0].tool_use_id, "t1")
+
+    def test_the_rebuilt_record_defaults_the_denial_kind_when_the_block_has_none(self):
+        """`or@232`: the denial kind the block does NOT carry.
+
+        A synthetic result with no denial kind of its own must still be
+        recorded as interrupted -- that is what the fallback is for.  With
+        ``or -> and`` the fallback never applies and the record claims an
+        empty denial kind, which no reader can act on.
+        """
+        transcript = self.already_unwound_transcript(synthetic=True, tool_denial_kind="")
+
+        unwound, outcome = unwind(transcript)
+
+        self.assertEqual(outcome.classification, RESUME_INTERRUPTED)
+        self.assertEqual(outcome.count, 1)
+        self.assertEqual(outcome.synthesised[0].denial_kind, INTERRUPTED_DENIAL_KIND)
+
+    def test_the_refusal_message_names_an_unnamed_pending_call(self):
+        """`or@277`: the fallback name for a call with no name.
+
+        A tool call the provider named nothing still has to be identifiable
+        in the refusal message -- by its id, and by the ``(unnamed)``
+        placeholder.  With ``or -> and`` the placeholder is replaced by the
+        empty string and the message reads ``[]``.
+        """
+        transcript = [AssistantMessage(content=(ToolUseBlock(id="t1", name=""),))]
+
+        with self.assertRaises(ResumeRefusedError) as caught:
+            require_resumable(transcript)
+
+        message = str(caught.exception)
+        self.assertIn("(unnamed)[t1]", message)
+        self.assertIn("resume refused", message)
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
