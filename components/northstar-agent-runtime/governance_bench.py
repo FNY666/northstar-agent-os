@@ -13311,16 +13311,30 @@ def seccomp_filter_loadable() -> bool:
     return loadable
 
 
+# The seccomp denylist rejects socket() with EPERM instead of killing the
+# process, so a live filter is observable from inside the sandbox. Reading
+# /proc/self/status is not: a host whose Landlock rules confine /proc would
+# report a missing proof file even though the filter is installed.
+_SECCOMP_LIVE_PROOF_COMMAND = (
+    "python3 -c 'import socket, sys\n"
+    "try:\n"
+    "    socket.socket()\n"
+    "except OSError as exc:\n"
+    "    sys.exit(0 if exc.errno == 1 else 3)\n"
+    "sys.exit(2)'"
+)
+
+
 def _case_seccomp_filter_live_on_process(h: BenchHarness) -> BenchExpectation:
-    # Behavioral proof the prctl wrapper really loads the filter: only a live
-    # SECCOMP_MODE_FILTER lets the command observe Seccomp: 2 and create the
-    # proof file.
+    # Behavioral proof the prctl wrapper really loads the filter: the denylist
+    # answers socket() with EPERM, so only a live filter lets the command
+    # create the proof file.
     ws = h.workspace()
     supported = seccomp_filter_loadable()
     turns: list[Any] = [
         _tool(
             "Shell",
-            {"command": "grep -q 'Seccomp:\t2' /proc/self/status && touch filter_live.txt"},
+            {"command": _SECCOMP_LIVE_PROOF_COMMAND + " && touch filter_live.txt"},
         ),
         _text("done"),
     ]
@@ -13355,14 +13369,15 @@ def _case_seccomp_filter_live_on_process(h: BenchHarness) -> BenchExpectation:
 
 def _case_seccomp_payload_cannot_loosen(h: BenchHarness) -> BenchExpectation:
     # Tighten-only, observed behaviorally: with the operator at "on", a
-    # per-call "off" must still leave the filter live (Seccomp: 2).
+    # per-call "off" must still leave the filter live, so the denied syscall
+    # is still refused.
     ws = h.workspace()
     supported = seccomp_filter_loadable()
     turns: list[Any] = [
         _tool(
             "Shell",
             {
-                "command": "grep -q 'Seccomp:\t2' /proc/self/status && touch tightened.txt",
+                "command": _SECCOMP_LIVE_PROOF_COMMAND + " && touch tightened.txt",
                 "seccomp": "off",
             },
         ),
