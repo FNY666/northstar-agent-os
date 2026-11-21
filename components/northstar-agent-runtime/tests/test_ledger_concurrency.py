@@ -703,5 +703,144 @@ class ModuleShapeTests(unittest.TestCase):
         self.assertEqual(lc.OUTCOMES, ("passed", "failed", "infra"))
 
 
+class SelfCheckSecondHalfTests(LedgerConcurrencyTestCase):
+    """The second half of the module's own self-check assertions.
+
+    The self-check's assertions are PAIRS joined by ``and``:
+
+        assert landed_again is False and again.seq == event.seq
+        assert counts["failed"] == 0 and counts["infra"] == 1
+
+    The suite drove the FIRST half of each and left the second, so a
+    fault planted in the second half survived.  The halves are NOT
+    interchangeable: under ``and`` -> ``or`` the assertion reads "the
+    first half OR the second half", so the second half is never
+    actually checked.
+
+    And the second half is the load-bearing one in both cases:
+
+    * ``again.seq == event.seq`` is what says the SECOND call landed
+      NO NEW EVENT -- the idempotency property the whole check-then-
+      append transaction exists for.  ``landed_again is False`` alone
+      can be satisfied by a ledger that returned the wrong event.
+    * ``counts["infra"] == 1`` is what says the infra result landed in
+      the INFRA bucket.  ``counts["failed"] == 0`` alone can be
+      satisfied by a tally that counted nothing at all.
+
+    The discriminator for each is a ledger (or a tally) whose second
+    half is wrong, so the real self-check must FAIL and the mutant's
+    must pass.
+    """
+
+    # -- and@823: the idempotency assertion -----------------------------
+
+    def test_the_self_check_fails_when_the_second_update_lands_a_new_seq(self):
+        """`and@823`: the second half of the idempotency assertion.
+
+        The ledger is made wrong by one that hands back a DIFFERENT
+        event on the second call -- as if the short-circuit had
+        appended a second event under the same key.  The real
+        self-check must then FAIL, because the second half of the
+        assertion is false.
+        """
+
+        class SecondUpdateLandsANewEvent(lc.ConcurrentLedger):
+            def update(self, **kwargs):
+                event, landed = super().update(**kwargs)
+                if not landed:
+                    # Report a DIFFERENT event, as a double-append would.
+                    from dataclasses import replace
+
+                    return replace(event, seq=event.seq + 1), False
+                return event, landed
+
+        original = lc.ConcurrentLedger
+        lc.ConcurrentLedger = SecondUpdateLandsANewEvent
+        try:
+            with self.assertRaises(AssertionError):
+                lc.main()
+        finally:
+            lc.ConcurrentLedger = original
+
+    def test_the_self_check_fails_when_the_second_update_says_it_landed(self):
+        """`and@823`: the first half of the same assertion.
+
+        The other half of the pair: a ledger that claims the second
+        call LANDED a new event.  The real self-check must fail.
+        """
+
+        class SecondUpdateClaimsItLanded(lc.ConcurrentLedger):
+            def update(self, **kwargs):
+                event, _landed = super().update(**kwargs)
+                return event, True
+
+        original = lc.ConcurrentLedger
+        lc.ConcurrentLedger = SecondUpdateClaimsItLanded
+        try:
+            with self.assertRaises(AssertionError):
+                lc.main()
+        finally:
+            lc.ConcurrentLedger = original
+
+    def test_the_self_check_still_passes_on_the_real_code(self):
+        """`and@823`: the control -- the real self-check still passes.
+
+        The discriminator above needs the self-check to be capable of
+        FAILING.  If it could not fail, the test would pass for the
+        wrong reason and the fault would still be alive.
+        """
+        lc.main()
+
+    # -- and@829: the infra-tally assertion -----------------------------
+
+    def test_the_self_check_fails_when_the_infra_result_is_counted_as_a_failure(self):
+        """`and@829`: the second half of the infra-tally assertion.
+
+        The tally is made wrong by one that files the infra result
+        under ``failed`` -- the exact misattribution the source warns
+        about ("counting it as a rejection misattributes a broken
+        environment to the agent's work").  The real self-check must
+        then FAIL, because ``counts["infra"]`` is 0 and not 1.
+
+        The first half of the assertion (``counts["failed"] == 0``)
+        is already satisfied by a tally that counted nothing, so the
+        FIRST half alone cannot tell this fault from a correct tally.
+        That is exactly why the second half has to be driven.
+        """
+
+        def WrongTally(results):
+            counts = {lc.OUTCOME_PASSED: 0, lc.OUTCOME_FAILED: 0, lc.OUTCOME_INFRA: 0}
+            for result in results:
+                counts[lc.OUTCOME_FAILED] += 1
+            return counts
+
+        original = lc.tally
+        lc.tally = WrongTally
+        try:
+            with self.assertRaises(AssertionError):
+                lc.main()
+        finally:
+            lc.tally = original
+
+    def test_the_self_check_fails_when_the_infra_result_is_not_counted_at_all(self):
+        """`and@829`: the other direction.
+
+        A tally that drops the infra result entirely.  Then
+        ``counts["failed"]`` is 0 -- so the FIRST half of the
+        assertion holds -- and only the second half catches it.
+        """
+
+        def EmptyTally(results):
+            return {lc.OUTCOME_PASSED: 0, lc.OUTCOME_FAILED: 0, lc.OUTCOME_INFRA: 0}
+
+        original = lc.tally
+        lc.tally = EmptyTally
+        try:
+            with self.assertRaises(AssertionError):
+                lc.main()
+        finally:
+            lc.tally = original
+
+
 if __name__ == "__main__":
     unittest.main()
