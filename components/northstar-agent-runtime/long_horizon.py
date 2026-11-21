@@ -665,6 +665,14 @@ class AuditorBackend:
         self.checks = tuple(checks)
         self.max_output_chars = int(max_output_chars)
         self.timeout_s = float(timeout_s)
+        # The auditor's output cap is a bound like the executor's, and it is
+        # refused for the same reason: a cap of 0 (or less) keeps NO output
+        # at all, so the rejection of a failing check would name the check
+        # but not the reason it failed -- and a negative cap would slice
+        # from the tail instead, keeping output the cap was meant to drop.
+        # The executor refuses these already; the auditor must too.
+        if self.max_output_chars < 1:
+            raise LongHorizonError("max_output_chars must be >= 1")
 
     def audit(
         self,
