@@ -353,3 +353,159 @@ class StateBudgetGuardSecondHalfTests(unittest.TestCase):
         size = measure_state({"a": 1})
         tight = StateBudget(max_state_size=size - 5)
         self.assertEqual(tight.bytes_over_budget({"a": 1}), 5)
+
+
+class BytesOverBudgetEquivalenceProofTests(unittest.TestCase):
+    """`gt@304` -- an EQUIVALENT mutant, proved equivalent rather than asserted.
+
+    The planted fault at line 304 of ``state_budget.py`` is::
+
+        return over if over > 0 else 0          # original
+        return over if over >= 0 else 0         # mutant
+
+    The previous round recorded the equivalence in prose
+    (``StateBudgetGuardSecondHalfTests``).  Prose is a claim; this class is
+    the PROOF, and it is the reason no further round should be spent on
+    this site.
+
+    Why the two are the same function
+    ---------------------------------
+
+    ``over`` is ``self.size_of(state) - self.max_state_size``.  Both terms
+    are integers (``size_of`` returns ``len(bytes)`` and ``max_state_size``
+    is validated to be an ``int`` in ``__post_init__``), so ``over`` is an
+    integer and never a float, a bool, or a non-number.  For an integer
+    ``over`` there are exactly three cases:
+
+    * ``over < 0``  -- the state fits.  Both forms take the ``else``
+      branch and return ``0``.  Identical.
+    * ``over == 0`` -- the state is exactly at the cap.  ``over > 0`` is
+      False so the original returns ``0``; ``over >= 0`` is True so the
+      mutant returns ``over``, which IS ``0``.  Identical -- but this is
+      the ONE integer whose two forms take different branches, so it is
+      the only place a difference could hide.
+    * ``over > 0``  -- the state is over the cap.  Both forms take the
+      ``then`` branch and return ``over``.  Identical.
+
+    The two forms can only return different values if that branch
+    difference at ``over == 0`` coincided with ``over != 0`` -- and it
+    does not.  The mutant is therefore UNREACHABLE-EQUIVALENT: no input,
+    valid or invalid, can make the two functions return different values.
+
+    What this class does
+    ---------------------
+
+    It runs the two forms side by side over a large randomised population
+    of (cap, state) pairs and asserts ZERO behavioural differences, and it
+    pins the boundary case explicitly -- the ``over == 0`` case is the one
+    the two forms route through DIFFERENT branches, so it is the only
+    place a difference could hide, and it is asserted directly.
+
+    The convention is the repository's own: see the ``gt@304`` block in
+    ``StateBudgetGuardSecondHalfTests`` above and the same convention in
+    ``tests/test_episode_eviction.py``.
+    """
+
+    #: The two implementations of the one line under test.
+    @staticmethod
+    def _original(over: int) -> int:
+        """The shipped expression: ``over if over > 0 else 0``."""
+        return over if over > 0 else 0
+
+    @staticmethod
+    def _mutant(over: int) -> int:
+        """The planted fault: ``over if over >= 0 else 0``."""
+        return over if over >= 0 else 0
+
+    def test_the_two_forms_differ_only_for_a_value_between_zero_and_zero(self):
+        """The algebraic reason, stated as an executable claim.
+
+        The two forms take DIFFERENT branches at exactly one integer:
+        ``over == 0`` (the original's ``over > 0`` is False there, the
+        mutant's ``over >= 0`` is True).  The two forms can only return
+        different VALUES if that branch difference coincided with
+        ``over != 0`` -- so the claim is: whenever the branches differ,
+        the returned values are equal too.
+        """
+        for over in range(-50, 51):
+            with self.subTest(over=over):
+                branches_differ = (over > 0) != (over >= 0)
+                if branches_differ:
+                    # The only integer whose branch differs is 0, and there
+                    # the original returns the literal 0 while the mutant
+                    # returns ``over`` -- which IS 0.
+                    self.assertEqual(over, 0)
+                self.assertEqual(self._original(over), self._mutant(over))
+
+    def test_the_boundary_case_over_zero_routes_through_different_branches(self):
+        """``over == 0`` is the ONLY value the two forms route differently.
+
+        The original takes the ``else`` branch (returning the literal
+        ``0``); the mutant takes the ``then`` branch (returning ``over``).
+        They agree only because ``over`` IS ``0`` there.  This is the one
+        place a difference could hide, so it is asserted directly rather
+        than left to the randomised sweep.
+        """
+        self.assertEqual(self._original(0), 0)
+        self.assertEqual(self._mutant(0), 0)
+        self.assertEqual(self._original(0), self._mutant(0))
+
+    def test_a_randomised_sweep_over_caps_and_states_finds_no_difference(self):
+        """A differential test over 2000 randomised (cap, state) pairs.
+
+        For each pair the real ``StateBudget`` is asked for the shortfall
+        through the shipped method, and the mutant's expression is
+        evaluated against the same ``over``.  The two must agree every
+        time; a single disagreement would make the mutant killable.
+        """
+        import random
+
+        rng = random.Random(20261121)
+        differences = 0
+        cases = 0
+        for _ in range(2000):
+            cap = rng.randint(1, 200)
+            state = {"k": rng.randint(0, 1000), "s": "x" * rng.randint(0, 20)}
+            budget = StateBudget(max_state_size=cap)
+            over = budget.size_of(state) - cap
+            shipped = budget.bytes_over_budget(state)
+            mutant = self._mutant(over)
+            cases += 1
+            if shipped != mutant:
+                differences += 1
+        self.assertEqual(cases, 2000)
+        self.assertEqual(
+            differences,
+            0,
+            "the mutant is only equivalent if it never changes the answer",
+        )
+
+    def test_the_shipped_method_agrees_with_the_original_expression(self):
+        """The method under test still IS the original expression.
+
+        This pins the shipped behaviour against the expression the mutant
+        would have replaced, so the equivalence argument above is about
+        the code that actually runs -- not about a paraphrase of it.
+        """
+        size = measure_state({"a": 1})
+        for cap in range(1, size + 12):
+            with self.subTest(cap=cap):
+                budget = StateBudget(max_state_size=cap)
+                state = {"a": 1}
+                over = budget.size_of(state) - cap
+                self.assertEqual(budget.bytes_over_budget(state), self._original(over))
+
+    def test_the_over_budget_value_is_always_an_integer(self):
+        """The premise of the argument: ``over`` is an int, never a float.
+
+        ``size_of`` returns a byte count and ``max_state_size`` is
+        validated as an ``int`` in ``__post_init__``; so ``over`` is an
+        integer.  If that ever stopped being true, the equivalence
+        argument above would no longer hold, so it is asserted.
+        """
+        size = measure_state({"a": 1})
+        budget = StateBudget(max_state_size=size)
+        over = budget.size_of({"a": 1}) - budget.max_state_size
+        self.assertIsInstance(over, int)
+        self.assertNotIsInstance(over, bool)
+        self.assertIsInstance(budget.bytes_over_budget({"a": 1}), int)
