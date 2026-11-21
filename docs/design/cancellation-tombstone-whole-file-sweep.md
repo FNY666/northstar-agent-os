@@ -39,6 +39,18 @@ The census was run over all 104 slices of the batch
 are this module — the `tombstone` slice and the `tombstone-mutant-blindspots`
 slice, both measuring `22/37` against the same file.
 
+**One of the 17 turned out to have no number at all.** The
+`cwl-episode-eviction` slice's census row read `ERROR`, not a count: eleven
+of its mutants made the test suite **hang**, and the probe reports a
+timeout as `SKIP (test timeout)` — neither a kill nor a survival. That
+slice is fixed separately; see
+`docs/design/cwl-episode-eviction.md` § "The loop's termination
+guarantee".
+
+The lesson for a census is the same one this slice teaches about an accept
+metric: **a number that is missing is a finding**, and a slice with no
+census number is a slice nobody has measured.
+
 ## 2. The claim under test: are they EQUIVALENT, or just untested?
 
 A mutant that survives a test suite is not automatically a defect. It may be
