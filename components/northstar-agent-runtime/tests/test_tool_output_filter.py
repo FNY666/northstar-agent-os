@@ -469,3 +469,191 @@ class FilterConfigGuardSecondHalfTests(unittest.TestCase):
         """
         with self.assertRaises(ValueError):
             FilterConfig(max_bytes=True)
+
+
+class FilterGuardSecondHalfTests(FilterTestCase):
+    """The SECOND half of each guard in ``tool_output_filter``.
+
+    Five planted faults survived this slice's suite:
+
+      gt@306  the ``end > 0`` bound in ``_value_end``
+      or@457  the "is alphanumeric" half of the stored-file name
+      or@458  the "strip, then fall back" half of the stored-file name
+      gt@486  the "would exceed the preview byte bound" test
+      or@690  the "is a string" half of the name guard
+
+    Each is driven below through the module's PUBLIC surface -- the
+    filter's own ``filter()`` and the module's own helpers -- because a
+    guard that only the private helper honours is a guard the caller
+    never gets.
+    """
+
+    # --- gt@306: the "end > 0" bound in _value_end ----------------------
+    def test_a_value_that_is_only_closing_quotes_keeps_no_value(self):
+        """`gt@306`: the bound is STRICT.
+
+        ``_value_end`` walks the trailing quotes off the end of a matched
+        credential span.  A span that is NOTHING BUT quotes has no value
+        at all: the value ends at offset 0, and the quotes are the field's
+        own closing delimiter, so they are kept in the span.
+
+        The mutant (``>`` -> ``>=``) walks one step too far: at
+        ``end == 0`` it inspects ``matched[-1]``, the LAST character of
+        the span, and -- for a span made only of quotes -- that character
+        is a quote, so the walk continues and the value end comes back
+        NEGATIVE.  A negative value end makes the replacement slice
+        ``text[value_start:value_end]`` empty, so the secret is NOT
+        replaced and the credential survives into the context.
+
+        The control below shows the ordinary case: a value with a closing
+        quote keeps the quote and loses the value.
+        """
+        from tool_output_filter import _value_end
+
+        self.assertEqual(_value_end('""', 2), 0)
+        self.assertEqual(_value_end("''", 2), 0)
+
+    def test_an_ordinary_value_keeps_its_closing_quote(self):
+        """`gt@306`: the control -- the ordinary case is unchanged."""
+        from tool_output_filter import _value_end
+
+        # 'key="secret"' -- the trailing '"' is the field's, not the secret's.
+        self.assertEqual(_value_end('key="secret"', 10), 10)
+
+    def test_a_quote_only_span_does_not_leak_a_secret_into_the_context(self):
+        """`gt@306`: the consequence, through the public filter.
+
+        A credential whose matched span is only quotes has no secret to
+        redact, so the filtered output must not have grown a
+        placeholder for it.
+        """
+        result = self.make_filter().filter('api_key: ""')
+        self.assertNotIn("[[REDACTED", result.output)
+        self.assertIn('api_key: ""', result.output)
+
+    # --- or@457: the "is alphanumeric" half of the name ----------------
+    def test_a_name_with_punctuation_is_stored_under_a_sanitised_name(self):
+        """`or@457`: the name is sanitised before it becomes a file name.
+
+        The stored body's file name is built from the caller's ``name``
+        with everything that is not alphanumeric and not in ``-_.``
+        replaced by an underscore.  A name that carries punctuation must
+        therefore appear in the path with the punctuation replaced --
+        NOT with the punctuation kept, and NOT with the whole name
+        dropped.
+
+        The mutant (``or`` -> ``and``) keeps every character whose
+        alphanumeric test FAILS, so the punctuation would survive into
+        the path.
+        """
+        result = self.make_filter(max_bytes=10).filter("x" * 100, name="a b/c")
+
+        path = Path(result.full_output_path)
+        self.assertTrue(path.exists())
+        self.assertEqual(path.name, "a_b_c-000001.txt")
+
+    def test_an_ordinary_name_is_kept_verbatim(self):
+        """`or@457`: the control -- an ordinary name is unchanged."""
+        result = self.make_filter(max_bytes=10).filter("x" * 100, name="tool-a_1.2")
+
+        path = Path(result.full_output_path)
+        self.assertTrue(path.exists())
+        self.assertEqual(path.name, "tool-a_1.2-000001.txt")
+
+    # --- or@458: the "strip, then fall back" half ----------------------
+    def test_a_name_that_is_only_dots_and_underscores_falls_back_to_a_default(self):
+        """`or@458`: the fallback name.
+
+        A name that sanitises to nothing usable -- one made only of
+        dots and underscores -- is stripped, and when what is left is
+        empty the store falls back to the default name ``tool-output``.
+
+        The mutant (``or`` -> ``and``) keeps the empty string instead of
+        falling back, so the body would be written to a file whose name
+        begins with a dash: ``-000001.txt``.
+        """
+        result = self.make_filter(max_bytes=10).filter("x" * 100, name="___")
+
+        path = Path(result.full_output_path)
+        self.assertTrue(path.exists())
+        self.assertEqual(path.name, "tool-output-000001.txt")
+
+    def test_a_name_with_leading_dots_is_stripped_of_them(self):
+        """`or@458`: the strip half, from the other side.
+
+        The dots and underscores at the EDGES of a name are stripped, so
+        a name like ``..tool..`` is stored as ``tool``.  Under the mutant
+        the trailing dots survive.
+        """
+        result = self.make_filter(max_bytes=10).filter("x" * 100, name="..tool..")
+
+        path = Path(result.full_output_path)
+        self.assertTrue(path.exists())
+        self.assertEqual(path.name, "tool-000001.txt")
+
+    # --- gt@486: the preview byte bound --------------------------------
+    def test_a_preview_line_that_exactly_fills_the_bound_is_kept(self):
+        """`gt@486`: the bound is STRICT.
+
+        The preview keeps whole lines, and stops before a line that
+        WOULD EXCEED the byte bound.  A line that exactly reaches the
+        bound does not exceed it, so it is KEPT.
+
+        The mutant (``>`` -> ``>=``) stops one line early, so a preview
+        that should hold two lines holds one.
+        """
+        body = "aaa\nbbb\n" + "z" * 100
+        result = self.make_filter(
+            max_bytes=10, preview_lines=2, preview_max_bytes=7
+        ).filter(body)
+
+        self.assertTrue(result.truncated)
+        preview = result.output.split("\n")[1:]
+        self.assertEqual(preview[:2], ["aaa", "bbb"])
+
+    def test_a_preview_line_one_byte_past_the_bound_is_dropped(self):
+        """`gt@486`: the bound, from the other side."""
+        body = "aaa\nbbb\n" + "z" * 100
+        result = self.make_filter(
+            max_bytes=10, preview_lines=2, preview_max_bytes=6
+        ).filter(body)
+
+        self.assertTrue(result.truncated)
+        preview = result.output.split("\n")[1:]
+        self.assertEqual(preview[0], "aaa")
+        self.assertNotIn("bbb", preview)
+
+    # --- or@690: the "is a string" half of the name guard --------------
+    def test_a_non_string_name_is_refused(self):
+        """`or@690`: the "is a string" half.
+
+        The name guard is ``if not isinstance(name, str) or not name:``.
+        The "is not empty" half refuses ``""``; the "is not a string"
+        half is what refuses a name that is not a string at all.
+
+        The mutant (``or`` -> ``and``) keeps a non-string name, and the
+        filter then treats it as a usable name -- which is the
+        fail-open the module's own contract forbids.
+        """
+        with self.assertRaises(ValueError):
+            self.make_filter().filter("body", name=123)  # type: ignore[arg-type]
+
+    def test_an_empty_name_is_refused(self):
+        """`or@690`: the other half, as the control."""
+        with self.assertRaises(ValueError):
+            self.make_filter().filter("body", name="")
+
+    def test_a_non_string_name_is_refused_before_any_body_is_stored(self):
+        """`or@690`: the consequence -- nothing is written.
+
+        A refused name must be refused BEFORE the store writes anything,
+        so a bad name leaves no evidence on disk.
+        """
+        store = Path(self.store_dir)
+        before = sorted(store.glob("*")) if store.exists() else []
+
+        with self.assertRaises(ValueError):
+            self.make_filter(max_bytes=10).filter("x" * 100, name=123)  # type: ignore[arg-type]
+
+        after = sorted(store.glob("*")) if store.exists() else []
+        self.assertEqual(before, after)
