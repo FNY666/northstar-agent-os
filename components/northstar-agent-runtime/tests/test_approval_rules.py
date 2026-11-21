@@ -135,3 +135,77 @@ class CheckpointCarryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MalformedStateFieldTests(unittest.TestCase):
+    """The three collection fields of a restored approval state.
+
+    Each field's guard is a conjunction of two conditions:
+
+        if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+
+    The suite drove only the first half -- a string is refused, because a
+    string is not a Sequence.  The second half is what refuses a value
+    that is not a sequence AT ALL: under the mutant (``or`` -> ``and``)
+    the guard only fires when the value is both a non-Sequence AND a
+    string, which is never true, so the malformed value reaches the
+    list comprehension and raises a bare ``TypeError`` or
+    ``ValueError`` instead of the module's ``ApprovalRuleError``.
+
+    These tests assert the MODULE'S ERROR, so a mutant that lets the
+    malformed value through is caught.
+    """
+
+    def test_a_non_sequence_rules_field_is_refused_with_the_module_error(self):
+        """`or@196`: the "and it is not a string" half.
+
+        An int is not a Sequence and not a string, so the guard's
+        second half is what refuses it.
+        """
+        with self.assertRaises(ApprovalRuleError) as caught:
+            ToolApprovalState.from_dict({"rules": 5})
+        self.assertIn("rules must be a list", str(caught.exception))
+
+    def test_a_byte_rules_field_is_refused_with_the_module_error(self):
+        """`or@196`: the other order -- bytes are a Sequence, but a
+        str-shaped one, so the second half refuses them."""
+        with self.assertRaises(ApprovalRuleError) as caught:
+            ToolApprovalState.from_dict({"rules": b"abc"})
+        self.assertIn("rules must be a list", str(caught.exception))
+
+    def test_a_non_sequence_queued_field_is_refused_with_the_module_error(self):
+        """`or@200`: the "and it is not a string" half."""
+        with self.assertRaises(ApprovalRuleError) as caught:
+            ToolApprovalState.from_dict({"queued_approval_requests": 5})
+        self.assertIn("queued_approval_requests must be a list",
+                      str(caught.exception))
+
+    def test_a_byte_queued_field_is_refused_with_the_module_error(self):
+        """`or@200`: the other order."""
+        with self.assertRaises(ApprovalRuleError) as caught:
+            ToolApprovalState.from_dict({"queued_approval_requests": b"abc"})
+        self.assertIn("queued_approval_requests must be a list",
+                      str(caught.exception))
+
+    def test_a_non_sequence_collected_field_is_refused_with_the_module_error(self):
+        """`or@202`: the "and it is not a string" half."""
+        with self.assertRaises(ApprovalRuleError) as caught:
+            ToolApprovalState.from_dict({"collected_approval_responses": 5})
+        self.assertIn("collected_approval_responses must be a list",
+                      str(caught.exception))
+
+    def test_a_byte_collected_field_is_refused_with_the_module_error(self):
+        """`or@202`: the other order."""
+        with self.assertRaises(ApprovalRuleError) as caught:
+            ToolApprovalState.from_dict({"collected_approval_responses": b"abc"})
+        self.assertIn("collected_approval_responses must be a list",
+                      str(caught.exception))
+
+    def test_a_valid_state_still_restores(self):
+        """The control -- the happy path must survive the guards."""
+        state = ToolApprovalState(
+            rules=[ToolApprovalRule("Read", {"path": "/tmp/a"})]
+        )
+        restored = ToolApprovalState.from_dict(state.as_dict())
+        self.assertEqual(len(restored.rules), 1)
+        self.assertEqual(restored.rules[0].tool_name, "Read")
