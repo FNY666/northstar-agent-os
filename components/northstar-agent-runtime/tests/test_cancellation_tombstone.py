@@ -790,3 +790,64 @@ class TombstoneMutantBlindspotTests(unittest.TestCase):
         lift = a_named_lift(action="publish-something-else", text=123)
         with self.assertRaises(ct.TombstoneLiftError):
             ct.check_lift(a_tombstone(), lift)
+
+
+class TombstoneBoundTypeTests(unittest.TestCase):
+    """The bound a capacity denial carries must be a number.
+
+    ``expires_at`` is compared against the executor's clock in
+    :meth:`TombstoneSet.blocked`: ``now >= tombstone.expires_at``.  A
+    bound that is not a number cannot be compared, so the read-time
+    check that is supposed to answer "does this still block?" raises a
+    ``TypeError`` instead of answering -- and the executor's answer to
+    "may I act?" becomes a crash.
+
+    ``declared_at`` and ``lifted_at`` are the same class of field and are
+    checked for the same reason: ``check_lift`` compares the lift's
+    timestamp against the tombstone's.
+    """
+
+    def test_a_capacity_denial_with_a_non_numeric_bound_is_refused(self):
+        for bound in ("not-a-number", [], {}, True):
+            with self.subTest(bound=bound):
+                with self.assertRaises(ct.TombstoneError):
+                    a_tombstone(kind=CAPACITY, expires_at=bound)
+
+    def test_a_capacity_denial_with_a_numeric_bound_is_accepted(self):
+        for bound in (500.0, 500, 0.0):
+            with self.subTest(bound=bound):
+                tombstone = a_tombstone(kind=CAPACITY, expires_at=bound)
+                self.assertEqual(tombstone.expires_at, bound)
+
+    def test_the_read_time_check_answers_instead_of_crashing(self):
+        # The regression: the set's answer to "does this still block?"
+        # must be an answer, not a TypeError.
+        registry = TombstoneSet([a_tombstone(kind=CAPACITY, expires_at=500.0)])
+        self.assertTrue(registry.is_blocked("grant-publish", "publish", "post-42", now=499.0))
+        self.assertFalse(registry.is_blocked("grant-publish", "publish", "post-42", now=500.0))
+
+    def test_a_tombstone_with_a_non_numeric_declared_at_is_refused(self):
+        with self.assertRaises(ct.TombstoneError):
+            a_tombstone(declared_at="not-a-number")
+
+    def test_a_lift_with_a_non_numeric_lifted_at_is_refused(self):
+        with self.assertRaises(ct.TombstoneError):
+            a_named_lift(lifted_at="not-a-number")
+
+    def test_the_lift_check_answers_instead_of_crashing(self):
+        # The regression for the lift: a lift whose timestamp cannot be
+        # compared is refused at construction, so the lift check answers
+        # with a TombstoneLiftError rather than a TypeError.
+        tombstone = a_tombstone(declared_at=100.0)
+        with self.assertRaises(ct.TombstoneError):
+            Lift(
+                declarer=PRINCIPAL,
+                declarer_channel=CHAT,
+                grant_id="grant-publish",
+                action="publish",
+                subject="post-42",
+                text="I re-authorize publishing grant-publish/publish (post-42).",
+                lifted_at="not-a-number",
+            )
+        # The control: a well-formed lift still lifts.
+        ct.check_lift(tombstone, a_named_lift())

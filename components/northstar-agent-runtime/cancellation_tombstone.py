@@ -143,6 +143,8 @@ class Tombstone:
         if self.kind == CAPACITY:
             if self.expires_at is None:
                 raise TombstoneError("a capacity denial must carry the bound that measures it")
+            if not isinstance(self.expires_at, (int, float)) or isinstance(self.expires_at, bool):
+                raise TombstoneError("expires_at must be a number")
         elif self.expires_at is not None:
             raise TombstoneError("a permission stop must not carry an expiry: it does not expire on the executor's clock")
         if not isinstance(self.declared_at, (int, float)) or isinstance(self.declared_at, bool):
@@ -250,6 +252,8 @@ class Lift:
         object.__setattr__(self, "declarer_channel", _require_text(self.declarer_channel, "declarer_channel"))
         object.__setattr__(self, "grant_id", _require_text(self.grant_id, "grant_id"))
         object.__setattr__(self, "action", _require_text(self.action, "action"))
+        if not isinstance(self.lifted_at, (int, float)) or isinstance(self.lifted_at, bool):
+            raise TombstoneError("lifted_at must be a number")
 
     def names(self, tombstone: Tombstone) -> bool:
         """True when this instruction names the tombstone's action exactly."""
