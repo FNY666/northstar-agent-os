@@ -352,3 +352,195 @@ class ModuleHygieneTests(unittest.TestCase):
         for delivered in range(0, len("abcdefgh") + 1):
             outcome = truncate(item, delivered, seq=1)
             self.assertEqual(delivered_prefix(outcome.item), "abcdefgh"[:delivered])
+
+
+class TruncationGuardSecondHalfTests(unittest.TestCase):
+    """The SECOND half of each guard in ``turn_truncation``.
+
+    Four planted faults survived this slice's suite:
+
+      gt@284  the "was already truncated to N, and this claims more than N"
+              bound in ``truncate``
+      lt@289  the "a shorter delivery contradicts the report" bound in
+              ``truncate``
+      retF@415 the "an import outside the standard library" answer in
+              ``stdlib_only``
+      retF@418 the "a from-import outside the standard library" answer in
+              ``stdlib_only``
+
+    The two bounds in ``truncate`` are the two halves of ONE rule: a turn
+    that was already cut may not be re-extended (that would claim
+    undelivered text was said) and may not be shortened (that would
+    contradict the delivery report it already carries).  The existing
+    suite drove both, but from a distance: it used a first truncation of
+    9 against a generated length of 24, so the mutant's shifted bound
+    (9 -> 10) never crossed the value it used.  These tests use the
+    BOUNDARY values, where the mutant's off-by-one is visible.
+
+    The two ``stdlib_only`` answers are driven by pointing the function
+    at a scratch source file, which is exactly what the function reads.
+    """
+
+    # --- gt@284: the re-extend bound -----------------------------------
+    def test_re_reporting_the_same_length_is_not_a_re_extension(self):
+        """`gt@284`: the bound is STRICT.
+
+        A turn that was already truncated to 9 units may not be
+        re-extended.  A request to extend it to EXACTLY 9 is not an
+        extension at all -- it is the same report again -- so it is
+        accepted, and the refusal is for a length STRICTLY GREATER than
+        the one already reported.
+
+        Under the mutant (``>`` -> ``>=``) a request to extend to
+        exactly 9 is REFUSED, so re-reporting the same delivery
+        position -- the most innocent thing a caller can do -- is
+        treated as an attempt to restore the undelivered suffix.
+        """
+        item = make_item("t1", "The answer is forty two.")
+        outcome = truncate(item, 9, seq=1)
+        self.assertEqual(outcome.item.delivered_len, 9)
+
+        # Re-reporting the same delivery position is not a re-extension.
+        again = truncate(outcome.item, 9, seq=2)
+        self.assertEqual(again.item.delivered_len, 9)
+        self.assertEqual(again.item.status, PARTIAL)
+
+    def test_re_extending_one_past_the_reported_length_is_refused(self):
+        """`gt@284`: the bound, from the other side."""
+        item = make_item("t1", "The answer is forty two.")
+        outcome = truncate(item, 9, seq=1)
+        with self.assertRaises(ReextendRefusedError):
+            truncate(outcome.item, 10, seq=2)
+
+    def test_re_reporting_the_same_length_on_a_full_delivery_is_accepted(self):
+        """`gt@284`: the same rule at the other end of the range.
+
+        A turn that was delivered WHOLE (delivered_len == generated_len)
+        carries a delivery report of its own length, and re-reporting
+        that same length is the same report -- not an attempt to
+        restore text that was never delivered.
+
+        Under the mutant (``>`` -> ``>=``) the request is REFUSED as a
+        re-extension, so a caller that re-reports the delivery position
+        it already reported is told it tried to restore the undelivered
+        suffix of a turn that was never cut.
+        """
+        item = make_item("t1", "short")
+        outcome = truncate(item, 5, seq=1)
+        self.assertEqual(outcome.item.status, DELIVERED)
+
+        again = truncate(outcome.item, 5, seq=2)
+        self.assertEqual(again.item.delivered_len, 5)
+        self.assertEqual(again.item.status, DELIVERED)
+
+    # --- lt@289: the shortening bound ----------------------------------
+    def test_shortening_to_exactly_the_reported_length_is_accepted(self):
+        """`lt@289`: the bound is STRICT.
+
+        A turn that was already truncated to 9 units may be re-reported
+        at 9 -- that is the same report, not a contradiction.  A
+        SHORTER report contradicts the one already on the record.
+
+        Under the mutant (``<`` -> ``<=``) a report of exactly 9 is
+        REFUSED as a contradiction, so re-reporting the same delivery
+        position is treated as contradicting the record.
+        """
+        item = make_item("t1", "The answer is forty two.")
+        outcome = truncate(item, 9, seq=1)
+
+        again = truncate(outcome.item, 9, seq=2)
+        self.assertEqual(again.item.delivered_len, 9)
+        self.assertEqual(delivered_prefix(again.item), "The answe")
+
+    def test_shortening_one_past_the_reported_length_is_refused(self):
+        """`lt@289`: the bound, from the other side."""
+        item = make_item("t1", "The answer is forty two.")
+        outcome = truncate(item, 9, seq=1)
+        with self.assertRaises(DeliveryRangeError):
+            truncate(outcome.item, 8, seq=2)
+
+    # --- retF@415 / retF@418: the stdlib_only answers -------------------
+    def test_a_plain_import_outside_the_standard_library_is_not_stdlib_only(self):
+        """`retF@415`: the "an import outside the standard library" answer.
+
+        ``stdlib_only`` walks the module's own imports and answers
+        False when one of them is outside the standard library.  The
+        ``import`` branch is the one that reads ``alias.name``; the
+        ``from`` branch reads ``node.module``.
+
+        Under the mutant (``return False`` -> ``return True``) a module
+        that imports a third-party package reads as standard-library
+        only.
+
+        The function reads the file named by ``__file__``, so the source
+        it is asked about is a scratch file -- which is exactly what the
+        function is specified to read.
+        """
+        import tempfile
+        from pathlib import Path
+
+        import turn_truncation as module
+
+        with tempfile.TemporaryDirectory() as tmp:
+            scratch = Path(tmp) / "third_party_import.py"
+            scratch.write_text("import requests\n", encoding="utf-8")
+            original = module.__file__
+            module.__file__ = str(scratch)
+            try:
+                self.assertFalse(module.stdlib_only())
+            finally:
+                module.__file__ = original
+
+    def test_a_from_import_outside_the_standard_library_is_not_stdlib_only(self):
+        """`retF@418`: the "a from-import outside the standard library" answer.
+
+        This is the SECOND branch: ``from requests import get``.  The
+        ``node.module`` of that import is ``requests``, whose first
+        component is outside the allowed set.
+
+        Under the mutant (``return False`` -> ``return True``) the
+        ``from`` branch never refuses anything, so only the ``import``
+        branch would still catch a third-party dependency.
+        """
+        import tempfile
+        from pathlib import Path
+
+        import turn_truncation as module
+
+        with tempfile.TemporaryDirectory() as tmp:
+            scratch = Path(tmp) / "third_party_from_import.py"
+            scratch.write_text("from requests import get\n", encoding="utf-8")
+            original = module.__file__
+            module.__file__ = str(scratch)
+            try:
+                self.assertFalse(module.stdlib_only())
+            finally:
+                module.__file__ = original
+
+    def test_a_standard_library_only_source_is_stdlib_only(self):
+        """`retF@415` / `retF@418`: the control.
+
+        The same scratch-file mechanism, with a source that imports only
+        the standard library, must still read as standard-library only.
+        """
+        import tempfile
+        from pathlib import Path
+
+        import turn_truncation as module
+
+        with tempfile.TemporaryDirectory() as tmp:
+            scratch = Path(tmp) / "stdlib_only_source.py"
+            scratch.write_text(
+                "import ast\nfrom pathlib import Path\nfrom typing import Iterable\n",
+                encoding="utf-8",
+            )
+            original = module.__file__
+            module.__file__ = str(scratch)
+            try:
+                self.assertTrue(module.stdlib_only())
+            finally:
+                module.__file__ = original
+
+    def test_the_module_itself_is_stdlib_only(self):
+        """`retF@415` / `retF@418`: the module's own file, as shipped."""
+        self.assertTrue(stdlib_only())
