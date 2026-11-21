@@ -510,3 +510,348 @@ class ExecutionIsolationTests(unittest.TestCase):
         self.assertNotIn("socket", tree_source)
 
 
+
+
+class SecondHalfGuardTests(unittest.TestCase):
+    """The second half of every guard in the effect-directive module.
+
+    Each surviving mutant is one arm of a two-armed conditional, or one
+    half of a conjunction, and the rest of the suite drove only the
+    other arm.  These tests drive the missing half.
+    """
+
+    # -- or@224: the capability guard ---------------------------------
+
+    def test_a_capability_of_the_right_type_but_the_wrong_object_is_refused(self):
+        """`or@224`: the "or it is not the singleton" half.
+
+        The guard is ``if not isinstance(capability, HostCapability) or
+        capability is not HOST_CAPABILITY``.  The suite drove the "not
+        a HostCapability at all" half; this drives a genuine
+        HostCapability that is not the singleton.
+        """
+        forged = effect_directive.HostCapability(proof="not-the-real-one")
+        self.assertIsInstance(forged, effect_directive.HostCapability)
+        self.assertIsNot(forged, HOST)
+        with self.assertRaises(MintError):
+            mint("Emit", {}, capability=forged)
+
+    def test_the_singleton_capability_is_accepted(self):
+        """`or@224`: the control -- the real capability mints."""
+        directive = mint("Emit", {"text": "hi"}, capability=HOST)
+        self.assertEqual(directive.kind, "Emit")
+
+    # -- or@226: the kind guard ----------------------------------------
+
+    def test_a_kind_that_is_not_a_str_is_refused(self):
+        """`or@226`: the "or the kind is not a str" half.
+
+        The guard is ``if not isinstance(kind, str) or kind not in
+        DIRECTIVE_KINDS``.  The suite drove the "not in the closed set"
+        half; this drives a non-str kind.
+        """
+        for bad in (None, 42, b"Emit", ["Emit"]):
+            with self.subTest(bad=bad):
+                with self.assertRaises(UnknownDirectiveKind):
+                    mint(bad, {}, capability=HOST)
+
+    def test_a_kind_in_the_closed_set_is_accepted(self):
+        """`or@226`: the control."""
+        directive = mint("Cron", {}, capability=HOST)
+        self.assertEqual(directive.kind, "Cron")
+
+    # -- or@293: the signal-type guard ---------------------------------
+
+    def test_a_signal_type_that_is_not_a_str_is_refused(self):
+        """`or@293`: the "or the type is not a str" half.
+
+        The guard is ``if not isinstance(self.signal_type, str) or not
+        self.signal_type``.  The suite drove the empty-string half; this
+        drives a non-str type.
+        """
+        for bad in (None, 42, b"say", ["say"]):
+            with self.subTest(bad=bad):
+                with self.assertRaises(effect_directive.EffectDirectiveError):
+                    Signal(bad)
+
+    def test_an_empty_signal_type_is_refused(self):
+        """`or@293`: the other half -- an empty type."""
+        with self.assertRaises(effect_directive.EffectDirectiveError):
+            Signal("")
+
+    def test_a_real_signal_type_is_accepted(self):
+        """`or@293`: the control."""
+        self.assertEqual(Signal("say", "hello").signal_type, "say")
+
+    # -- or@318: the route-key guard -----------------------------------
+
+    def test_a_route_key_that_is_not_a_str_is_refused(self):
+        """`or@318`: the "or the key is not a str" half.
+
+        The guard is ``if not isinstance(key, str) or not key``.  The
+        suite drove the empty-key half; this drives a non-str key.
+        """
+        for bad in (None, 42, b"say"):
+            with self.subTest(bad=bad):
+                with self.assertRaises(effect_directive.EffectDirectiveError):
+                    SignalRouter({bad: lambda s, g: {"x": 1}})
+
+    def test_an_empty_route_key_is_refused(self):
+        """`or@318`: the other half -- an empty key."""
+        with self.assertRaises(effect_directive.EffectDirectiveError):
+            SignalRouter({"": lambda s, g: {"x": 1}})
+
+    def test_a_str_route_key_is_accepted(self):
+        """`or@318`: the control."""
+        router = SignalRouter({"say": lambda s, g: {"x": 1}})
+        self.assertEqual(router.known_types(), ("say",))
+
+    # -- or@347: the frozen-mapping constructor ------------------------
+
+    def test_a_frozen_mapping_built_from_nothing_is_empty(self):
+        """`or@347`: the "or the data is falsy" half.
+
+        ``dict(data or {})`` -- an empty mapping and a ``None`` both
+        yield an empty FrozenMapping.
+        """
+        import effect_directive as ed
+
+        self.assertEqual(len(ed.FrozenMapping()), 0)
+        self.assertEqual(len(ed.FrozenMapping(None)), 0)
+        self.assertEqual(len(ed.FrozenMapping({})), 0)
+
+    def test_a_frozen_mapping_built_from_data_holds_it(self):
+        """`or@347`: the control -- real data is kept."""
+        import effect_directive as ed
+
+        frozen = ed.FrozenMapping({"a": 1, "b": 2})
+        self.assertEqual(len(frozen), 2)
+        self.assertEqual(frozen["a"], 1)
+        self.assertEqual(sorted(frozen), ["a", "b"])
+
+    # -- and@514: the action's proposal shape --------------------------
+
+    def test_an_action_that_returns_only_a_state_gets_no_directives(self):
+        """`and@514`: the "and it has exactly two elements" half.
+
+        The proposal is unpacked only when it is a two-tuple.  An action
+        that returns a bare mapping contributes no directives.
+        """
+        def action(state, signal):
+            return {"n": state.get("n", 0) + 1}
+
+        router = SignalRouter({"say": action})
+        result = run_turn({"n": 0}, Signal("say", "hi"), router)
+        self.assertTrue(result.committed)
+        self.assertEqual(result.directives, ())
+        self.assertEqual(result.state["n"], 1)
+
+    def test_an_action_that_returns_a_two_key_mapping_gets_no_directives(self):
+        """`and@514`: the "and it has exactly two elements" half.
+
+        ``isinstance(proposal, tuple) and len(proposal) == 2`` -- the
+        length test only applies to a TUPLE.  A plain mapping with
+        exactly two keys is a new state, not a ``(state, directives)``
+        pair: it commits whole, with no directives.
+        """
+        def action(state, signal):
+            return {"n": 1, "m": 2}
+
+        router = SignalRouter({"say": action})
+        result = run_turn({"n": 0}, Signal("say", "hi"), router)
+        self.assertTrue(result.committed)
+        self.assertIsNone(result.failure)
+        self.assertEqual(result.directives, ())
+        self.assertEqual(dict(result.state), {"n": 1, "m": 2})
+
+    def test_an_action_that_returns_a_state_and_directives_commits_both(self):
+        """`and@514`: the control -- the exact two-tuple is unpacked."""
+        directive = mint("Emit", {"text": "hi"}, capability=HOST)
+
+        def action(state, signal):
+            return {"n": 1}, (directive,)
+
+        router = SignalRouter({"say": action})
+        sink = RecordingSink()
+        executor = DirectiveExec(sink)
+        result = run_turn({"n": 0}, Signal("say", "hi"), router, executor=executor)
+        self.assertTrue(result.committed)
+        self.assertEqual(len(result.directives), 1)
+        self.assertEqual(len(sink.effects), 1)
+
+    # -- and@587: the post-commit failure filter -----------------------
+
+    def test_a_receipt_that_did_not_execute_but_did_not_fail_is_not_a_failure(self):
+        """`and@587`: the "and the detail says the effect failed" half.
+
+        A replayed receipt is ``executed=False``, but its detail says
+        "replay: ...", not "effect failed".  A turn whose only
+        non-executed receipt is a replay must settle cleanly -- the
+        commit stands and no failure is reported.
+        """
+        directive = mint("Emit", {"text": "hi"}, capability=HOST)
+
+        def action(state, signal):
+            return {"n": state.get("n", 0) + 1}, (directive,)
+
+        router = SignalRouter({"say": action})
+        sink = RecordingSink()
+        executor = DirectiveExec(sink)
+        # The first turn executes the effect.
+        first = run_turn({"n": 0}, Signal("say", "hi"), router, executor=executor)
+        self.assertTrue(first.committed)
+        self.assertIsNone(first.failure)
+        # The second turn replays it: the receipt is not executed, but
+        # the effect did not fail either.
+        second = run_turn({"n": 1}, Signal("say", "hi"), router, executor=executor)
+        self.assertTrue(second.committed)
+        self.assertIsNone(second.failure)
+        self.assertEqual(second.step, "settle")
+
+    def test_a_receipt_whose_effect_failed_is_a_post_commit_failure(self):
+        """`and@587`: the control -- the failed effect is reported."""
+        directive = mint("Emit", {"text": "hi"}, capability=HOST)
+
+        def action(state, signal):
+            return {"n": 1}, (directive,)
+
+        router = SignalRouter({"say": action})
+        sink = RecordingSink(fail_on="Emit")
+        executor = DirectiveExec(sink)
+        result = run_turn({"n": 0}, Signal("say", "hi"), router, executor=executor)
+        self.assertTrue(result.committed)
+        self.assertIsNotNone(result.failure)
+        self.assertIn("post-commit", result.failure)
+
+    # -- or@721: the router-name guard ---------------------------------
+
+    def test_a_router_name_that_is_not_a_str_is_refused(self):
+        """`or@721`: the "or the name is not a str" half.
+
+        The guard is ``if not isinstance(name, str) or not name``.  The
+        suite drove the empty-name half; this drives a non-str name.
+        """
+        router = SignalRouter({"say": lambda s, g: {"x": 1}})
+        for bad in (None, 42, b"router"):
+            with self.subTest(bad=bad):
+                with self.assertRaises(effect_directive.EffectDirectiveError):
+                    install_router(bad, router)
+
+    def test_an_empty_router_name_is_refused(self):
+        """`or@721`: the other half -- an empty name."""
+        router = SignalRouter({"say": lambda s, g: {"x": 1}})
+        with self.assertRaises(effect_directive.EffectDirectiveError):
+            install_router("", router)
+
+    def test_a_router_name_that_is_a_str_is_accepted(self):
+        """`or@721`: the control."""
+        router = SignalRouter({"say": lambda s, g: {"x": 1}})
+        install_router("a-named-router", router)
+        self.assertIn("a-named-router", effect_directive.installed_routers())
+
+    # -- or@728: the default-router guard ------------------------------
+
+    def test_a_non_default_install_does_not_become_the_default(self):
+        """`or@728`: the "or there is no default yet" half.
+
+        ``if make_default or _DEFAULT_ROUTER_NAME is None`` -- a router
+        installed without ``make_default`` does NOT take over the
+        default slot when a default already exists.
+        """
+        import effect_directive as ed
+
+        original_default = ed._DEFAULT_ROUTER_NAME
+        original_routers = dict(ed._ROUTERS)
+        try:
+            ed._ROUTERS.clear()
+            ed._DEFAULT_ROUTER_NAME = None
+
+            first = SignalRouter({"say": lambda s, g: {"x": 1}})
+            ed.install_router("guard-first", first)
+            self.assertEqual(ed._DEFAULT_ROUTER_NAME, "guard-first")
+
+            second = SignalRouter({"other": lambda s, g: {"x": 2}})
+            ed.install_router("guard-second", second)
+            # The first router is still the default.
+            self.assertEqual(ed._DEFAULT_ROUTER_NAME, "guard-first")
+            self.assertIs(ed.default_router(), first)
+        finally:
+            ed._ROUTERS.clear()
+            ed._ROUTERS.update(original_routers)
+            ed._DEFAULT_ROUTER_NAME = original_default
+
+    def test_the_first_install_becomes_the_default(self):
+        """`or@728`: the other half -- with no default, the install takes it."""
+        import effect_directive as ed
+
+        original_default = ed._DEFAULT_ROUTER_NAME
+        original_routers = dict(ed._ROUTERS)
+        try:
+            ed._ROUTERS.clear()
+            ed._DEFAULT_ROUTER_NAME = None
+            router = SignalRouter({"say": lambda s, g: {"x": 1}})
+            ed.install_router("guard-only", router)
+            self.assertEqual(ed._DEFAULT_ROUTER_NAME, "guard-only")
+            self.assertIs(ed.default_router(), router)
+        finally:
+            ed._ROUTERS.clear()
+            ed._ROUTERS.update(original_routers)
+            ed._DEFAULT_ROUTER_NAME = original_default
+
+
+class SelfCheckTests(unittest.TestCase):
+    """The module's own self-check, pinned.
+
+    ``effect_directive.main()`` asserts the module's invariants.  The
+    suite ran it without asserting anything about it, so every
+    assertion inside it was a free mutant.
+    """
+
+    def test_the_module_self_checks_when_run_as_a_script(self):
+        """`eq@776`: the ``__name__ == "__main__"`` guard.
+
+        Run as a script, the module self-checks and says so.
+        """
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        component = Path(effect_directive.__file__).resolve().parent
+        result = subprocess.run(
+            [sys.executable, "-m", "effect_directive"],
+            cwd=str(component),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=180,
+        )
+        output = result.stdout.decode("utf-8", "replace")
+        self.assertEqual(result.returncode, 0, output)
+        self.assertIn("effect-directive OK", output)
+
+    def test_the_self_check_pins_the_closed_type_set(self):
+        """`eq@752` / `eq@755`: the closed set and the minted kind.
+
+        Exactly nine kinds, and each minted directive carries its own
+        kind.
+        """
+        self.assertEqual(len(DIRECTIVE_KINDS), 9)
+        for kind in sorted(DIRECTIVE_KINDS):
+            with self.subTest(kind=kind):
+                directive = mint(kind, {"x": 1}, capability=HOST)
+                self.assertEqual(directive.kind, kind)
+
+    def test_the_self_check_pins_purity(self):
+        """`eq@771` / `eq@772`: decide is pure.
+
+        Two calls with the same input give the same result, and the
+        state is what the action returned.
+        """
+        def action(state, signal):
+            return {"seen": signal.payload}
+
+        router = SignalRouter({"say": action})
+        signal = Signal("say", "hello")
+        first = decide({"n": 0}, signal, router)
+        second = decide({"n": 0}, signal, router)
+        self.assertEqual(first, second)
+        self.assertEqual(dict(first.state), {"seen": "hello"})
