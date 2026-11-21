@@ -616,6 +616,42 @@ class ContextBudgetSecondHalfTests(unittest.TestCase):
         self.assertEqual(len(capped.encode("utf-8")), 100)
         self.assertTrue(record["truncated"])
 
+    def test_auto_memory_at_the_byte_limit_is_byte_identical(self):
+        """`lt@579`: an EQUIVALENT mutant, recorded.
+
+        The planted fault at this site (``<`` -> ``<=``) is an
+        EQUIVALENT mutant, and provably so:
+
+        * ``bytes_kept = min(body_bytes, auto_memory_max_bytes)``, so
+          ``bytes_kept == body_bytes`` exactly when the body already
+          fits the byte cap;
+        * under the mutant the cut branch runs one extra time in that
+          case, but the cut is
+          ``body.encode("utf-8")[:bytes_kept].decode("utf-8", ...)``
+          with ``bytes_kept == len(body.encode("utf-8"))`` -- slicing
+          a string to exactly its own length is the IDENTITY, and the
+          re-decode of well-formed UTF-8 is the identity too;
+        * the mutant branch also assigns ``body_bytes = bytes_kept``,
+          which is the value it already had.
+
+        So at ``bytes_kept == body_bytes`` the two versions agree
+        exactly, and the ``truncated`` flag is computed from
+        ``bytes_kept`` and ``bytes_total``, neither of which the mutant
+        touches.  It is an EQUIVALENT mutant, not a gap in the suite,
+        and no test can distinguish it.  It is recorded here so the
+        next person does not spend a round looking for one.
+
+        This test pins the behaviour the equivalence depends on: a body
+        that fits the byte cap comes back BYTE-IDENTICAL, including
+        multibyte UTF-8.
+        """
+        limits = ContextThresholds(auto_memory_max_bytes=100)
+        for text in ("y" * 100, "é" * 50, "a\nb", "漢" * 25):
+            capped, record = cap_auto_memory(text, limits=limits)
+            self.assertEqual(capped, text)
+            self.assertEqual(len(capped.encode("utf-8")), len(text.encode("utf-8")))
+            self.assertFalse(record["truncated"])
+
     # -- or@682: the type half of the memory-tax source guard ----------
 
     def test_a_non_string_source_is_refused(self):
