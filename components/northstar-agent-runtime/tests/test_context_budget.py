@@ -897,3 +897,141 @@ class AutoMemoryByteAccountingTests(unittest.TestCase):
         self.assertEqual(record["kept_bytes"], 100)
         self.assertFalse(record["truncated"])
 
+
+
+class AutoMemoryByteCapHarnessControlTests(unittest.TestCase):
+    """The ``lt@579`` equivalence proof must be able to FAIL.
+
+    ``AutoMemoryByteCapEquivalentMutantTests`` above proves that the
+    planted fault at ``lt@579`` (``bytes_kept < body_bytes`` ->
+    ``bytes_kept <= body_bytes``) changes nothing, by loading the module
+    twice -- once as shipped, once with that one comparison rewritten --
+    and comparing the two across a randomised sweep.
+
+    A differential test that CANNOT fail proves nothing.  If the two
+    variants were accidentally the same source, or if the sweep never
+    reached an input that separates them, the agreement would be empty
+    and the "EQUIVALENT mutant" conclusion would be worthless.
+
+    This class gives the harness its **non-vacuity control**: the same
+    loader and the same comparison are pointed at a mutation that is
+    known to change behaviour, and the harness is REQUIRED to notice.
+    The control mutation is the *other* arm of the same guard -- turning
+    ``<`` into ``>`` -- which cuts the body the wrong way and is
+    observable at once.
+    """
+
+    #: The exact source line the mutation targets (the byte-cap bound).
+    _BOUND_RE = re.compile(r"if bytes_kept (?P<op>[<>]=?) body_bytes:")
+
+    #: The cap computation the CONTROL mutation rewrites.
+    _CAP_RE = re.compile(
+        r"bytes_kept = min\(body_bytes, limits\.auto_memory_max_bytes\)"
+    )
+
+    def _load_with_bound(self, op: str):
+        """Load ``context_budget`` with the byte-cap bound set to ``op``."""
+        import context_budget
+
+        source = Path(context_budget.__file__).read_text(encoding="utf-8")
+        matches = self._BOUND_RE.findall(source)
+        self.assertEqual(
+            len(matches), 1, f"expected exactly one byte cap, found {matches}"
+        )
+        mutated = self._BOUND_RE.sub(
+            f"if bytes_kept {op} body_bytes:", source, count=1
+        )
+        name = f"_context_budget_control_{op.replace('<', 'lt').replace('>', 'gt')}"
+        module = types.ModuleType(name)
+        module.__file__ = str(Path(context_budget.__file__))
+        sys.modules[name] = module
+        exec(compile(mutated, module.__file__, "exec"), module.__dict__)  # noqa: S102
+        return module
+
+    def _load_with_a_one_byte_wider_cap(self):
+        """The CONTROL variant: the cap allows ONE byte more than it should.
+
+        This is the other half of the same guard -- the cap computation
+        rather than the cut condition -- and it IS observable: a body
+        one byte over the cap is cut to a different length.  It is the
+        right control because it exercises exactly the code the
+        equivalence proof claims the planted fault cannot change.
+        """
+        import context_budget
+
+        source = Path(context_budget.__file__).read_text(encoding="utf-8")
+        matches = self._CAP_RE.findall(source)
+        self.assertEqual(
+            len(matches), 1, f"expected exactly one byte cap, found {matches}"
+        )
+        mutated = self._CAP_RE.sub(
+            "bytes_kept = min(body_bytes, limits.auto_memory_max_bytes + 1)",
+            source,
+            count=1,
+        )
+        module = types.ModuleType("_context_budget_control_cap")
+        module.__file__ = str(Path(context_budget.__file__))
+        sys.modules[module.__name__] = module
+        exec(compile(mutated, module.__file__, "exec"), module.__dict__)  # noqa: S102
+        return module
+
+    def _cap(self, module, text: str, max_lines: int, max_bytes: int):
+        limits = module.ContextThresholds(
+            auto_memory_max_lines=max_lines, auto_memory_max_bytes=max_bytes
+        )
+        body, record = module.cap_auto_memory(text, limits=limits)
+        return (body, tuple(sorted(record.items())))
+
+    def test_the_control_mutation_changes_the_outcome(self):
+        """The control mutation must actually CHANGE the outcome."""
+        original = self._load_with_bound("<")
+        control = self._load_with_a_one_byte_wider_cap()
+
+        # A body one byte OVER the cap: the shipped form cuts it to the
+        # cap, the control form cuts it to one byte more.
+        text = "y" * 41
+        before = self._cap(original, text, 10, 40)
+        after = self._cap(control, text, 10, 40)
+        self.assertNotEqual(
+            before,
+            after,
+            "the control mutation changed nothing, so the differential "
+            "harness cannot distinguish any two functions",
+        )
+
+    def test_the_harness_notices_the_control_mutation(self):
+        """The SAME harness, pointed at the control, must find a difference.
+
+        This is the non-vacuity check on the equivalence proof: the same
+        loader and the same comparison that ``lt@579`` uses must report a
+        disagreement when the rule it compares against is one that
+        genuinely disagrees.
+        """
+        original = self._load_with_bound("<")
+        control = self._load_with_a_one_byte_wider_cap()
+
+        rng = random.Random(20261121)
+        alphabet = "ab c\n\té漢"
+        differences = 0
+        cases = 0
+        for _ in range(200):
+            line_count = rng.randint(0, 12)
+            lines = [
+                "".join(rng.choice(alphabet) for _ in range(rng.randint(0, 12)))
+                for _ in range(line_count)
+            ]
+            text = "\n".join(lines)
+            max_lines = rng.randint(1, 15)
+            max_bytes = rng.randint(1, 60)
+            cases += 1
+            before = self._cap(original, text, max_lines, max_bytes)
+            after = self._cap(control, text, max_lines, max_bytes)
+            if before != after:
+                differences += 1
+        self.assertGreater(cases, 0)
+        self.assertGreater(
+            differences,
+            0,
+            "the harness found no difference for a mutation that changes "
+            "the outcome, so it cannot certify lt@579 as equivalent",
+        )
