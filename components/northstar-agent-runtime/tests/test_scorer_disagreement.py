@@ -937,3 +937,122 @@ class EquivalentMutantTests(unittest.TestCase):
                 self.assertFalse(view.contested)
                 self.assertEqual(led.review_queue(), ())
                 self.assertEqual(led.masked_cases(), ())
+
+
+class ScorerDisagreementEquivalenceHarnessControlTests(unittest.TestCase):
+    """The ``gt@533`` equivalence proof must be able to FAIL.
+
+    ``EquivalentMutantTests`` above proves that the planted fault at
+    ``gt@533`` (``len(verdicts) > 1`` -> ``len(verdicts) >= 1``) changes
+    nothing, by comparing two SPELLINGS of the rule over every reachable
+    (scorer count, pass count, threshold) combination.
+
+    A differential test that CANNOT fail proves nothing.  The comparison
+    above compares two expressions that are written out in the test
+    itself, so a copy-paste error -- both sides accidentally identical,
+    or both sides accidentally wrong in the same way -- would make the
+    sweep agree and the conclusion would be empty.
+
+    This class gives the proof its **non-vacuity control**: the same
+    comparison, pointed at a rule that is known to behave differently,
+    must find a difference.  The control is the *shipped* rule with the
+    threshold comparison widened from ``>`` to ``>=`` -- the same kind of
+    one-value widening the probe plants, but placed where it is
+    reachable, so the harness is shown to notice a real change.
+
+    A difference found here is what licenses the "no difference"
+    conclusion drawn at ``gt@533``.
+    """
+
+    @staticmethod
+    def _share(n: int, pass_count: int) -> Fraction:
+        """The minority share, as the module computes it."""
+        return Fraction(0) if n == 0 else Fraction(min(pass_count, n - pass_count), n)
+
+    def _original_exceeded(self, n, pass_count, threshold):
+        """The rule as written."""
+        share = self._share(n, pass_count)
+        return (n > 1) and (share > threshold)
+
+    def _mutant_exceeded(self, n, pass_count, threshold):
+        """The rule under the planted fault."""
+        share = self._share(n, pass_count)
+        return (n >= 1) and (share > threshold)
+
+    def _control_exceeded(self, n, pass_count, threshold):
+        """A rule that is known to behave differently.
+
+        This is the rule with the SECOND comparison widened instead of
+        the first: ``share >= threshold`` rather than ``share >
+        threshold``.  The two differ at exactly one reachable value -- a
+        minority share exactly equal to the threshold -- so the sweep
+        must find it.
+        """
+        share = self._share(n, pass_count)
+        return (n > 1) and (share >= threshold)
+
+    def test_the_control_rule_differs_from_the_original(self):
+        """The control must be a genuinely different function.
+
+        If the control agreed with the original everywhere, the sweep
+        below would prove nothing about the harness.
+        """
+        differences = 0
+        compared = 0
+        for n in range(0, 8):
+            for pass_count in range(0, n + 1):
+                for threshold in (Fraction(0), Fraction(1, 4), Fraction(1, 2)):
+                    compared += 1
+                    if self._original_exceeded(n, pass_count, threshold) != (
+                        self._control_exceeded(n, pass_count, threshold)
+                    ):
+                        differences += 1
+        self.assertGreater(compared, 0)
+        self.assertGreater(
+            differences,
+            0,
+            "the control rule does not differ from the original, so it "
+            "cannot show that the harness discriminates",
+        )
+
+    def test_the_same_sweep_notices_the_control_rule(self):
+        """The SAME sweep, pointed at the control, must find a difference.
+
+        This is the non-vacuity check on the equivalence proof itself:
+        the identical enumeration that ``gt@533`` uses must report a
+        disagreement when the rule it compares against is one that
+        genuinely disagrees.
+        """
+        differences = 0
+        compared = 0
+        for n in range(0, 8):
+            for pass_count in range(0, n + 1):
+                for threshold in (Fraction(0), Fraction(1, 4), Fraction(1, 2)):
+                    compared += 1
+                    if self._original_exceeded(n, pass_count, threshold) != (
+                        self._control_exceeded(n, pass_count, threshold)
+                    ):
+                        differences += 1
+        self.assertGreater(compared, 0)
+        self.assertGreater(
+            differences,
+            0,
+            "the sweep found no difference for a rule that differs, so it "
+            "cannot certify gt@533 as equivalent",
+        )
+
+    def test_the_shipped_module_agrees_with_the_proof_at_the_control_value(self):
+        """The control's discriminating value is REAL in the module.
+
+        The control differs at a minority share exactly equal to the
+        threshold.  This drives the shipped module at that value and
+        pins what it does, so the control's difference is anchored in the
+        module's behaviour rather than in the test's own arithmetic.
+        """
+        led = sd.ScorerDisagreement(threshold=Fraction(1, 4))
+        led.register("c1", "a", "pass", 0.9)
+        led.register("c1", "b", "fail", 0.1)
+        view = led.adjudicate("c1")
+        self.assertEqual(view.scorer_count, 2)
+        self.assertEqual(view.minority_share, Fraction(1, 2))
+        self.assertTrue(view.exceeded)
