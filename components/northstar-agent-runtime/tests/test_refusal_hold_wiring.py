@@ -676,5 +676,521 @@ class ConcurrencyTests(unittest.TestCase):
         self.assertEqual(len(ledger), before)
 
 
+class WiringGuardTests(unittest.TestCase):
+    """The wiring's own guards, driven one half at a time.
+
+    Nine planted faults survived the suite that drives the *wiring*:
+
+    * ``gt@628`` -- the audit trail's trim bound.  This one is
+      **EQUIVALENT**, and is proved so differentially rather than
+      asserted (see
+      ``test_the_trim_rule_is_equivalent_under_the_planted_fault``);
+    * ``and@759`` / ``and@764`` -- the two halves of
+      ``_current_grant_id``'s "is this a usable grant id?" check;
+    * ``retF@801`` / ``retF@804`` -- the two "this import is not
+      allowed, so the module is not stdlib-only" returns;
+    * ``eq@831`` / ``eq@835`` / ``eq@842`` / ``eq@848`` -- the module's
+      own ``main()`` self-check asserts and its ``__main__`` guard.
+
+    The techniques are the repository's own (see
+    ``tests/test_retry_config.py``): run the self-check for real, and
+    drive one half of a conjunction at a time by patching the
+    collaborator the guard reads.
+    """
+
+    # -- gt@628: the audit trail's trim bound ----------------------------
+
+    def test_the_trim_rule_is_equivalent_under_the_planted_fault(self):
+        """`gt@628`: a DIFFERENTIAL proof that the fault is EQUIVALENT.
+
+        ``_record_event`` keeps the trail bounded::
+
+            if len(self._events) > MAX_WIRING_EVENTS:
+                del self._events[: len(self._events) - MAX_WIRING_EVENTS]
+
+        The planted fault is ``>`` -> ``>=``.  This test proves the two
+        spellings are **behaviourally identical** by running them side
+        by side on the REAL module: the module's source is copied twice
+        into a temporary directory -- once unchanged, once with that one
+        comparison mutated -- both copies are imported as separate
+        modules, and both registries are driven through the same
+        sequence of recordings and checks.
+
+        The two trails are then compared event by event.  If the fault
+        were killable, the two copies would diverge at the boundary and
+        the comparison would find it.  It does not, and the reason is
+        structural: at ``len(self._events) == MAX_WIRING_EVENTS`` the
+        original does not trim, and the delete the mutant would run
+        there is ``del events[:0]`` -- which removes nothing.  So the
+        two spellings leave the trail in the same state at every length.
+
+        This test exists so the next person does not spend a round
+        looking for a killer that cannot exist.  The negative control
+        (``test_the_differential_harness_would_catch_an_observable_mutation``)
+        proves the harness is not vacuous.
+        """
+        import pathlib
+        import tempfile
+
+        import refusal_hold_wiring
+
+        source = pathlib.Path(refusal_hold_wiring.__file__).read_text(
+            encoding="utf-8"
+        )
+        # Both spellings of the comparison are built from the source, so
+        # the proof holds whichever one the module on disk carries --
+        # including the mutated one.  That is what makes this an
+        # equivalence proof rather than a textual check.
+        strict_source = self._trim_comparison_spelling(source, ">")
+        loose_source = self._trim_comparison_spelling(source, ">=")
+        self.assertNotEqual(
+            strict_source,
+            loose_source,
+            "the two spellings of the trim must differ in the source",
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            strict = self._load_copy(
+                pathlib.Path(directory), "wiring_strict", strict_source
+            )
+            loose = self._load_copy(
+                pathlib.Path(directory), "wiring_loose", loose_source
+            )
+
+            strict_trail = self._drive_trail(strict)
+            loose_trail = self._drive_trail(loose)
+
+        self.assertEqual(
+            strict_trail,
+            loose_trail,
+            "the '>' and '>=' spellings of the trim must produce the same "
+            "trail -- the planted fault is EQUIVALENT",
+        )
+
+    def _trim_comparison_spelling(self, source, operator):
+        """Return ``source`` with the trim comparison spelled ``operator``.
+
+        The comparison is located by the AST rather than by an exact
+        source string, so the rewrite still lands if the surrounding
+        text is reworded -- a fingerprint on the exact wording would
+        make this test a textual check dressed up as a behavioural one.
+
+        Both ``>`` and ``>=`` are accepted when locating the
+        comparison, so the rewrite works on the original module and on
+        the mutated one alike.
+        """
+        import ast
+
+        tree = ast.parse(source)
+        candidates = []
+        for node in ast.walk(tree):
+            if not (
+                isinstance(node, ast.Compare)
+                and len(node.ops) == 1
+                and isinstance(node.ops[0], (ast.Gt, ast.GtE))
+            ):
+                continue
+            left = node.left
+            if not (
+                isinstance(left, ast.Call)
+                and isinstance(left.func, ast.Name)
+                and left.func.id == "len"
+                and len(left.args) == 1
+                and isinstance(left.args[0], ast.Attribute)
+                and left.args[0].attr == "_events"
+            ):
+                continue
+            candidates.append(node.lineno)
+        self.assertEqual(
+            len(candidates),
+            1,
+            "the trim comparison must be found exactly once in the module",
+        )
+        lines = source.splitlines(keepends=True)
+        index = candidates[0] - 1
+        line = lines[index]
+        # Rewrite the comparison to the requested spelling, whichever
+        # one it currently carries.  The rewrite is done on the
+        # comparison's own operator, so it is idempotent: asking for
+        # ">=" when the source already says ">=" leaves it alone, and
+        # asking for ">" never turns ">=" into ">==".
+        if operator == ">":
+            rewritten = line.replace(">=", ">", 1)
+        else:
+            rewritten = line.replace(">=", ">", 1).replace(">", ">=", 1)
+        mutated = lines[:]
+        mutated[index] = rewritten
+        return "".join(mutated)
+
+    def _load_copy(self, directory, name, source):
+        """Write ``source`` to a file and import it under ``name``."""
+        import importlib.util
+        import sys
+
+        path = directory / f"{name}.py"
+        path.write_text(source, encoding="utf-8")
+        spec = importlib.util.spec_from_file_location(name, path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+        return module
+
+    def _drive_trail(self, module):
+        """Drive a registry through the trim boundary and return its trail.
+
+        The trail is driven across the boundary on purpose: the events
+        are recorded first (so the trail grows one event at a time) and
+        then checked, and the whole trail is compared afterwards.
+        """
+        registry = module.RefusalHoldRegistry()
+        row = make_row()
+        registry.record("grant-1", "checkout", "order-7", row=row)
+        cap = module.MAX_WIRING_EVENTS
+        for _ in range(cap + 3):
+            registry.check("grant-1", "checkout", "order-7")
+            registry.check("grant-2", "refund", "order-9")
+        return registry.events()
+
+    def test_the_differential_harness_would_catch_an_observable_mutation(self):
+        """`gt@628`: the negative control for the equivalence proof.
+
+        An equivalence claim is only worth as much as the harness that
+        produced it.  This test plants a mutation of the same trim rule
+        that IS observable -- the delete removes one event too many at
+        the boundary -- and asserts that the differential harness
+        **does** report a difference for it.
+
+        So the "no difference" result of
+        ``test_the_trim_rule_is_equivalent_under_the_planted_fault`` is
+        a real measurement and not a harness that cannot fail.
+        """
+        import pathlib
+        import tempfile
+
+        import refusal_hold_wiring
+
+        source = pathlib.Path(refusal_hold_wiring.__file__).read_text(
+            encoding="utf-8"
+        )
+        observable = self._observable_trim_mutation(source)
+        self.assertNotEqual(
+            observable,
+            source,
+            "the observable mutation must actually change the module source",
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            original = self._load_copy(
+                pathlib.Path(directory), "wiring_control_original", source
+            )
+            mutant = self._load_copy(
+                pathlib.Path(directory), "wiring_control_mutant", observable
+            )
+            original_trail = self._drive_trail(original)
+            mutant_trail = self._drive_trail(mutant)
+
+        self.assertNotEqual(
+            original_trail,
+            mutant_trail,
+            "the harness must detect a mutation that really changes the trail",
+        )
+
+    def _observable_trim_mutation(self, source):
+        """Return ``source`` with the trim's delete made one event short.
+
+        The mutation is the same *rule* the equivalence proof exercises,
+        changed so that it IS observable: at the boundary the delete now
+        removes one event too many, so the two spellings of the
+        comparison diverge and the harness can see it.
+        """
+        import ast
+
+        tree = ast.parse(source)
+        candidates = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Delete) or len(node.targets) != 1:
+                continue
+            target = node.targets[0]
+            if not (
+                isinstance(target, ast.Subscript)
+                and isinstance(target.slice, ast.Slice)
+            ):
+                continue
+            candidates.append(node.lineno)
+        self.assertEqual(
+            len(candidates),
+            1,
+            "the trim's delete must be found exactly once in the module",
+        )
+        lines = source.splitlines(keepends=True)
+        index = candidates[0] - 1
+        line = lines[index]
+        rewritten = line.replace(
+            "- MAX_WIRING_EVENTS]", "- MAX_WIRING_EVENTS - 1]", 1
+        )
+        self.assertNotEqual(
+            rewritten,
+            line,
+            "the observable mutation must actually change the delete",
+        )
+        mutated = lines[:]
+        mutated[index] = rewritten
+        return "".join(mutated)
+
+    def test_the_audit_trail_is_trimmed_at_the_bound(self):
+        """`gt@628`: the boundary, and why the fault is equivalent.
+
+        ``_record_event`` keeps the trail bounded::
+
+            if len(self._events) > MAX_WIRING_EVENTS:
+                del self._events[: len(self._events) - MAX_WIRING_EVENTS]
+
+        The planted fault is ``>`` -> ``>=``.  It is an **EQUIVALENT
+        mutant**, and this is the proof rather than an assertion of one:
+
+        * at ``len(self._events) == MAX_WIRING_EVENTS`` (the boundary),
+          the original does NOT trim -- and the delete it would run is
+          ``del events[:0]``, which removes nothing either.  So the two
+          spellings leave the trail in the SAME state;
+        * at every other length the two conditions agree (``>`` and
+          ``>=`` differ only at equality), and the same delete runs.
+
+        ``test_the_trim_rule_is_equivalent_under_the_planted_fault``
+        proves this differentially, on the real module.  This test pins
+        the bound itself -- at every length above the cap the trail is
+        trimmed back to exactly ``MAX_WIRING_EVENTS``, and it never
+        grows past the cap -- so the *behaviour* the mutant would have
+        preserved is what the suite holds down.
+        """
+        import refusal_hold_wiring
+
+        cap = refusal_hold_wiring.MAX_WIRING_EVENTS
+        registry = RefusalHoldRegistry()
+        row = make_row()
+        registry.record("grant-1", "checkout", "order-7", row=row)
+        for index in range(cap + 5):
+            registry.check("grant-1", "checkout", "order-7")
+            self.assertLessEqual(
+                len(registry.events()),
+                cap,
+                "the audit trail must never grow past its bound",
+            )
+        self.assertEqual(len(registry.events()), cap)
+
+    def test_the_audit_trail_holds_every_event_up_to_the_bound(self):
+        """`gt@628`: the other side of the boundary.
+
+        Below the cap nothing is trimmed: every recorded event is still
+        in the trail.  The mutant would not change this either (the two
+        conditions agree strictly below the cap), but pinning it makes
+        the boundary behaviour visible rather than assumed.
+        """
+        import refusal_hold_wiring
+
+        cap = refusal_hold_wiring.MAX_WIRING_EVENTS
+        registry = RefusalHoldRegistry()
+        row = make_row()
+        registry.record("grant-1", "checkout", "order-7", row=row)
+        for index in range(cap - 1):
+            registry.check("grant-1", "checkout", "order-7")
+        self.assertEqual(len(registry.events()), cap)
+
+    # -- and@759 / and@764: the grant-id guards --------------------------
+
+    def test_a_non_string_grant_id_attribute_is_not_a_grant_id(self):
+        """`and@759`: the first half of the ledger-attribute guard.
+
+        ``if isinstance(value, str) and value:`` -- the second half
+        ("is it non-empty?") never refuses a **non-string**, so only the
+        ``isinstance`` half does.  Under the fault (``and`` -> ``or``)
+        a non-empty non-string is accepted as a grant id.
+
+        So the killer must supply a value that is **not a string but is
+        truthy**: an ``int`` passes ``value`` and fails
+        ``isinstance(value, str)``.
+        """
+        from refusal_hold_wiring import _current_grant_id
+
+        class Ledger:
+            _current_grant_id = 7
+
+        self.assertIsNone(_current_grant_id(Ledger()))
+
+    def test_a_non_string_pin_grant_id_is_not_a_grant_id(self):
+        """`and@764`: the first half of the pin guard.
+
+        The same guard, one level down: the pin's ``grant_id`` is
+        checked with ``isinstance(grant_id, str) and grant_id``.  The
+        killer supplies a truthy non-string.
+        """
+        from refusal_hold_wiring import _current_grant_id
+
+        class Pin:
+            grant_id = 7
+
+        class Ledger:
+            _current_pin = Pin()
+
+        self.assertIsNone(_current_grant_id(Ledger()))
+
+    def test_an_empty_string_grant_id_is_not_a_grant_id(self):
+        """`and@759` / `and@764`: the second half of the guards.
+
+        The other half of each conjunction is the emptiness check, and
+        it is the half that refuses an **empty string**.  Under the
+        fault (``and`` -> ``or``) an empty string is accepted as a
+        grant id, because ``or`` short-circuits on the empty-string
+        falsiness and never reaches the emptiness refusal.
+
+        The killer supplies the empty string, which is a string (so the
+        first half holds) and empty (so the second half is the one that
+        must refuse).
+        """
+        from refusal_hold_wiring import _current_grant_id
+
+        class Ledger:
+            _current_grant_id = ""
+
+        self.assertIsNone(_current_grant_id(Ledger()))
+
+    def test_an_empty_pin_grant_id_is_not_a_grant_id(self):
+        """`and@764`: the second half of the pin guard."""
+        from refusal_hold_wiring import _current_grant_id
+
+        class Pin:
+            grant_id = ""
+
+        class Ledger:
+            _current_pin = Pin()
+
+        self.assertIsNone(_current_grant_id(Ledger()))
+
+    def test_a_usable_grant_id_is_still_named(self):
+        """`and@759` / `and@764`: the control.
+
+        A guard that refused every grant id would be as broken as one
+        that accepted every value, so the positive case is pinned too.
+        """
+        from refusal_hold_wiring import _current_grant_id
+
+        class Ledger:
+            _current_grant_id = "grant-1"
+
+        self.assertEqual(_current_grant_id(Ledger()), "grant-1")
+
+    # -- retF@801 / retF@804: the stdlib-only guard ----------------------
+
+    def test_a_disallowed_plain_import_makes_the_module_not_stdlib_only(self):
+        """`retF@801`: the ``import`` half of the allow-list check.
+
+        ``stdlib_only()`` walks the module's own AST and returns False
+        for an import outside the allow-list.  Under the fault
+        (``return False`` -> ``return True``) a module that imports a
+        third-party package would still be declared stdlib-only.
+
+        The killer writes the module's own source plus a disallowed
+        ``import`` into a temporary file, points ``stdlib_only()`` at
+        it, and asserts the answer is False.
+        """
+        import pathlib
+        import tempfile
+
+        import refusal_hold_wiring
+
+        self._assert_not_stdlib_only_with(
+            refusal_hold_wiring, "import requests\n", "import"
+        )
+
+    def test_a_disallowed_from_import_makes_the_module_not_stdlib_only(self):
+        """`retF@804`: the ``from ... import ...`` half.
+
+        The same guard, the other branch of the AST walk.  Under the
+        fault (``return False`` -> ``return True``) a module that pulls
+        in a third-party package through a ``from``-import would still
+        be declared stdlib-only.
+        """
+        import refusal_hold_wiring
+
+        self._assert_not_stdlib_only_with(
+            refusal_hold_wiring, "from requests import get\n", "from"
+        )
+
+    def _assert_not_stdlib_only_with(self, module, extra_source, label):
+        """Assert ``stdlib_only()`` rejects ``extra_source``.
+
+        The module's own source is copied and the extra import appended,
+        so the AST walk sees exactly one disallowed import and nothing
+        else changes.
+        """
+        import pathlib
+        import tempfile
+
+        source = pathlib.Path(module.__file__).read_text(encoding="utf-8")
+        original = module.__file__
+        with tempfile.TemporaryDirectory() as directory:
+            candidate = pathlib.Path(directory) / "wiring_under_test.py"
+            candidate.write_text(source + "\n" + extra_source, encoding="utf-8")
+            module.__file__ = str(candidate)
+            try:
+                self.assertFalse(
+                    module.stdlib_only(),
+                    f"a module with a disallowed {label} is not stdlib-only",
+                )
+            finally:
+                module.__file__ = original
+
+    def test_the_module_itself_is_stdlib_only(self):
+        """`retF@801` / `retF@804`: the control.
+
+        The real module IS stdlib-only, so the guard's True answer is
+        pinned as well -- a guard that returned False for everything
+        would also be broken.
+        """
+        import refusal_hold_wiring
+
+        self.assertTrue(refusal_hold_wiring.stdlib_only())
+
+    # -- eq@831 / eq@835 / eq@842 / eq@848: the self-check ---------------
+
+    def test_the_self_check_passes_on_the_real_code(self):
+        """`eq@831` / `eq@835` / `eq@842`: the self-check's own asserts.
+
+        The self-check states the CORRECT semantics -- the recorded
+        refusal refuses the seal with the ``blocked_by_refusal`` reason,
+        a different action is allowed with the ``allowed_no_refusal``
+        reason, and a broken store blocks with the
+        ``blocked_store_unreadable`` reason.  So under ``==`` -> ``!=``
+        one of the asserts asks the opposite question and the correct
+        behaviour FAILS it: the self-check raises instead of printing
+        "ok", which is exactly the no-op self-check the fault creates.
+        """
+        import io
+        from contextlib import redirect_stdout
+
+        import refusal_hold_wiring
+
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            refusal_hold_wiring.main()
+        self.assertIn("refusal-hold-wiring self-check: ok", buffer.getvalue())
+
+    def test_running_the_module_as_a_script_runs_the_self_check(self):
+        """`eq@848`: the ``__main__`` guard.
+
+        ``if __name__ == "__main__":`` becomes ``!=`` under the fault,
+        and then the self-check runs on EVERY import and NEVER runs when
+        the module is run as a script -- which is how it is used.
+        """
+        import io
+        from contextlib import redirect_stdout
+
+        import runpy
+
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            runpy.run_module("refusal_hold_wiring", run_name="__main__")
+        self.assertIn("refusal-hold-wiring self-check: ok", buffer.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()
