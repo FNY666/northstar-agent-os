@@ -648,3 +648,100 @@ touched the slice's module or test file (the D-23 patch, which is in
 the shipped `b173-mutant.sh`).  That is why a lift committed under the
 ORIGINAL slug is both necessary and sufficient: the pin finds it, and
 no phantom `mutant-lift-*` slice is created for the referee to judge.
+
+## 9. RESOLVED -- the equivalence records now have non-vacuity controls
+
+**Status: closed 2026-11-21.**  Every surviving mutant in the batch's
+census is an **EQUIVALENT** mutant: a planted fault that no test can
+distinguish, because the original and the mutant are the same function
+on every reachable input.  Each one is recorded in its slice's test
+file with a proof, and the repository's convention (from
+`tests/test_state_budget.py`'s `gt@304`) is to record such a mutant
+rather than hunt a killer that cannot exist.
+
+**The gap this section closes.**  A proof that CANNOT fail proves
+nothing.  The recorded proofs came in two shapes, and neither shape
+required the proof to be able to fail:
+
+* a **differential sweep** -- load the module twice (original, mutant)
+  and assert the two agree over a large input set; and
+* an **algebraic argument** -- the two spellings agree because of an
+  invariant that holds in the module.
+
+Both pin the PREMISE the argument rests on.  Neither shows that a
+broken premise would change the answer.  So if the premise were not
+what the argument says, the "no observable difference" conclusion would
+be empty -- and the record would be a false comfort: the next reader
+would either burn a round hunting a killer that does not exist, or
+trust a mutant that was in fact killable.
+
+**Measured: 11 of the 13 recorded equivalence proofs had no
+non-vacuity control.**  All eleven now have one.  The two that already
+did -- `cancellation-gate`'s `or@504` and `durable-resume`'s `lt@701` --
+are the model the other eleven now follow.
+
+### 9.1 The two shapes of control
+
+**A control mutation.**  The same harness -- same loader, same sweep,
+same comparison -- is pointed at a mutation that is known to change
+behaviour, and the harness is REQUIRED to find the difference.  A
+difference there is what licenses the "no difference" conclusion at
+the planted fault.
+
+| slice | site | the control |
+|---|---|---|
+| `audit-head` | `or@527` | the two spellings of the monotonicity guard, over inputs that violate `seq == records_sealed` |
+| `audit-head` | `lt@928` | the strict and non-strict row comparisons, over the EQUAL counts the guard never reaches |
+| `cwl-episode-eviction` | `eq@370` | the validation call driven directly with an invalid dependency |
+| `diviner` / `scope-verb-canonical` | `lt@667`, `gt@669` | the same comparison, over the EQUAL target sets the sweep skips |
+| `fable` | `lt@579` | the cap computation widened by one byte |
+| `horizon` | `gt@741` | the truncation keeping one character fewer |
+| `jido-statebudget` | `gt@304` | a deliberately wrong expression -- the original with the bound one step further |
+| `openhands-stuck-detector` | `gt@681` | the source-index line with a ONE-element message key |
+| `scope-verbatim-compaction` | `lt@390` | the end-marker guard moved to a bound that never fires |
+| `scorer-disagreement` | `gt@533` | the threshold comparison widened instead of the scorer-count one |
+| `step-reliability-budget` | `lt@152` | the final formula of `max_steps` shifted by one |
+
+**The skipped inputs.**  A sweep that SKIPS a class of pairs -- the
+equal target sets, the equal row counts -- is skipping exactly where
+the two spellings disagree.  Running the same comparison over the
+skipped pairs and requiring a difference there shows the skip is doing
+the work the argument claims, and it is what makes the agreement over
+the non-skipped pairs mean something.
+
+### 9.2 Two pitfalls, both measured
+
+**A control that asserts the SOURCE TEXT is a false kill.**  The first
+version of the `scope-verbatim-compaction` control rewrote the
+end-marker guard from the spelling it expected to find on disk.  The
+moment the mutation probe planted the other spelling, the control
+broke -- and the probe reported `lt@390` **KILLED**, a "kill" that was a
+difference in the FILE, not in the BEHAVIOUR.
+
+Measured, same tree, same probe:
+
+| control | census verdict |
+|---|---|
+| asymmetric (asserts one spelling) | `killed 33/33` -- `lt@390` reported killed |
+| symmetric (rewrites whichever spelling is present) | `killed 32/33` -- `lt@390` survives, honestly equivalent |
+
+The fix is the symmetry the repository's own equivalence proofs use:
+rewrite whichever spelling is on disk.  `tests/test_cancellation_gate.py`
+does this, and it is the shape to copy.
+
+**A control mutation must be OBSERVABLE.**  Turning `<` into `>` in a
+guard whose branches are both no-ops changes nothing; so does moving a
+bound the wrong way when the value never reaches it.  The first attempt
+at the `fable` control -- flipping the byte-cap comparison to `>` --
+was a no-op for exactly that reason, and the test caught it.  Pick the
+control by reading where the value can actually arrive.
+
+### 9.3 What this section does NOT change
+
+* **No module body was changed.**  All eleven controls live in test
+  files.
+* **No mutant was killed.**  The mutants were equivalent before this
+  section and they are equivalent after it.  What changed is that the
+  record now SAYS SO with a proof that can fail.
+* **No census number moved** -- except the one false kill described
+  above, which was moved BACK to the honest number.
