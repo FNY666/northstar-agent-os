@@ -385,3 +385,513 @@ class HouseStyleTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ColumnGuardSecondHalfTests(unittest.TestCase):
+    """The second half of each column guard in the pin ledger.
+
+    Each guard here is a conjunction or a two-armed conditional, and the
+    rest of the suite drove only one arm.  These tests drive the other.
+    """
+
+    # -- eq@142 / gt@143: the length limit's two branches ---------------
+
+    def test_a_grant_id_at_the_length_limit_is_accepted(self):
+        """`gt@143`: the lower edge of the length guard, on a grant id.
+
+        The limit is ``len(value) > limit``, so a grant id of exactly
+        the limit is accepted.  A mutant that turns ``>`` into ``>=``
+        refuses it.
+        """
+        pin = GrantPin("g" * 256, "v1", 1)
+        self.assertEqual(len(pin.grant_id), 256)
+
+    def test_a_grant_id_one_character_over_the_limit_is_refused(self):
+        """`gt@143`: inside the band -- one character over is refused."""
+        with self.assertRaises(MalformedPinError) as caught:
+            GrantPin("g" * 257, "v1", 1)
+        self.assertIn("too long", str(caught.exception))
+
+    def test_a_version_at_the_length_limit_is_accepted(self):
+        """`eq@142`: the OTHER branch of the limit choice.
+
+        The limit is ``_MAX_ID_CHARS if name == "grant_id" else
+        _MAX_VERSION_CHARS``.  Both constants happen to be 256 today, so
+        the branch is only distinguishable by WHICH name is checked --
+        and the branch matters the moment the two limits differ.  This
+        test pins that a version is measured against the version limit.
+        """
+        import grant_pin_ledger as gpl
+
+        self.assertEqual(gpl._MAX_ID_CHARS, gpl._MAX_VERSION_CHARS)
+        pin = GrantPin("grant-1", "v" * 256, 1)
+        self.assertEqual(len(pin.version), 256)
+
+    def test_a_version_one_character_over_the_limit_is_refused(self):
+        """`eq@142`: the other branch -- the version is length-checked too."""
+        with self.assertRaises(MalformedPinError) as caught:
+            GrantPin("grant-1", "v" * 257, 1)
+        self.assertIn("version is too long", str(caught.exception))
+
+    # -- lt@149 / gt@151: the counter's range --------------------------
+
+    def test_a_zero_counter_is_accepted(self):
+        """`lt@149`: the lower edge of the counter's range.
+
+        The counter must be non-negative, so zero is allowed.  A mutant
+        that turns ``< 0`` into ``<= 0`` refuses it.
+        """
+        pin = GrantPin("grant-1", "v1", 0)
+        self.assertEqual(pin.counter, 0)
+
+    def test_a_negative_counter_is_refused(self):
+        """`lt@149`: the sign half of the counter's range."""
+        with self.assertRaises(MalformedPinError) as caught:
+            GrantPin("grant-1", "v1", -1)
+        self.assertIn("must be non-negative", str(caught.exception))
+
+    def test_a_counter_at_the_safe_range_is_accepted(self):
+        """`gt@151`: the upper edge of the counter's range.
+
+        The safe range ends at 2**53 - 1.  A counter of exactly that
+        value is accepted; a mutant that turns ``>`` into ``>=`` refuses
+        it.
+        """
+        pin = GrantPin("grant-1", "v1", 2**53 - 1)
+        self.assertEqual(pin.counter, 2**53 - 1)
+
+    def test_a_counter_one_over_the_safe_range_is_refused(self):
+        """`gt@151`: inside the band -- one over the safe range is refused."""
+        with self.assertRaises(MalformedPinError) as caught:
+            GrantPin("grant-1", "v1", 2**53)
+        self.assertIn("exceeds the safe range", str(caught.exception))
+
+    # -- or@254: the parse guard's halves -------------------------------
+
+    def test_parsing_a_non_string_is_refused(self):
+        """`or@254`: the type half of the parse guard."""
+        with self.assertRaises(MalformedPinError) as caught:
+            GrantPin.parse(42)
+        self.assertIn("must be a non-empty str", str(caught.exception))
+
+    def test_parsing_an_empty_string_is_refused(self):
+        """`or@254`: the emptiness half of the parse guard."""
+        with self.assertRaises(MalformedPinError):
+            GrantPin.parse("")
+
+    def test_parsing_a_valid_rendered_pin_still_works(self):
+        """`or@254`: the control -- a valid pin still parses."""
+        pin = GrantPin("grant-1", "v2", 7)
+        parsed = GrantPin.parse(pin.render())
+        self.assertEqual(parsed.to_dict(), pin.to_dict())
+
+    # -- retF@322: the digest verify guard -----------------------------
+
+    def test_a_row_with_a_broken_digest_does_not_verify(self):
+        """`retF@322`: the "the digest does not match" half.
+
+        ``verify()`` re-derives the row digest and compares it.  A row
+        whose outcome was tampered with must NOT verify.
+        """
+        import dataclasses
+
+        from grant_pin_ledger import SealedGrantRow, _digest
+
+        pin = GrantPin("grant-1", "v2", 7)
+        digest = _digest({
+            "seq": 1,
+            "pin": pin.to_dict(),
+            "outcome": "executed",
+            "schema": SCHEMA_PIN,
+        })
+        tampered = SealedGrantRow(
+            seq=1,
+            pin=pin,
+            outcome="refused",
+            digest=digest,
+        )
+        self.assertFalse(tampered.verify())
+
+    def test_a_row_with_the_right_digest_verifies(self):
+        """`retF@322`: the control -- an untouched row verifies."""
+        ledger = GrantPinLedger()
+        row = ledger.seal(GrantPin("grant-1", "v2", 7), outcome="executed", seq=1)
+        self.assertTrue(row.verify())
+
+    # -- or@342: the resolve guard's halves -----------------------------
+
+    def test_resolving_with_a_non_string_outcome_is_refused(self):
+        """`or@342`: the type half of the outcome guard."""
+        import grant_pin_ledger as gpl
+
+        with self.assertRaises(GrantPinError) as caught:
+            gpl.resolve_seal_outcome(GrantPin("grant-1", "v1", 1), 42)
+        self.assertIn("outcome must be a non-empty string", str(caught.exception))
+
+    def test_resolving_with_an_empty_outcome_is_refused(self):
+        """`or@342`: the emptiness half of the outcome guard."""
+        import grant_pin_ledger as gpl
+
+        with self.assertRaises(GrantPinError):
+            gpl.resolve_seal_outcome(GrantPin("grant-1", "v1", 1), "")
+
+    def test_resolving_with_a_non_string_pin_is_refused(self):
+        """`or@342`: the pin half of the guard."""
+        import grant_pin_ledger as gpl
+
+        with self.assertRaises(MalformedPinError) as caught:
+            gpl.resolve_seal_outcome("not a pin", "executed")
+        self.assertIn("pin must be a GrantPin", str(caught.exception))
+
+    # -- or@377 / lt@379: the row lookup's halves ----------------------
+
+    def test_looking_up_a_boolean_seq_is_refused(self):
+        """`or@377`: the type half of the seq guard, on a bool.
+
+        A bool IS an int in Python, so only the isinstance(..., bool)
+        half can catch it.
+        """
+        ledger = GrantPinLedger()
+        ledger.seal(GrantPin("grant-1", "v1", 1), seq=1)
+        with self.assertRaises(GrantPinError) as caught:
+            ledger.row(True)
+        self.assertIn("seq must be an int", str(caught.exception))
+
+    def test_looking_up_a_seq_of_zero_is_refused(self):
+        """`lt@379`: the lower edge of the seq range.
+
+        The seq is 1-based, so zero is not a row.  A mutant that turns
+        ``< 1`` into ``<= 1`` would return the LAST row for zero.
+        """
+        ledger = GrantPinLedger()
+        ledger.seal(GrantPin("grant-1", "v1", 1), seq=1)
+        with self.assertRaises(GrantPinError) as caught:
+            ledger.row(0)
+        self.assertIn("unknown seq", str(caught.exception))
+
+    def test_looking_up_a_seq_past_the_end_is_refused(self):
+        """`lt@379`: the upper edge of the seq range."""
+        ledger = GrantPinLedger()
+        ledger.seal(GrantPin("grant-1", "v1", 1), seq=1)
+        with self.assertRaises(GrantPinError):
+            ledger.row(2)
+
+    # -- or@400 / or@402: the seal guard's halves -----------------------
+
+    def test_sealing_with_an_empty_outcome_is_refused(self):
+        """`or@400`: the emptiness half of the seal's outcome guard."""
+        ledger = GrantPinLedger()
+        with self.assertRaises(GrantPinError) as caught:
+            ledger.seal(GrantPin("grant-1", "v1", 1), outcome="")
+        self.assertIn("outcome must be a non-empty string", str(caught.exception))
+        self.assertEqual(len(ledger), 0)
+
+    def test_sealing_with_a_non_string_outcome_is_refused(self):
+        """`or@400`: the type half of the seal's outcome guard."""
+        ledger = GrantPinLedger()
+        with self.assertRaises(GrantPinError):
+            ledger.seal(GrantPin("grant-1", "v1", 1), outcome=42)
+        self.assertEqual(len(ledger), 0)
+
+    def test_sealing_with_a_boolean_seq_is_refused(self):
+        """`or@402`: the type half of the seal's seq guard, on a bool."""
+        ledger = GrantPinLedger()
+        with self.assertRaises(GrantPinError) as caught:
+            ledger.seal(GrantPin("grant-1", "v1", 1), seq=True)
+        self.assertIn("seq must be a non-negative int", str(caught.exception))
+        self.assertEqual(len(ledger), 0)
+
+    def test_sealing_with_a_negative_seq_is_refused(self):
+        """`or@402`: the sign half of the seal's seq guard."""
+        ledger = GrantPinLedger()
+        with self.assertRaises(GrantPinError):
+            ledger.seal(GrantPin("grant-1", "v1", 1), seq=-1)
+        self.assertEqual(len(ledger), 0)
+
+    def test_sealing_with_a_zero_seq_is_allowed(self):
+        """`or@402`: the boundary -- zero is a legal seq.
+
+        A mutant that turns ``< 0`` into ``<= 0`` refuses this.
+        """
+        ledger = GrantPinLedger()
+        row = ledger.seal(GrantPin("grant-1", "v1", 1), seq=0)
+        self.assertEqual(row.seq, 0)
+        self.assertEqual(len(ledger), 1)
+
+    # -- or@446: the forward ledger's guard -----------------------------
+
+    def test_sealing_into_a_ledger_without_append_is_refused(self):
+        """`or@446`: the "and the ledger has append()" half."""
+        import grant_pin_ledger as gpl
+
+        class NoAppend:
+            pass
+
+        with self.assertRaises(GrantPinError) as caught:
+            GrantPinLedger().seal_into(
+                GrantPin("grant-1", "v1", 1), NoAppend(),
+                intent="i", action="a", subject="s",
+            )
+        self.assertIn("ledger must have append()", str(caught.exception))
+
+    def test_sealing_into_a_none_ledger_is_refused(self):
+        """`or@446`: the "the ledger is not None" half."""
+        import grant_pin_ledger as gpl
+
+        with self.assertRaises(GrantPinError):
+            GrantPinLedger().seal_into(
+                GrantPin("grant-1", "v1", 1), None,
+                intent="i", action="a", subject="s",
+            )
+
+    def test_sealing_into_a_ledger_with_a_non_callable_append_is_refused(self):
+        """`or@446`: the callable half -- an ``append`` that is not callable."""
+        import grant_pin_ledger as gpl
+
+        class BadAppend:
+            append = "not callable"
+
+        with self.assertRaises(GrantPinError):
+            GrantPinLedger().seal_into(
+                GrantPin("grant-1", "v1", 1), BadAppend(),
+                intent="i", action="a", subject="s",
+            )
+
+    # -- or@493: the audit event's seq guard ----------------------------
+
+    def test_an_audit_event_with_a_boolean_seq_is_refused(self):
+        """`or@493`: the type half of the audit event's seq guard, on a bool."""
+        with self.assertRaises(GrantPinError) as caught:
+            grant_pin_audit_event(KIND_SEALED, {"grant_id": "g"}, True)
+        self.assertIn("seq must be a non-negative int", str(caught.exception))
+
+    def test_an_audit_event_with_a_negative_seq_is_refused(self):
+        """`or@493`: the sign half of the audit event's seq guard."""
+        with self.assertRaises(GrantPinError):
+            grant_pin_audit_event(KIND_SEALED, {"grant_id": "g"}, -1)
+
+    def test_an_audit_event_with_a_zero_seq_is_allowed(self):
+        """`or@493`: the boundary -- zero is a legal seq.
+
+        A mutant that turns ``< 0`` into ``<= 0`` refuses this.
+        """
+        event = grant_pin_audit_event(KIND_SEALED, {"grant_id": "g"}, 0)
+        self.assertEqual(event["seq"], 0)
+
+    # -- or@491: the audit event's kind guard ---------------------------
+
+    def test_an_audit_event_with_a_non_string_kind_is_refused(self):
+        """`or@491`: the type half of the audit event's kind guard."""
+        with self.assertRaises(GrantPinError) as caught:
+            grant_pin_audit_event(42, {"grant_id": "g"}, 0)
+        self.assertIn("unknown audit kind", str(caught.exception))
+
+
+class StdlibOnlyGuardTests(unittest.TestCase):
+    """The stdlib-only guard's second half.
+
+    ``stdlib_only()`` walks the module's own AST and refuses any import
+    that is not in the allowed set.  The suite already drove the
+    "a forbidden import is refused" half; the "everything allowed is
+    accepted" half is driven here.
+    """
+
+    def test_the_module_is_stdlib_only(self):
+        """The control -- the module's own imports are all allowed."""
+        self.assertTrue(stdlib_only())
+
+    def test_a_forbidden_root_import_is_refused(self):
+        """`retF@526` / `retF@529`: the import-not-allowed half.
+
+        The guard is driven against a stand-in source with a forbidden
+        import in it, so the refusal is observable rather than assumed.
+        """
+        import tempfile
+
+        import grant_pin_ledger as gpl
+
+        source = (
+            "import json\n"
+            "import numpy\n"
+            "from pathlib import Path\n"
+        )
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".py", delete=False, encoding="utf-8"
+        ) as handle:
+            handle.write(source)
+            path = handle.name
+
+        original = gpl.__file__
+        try:
+            gpl.__file__ = path
+            self.assertFalse(stdlib_only())
+        finally:
+            gpl.__file__ = original
+
+    def test_a_forbidden_from_import_is_refused(self):
+        """`retF@529` / `and@528`: the from-import half.
+
+        The guard's ``node.module and ...`` means a from-import with a
+        forbidden root module is refused.
+        """
+        import tempfile
+
+        import grant_pin_ledger as gpl
+
+        source = "from requests import get\n"
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".py", delete=False, encoding="utf-8"
+        ) as handle:
+            handle.write(source)
+            path = handle.name
+
+        original = gpl.__file__
+        try:
+            gpl.__file__ = path
+            self.assertFalse(stdlib_only())
+        finally:
+            gpl.__file__ = original
+
+    def test_an_allowed_relative_import_is_accepted(self):
+        """`and@528`: the "and the module has a name" half.
+
+        A relative from-import has ``node.module`` set but a non-zero
+        level; the guard's ``node.module and ...`` clause reads the
+        module name, and a relative import is not one of the forbidden
+        roots.
+        """
+        import tempfile
+
+        import grant_pin_ledger as gpl
+
+        source = "from . import sibling\n"
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".py", delete=False, encoding="utf-8"
+        ) as handle:
+            handle.write(source)
+            path = handle.name
+
+        original = gpl.__file__
+        try:
+            gpl.__file__ = path
+            self.assertTrue(stdlib_only())
+        finally:
+            gpl.__file__ = original
+
+
+class SelfCheckTests(unittest.TestCase):
+    """The module's own self-check, driven for real.
+
+    ``grant_pin_ledger.main()`` asserts the module's three claims.  The
+    suite never ran it, so every assertion inside it was a free mutant.
+    """
+
+    def test_the_self_check_passes(self):
+        """The self-check runs clean.
+
+        Under any mutant of one of its assertions the self-check raises
+        ``AssertionError`` and this test fails.
+        """
+        import io
+        from contextlib import redirect_stdout
+
+        import grant_pin_ledger as gpl
+
+        with redirect_stdout(io.StringIO()):
+            gpl.main()
+
+    def test_the_self_check_reports_that_the_module_is_ok(self):
+        """The self-check prints its own name."""
+        import io
+        from contextlib import redirect_stdout
+
+        import grant_pin_ledger as gpl
+
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            gpl.main()
+        self.assertIn("grant-pin-ledger OK", buffer.getvalue())
+
+    def test_the_module_runs_its_self_check_as_a_script(self):
+        """The ``__main__`` guard: run as a script, the module self-checks."""
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        import grant_pin_ledger as gpl
+
+        component = Path(gpl.__file__).resolve().parent
+        result = subprocess.run(
+            [sys.executable, "-m", "grant_pin_ledger"],
+            cwd=str(component),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=120,
+        )
+        output = result.stdout.decode("utf-8", "replace")
+        self.assertEqual(result.returncode, 0, output)
+        self.assertIn("grant-pin-ledger OK", output)
+
+    def test_the_self_check_refuses_an_unnamed_grant_and_lands_no_row(self):
+        """The self-check's refusal branch: an unnamed grant lands no row.
+
+        The self-check asserts that the ledger still holds two rows
+        after the refusal.  A seal that landed a row anyway would make
+        that assertion fail.
+        """
+        import io
+        from contextlib import redirect_stdout
+
+        import grant_pin_ledger as gpl
+
+        original = gpl.GrantPinLedger
+        ledgers = []
+
+        class RecordingLedger(original):
+            def __init__(self):
+                super().__init__()
+                ledgers.append(self)
+
+        gpl.GrantPinLedger = RecordingLedger
+        try:
+            with redirect_stdout(io.StringIO()):
+                gpl.main()
+        finally:
+            gpl.GrantPinLedger = original
+
+        self.assertEqual(len(ledgers), 1)
+        self.assertEqual(len(ledgers[0]), 2)
+
+    def test_the_self_check_fails_when_the_refusal_does_not_raise(self):
+        """The self-check's refusal branch is load-bearing.
+
+        The self-check does ``ledger.seal(...); raise AssertionError``
+        inside a ``try`` that catches ``MissingGrantIdError``.  If the
+        seal did NOT raise, the self-check raises its own
+        ``AssertionError`` -- and that AssertionError is NOT caught by
+        the ``except MissingGrantIdError``, so the self-check fails.
+        This test pins that a seal which does not refuse fails the
+        self-check.
+        """
+        import io
+        from contextlib import redirect_stdout
+
+        import grant_pin_ledger as gpl
+
+        original = gpl.GrantPinLedger
+
+        class LeakyLedger(original):
+            def seal(self, pin, *, outcome="executed", seq=0):
+                # A seal that never refuses the unnamed grant.
+                from grant_pin_ledger import GrantPin as _GP
+                return original.seal(
+                    self, _GP("grant-1", "v1", 3), outcome=outcome, seq=seq
+                )
+
+        gpl.GrantPinLedger = LeakyLedger
+        try:
+            with redirect_stdout(io.StringIO()):
+                with self.assertRaises(AssertionError):
+                    gpl.main()
+        finally:
+            gpl.GrantPinLedger = original
