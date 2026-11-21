@@ -81,7 +81,14 @@ fails any one of them is killed and the seven never run.
    reproduction is unknown, or slower than ten minutes, is killed.
 
 The order inside the pre-gate is fixed, so the reason a finding was killed
-is always the *first* thing wrong with it.
+is always the *first* thing wrong with it. The machine names are the ones
+the gate uses in `finding_gate.GATE_0_QUESTIONS`:
+
+| name | question |
+| --- | --- |
+| `gate-0-can-the-attacker-act-now` | can the attacker act on this right now? |
+| `gate-0-what-does-the-victim-lose` | what does the victim actually lose? |
+| `gate-0-is-it-reproducible-in-ten-minutes` | is it reproducible from scratch in ten minutes? |
 
 ## 5. The seven questions
 
