@@ -509,3 +509,98 @@ class BytesOverBudgetEquivalenceProofTests(unittest.TestCase):
         self.assertIsInstance(over, int)
         self.assertNotIsInstance(over, bool)
         self.assertIsInstance(budget.bytes_over_budget({"a": 1}), int)
+
+
+class BytesOverBudgetHarnessControlTests(unittest.TestCase):
+    """The ``gt@304`` equivalence proof must be able to FAIL.
+
+    ``BytesOverBudgetEquivalenceProofTests`` proves that the planted
+    fault at ``gt@304`` (``over if over > 0 else 0`` ->
+    ``over if over >= 0 else 0``) changes nothing.  Its sweep asks the
+    shipped ``StateBudget.bytes_over_budget`` for the shortfall and
+    compares it against the mutant's expression, over 2000 randomised
+    (cap, state) pairs.
+
+    A differential test that CANNOT fail proves nothing.  If the sweep
+    never reached a value that separates the two expressions -- or if the
+    mutant expression were accidentally the same as the original -- the
+    agreement would be empty and the "EQUIVALENT mutant" conclusion
+    would be worthless.
+
+    This class gives the proof its **non-vacuity control**: the same
+    sweep, pointed at a DELIBERATELY WRONG expression, must find a
+    difference.  The control is the original with the bound moved one
+    step further (``over > 1``), so the two disagree at every ``over``
+    of exactly 1 -- a value the sweep reaches.
+
+    A difference found here is what licenses the "no difference"
+    conclusion drawn at ``gt@304``.
+    """
+
+    @staticmethod
+    def _original(over: int) -> int:
+        """The shipped expression: ``over if over > 0 else 0``."""
+        return over if over > 0 else 0
+
+    @staticmethod
+    def _mutant(over: int) -> int:
+        """The planted fault: ``over if over >= 0 else 0``."""
+        return over if over >= 0 else 0
+
+    @staticmethod
+    def _control(over: int) -> int:
+        """A DELIBERATELY WRONG expression: the bound is one step too far.
+
+        The original refuses a shortfall of 1; this one refuses it too.
+        They disagree at exactly ``over == 1``, which is a value the
+        sweep reaches.
+        """
+        return over if over > 1 else 0
+
+    def test_the_control_expression_differs_from_the_original(self):
+        """The control must be a genuinely different function."""
+        differences = 0
+        compared = 0
+        for over in range(-50, 51):
+            compared += 1
+            if self._original(over) != self._control(over):
+                differences += 1
+        self.assertGreater(compared, 0)
+        self.assertGreater(
+            differences,
+            0,
+            "the control expression does not differ from the original, so "
+            "it cannot show that the sweep discriminates",
+        )
+
+    def test_the_same_sweep_notices_the_control_expression(self):
+        """The SAME sweep, pointed at the control, must find a difference.
+
+        This is the non-vacuity check on the equivalence proof: the very
+        sweep that ``gt@304`` runs -- the shipped method against a
+        candidate expression, over randomised (cap, state) pairs -- must
+        report a disagreement when the candidate expression is one that
+        genuinely disagrees.
+        """
+        import random
+
+        rng = random.Random(20261121)
+        differences = 0
+        cases = 0
+        for _ in range(2000):
+            cap = rng.randint(1, 200)
+            state = {"k": rng.randint(0, 1000), "s": "x" * rng.randint(0, 20)}
+            budget = StateBudget(max_state_size=cap)
+            over = budget.size_of(state) - cap
+            shipped = budget.bytes_over_budget(state)
+            control = self._control(over)
+            cases += 1
+            if shipped != control:
+                differences += 1
+        self.assertEqual(cases, 2000)
+        self.assertGreater(
+            differences,
+            0,
+            "the sweep found no difference for an expression that differs, "
+            "so it cannot certify gt@304 as equivalent",
+        )
