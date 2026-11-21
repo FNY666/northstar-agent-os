@@ -414,3 +414,260 @@ class DesignDocTests(unittest.TestCase):
         self.assertIn("Claude-BugHunter", self.doc)
         self.assertIn("adapted from", self.doc)
         self.assertIn("Northstar's own", self.doc)
+
+
+class SecondHalfGuardTests(unittest.TestCase):
+    """The guard arms the original suite never reached.
+
+    The mutant census of ``finding_gate.py`` stood at **killed 18/26**:
+    eight mutants survived, and every one of them is a guard arm that no
+    existing test drove.  Each test below names the mutant it kills.
+
+    The pattern behind all eight is the one this repo calls the
+    **double-guard**: a guard written as two halves joined by ``or`` (or
+    a bound written as ``<``), where the suite exercises one half and the
+    other half is untested.  The surviving arm is invisible to a reader
+    of the suite: the tests look complete, and the mutant says the guard
+    is looser than it reads.
+    """
+
+    # -- the ``repro_minutes`` type guard -------------------------------
+
+    def test_a_boolean_repro_time_is_refused(self):
+        """``or@273``: the BOOLEAN half of the type guard.
+
+        The guard is::
+
+            if isinstance(minutes, bool) or not isinstance(minutes, int):
+
+        A ``bool`` IS an ``int`` in Python, so ``isinstance(True, int)`` is
+        True and the ``not isinstance(...)`` half does NOT refuse a
+        boolean.  Only the explicit boolean half does.  The existing
+        suite feeds ``45``, ``None`` and ``600`` -- all non-booleans --
+        so under the mutant (``or`` -> ``and``) the boolean half is never
+        consulted and a boolean repro time is accepted.
+
+        A boolean repro time is a repro time of 0 or 1: it says "one
+        minute" when the caller meant "yes".  The gate must refuse it.
+        """
+        for value in (True, False):
+            with self.subTest(repro_minutes=value):
+                with self.assertRaises(FindingGateError) as caught:
+                    true_finding(repro_minutes=value)
+                self.assertIn("repro_minutes", str(caught.exception))
+
+    def test_a_boolean_repro_time_is_refused_even_when_it_would_pass(self):
+        """``or@273``: the control -- the refusal is not an accident.
+
+        ``True`` compares as ``1``, which is under ten minutes, so a
+        boolean would sail through the pre-gate if the type guard let it
+        through.  This pins that the refusal happens at the TYPE check
+        and not because the pre-gate happened to kill the finding.
+        """
+        with self.assertRaises(FindingGateError):
+            true_finding(repro_minutes=True)
+
+    def test_a_non_integer_repro_time_is_refused(self):
+        """``or@273``: the OTHER half -- a non-integer is refused too.
+
+        The mutant turns ``or`` into ``and``, so BOTH halves must be
+        driven: the boolean (above) and the non-integer.  Under the
+        mutant the non-integer half is the only one left, and a float
+        such as ``10.5`` would be accepted.
+        """
+        for value in (10.5, 2.0, "10", [10]):
+            with self.subTest(repro_minutes=value):
+                with self.assertRaises(FindingGateError):
+                    true_finding(repro_minutes=value)
+
+    # -- the ``repro_minutes`` bound ------------------------------------
+
+    def test_a_zero_repro_time_is_accepted(self):
+        """``lt@277``: the ZERO boundary of the non-negative check.
+
+        The guard is ``if minutes < 0:``.  The mutant makes it
+        ``minutes <= 0``.  The two differ at exactly ONE value: zero.
+        The existing suite feeds ``45``, ``None``, ``600`` and ``10`` --
+        none of them zero -- so under the mutant a finding that claims to
+        reproduce in zero minutes is refused.
+
+        Zero minutes is legal: it says the attack needs no time at all.
+        It is under ten minutes, so the pre-gate must let it through.
+        """
+        finding = true_finding(repro_minutes=0)
+        self.assertEqual(finding.repro_minutes, 0)
+        verdict = evaluate_finding(finding)
+        self.assertEqual(verdict.outcome, VERDICT_PASS)
+
+    def test_a_negative_repro_time_is_refused(self):
+        """``lt@277``: the control -- the bound still refuses negatives.
+
+        Without this, "zero is accepted" could be satisfied by a guard
+        that accepts everything.  A negative repro time is a contradiction
+        -- time does not run backwards -- and must be refused.
+        """
+        for value in (-1, -600):
+            with self.subTest(repro_minutes=value):
+                with self.assertRaises(FindingGateError) as caught:
+                    true_finding(repro_minutes=value)
+                self.assertIn("negative", str(caught.exception))
+
+    # -- the request-shape guard ----------------------------------------
+
+    def test_a_single_token_step_is_not_a_request(self):
+        """``gt@375``: the ONE-token boundary of the target guard.
+
+        The line is::
+
+            rest = head[1] if len(head) > 1 else ""
+
+        The mutant makes it ``len(head) >= 1``, which for a one-token
+        step reads ``head[1]`` -- an IndexError -- instead of taking the
+        ``else`` branch.  The existing suite never feeds a step that is
+        a single token, so under the mutant that arm is never reached.
+
+        A single token names a METHOD but no TARGET, so it cannot be
+        sent: it is not a request.
+        """
+        self.assertFalse(finding_gate._is_real_request("GET"))
+        self.assertFalse(finding_gate._is_real_request("POST"))
+        self.assertFalse(finding_gate._is_real_request("OPTIONS"))
+
+    def test_a_single_token_step_is_killed_by_the_gate(self):
+        """``gt@375``: the same boundary, seen through the gate.
+
+        The private helper's answer is the same answer the gate gives:
+        a finding whose only step is a bare method is killed at q1
+        because the step cannot be sent.
+        """
+        verdict = evaluate_finding(
+            true_finding(attacker_steps=("GET",))
+        )
+        self.assertEqual(verdict.outcome, VERDICT_KILL)
+        self.assertIn("real requests", verdict.reason)
+
+    def test_a_step_with_a_method_and_a_target_is_a_request(self):
+        """``gt@375``: the control -- a two-token step IS a request.
+
+        The mutant must not be satisfiable by a guard that refuses
+        everything, so this pins the positive case: two tokens make a
+        request, and the gate lets it through.
+        """
+        self.assertTrue(finding_gate._is_real_request("GET /api/import"))
+        self.assertTrue(finding_gate._is_real_request("POST /api/import {\"rows\": 1}"))
+        verdict = evaluate_finding(
+            true_finding(attacker_steps=("GET /api/import",))
+        )
+        self.assertEqual(verdict.outcome, VERDICT_PASS)
+
+    def test_an_empty_step_is_not_a_request(self):
+        """``retF@368``: the EMPTY-STEP arm.
+
+        The guard is ``if not step: return False``.  The mutant turns the
+        ``return False`` into ``return True``, so an empty step would be
+        accepted as a request.  The existing suite feeds a PROSE step,
+        which is refused by a LATER guard, so it cannot tell the empty
+        arm from the prose arm.
+
+        An empty step is not a request: there is nothing to send.
+        """
+        self.assertFalse(finding_gate._is_real_request(""))
+        self.assertFalse(finding_gate._is_real_request("   "))
+
+    def test_a_whitespace_only_step_is_killed_by_the_gate(self):
+        """``retF@368``: the same arm, through the gate.
+
+        A whitespace-only step is stripped to the empty string by
+        ``_steps_tuple``, so it reaches the guard as ``""`` -- which is
+        exactly the arm above.
+        """
+        verdict = evaluate_finding(true_finding(attacker_steps=("   ",)))
+        self.assertEqual(verdict.outcome, VERDICT_KILL)
+        self.assertIn("real requests", verdict.reason)
+
+    def test_a_method_with_no_target_is_not_a_request(self):
+        """``retF@377``: the NO-TARGET arm.
+
+        The guard is::
+
+            rest = head[1] if len(head) > 1 else ""
+            if not rest:
+                return False
+
+        The mutant turns that ``return False`` into ``return True``, so a
+        step that names a method but no target would be accepted as a
+        request.  The existing suite never feeds a method-only step, so
+        this arm is untested.
+        """
+        self.assertFalse(finding_gate._is_real_request("GET"))
+
+    def test_a_target_that_is_not_a_path_is_not_a_request(self):
+        """``retF@380``: the NON-PATH-TARGET arm.
+
+        The guard is::
+
+            if not target.startswith("/") and "://" not in target:
+                return False
+
+        The mutant turns that ``return False`` into ``return True``, so a
+        target that is neither a path nor a URL would be accepted.  The
+        existing suite's prose step is refused EARLIER (its method is not
+        an HTTP method), so it cannot reach this arm.
+
+        A target that is neither a path nor a URL names nothing that can
+        be requested.
+        """
+        self.assertFalse(finding_gate._is_real_request("GET api/import"))
+        self.assertFalse(finding_gate._is_real_request("GET import"))
+
+    def test_an_absolute_url_target_is_a_request(self):
+        """``retF@380``: the control -- a URL target IS accepted.
+
+        The ``"://" not in target`` half of the guard must keep working:
+        the mutant must not be satisfiable by a guard that refuses every
+        target.
+        """
+        self.assertTrue(finding_gate._is_real_request("GET http://host/api"))
+        self.assertTrue(finding_gate._is_real_request("GET https://host/api"))
+
+    # -- the impact-proof guard -----------------------------------------
+
+    def test_no_proof_kind_is_killed_even_with_proof_text(self):
+        """``or@538``: the "NO PROOF KIND" half of the guard.
+
+        The guard is::
+
+            if kind == PROOF_NONE or not finding.impact_proof.strip():
+
+        The two halves are independent: a finding can name no proof KIND
+        while carrying proof TEXT (a caller that filled in the text and
+        left the kind at its default), and it can name a kind with no
+        text.  The existing suite only feeds the case where BOTH are
+        empty, so under the mutant (``or`` -> ``and``) the first half is
+        never decisive and a kind-less finding with proof text survives
+        into q6's later branches.
+
+        A finding that names no proof kind has proved nothing, whatever
+        text it carries: the kind is what says HOW the impact was shown.
+        """
+        finding = true_finding(
+            impact_proof="the response body carried another tenant's row id 42",
+            impact_proof_kind=PROOF_NONE,
+        )
+        verdict = evaluate_finding(finding)
+        self.assertEqual(verdict.outcome, VERDICT_KILL)
+        self.assertIn("technically possible", verdict.reason)
+
+    def test_a_proof_kind_with_no_text_is_killed(self):
+        """``or@538``: the OTHER half -- the text arm, driven too.
+
+        The mutant turns ``or`` into ``and``, so BOTH halves must be
+        driven.  A finding that names a proof kind but carries no text
+        has no evidence either, and must be killed.
+        """
+        verdict = evaluate_finding(
+            true_finding(impact_proof="", impact_proof_kind=PROOF_CONCRETE)
+        )
+        self.assertEqual(verdict.outcome, VERDICT_KILL)
+        self.assertIn("technically possible", verdict.reason)
+
