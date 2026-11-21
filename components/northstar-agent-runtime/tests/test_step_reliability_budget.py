@@ -14,6 +14,7 @@ arithmetic and checked against reference values computed independently
 formulas), and every illegal argument is checked to be refused.
 """
 import math
+import pathlib
 import unittest
 from decimal import Decimal, getcontext
 
@@ -511,3 +512,113 @@ class StepReliabilityBudgetSecondHalfTests(unittest.TestCase):
                 msg=f"measured={measured} target={target}",
             )
         self.assertGreater(len(pairs), 200000)
+
+
+class StepReliabilityEquivalenceHarnessControlTests(unittest.TestCase):
+    """The ``lt@152`` equivalence proof must be able to FAIL.
+
+    The proof above is a differential test: it builds two variants of the
+    module -- one as shipped, one with the ``measured < 1.0`` /
+    ``measured <= 1.0`` comparison swapped -- and asserts that the two
+    agree over 200,000+ input pairs.
+
+    A differential test that CANNOT fail proves nothing.  If the two
+    variants were accidentally the same function, or if the sweep never
+    reached an input that separates them, the agreement would be
+    vacuous and the "EQUIVALENT mutant" conclusion would be worthless.
+
+    This class gives the harness its **non-vacuity control**: the very
+    same harness -- the same loader, the same outcome function, the same
+    sweep -- is pointed at a mutation that is known to change behaviour,
+    and it is REQUIRED to notice.  If the control finds no difference,
+    the harness is broken and the equivalence result must be thrown away
+    and re-derived by hand.
+
+    The control mutation is ``if measured >= 1.0:`` -> ``if measured >
+    1.0:`` on the guard three lines above the site.  That guard returns
+    ``None`` for a flawless step; widening it to ``> 1.0`` lets a
+    ``measured == 1.0`` step fall through to the logarithm, which is
+    ``log(1.0) == 0`` and therefore a ``ZeroDivisionError`` -- an
+    observable behaviour change at exactly one input.
+    """
+
+    #: The line the control mutation rewrites.  It is the final
+    #: formula of ``max_steps``: adding one to the result changes every
+    #: answer, so a harness that compares two modules cannot possibly
+    #: miss it.
+    _GUARD = "return math.floor(math.log(target) / math.log(measured))"
+    _GUARD_MUTATED = (
+        "return math.floor(math.log(target) / math.log(measured)) + 1"
+    )
+
+    def _load(self, name: str, text: str):
+        """Load a module variant from source text, as the proof does."""
+        import importlib.util
+        import sys
+        import types
+
+        module = types.ModuleType(name)
+        module.__file__ = f"<{name}>"
+        sys.modules[name] = module
+        exec(compile(text, module.__file__, "exec"), module.__dict__)  # pragma: no cover
+        return module
+
+    @staticmethod
+    def _call_outcome(module, function, *args):
+        """The outcome of one call, as a comparable value."""
+        try:
+            return ("ok", getattr(module, function)(*args))
+        except Exception as exc:  # noqa: BLE001 - the outcome IS the datum
+            return ("raise", type(exc).__name__, str(exc))
+
+    def test_the_control_mutation_is_reachable_and_changes_the_call_outcome(self):
+        """The control mutation must actually CHANGE the outcome.
+
+        If it does not, the harness has no discriminating power at all
+        and every equivalence result it produces is empty.
+        """
+        source = pathlib.Path(step_reliability_budget.__file__).read_text(encoding="utf-8")
+        self.assertIn(self._GUARD, source, "the control guard moved")
+        mutated = source.replace(self._GUARD, self._GUARD_MUTATED, 1)
+
+        original = self._load("srb_control_original", source)
+        control = self._load("srb_control_mutated", mutated)
+
+        before = self._call_outcome(original, "max_steps", 0.5, 0.8)
+        after = self._call_outcome(control, "max_steps", 0.5, 0.8)
+        self.assertNotEqual(
+            before,
+            after,
+            "the control mutation changed nothing, so the differential "
+            "harness cannot distinguish any two functions",
+        )
+
+    def test_the_harness_notices_the_control_mutation(self):
+        """The SAME harness, pointed at the control mutation, must FAIL.
+
+        This is the harness's non-vacuity check.  It runs the equivalence
+        proof's own comparison -- same outcome function, same grid, same
+        call -- over the module and its control mutant, and requires a
+        difference to be found.  A difference here is what licenses the
+        "no difference" conclusion the proof draws at ``lt@152``.
+        """
+        source = pathlib.Path(step_reliability_budget.__file__).read_text(encoding="utf-8")
+        mutated = source.replace(self._GUARD, self._GUARD_MUTATED, 1)
+        original = self._load("srb_nv_original", source)
+        control = self._load("srb_nv_mutated", mutated)
+
+        grid = (0.001, 0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.99, 0.999, 0.9999, 1.0)
+        pairs = [(a, b) for a in grid for b in grid]
+
+        differences = 0
+        for measured, target in pairs:
+            before = self._call_outcome(original, "max_steps", measured, target)
+            after = self._call_outcome(control, "max_steps", measured, target)
+            if before != after:
+                differences += 1
+        self.assertGreater(
+            differences,
+            0,
+            "the harness found no difference for a mutation that changes "
+            "the outcome, so it cannot certify lt@152 as equivalent",
+        )
