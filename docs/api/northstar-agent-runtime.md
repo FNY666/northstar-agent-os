@@ -43518,8 +43518,12 @@ Single-writer forward-secure sealed ledger.
 
 - `tombstones` (property)
   - The tombstone registry this ledger consults (may be ``None``).
+- `cancellations` (property)
+  - The cancellation-tombstone registry (may be ``None``).
+- `refusals` (property)
+  - The refusal-hold registry (may be ``None``).
 - `set_tombstones(registry: Any)`
-  - Install (or clear) the tombstone registry.
+  - Install (or clear) a gate registry.
 - `genesis` (property)
 - `record(seq: int)`
   - Return the sealed record with 1-based ``seq`` (pure read).
@@ -90384,6 +90388,8 @@ The registry the seal ledger's injection point accepts.
   - The store this registry reads from.
 - `scope_kind` (property)
   - The scope kind this registry's refusals live under.
+- `is_refusal_registry` (property)
+  - This registry is the **refusal** family, not the cancellation one.
 - `key_for(grant_id: str, action: str, subject: Optional[str]=None)`
   - The hold key for one ledger-side identity.
 - `check(grant_id: str, action: str, subject: Optional[str]=None, *, now: Optional[float]=None)`

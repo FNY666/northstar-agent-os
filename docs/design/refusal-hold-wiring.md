@@ -338,3 +338,80 @@ honest open item, and it is stated here rather than left silent.
    `_authorize_under_tombstone_locked()` (which would consult the refusal
    registry next to the tombstone registry), but that file is read-only in
    this slice.
+
+## 6. RESOLVED — the ledger holds BOTH gate families
+
+Open item 4 above said the ledger itself was not modified, and named the
+one-line change that would close it. It is closed now, and closing it
+turned up a **fail-open** that was not in the open items at all.
+
+### 6.1 What the ledger actually did
+
+`ForwardSealLedger` has **one** injection point, `set_tombstones()`, and
+**two** gate families that are installed into it:
+
+* the **cancellation tombstone** (`cancellation_tombstone.TombstoneSet`),
+  and
+* the **refusal hold** (`refusal_hold_wiring.RefusalHoldRegistry`).
+
+They are deliberately interchangeable in shape — the wiring exists to be
+dropped into the tombstone's slot — but they are **different gates**: one
+answers "was this action cancelled?", the other "was this action
+refused?". A host that installs both means to be stopped by both.
+
+The slot held **one** object, so the second install **replaced** the
+first. Measured on this branch, before the fix:
+
+```python
+ledger.set_tombstones(tombstone_set)      # the cancellation gate
+ledger.set_tombstones(refusal_registry)    # the refusal gate
+ledger.append_grant(grant_id="grant-1", action="dispatch")
+# -> len(ledger) == 1
+```
+
+The seal **landed**. The cancellation tombstone that covered exactly that
+identity was silently dropped, and the ledger sealed the action it named.
+A host that installed the refusal gate — the way this slice's own test
+suite installs it — **disarmed the cancellation gate**.
+
+This is the same shape of defect the batch already knows by another name:
+the second half of a guard is not exercised, so the first half's
+protection is assumed rather than measured.
+
+### 6.2 The fix
+
+1. **Two slots, not one.** The ledger keeps `_cancellations` and
+   `_refusals` separately, and `_authorize_under_tombstone_locked()`
+   consults **both**: a seal is refused when *either* family blocks.
+   The refusal is checked first and on its own terms — a refusal is not
+   a cancellation and cannot be lifted by a tombstone lift, so it never
+   goes through the lift path.
+2. **The family is decided by shape, not by name.** A registry is the
+   refusal family when it declares `is_refusal_registry` (the refusal
+   registry does) or when it carries a `row`/`row_digest`; otherwise it is
+   the cancellation family. The classification is made on the *declared
+   surface* of the object, so a host's own registry is filed by what it
+   actually is rather than by what it is called.
+3. **A second install is refused, not silently applied.** Installing a
+   *different* object into a family that already holds one raises
+   `ForwardSealError` rather than dropping the first. Installing the
+   **same** object again is idempotent, and passing `None` clears both
+   families — clearing is a deliberate act and must not leave one gate
+   behind.
+4. **The historical name still reads back the consulted gate.**
+   `ledger.tombstones` returns the refusal registry when that is the only
+   gate installed, so the existing caller (`test_refusal_hold_wiring.py`
+   asserts `ledger.tombstones is registry`) keeps its meaning.
+   `ledger.cancellations` and `ledger.refusals` are the explicit slots.
+
+### 6.3 What it does NOT change
+
+* The refusal hold's own semantics are untouched. This is a change to
+  *where the gate is installed*, not to what it answers.
+* The tombstone lift path is untouched: a lift still only lifts a
+  tombstone, and a refusal still cannot be lifted.
+* The ledger's default behaviour — no gate installed — is untouched: a
+  ledger with no gates seals exactly as before.
+* The queue-side wiring (open item 1) is still open. It needs the work
+  item to carry an action identity first, and it is a different seam
+  from this one.
