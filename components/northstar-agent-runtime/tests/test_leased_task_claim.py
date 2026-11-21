@@ -841,6 +841,199 @@ class SecondHalfGuardTests(ClaimTestBase):
         self.assertEqual(self.manager.task("t1").state, STATE_READY)
 
 
+class StoreAndReaperIsolationTests(ClaimTestBase):
+    """Two guards that need the store's own behaviour to be observable.
+
+    ``or@438`` and ``or@1112`` are both masked by the code around them:
+    the store's path fallback is unreachable through the public API, and
+    the reaper's vanished-row branch is unreachable because the row is
+    read from the same transaction that then re-reads it.
+    """
+
+    def _manager(self, **kwargs) -> LeasedTaskClaim:
+        """A manager with its own settings, closed by the caller."""
+        return LeasedTaskClaim(**kwargs)
+
+    def test_an_empty_store_path_falls_back_to_an_in_memory_database(self):
+        """`or@438`: the "or the path is empty" half.
+
+        The store connects to ``path or ":memory:"``, so an empty path
+        is an in-memory database rather than a file called "".  The
+        store is exercised directly, because the manager's own default
+        path is already ":memory:" and the fallback is not reachable
+        through it.
+        """
+        import leased_task_claim as ltc
+
+        store = ltc._Store("")
+        try:
+            self.assertEqual(store.path, "")
+            # The fallback really is the in-memory database.
+            journal = store._conn.execute("PRAGMA journal_mode").fetchone()[0]
+            self.assertEqual(journal, "memory")
+        finally:
+            store.close()
+
+    def test_the_store_really_is_in_memory_for_an_empty_path(self):
+        """`or@438`: the fallback is observable through the connection.
+
+        An empty path must not create a file named "" on disk; the
+        connection is the in-memory one, so its database name says so.
+        """
+        import leased_task_claim as ltc
+
+        empty = ltc._Store("")
+        memory = ltc._Store(":memory:")
+        try:
+            empty_journal = empty._conn.execute("PRAGMA journal_mode").fetchone()[0]
+            memory_journal = memory._conn.execute("PRAGMA journal_mode").fetchone()[0]
+            self.assertEqual(empty_journal, memory_journal)
+            self.assertEqual(empty_journal, "memory")
+        finally:
+            empty.close()
+            memory.close()
+
+    def test_the_reaper_leaves_a_task_that_vanished_between_the_two_reads(self):
+        """`or@1112`: the "or the row is gone" half.
+
+        The reaper reads the expired leases, then re-reads each row
+        inside the transaction and skips it when the row is GONE -- not
+        merely when it is no longer leased.  The row can only vanish if
+        it is deleted between the two reads, so the test deletes it.
+
+        The store is reached directly so that the deletion happens
+        between the reaper's outer read and its inner read.
+        """
+        import leased_task_claim as ltc
+
+        manager = self._manager()
+        try:
+            manager.enqueue_task("t1", "task")
+            lease = manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+            self.assertEqual(lease.token, 1)
+
+            # The reaper's outer read must see the expired lease, so the
+            # deletion has to happen after that read.  The store's read
+            # is wrapped so that the FIRST read of the sweep returns the
+            # row and the row is deleted immediately afterwards.
+            original_read = manager._store.read
+            state = {"reads": 0}
+
+            def deleting_read(statement, params=()):
+                rows = original_read(statement, params)
+                if "FROM ltc_task WHERE state" in statement:
+                    state["reads"] += 1
+                    if state["reads"] == 1:
+                        # The row has now been handed to the reaper; make
+                        # it vanish before the reaper re-reads it.
+                        with manager._store.transaction() as conn:
+                            conn.execute(
+                                "DELETE FROM ltc_task WHERE task_id = ?",
+                                ("t1",),
+                            )
+                return rows
+
+            manager._store.read = deleting_read
+            swept = manager.reap(now=200.0)
+            self.assertEqual(tuple(swept), ())
+        finally:
+            manager.close()
+
+
+class SelfCheckAssertShapeTests(unittest.TestCase):
+    """The self-check's ``and`` assertions.
+
+    Three of the self-check's assertions are ``and`` conjunctions, so
+    each has two halves and a mutant that replaces ``and`` with ``or``
+    only stops evaluating the second operand when the first one already
+    holds.  These tests pin the second operand of each.
+    """
+
+    def _run_self_check(self):
+        import io
+        from contextlib import redirect_stdout
+
+        import leased_task_claim as ltc
+
+        with redirect_stdout(io.StringIO()):
+            ltc.main()
+
+    def test_the_reaped_task_is_ready_with_no_delay_and_no_failure(self):
+        """`and@1253`: the second operand of the reaped-view assertion.
+
+        The self-check asserts ``view.state == STATE_READY and
+        view.delay_until == 0.0``.  The second operand is the delay: a
+        crash is not a fault, so the requeued task takes no backoff.  A
+        mutant that replaced ``and`` with ``or`` would still pass when
+        the state is right, whatever the delay -- so the delay is pinned
+        here against a live run.
+        """
+        manager = LeasedTaskClaim(max_failures=2, base_backoff_seconds=2.0)
+        try:
+            manager.enqueue_task("t1", "demo-task", payload="hello")
+            lease = manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+            manager.save_checkpoint("t1", lease.token, 1, {"step": "one"},
+                                    now=101.0)
+            swept = manager.reap(now=200.0)
+            self.assertEqual(len(swept), 1)
+            view = manager.task("t1")
+            self.assertEqual(view.state, STATE_READY)
+            # The second operand: no backoff delay after a crash.
+            self.assertEqual(view.delay_until, 0.0)
+            # And the failure budget is not consumed by a crash.
+            self.assertEqual(view.failures, 0)
+        finally:
+            manager.close()
+
+    def test_the_resumed_holder_continues_from_the_newest_checkpoint(self):
+        """`and@1260`: the second operand of the resume assertion.
+
+        The self-check asserts ``resumed is not None and resumed.step ==
+        2``.  The second operand is the step: the new holder continues
+        from the newest checkpoint, not from the beginning.  A mutant
+        that replaced ``and`` with ``or`` would accept any non-None
+        record.
+        """
+        manager = LeasedTaskClaim(max_failures=2, base_backoff_seconds=2.0)
+        try:
+            manager.enqueue_task("t1", "demo-task", payload="hello")
+            lease = manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+            manager.save_checkpoint("t1", lease.token, 1, {"step": "one"},
+                                    now=101.0)
+            manager.save_checkpoint("t1", lease.token, 2, {"step": "two"},
+                                    now=102.0)
+            manager.reap(now=200.0)
+            manager.claim("t1", "worker-B", ttl=10.0, now=201.0)
+            resumed = manager.resume_from("t1")
+            self.assertIsNotNone(resumed)
+            # The second operand: the newest checkpoint, not the first.
+            self.assertEqual(resumed.step, 2)
+        finally:
+            manager.close()
+
+    def test_the_completion_books_exactly_one_outbox_row(self):
+        """`and@1282`: the second operand of the outbox assertion.
+
+        The self-check asserts ``len(rows) == 1 and rows[0].message_id
+        == "t1:completed"``.  The second operand is the message id: the
+        stable idempotency key.  A mutant that replaced ``and`` with
+        ``or`` would accept any single row.
+        """
+        manager = LeasedTaskClaim(max_failures=2, base_backoff_seconds=2.0)
+        try:
+            manager.enqueue_task("t1", "demo-task", payload="hello")
+            lease = manager.claim("t1", "worker-B", ttl=200.0, now=100.0)
+            terminal = manager.complete("t1", lease.token, {"ok": True},
+                                        now=103.0)
+            rows = manager.outbox_rows("t1")
+            self.assertEqual(len(rows), 1)
+            # The second operand: the stable idempotency key.
+            self.assertEqual(rows[0].message_id, "t1:completed")
+            self.assertEqual(terminal.message_id, "t1:completed")
+        finally:
+            manager.close()
+
+
 class SelfCheckTests(unittest.TestCase):
     """The module's own self-check, driven for real.
 
