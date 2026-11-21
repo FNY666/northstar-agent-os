@@ -35,6 +35,7 @@ is tampered with behind the frozen check, the store is broken, and the key
 is malformed.
 """
 import unittest
+from dataclasses import replace as dataclasses_replace
 
 from refusal_hold import (
     REASON_ALLOWED_NO_REFUSAL,
@@ -575,3 +576,213 @@ class RefusalHoldBoundTests(unittest.TestCase):
         self.assertFalse(store.is_readable())
         store.repair()
         self.assertTrue(store.is_readable())
+
+
+
+class RefusalHoldSelfCheckTests(unittest.TestCase):
+    """The module's own ``main()`` self-check is real code, and its
+    asserts are the last line of defence.
+
+    Four ``eq`` faults and four ``and`` faults survived the suite that
+    drives the *library*: every one of them sat in the self-check's own
+    asserts (and one in its ``__main__`` guard), which **no test ever
+    executed**.  A fault in a self-check assert turns the self-check into
+    a **no-op that still prints "ok"** -- the module's last guard
+    silently stops guarding, and the module's own ``if __name__ ==
+    "__main__"`` entry point becomes a lie.
+
+    Two techniques are used here, and both are the repository's own:
+
+    * **run the self-check for real** (``runpy`` / a direct call).  The
+      self-check's asserts state the *correct* semantics, so on the
+      unmutated module they hold; a fault in one of them turns the
+      self-check into a failing one.  The plain "it completes" test is
+      therefore the killer for every ``==`` -> ``!=`` fault: the mutant
+      makes the real, correct answer FAIL the assert.
+    * **drive one half of a conjunction at a time**.  ``and`` -> ``or``
+      cannot be killed by the real behaviour (both halves are true
+      there, so both spellings pass), and it cannot be killed by a
+      failing behaviour either (the original assert would fail too).
+      The killer is a case where **exactly one** half holds: the
+      original assert raises, the mutant's passes.  The collaborator
+      the assert reads -- ``RefusalHold.check`` -- is patched so that
+      one half is true and the other false, and the self-check is
+      expected to raise.
+
+    The self-check asserts, and what each one says:
+
+    * ``main()`` line 645 -- ``assert blocked.blocked and
+      blocked.reason == REASON_BLOCKED_BY_REFUSAL`` -- the refusal
+      blocks **and** the reason names it.
+    * ``main()`` line 646 -- ``assert blocked.row is row and
+      blocked.row_digest == row.row_digest`` -- the block carries **the
+      row itself** and **its digest**.
+    * ``main()`` line 649 -- ``assert not other.blocked and
+      other.reason == REASON_ALLOWED_NO_REFUSAL`` -- a different job is
+      **not** blocked **and** the reason says so.
+    * ``main()`` line 654 -- ``assert unreadable.blocked and
+      unreadable.reason == REASON_BLOCKED_STORE_UNREADABLE`` -- a
+      broken store blocks **and** the reason says so.
+    """
+
+    def _run_main(self):
+        """Run the module's self-check, capturing what it printed."""
+        import io
+        from contextlib import redirect_stdout
+
+        import refusal_hold
+
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            refusal_hold.main()
+        return buffer.getvalue()
+
+    def _run_main_with_patched_check(self, patch):
+        """Run the self-check with ``RefusalHold.check`` replaced.
+
+        ``patch`` receives the real result and returns the result the
+        assert under test will see.  Every other part of the hold --
+        the store, the row, the key -- is left alone, so the assert
+        under test is the only thing that changes.
+        """
+        import dataclasses
+
+        import refusal_hold
+
+        original = refusal_hold.RefusalHold.check
+
+        def patched(self, key, now=None):
+            return patch(dataclasses.replace(original(self, key, now=now)))
+
+        refusal_hold.RefusalHold.check = patched
+        try:
+            with self.assertRaises(AssertionError):
+                refusal_hold.main()
+        finally:
+            refusal_hold.RefusalHold.check = original
+
+    # -- the self-check really runs ---------------------------------------
+
+    def test_the_self_check_passes_on_the_real_code(self):
+        """`eq@645` / `eq@646` / `eq@649` / `eq@654`: the self-check's
+        own asserts, on the real behaviour.
+
+        The self-check states the *correct* semantics -- the refusal
+        blocks with the ``blocked_by_refusal`` reason, the block carries
+        the row and its digest, a different job is allowed with the
+        ``allowed_no_refusal`` reason, and a broken store blocks with
+        the ``blocked_store_unreadable`` reason.  So on the unmutated
+        module every assert holds and the self-check completes.
+
+        Under a fault (``==`` -> ``!=``) one of those asserts asks the
+        opposite question -- "the reason is NOT blocked_by_refusal",
+        "the row is NOT the row" -- and the correct behaviour FAILS it.
+        The self-check then raises instead of printing "ok", which is
+        exactly the no-op self-check the fault creates.
+        """
+        self.assertIn("refusal-hold self-check: ok", self._run_main())
+
+    def test_running_the_module_as_a_script_runs_the_self_check(self):
+        """`eq@659`: the ``__main__`` guard.
+
+        ``if __name__ == "__main__":`` becomes ``!=`` under the fault,
+        and then the self-check runs on EVERY import and NEVER runs when
+        the module is run as a script -- which is how it is used, and
+        how its faults would reach production.
+        """
+        import io
+        from contextlib import redirect_stdout
+
+        import runpy
+
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            runpy.run_module("refusal_hold", run_name="__main__")
+        self.assertIn("refusal-hold self-check: ok", buffer.getvalue())
+
+    # -- and@645: the block and its reason -------------------------------
+
+    def test_the_self_check_fails_when_the_block_is_right_and_the_reason_is_wrong(self):
+        """`and@645`: the conjunction's two halves, driven apart.
+
+        The assert is ``blocked.blocked and blocked.reason ==
+        REASON_BLOCKED_BY_REFUSAL``.  Under the fault (``and`` ->
+        ``or``) it reads "the refusal blocks OR the reason names it".
+
+        The killer is the case where **exactly one** half holds: the
+        block is real but the reason is not
+        ``blocked_by_refusal``.  There the original assert FAILS (both
+        halves must hold) while the mutant's PASSES (one half is
+        enough), so the self-check's "not a refusal block" reasoning is
+        what the fault removes.
+        """
+        import refusal_hold
+
+        def patch(result):
+            if result.reason == refusal_hold.REASON_BLOCKED_BY_REFUSAL:
+                return dataclasses_replace(
+                    result, reason=refusal_hold.REASON_BLOCKED_ROW_INVALID
+                )
+            return result
+
+        self._run_main_with_patched_check(patch)
+
+    # -- and@646: the row and the digest ---------------------------------
+
+    def test_the_self_check_fails_when_the_digest_is_right_and_the_row_is_missing(self):
+        """`and@646`: the conjunction's two halves, driven apart.
+
+        The assert is ``blocked.row is row and blocked.row_digest ==
+        row.row_digest``.  The killer is the case where the **digest**
+        is the row's and the **row** is missing: the original assert
+        fails, the mutant's (``or``) passes on the digest alone.
+        """
+        import refusal_hold
+
+        def patch(result):
+            if result.reason == refusal_hold.REASON_BLOCKED_BY_REFUSAL:
+                return dataclasses_replace(result, row=None)
+            return result
+
+        self._run_main_with_patched_check(patch)
+
+    # -- and@649: the no-over-block half ---------------------------------
+
+    def test_the_self_check_fails_when_a_different_job_is_blocked_but_claims_to_pass(self):
+        """`and@649`: the conjunction's two halves, driven apart.
+
+        The assert is ``not other.blocked and other.reason ==
+        REASON_ALLOWED_NO_REFUSAL``.  The killer is the case where the
+        different job **is blocked** while the reason still claims it
+        may pass: the original assert fails (the first half is false),
+        the mutant's (``or``) passes on the reason alone.
+        """
+        import refusal_hold
+
+        def patch(result):
+            if not result.blocked:
+                return dataclasses_replace(result, blocked=True)
+            return result
+
+        self._run_main_with_patched_check(patch)
+
+    # -- and@654: the broken store ---------------------------------------
+
+    def test_the_self_check_fails_when_a_broken_store_fail_opens(self):
+        """`and@654`: the conjunction's two halves, driven apart.
+
+        The assert is ``unreadable.blocked and unreadable.reason ==
+        REASON_BLOCKED_STORE_UNREADABLE``.  The killer is the case
+        where the broken store **does not block** while the reason
+        still names the fail-closed slug: the original assert fails (the
+        first half is false -- the gate fail-opened), the mutant's
+        (``or``) passes on the reason alone.
+        """
+        import refusal_hold
+
+        def patch(result):
+            if result.reason == refusal_hold.REASON_BLOCKED_STORE_UNREADABLE:
+                return dataclasses_replace(result, blocked=False)
+            return result
+
+        self._run_main_with_patched_check(patch)
