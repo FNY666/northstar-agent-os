@@ -578,7 +578,11 @@ def cap_auto_memory(text: str, *, limits: ContextThresholds) -> tuple[str, dict[
     bytes_kept = min(body_bytes, limits.auto_memory_max_bytes)
     if bytes_kept < body_bytes:
         body = body.encode("utf-8")[:bytes_kept].decode("utf-8", errors="ignore")
-        body_bytes = bytes_kept
+        # The cut may land INSIDE a multibyte character, so the bytes that
+        # survive are fewer than the budget allowed.  The record must report
+        # the bytes that were actually kept -- a record that claims more
+        # bytes than the body holds overstates what stayed in the context.
+        body_bytes = len(body.encode("utf-8"))
     truncated = lines_kept < len(raw_lines) or bytes_kept < bytes_total
     record = {
         "original_lines": len(raw_lines),
