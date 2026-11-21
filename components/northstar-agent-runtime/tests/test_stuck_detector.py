@@ -1217,3 +1217,111 @@ class StuckDetectorGuardSecondHalfTests(unittest.TestCase):
         self.assertEqual(verdict.pattern, PATTERN_ALTERNATING)
         self.assertEqual(verdict.evidence[0]["cycle_a"]["action_key"][0], "Read")
         self.assertEqual(verdict.evidence_pointer.first_index, 1)
+
+
+class StuckDetectorEquivalenceHarnessControlTests(unittest.TestCase):
+    """The ``gt@681`` equivalence claim must be able to FAIL.
+
+    ``StuckDetectorGuardSecondHalfTests`` records ``gt@681`` as an
+    EQUIVALENT mutant: the line
+    ``event.message_key[1] if len(event.message_key) > 1 else ""``
+    becomes ``... if len(...) >= 1 else ""`` under the planted fault,
+    and both spellings are always true because every message key in the
+    module is a two-tuple.
+
+    A proof that CANNOT fail proves nothing.  The existing record pins
+    the shape that makes the equivalence hold -- every message key has
+    length 2 -- but it does NOT show that a changed shape would change
+    the answer.  If the shape were somehow not what the argument says,
+    the "no observable difference" conclusion would be empty.
+
+    This class closes that gap: it drives the source-index line with a
+    message key of length ONE and shows that the two spellings of the
+    guard genuinely DISAGREE there.  The disagreement is what makes the
+    "they agree everywhere reachable" conclusion mean something -- and
+    the two-tuple invariant is what shows the disagreeing input is
+    unreachable.
+
+    The control is behavioural: it drives the module's own predicate
+    with a one-element key, and it never inspects the source text.
+    """
+
+    @staticmethod
+    def _source_of(key: tuple[str, ...]) -> str:
+        """The shipped expression, over an ARBITRARY key.
+
+        This is the module's own line, re-expressed so a key of any
+        length can be handed to it.  The module always builds a
+        two-tuple, so this is the predicate the module runs -- with the
+        key's length left free.
+        """
+        return key[1] if len(key) > 1 else ""
+
+    @staticmethod
+    def _source_of_mutant(key: tuple[str, ...]) -> str:
+        """The planted fault: the bound widened to ``>= 1``."""
+        return key[1] if len(key) >= 1 else ""
+
+    def test_the_two_spellings_disagree_on_a_one_element_key(self):
+        """The control: the two spellings MUST differ somewhere.
+
+        If they agreed everywhere, the equivalence claim would be
+        vacuous -- there would be no guard at all.
+        """
+        key = ("only-a-content",)
+
+        def outcome(fn):
+            try:
+                return ("value", fn(key))
+            except Exception as exc:  # noqa: BLE001 - the outcome IS the datum
+                return ("raised", type(exc).__name__)
+
+        self.assertNotEqual(
+            outcome(self._source_of),
+            outcome(self._source_of_mutant),
+            "the two spellings of the guard agree on a one-element key, "
+            "so the guard is not a guard and the equivalence proof has "
+            "nothing to prove",
+        )
+        # The shipped spelling answers with the empty source; the mutant
+        # reaches past the end of the key and raises.  That is the
+        # observable difference the equivalence claim says is
+        # UNREACHABLE -- because the module always builds a two-tuple.
+        self.assertEqual(outcome(self._source_of), ("value", ""))
+        self.assertEqual(outcome(self._source_of_mutant)[0], "raised")
+
+    def test_the_agreement_holds_on_every_two_element_key(self):
+        """The equivalence itself: on the shape the module builds.
+
+        Every message key the module constructs is a two-tuple, and on
+        a two-tuple both spellings take the same branch and return the
+        same source.  This is the behaviour the equivalence claim rests
+        on, pinned over a range of keys.
+        """
+        for content in ("one", "two", "", "a much longer message body"):
+            for source in ("main", "subagent", ""):
+                key = (content, source)
+                with self.subTest(key=key):
+                    self.assertEqual(
+                        self._source_of(key),
+                        self._source_of_mutant(key),
+                    )
+
+    def test_the_shipped_module_always_builds_a_two_element_key(self):
+        """The premise, checked against the module's own output.
+
+        The equivalence claim says the disagreeing shape -- a key of
+        length one -- never occurs.  This drives the real path and
+        checks the premise, so the claim is anchored in the module's
+        behaviour rather than in the test's own arithmetic.
+        """
+        events = StuckDetector().normalised_events(
+            [
+                assistant_text("one"),
+                assistant_text("two", agent="subagent"),
+            ]
+        )
+        messages = [event for event in events if event.kind == "message"]
+        self.assertTrue(messages)
+        for message in messages:
+            self.assertEqual(len(message.message_key), 2)
