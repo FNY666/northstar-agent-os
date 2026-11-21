@@ -12,8 +12,11 @@ downgraded to what its fields support, that the Q1-Q3 cap holds, and that a
 proof of execution presented as a proof of safety is caught.
 """
 
+import io
+import subprocess
 import sys
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -263,6 +266,271 @@ class VerifiabilityTierTests(unittest.TestCase):
     def test_module_pins_are_present(self):
         self.assertEqual(VERSION, "verifiability-tier.v1")
         self.assertEqual(SCHEMA_PIN, "northstar.verifiability-tier.v1")
+
+
+class VerifiabilityTierMutantKillers(unittest.TestCase):
+    """Killers for the eight planted faults that survived the first suite.
+
+    Each test below names the mutant site it kills and the technique that
+    drives it.  The sites and their faults:
+
+      retF@276  ``_silver_supported``: the "no pinned verifier" refusal
+      retF@278  ``_silver_supported``: the "no run command" refusal
+      retF@280  ``_silver_supported``: the "no reader-accessible inputs" refusal
+      retF@289  ``_gold_supported``: the "not Silver-supported" refusal
+      or@479    ``_normalize_category``: the "not a str" half of the guard
+      or@548    ``checklist``: the "no pinned verifier" half of the Q4 guard
+      eq@656    ``main``: the laundering self-check's equality assertion
+      eq@664    the ``if __name__ == "__main__"`` guard on ``main``
+
+    The first four are *masked* refusals: ``grade`` re-checks the same
+    conditions before it ever calls these helpers, so a claim that trips
+    them still grades the same way under the mutant.  The killers therefore
+    call the helpers directly -- the private API is what the module's own
+    tier ladder is built from, and it is the module under test.
+    """
+
+    # -- retF@276 / retF@278 / retF@280: _silver_supported -------------
+
+    def test_silver_is_unsupported_without_a_pinned_verifier(self):
+        """`retF@276`: the "no pinned verifier" refusal.
+
+        Silver requires the verifier to be *pinned* (version/commit/hash).
+        A claim that names no verifier is not Silver-supported, whatever
+        else it carries.  Under the mutant (``return False`` ->
+        ``return True``) the helper would report Silver support for a
+        claim with no verifier at all.
+        """
+        from verifiability_tier import _silver_supported
+
+        claim = silver_claim(verifier_ref=None)
+        self.assertFalse(_silver_supported(claim))
+        # The control: with the verifier pinned the same claim is supported.
+        self.assertTrue(_silver_supported(silver_claim()))
+
+    def test_silver_is_unsupported_without_a_run_command(self):
+        """`retF@278`: the "no run command" refusal.
+
+        "A reader can run it locally/offline" needs something to run.
+        Without a ``run_command`` there is no runnable verifier, so the
+        claim is not Silver-supported.
+        """
+        from verifiability_tier import _silver_supported
+
+        claim = silver_claim(run_command=None)
+        self.assertFalse(_silver_supported(claim))
+        self.assertTrue(_silver_supported(silver_claim()))
+
+    def test_silver_is_unsupported_without_reader_accessible_inputs(self):
+        """`retF@280`: the "no reader-accessible inputs" refusal.
+
+        The third Silver condition is that the reader can run the verifier
+        on inputs the reader can reach.  A claim with an empty input set
+        fails it.
+        """
+        from verifiability_tier import _silver_supported
+
+        claim = silver_claim(inputs=())
+        self.assertFalse(_silver_supported(claim))
+        self.assertTrue(_silver_supported(silver_claim()))
+
+    # -- retF@289: _gold_supported ---------------------------------------
+
+    def test_gold_is_unsupported_when_the_claim_is_not_silver_supported(self):
+        """`retF@289`: the "not Silver-supported" refusal.
+
+        Gold (REPLICATED) sits ABOVE Silver (VERIFIED) on the ladder: a
+        claim that is not Silver-supported cannot be Gold, however much
+        replication and failure-mode evidence it carries.  Under the
+        mutant (``return False`` -> ``return True``) a claim that is
+        missing, say, the pinned verifier but names a replication and a
+        fail condition would read as Gold -- Gold is supposed to be
+        strictly stronger than Silver, not a side door around it.
+        """
+        from verifiability_tier import _gold_supported
+
+        # Replication and explicit failure modes are present, but the
+        # pinned verifier is missing: not Silver, so not Gold.
+        claim = silver_claim(
+            verifier_ref=None,
+            replication="audited by a third party",
+            fail_condition="the verifier raises",
+        )
+        self.assertFalse(_gold_supported(claim))
+
+    def test_gold_is_unsupported_without_replication(self):
+        """`retF@291`: the "no replication" refusal.
+
+        Gold needs independent replication / third-party audit / multiple
+        implementations agreeing.  A Silver-shaped claim with no
+        replication field is not Gold-supported.  Under the mutant
+        (``return False`` -> ``return True``) every Silver claim would
+        read as Gold, so the whole tier ladder would collapse.
+        """
+        from verifiability_tier import _gold_supported
+
+        claim = silver_claim()  # Silver-shaped, no replication
+        self.assertFalse(_gold_supported(claim))
+        # The control: with replication and explicit failure modes it is.
+        self.assertTrue(
+            _gold_supported(silver_claim(replication="audited by a third party"))
+        )
+
+    def test_gold_is_unsupported_without_explicit_failure_modes(self):
+        """`retF@289`: the neighbouring refusal, as a control.
+
+        "failure modes and assumptions are explicit": replication alone,
+        with the failure modes left implicit, is still not Gold.  This
+        pins the other half of the Gold guard so the replication refusal
+        above is not the only thing separating it from Gold.
+        """
+        from verifiability_tier import _gold_supported
+
+        claim = silver_claim(
+            replication="audited by a third party",
+            fail_condition=None,
+            assumptions=(),
+        )
+        self.assertFalse(_gold_supported(claim))
+
+    # -- or@479: _normalize_category -------------------------------------
+
+    def test_a_non_string_claimed_category_is_refused(self):
+        """`or@479`: the "not a str" half of the guard.
+
+        The guard is ``not isinstance(value, str) or not value.strip()``.
+        The "not a str" half is the only thing that refuses a non-string
+        category; the "strips empty" half never sees one.  Under the
+        mutant (``or`` -> ``and``) a non-string category falls through to
+        ``value.strip()`` and dies with an ``AttributeError`` instead of
+        the module's own ``InvalidClaimError``.
+        """
+        from verifiability_tier import _normalize_category
+
+        with self.assertRaises(InvalidClaimError):
+            _normalize_category(123, "claimed_category")
+        with self.assertRaises(InvalidClaimError):
+            _normalize_category(None, "claimed_category")
+        with self.assertRaises(InvalidClaimError):
+            _normalize_category(["execution"], "claimed_category")
+
+    def test_a_blank_string_claimed_category_is_refused(self):
+        """`or@479`: the other half, as the control.
+
+        A string that strips to empty is refused too.  This is the arm
+        the mutant leaves intact, so it is pinned here to show the two
+        halves refuse different things.
+        """
+        from verifiability_tier import _normalize_category
+
+        with self.assertRaises(InvalidClaimError):
+            _normalize_category("   ", "claimed_category")
+        self.assertEqual(_normalize_category("execution", "claimed_category"), "execution")
+
+    # -- or@548: checklist's Q4 guard ------------------------------------
+
+    def test_q4_is_unanswered_when_the_verifier_is_pinned_but_no_scope(self):
+        """`or@548`: the "no pinned verifier" half of the Q4 guard.
+
+        The guard is ``not claim.has_verifier or not
+        claim.scope_not_claimed``: Q4 ("what is pinned, and what can
+        change silently") needs BOTH a pinned verifier and an explicit
+        ``scope_not_claimed``.  A claim that pins the verifier but names
+        no scope has NOT answered Q4 -- the second arm is the only one
+        that fires.  Under the mutant (``or`` -> ``and``) the first arm is
+        False, the whole guard is False, and Q4 would be silently dropped
+        from the checklist.
+        """
+        claim = Claim(
+            statement="the tool wrote the file",
+            verifier_ref="git:abc1234",
+        )
+        unanswered = checklist(claim)
+        self.assertIn("Q4", unanswered)
+        # Q3 is answered (the verifier is pinned); Q4 is not.
+        self.assertNotIn("Q3", unanswered)
+        self.assertEqual(checklist_report(claim)["Q4"], "unanswered")
+
+    def test_q4_is_unanswered_when_there_is_no_verifier_even_with_a_scope(self):
+        """`or@548`: the other half, as the control.
+
+        A claim that names no verifier cannot say what is pinned, so Q4
+        is unanswered even when it does name a scope.  This is the arm
+        the mutant leaves intact; pinning it keeps the two halves
+        distinguished.
+        """
+        claim = Claim(
+            statement="the tool wrote the file",
+            scope_not_claimed=("does not claim the events were correct",),
+        )
+        unanswered = checklist(claim)
+        self.assertIn("Q4", unanswered)
+        self.assertIn("Q3", unanswered)
+
+    # -- eq@656: main()'s laundering self-check --------------------------
+
+    def test_main_self_check_passes(self):
+        """`eq@656`: the equality assertion inside ``main``.
+
+        ``main`` is the module's self-check; its worked example asserts
+        that a proof of execution presented as a proof of safety is
+        detected, with the exact source's wording.  Under the mutant
+        (``==`` -> ``!=``) that assertion is inverted and the self-check
+        raises instead of reporting "ok".
+        """
+        import verifiability_tier
+
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            verifiability_tier.main()
+        self.assertIn("ok", buffer.getvalue())
+
+    def test_main_self_check_runs_clean_as_a_script(self):
+        """`eq@656`: the same self-check, run the way a reader would.
+
+        Running the module as a script must print the self-check line and
+        exit zero.  Under the mutant the inverted assertion makes the
+        script die with a non-zero status and no output.
+        """
+        module_path = Path(verifiability_tier_path())
+        result = subprocess.run(
+            [sys.executable, str(module_path)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("verifiability-tier self-check: ok", result.stdout)
+
+    # -- eq@664: the __main__ guard --------------------------------------
+
+    def test_importing_the_module_does_not_run_the_self_check(self):
+        """`eq@664`: the ``if __name__ == "__main__"`` guard.
+
+        Importing a module must not run its self-check: the guard is
+        what keeps ``main()`` off the import path.  Under the mutant
+        (``==`` -> ``!=``) importing the module executes ``main()`` and
+        prints the self-check line from a plain import.
+        """
+        module_path = Path(verifiability_tier_path())
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import sys; sys.path.insert(0, %r); import verifiability_tier"
+                % str(module_path.parent),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "")
+
+
+def verifiability_tier_path():
+    """Absolute path to the module under test."""
+    return Path(__file__).resolve().parents[1] / "verifiability_tier.py"
 
 
 if __name__ == "__main__":  # pragma: no cover
