@@ -481,5 +481,330 @@ class WitnessShapeTests(unittest.TestCase):
         self.assertEqual(payload["freshness_seq"], 7)
 
 
+class GuardSecondHalfTests(unittest.TestCase):
+    """The SECOND half of each guard in ``stale_checkpoint_gate``.
+
+    Seven planted faults survived this slice's suite:
+
+      and@237  the "and the digest is all lowercase hex" half of
+               ``is_checksum``
+      lt@246   the "not negative" bound in ``_check_seq``
+      gt@248   the "fits in a signed 64-bit integer" bound in ``_check_seq``
+      and@815  the ``and`` in the module's own self-check
+      eq@825   the ``==`` in the module's own self-check
+      eq@862   the ``==`` in the module's own self-check
+      eq@870   the ``==`` in the module's own self-check
+
+    The first three are guards in the module's own logic and are driven
+    directly below.
+
+    The last four live in the module's **self-check** -- the ``main()``
+    that runs when the module is executed as a script.  A self-check is
+    part of the module's shipped behaviour: it is the thing a host runs to
+    confirm the module works, and a self-check whose assertion has been
+    broken must FAIL rather than print "OK".  These four are driven by
+    executing the module's own ``main()`` under a patched namespace, so
+    the assertions under test are the module's own -- not a copy of them.
+    """
+
+    def setUp(self):
+        self.gate = StaleCheckpointGate()
+
+    # --- and@237: the "all lowercase hex" half --------------------------
+    def test_a_checksum_of_the_right_length_with_a_non_hex_digit_is_refused(self):
+        """`and@237`: the SECOND half of the digest check.
+
+        ``is_checksum`` ends with ``len(digest) == 64 and all(ch in
+        "0123456789abcdef" for ch in digest)``.  The length half only
+        refuses a digest of the WRONG LENGTH; a digest of the right
+        length that carries a non-hex character passes it.  Under the
+        mutant (``and`` -> ``or``) such a digest is ACCEPTED, because
+        the length half alone is true.
+        """
+        digest = "z" * 64
+        self.assertFalse(is_checksum(CHECKSUM_PREFIX + digest))
+
+    def test_a_checksum_with_an_uppercase_hex_digit_is_refused(self):
+        """`and@237`: an uppercase hex digit is not a lowercase hex digit.
+
+        The digest is pinned as 64 *lowercase* hex characters, so an
+        uppercase one is not the shape this module produces.  Under the
+        mutant this digest is accepted.
+        """
+        digest = "A" * 64
+        self.assertFalse(is_checksum(CHECKSUM_PREFIX + digest))
+
+    def test_a_checksum_of_the_right_length_and_all_hex_is_accepted(self):
+        """`and@237`: the control -- the shape IS accepted."""
+        digest = "0123456789abcdef" * 4
+        self.assertTrue(is_checksum(CHECKSUM_PREFIX + digest))
+
+    # --- lt@246: the "not negative" bound ------------------------------
+    def test_a_zero_sequence_is_a_valid_sequence(self):
+        """`lt@246`: the bound is STRICT.
+
+        A sequence number of zero is the FIRST sequence, not a negative
+        one, so it is valid.  Under the mutant (``<`` -> ``<=``) a
+        zero sequence is refused as "negative".
+        """
+        checkpoint = self.gate.create("ck-zero", external_state=_Schema.V3, freshness_seq=0)
+        self.assertEqual(checkpoint.freshness_seq, 0)
+
+    def test_a_negative_sequence_is_still_refused(self):
+        """`lt@246`: the bound, from the other side."""
+        with self.assertRaises(InvalidFreshnessSeqError):
+            self.gate.create("ck-negative", external_state=_Schema.V3, freshness_seq=-1)
+
+    def test_a_created_sequence_of_zero_is_a_valid_sequence(self):
+        """`lt@246`: the other sequence the gate checks."""
+        checkpoint = self.gate.create(
+            "ck-zero-created", external_state=_Schema.V3, freshness_seq=3, created_seq=0
+        )
+        self.assertEqual(checkpoint.created_seq, 0)
+
+    # --- gt@248: the signed-64-bit bound -------------------------------
+    def test_a_sequence_of_exactly_two_to_the_63_is_accepted(self):
+        """`gt@248`: the bound is STRICT.
+
+        ``2**63 - 1`` is the largest value that fits in a signed 64-bit
+        integer, so it is ACCEPTED.  Under the mutant (``>`` -> ``>=``)
+        the largest representable sequence would be refused.
+        """
+        checkpoint = self.gate.create(
+            "ck-max", external_state=_Schema.V3, freshness_seq=2**63 - 1
+        )
+        self.assertEqual(checkpoint.freshness_seq, 2**63 - 1)
+
+    def test_a_sequence_one_past_the_signed_64_bit_range_is_refused(self):
+        """`gt@248`: the bound, from the other side."""
+        with self.assertRaises(InvalidFreshnessSeqError):
+            self.gate.create("ck-over", external_state=_Schema.V3, freshness_seq=2**63)
+
+    def test_a_created_sequence_one_past_the_range_is_refused(self):
+        """`gt@248`: the other sequence the gate checks."""
+        with self.assertRaises(InvalidFreshnessSeqError):
+            self.gate.create(
+                "ck-over-created",
+                external_state=_Schema.V3,
+                freshness_seq=3,
+                created_seq=2**63,
+            )
+
+
+class ModuleSelfCheckTests(unittest.TestCase):
+    """The module's own self-check must fail when its assertions break.
+
+    The self-check (``main()``) is the module's shipped behaviour: it is
+    what a host runs to confirm the module works, and it prints "OK" only
+    if every one of its assertions holds.  Four planted faults live in it:
+
+      and@815  ``assert verdict.recoverable and verdict.drift is None``
+      eq@825   ``assert advanced.seq_advance == 4``
+      eq@862   ``assert drill_result.verdict.seq_advance == 1``
+      eq@870   ``if __name__ == "__main__":``
+
+    Each is driven by executing the module's OWN ``main()`` against a
+    patched namespace, so the assertion that fails is the module's own --
+    not a copy of it written in the test.
+    """
+
+    def _run_main(self, module_globals: dict) -> None:
+        """Run the module's ``main()`` with ``module_globals`` as its namespace.
+
+        ``main`` reads the module's globals (``StaleCheckpointGate``,
+        ``checksum_of_state``, ``dirty_recovery_drill``, ``WorldWrite``,
+        the verdict statuses).  A patched namespace keeps the module's
+        real functions but replaces the ones a fault would corrupt.
+        """
+        import stale_checkpoint_gate as module
+
+        saved = {key: getattr(module, key) for key in module_globals}
+        for key, value in module_globals.items():
+            setattr(module, key, value)
+        try:
+            module.main()
+        finally:
+            for key, value in saved.items():
+                setattr(module, key, value)
+
+    def test_the_self_check_passes_on_the_unpatched_module(self):
+        """The control: the module's own self-check passes as shipped."""
+        import contextlib
+        import io
+
+        import stale_checkpoint_gate as module
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            module.main()
+
+    def test_and_815_is_driven_when_the_pass_verdict_carries_drift(self):
+        """`and@815`: ``assert verdict.recoverable and verdict.drift is None``.
+
+        The self-check asserts TWO things about the clean-recovery
+        verdict: that it is recoverable AND that it carries no drift.
+        The second half is what the first half is checked with: a
+        verdict that is recoverable but DOES carry a drift must fail the
+        assertion.
+
+        Under the mutant (``and`` -> ``or``) such a verdict passes the
+        assertion, because the recoverable half alone is true.
+        """
+        import stale_checkpoint_gate as module
+
+        real_verify = module.StaleCheckpointGate.verify
+
+        def verify_with_drift(self, checkpoint, live_checksum, live_seq):
+            verdict = real_verify(self, checkpoint, live_checksum, live_seq)
+            return module.GateVerdict(
+                status=verdict.status,
+                checkpoint_id=verdict.checkpoint_id,
+                expected_checksum=verdict.expected_checksum,
+                actual_checksum=verdict.actual_checksum,
+                expected_seq=verdict.expected_seq,
+                actual_seq=verdict.actual_seq,
+                seq_advance=verdict.seq_advance,
+                reason=verdict.reason,
+                drift="a drift the self-check must not tolerate",
+            )
+
+        with self.assertRaises(AssertionError):
+            self._run_main(
+                {
+                    "StaleCheckpointGate": type(
+                        "PatchedGate",
+                        (module.StaleCheckpointGate,),
+                        {"verify": verify_with_drift},
+                    )
+                }
+            )
+
+    def test_eq_825_is_driven_when_the_flagged_verdict_miscounts_the_advance(self):
+        """`eq@825`: ``assert advanced.seq_advance == 4``.
+
+        The self-check asserts that a world which advanced from sequence
+        7 to sequence 11 reports an advance of exactly 4.  A verdict
+        that reports a DIFFERENT advance must fail the assertion.
+
+        Under the mutant (``==`` -> ``!=``) such a verdict passes, because
+        the comparison is inverted.
+        """
+        import stale_checkpoint_gate as module
+
+        real_verify = module.StaleCheckpointGate.verify
+
+        def verify_with_wrong_advance(self, checkpoint, live_checksum, live_seq):
+            verdict = real_verify(self, checkpoint, live_checksum, live_seq)
+            return module.GateVerdict(
+                status=verdict.status,
+                checkpoint_id=verdict.checkpoint_id,
+                expected_checksum=verdict.expected_checksum,
+                actual_checksum=verdict.actual_checksum,
+                expected_seq=verdict.expected_seq,
+                actual_seq=verdict.actual_seq,
+                seq_advance=verdict.seq_advance + 1,
+                reason=verdict.reason,
+                drift=verdict.drift,
+            )
+
+        with self.assertRaises(AssertionError):
+            self._run_main(
+                {
+                    "StaleCheckpointGate": type(
+                        "PatchedGate",
+                        (module.StaleCheckpointGate,),
+                        {"verify": verify_with_wrong_advance},
+                    )
+                }
+            )
+
+    def test_eq_862_is_driven_when_the_drill_miscounts_the_advance(self):
+        """`eq@862`: ``assert drill_result.verdict.seq_advance == 1``.
+
+        The self-check asserts that a drill over a world that took one
+        write reports an advance of exactly 1.  A drill whose verdict
+        reports a DIFFERENT advance must fail the assertion.
+
+        Under the mutant (``==`` -> ``!=``) such a drill passes.
+        """
+        import stale_checkpoint_gate as module
+
+        real_drill = module.dirty_recovery_drill
+
+        def drill_with_wrong_advance(*args, **kwargs):
+            result = real_drill(*args, **kwargs)
+            return module.DrillResult(
+                checkpoint=result.checkpoint,
+                live_checksum=result.live_checksum,
+                live_seq=result.live_seq,
+                verdict=module.GateVerdict(
+                    status=result.verdict.status,
+                    checkpoint_id=result.verdict.checkpoint_id,
+                    expected_checksum=result.verdict.expected_checksum,
+                    actual_checksum=result.verdict.actual_checksum,
+                    expected_seq=result.verdict.expected_seq,
+                    actual_seq=result.verdict.actual_seq,
+                    seq_advance=result.verdict.seq_advance + 1,
+                    reason=result.verdict.reason,
+                    drift=result.verdict.drift,
+                ),
+                writes=result.writes,
+                recovered=result.recovered,
+                stale_detected=result.stale_detected,
+            )
+
+        with self.assertRaises(AssertionError):
+            self._run_main({"dirty_recovery_drill": drill_with_wrong_advance})
+
+    def test_eq_870_is_driven_when_the_module_is_run_as_a_script(self):
+        """`eq@870`: ``if __name__ == "__main__":``.
+
+        The self-check runs when the module is executed as a script.  Run
+        under any OTHER name it must NOT run -- so a module that is
+        imported (as every test imports it) must not print the self-check
+        line or run the drill.
+
+        Under the mutant (``==`` -> ``!=``) the self-check runs on
+        import, which prints the "OK" line and runs the drill's
+        assertions as a side effect of importing the module.
+
+        The check here is the observable difference: importing the module
+        under a non-``__main__`` name must not have run ``main``.
+        """
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        component = Path(__file__).resolve().parent.parent
+
+        # Import the module under a name that is NOT "__main__": the
+        # self-check must stay silent.
+        imported = subprocess.run(
+            [sys.executable, "-c", "import stale_checkpoint_gate"],
+            cwd=str(component),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(imported.returncode, 0, imported.stderr)
+        self.assertEqual(
+            imported.stdout,
+            "",
+            "importing the module must not run its self-check",
+        )
+        self.assertNotIn("stale-checkpoint-gate OK", imported.stdout)
+
+    def test_the_self_check_prints_its_ok_line_when_it_runs(self):
+        """The control: the self-check does run, and does print, under ``__main__``."""
+        import contextlib
+        import io
+        import runpy
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            runpy.run_module("stale_checkpoint_gate", run_name="__main__")
+        self.assertIn("stale-checkpoint-gate OK", buffer.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()
