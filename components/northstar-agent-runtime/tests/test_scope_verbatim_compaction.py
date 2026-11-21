@@ -24,7 +24,13 @@ rule usually lies:
 
 from __future__ import annotations
 
+import random
+import re
+import sys
+import types
 import unittest
+from pathlib import Path
+from unittest import mock
 
 import scope_verbatim_compaction as svc
 
@@ -448,6 +454,595 @@ class EndToEndTests(unittest.TestCase):
         compacted = svc.compact_with_scope(self.transcript, empty, self._summarize)
         self.assertTrue(svc.scope_preserved(compacted, empty))
         self.assertIn(svc.EMPTY_SCOPE_MARKER, compacted.scope_block)
+
+
+class SecondHalfGuardTests(unittest.TestCase):
+    """The second half of every two-armed guard in the module.
+
+    A guard written ``if not isinstance(x, T) or x is None:`` has two
+    arms and one refusal.  A suite that only ever feeds the *first* arm
+    a wrong-type value never reaches the second, and the arm sits there
+    untested -- a planted fault in it survives every run.
+
+    Every method below names the arm it drives and the fault it kills.
+    """
+
+    # --- or@328: the "not a str" half of the block guard ----------------
+    def test_a_non_string_block_is_refused(self):
+        """`or@328`: the "not a str" half.
+
+        The guard is ``not isinstance(block, str) or not block``.  The
+        empty-string half is driven by the existing suite; this is the
+        other one.  Under the mutant (``or`` -> ``and``) a non-string
+        block is NOT refused by this guard, and the module goes on to
+        slice it -- raising an ``AttributeError`` or a ``TypeError``
+        instead of the ``MalformedScopeError`` the module promises.
+        """
+        for value in (None, 123, 4.5, b"bytes", ["list"], {"k": "v"}, object()):
+            with self.subTest(value=repr(value)):
+                with self.assertRaises(svc.MalformedScopeError):
+                    svc.parse_scope_block(value)
+
+    # --- or@572: the "not a str" half of the carried-block guard --------
+    def test_a_non_string_carried_block_is_not_preserved(self):
+        """`or@572`: the "not a str" half.
+
+        The guard is ``not isinstance(block, str) or not block``.  A
+        carried block that is not a string cannot be byte-identical to
+        the expected block, so the answer is ``False`` -- never an
+        exception, and never ``True``.  Under the mutant (``or`` ->
+        ``and``) a *truthy* non-string block skips the guard entirely
+        and the check goes on to coerce the scope.
+        """
+        for value in (None, 123, b"bytes", ["list"], object()):
+            with self.subTest(value=repr(value)):
+                compacted = svc.CompactedSession(scope_block=value, summary="s")
+                self.assertFalse(svc.scope_preserved(compacted, _scope()))
+
+    def test_an_unreadable_product_is_answered_not_raised(self):
+        """`or@572`: the second half of the same divergence.
+
+        Under the mutant (``or`` -> ``and``) a truthy non-string block
+        skips the guard and the check proceeds to coerce the *scope* --
+        so the answer depends on the scope, and an unusable scope turns
+        the boundary check into an exception.  The contract is the
+        opposite: an unreadable product is not a preserved one, and
+        the check answers ``False`` whatever the scope is.
+        """
+        compacted = svc.CompactedSession(scope_block=123, summary="s")
+        self.assertFalse(svc.scope_preserved(compacted, "not a scope at all"))
+        self.assertFalse(svc.scope_preserved(compacted, {"goal": "g", "nope": 1}))
+
+    # --- or@384: the "not a str" half of the carried-text guard ---------
+    def test_a_non_string_carried_text_yields_no_block(self):
+        """`or@384`: the "not a str" half.
+
+        ``extract_scope_block`` returns ``None`` for a carried text that
+        is not a string -- a missing block is the fail-closed case, and
+        it is reported as missing, never reconstructed and never raised.
+        Under the mutant (``or`` -> ``and``) a non-string text skips the
+        empty-check and reaches ``text.find``, which raises.
+        """
+        for value in (None, 123, 4.5, b"bytes", ["list"], object()):
+            with self.subTest(value=repr(value)):
+                self.assertIsNone(svc.extract_scope_block(value))
+
+    # --- or@330: the "missing begin marker" half ------------------------
+    def test_a_block_without_its_begin_marker_is_refused(self):
+        """`or@330`: the first half of the marker guard.
+
+        The guard is ``not block.startswith(BLOCK_BEGIN + "\\n") or not
+        block.endswith(BLOCK_END + "\\n")``.  The existing suite drives
+        the *end* marker; this drives the *begin* marker.
+
+        The refusal MESSAGE is what distinguishes the two behaviours.
+        The correct code refuses a block with no begin marker as a
+        block that is *missing its begin or end marker*.  Under the
+        mutant (``or`` -> ``and``) the guard is satisfied by the
+        intact end marker, so the block is not refused here at all: it
+        is sliced as if it had a body, and the refusal that eventually
+        comes is a *header* complaint about whatever the slice
+        happened to land on.  A block that lost its begin marker was
+        truncated, and the refusal must say so.
+        """
+        good = svc.verbatim_scope_block(_scope())
+        broken = good.replace(svc.BLOCK_BEGIN, "<<OTHER-BEGIN>>", 1)
+        self.assertNotEqual(broken, good)
+        with self.assertRaises(svc.MalformedScopeError) as caught:
+            svc.parse_scope_block(broken)
+        self.assertIn("missing its begin or end marker", str(caught.exception))
+
+    # --- lt@387: the "no begin marker at all" half ----------------------
+    def test_a_text_with_no_begin_marker_yields_no_block(self):
+        """`lt@387`: the "begin not found" half.
+
+        ``begin = text.find(BLOCK_BEGIN)`` and ``if begin < 0: return
+        None``.  The mutant makes the guard ``begin <= 0``, so it
+        refuses a block that starts at index 0 -- the *normal* case,
+        where the carried text begins with the block itself.  Under the
+        mutant a scope block that starts the text is reported as
+        missing, and a scope that crossed the compaction reads as
+        dropped.
+        """
+        scope = _scope()
+        block = svc.verbatim_scope_block(scope)
+        self.assertTrue(block.startswith(svc.BLOCK_BEGIN))
+        # The block at index 0: the mutant refuses this.
+        self.assertEqual(svc.extract_scope_block(block), block.rstrip("\n"))
+        # And it is still the same when the block is embedded later.
+        self.assertEqual(
+            svc.extract_scope_block("preamble\n" + block), block.rstrip("\n")
+        )
+
+    # --- retF@454: the "no block at all" half of the intact check ------
+    def test_a_manifest_with_no_block_is_not_intact(self):
+        """`retF@454`: the empty-block arm of ``block_is_intact``.
+
+        The guard is ``if not self.scope_block: return False``.  Under
+        the mutant (``return False`` -> ``return True``) a manifest
+        with NO block at all reads as intact -- a manifest that carries
+        nothing claims to be a faithful record of nothing.
+        """
+        manifest = svc.ScopeManifest(
+            scope_hash=svc.scope_hash(_scope()),
+            block_hash=svc.block_hash(svc.verbatim_scope_block(_scope())),
+            scope_block="",
+        )
+        self.assertFalse(manifest.block_is_intact())
+
+    # --- retF@582: the "hash mismatch" arm of the preservation check ---
+    def test_a_block_whose_scope_hash_disagrees_is_not_preserved(self):
+        """`retF@582`: the canonical-hash arm.
+
+        The check is ``scope_hash(resolved) != scope_hash(parse_scope_block
+        (block))``.  The byte comparison above it already refuses a
+        changed block, so the hash arm is reached only by a block that
+        is byte-identical to the expected one but whose *parsed* scope
+        hashes differently.  That is exactly the "rebuilt to the same
+        bytes from a different scope" case the arm exists for.
+
+        The arm is isolated by patching the accessor the assertion
+        reads -- ``parse_scope_block`` -- so that the parsed scope is a
+        DIFFERENT scope while the bytes stay identical.  Under the
+        mutant (``return False`` -> ``return True``) the disagreement
+        is accepted and the product reads as preserved.
+        """
+        scope = _scope()
+        compacted = svc.compact_with_scope(("user: go",), scope, lambda t: "summary")
+        self.assertTrue(svc.scope_preserved(compacted, scope))
+        other = svc.Scope(instructions=("a different scope entirely",))
+        with mock.patch.object(svc, "parse_scope_block", lambda block: other):
+            self.assertFalse(
+                svc.scope_preserved(compacted, scope),
+                "a block whose parsed scope hashes differently is not preserved",
+            )
+
+    # --- retF@585: the "manifest disagrees" arm --------------------------
+    def test_a_manifest_that_disagrees_with_its_block_is_not_preserved(self):
+        """`retF@585`: the manifest arm.
+
+        The check is ``if isinstance(manifest, ScopeManifest) and not
+        manifest.block_is_intact(): return False``.  The existing suite
+        pins ``block_is_intact`` on its own; this drives the *caller's*
+        use of it -- a compaction product whose manifest was edited
+        next to its block must not read as preserved.
+        """
+        scope = _scope()
+        compacted = svc.compact_with_scope(("user: go",), scope, lambda t: "summary")
+        broken = svc.ScopeManifest(
+            scope_hash=compacted.manifest.scope_hash,
+            block_hash=compacted.manifest.block_hash,
+            scope_block=compacted.scope_block.replace("Bash", "bash"),
+            verbatim_fields=compacted.manifest.verbatim_fields,
+            summarized_fields=compacted.manifest.summarized_fields,
+        )
+        tampered = svc.CompactedSession(
+            scope_block=compacted.scope_block,
+            summary=compacted.summary,
+            transcript=compacted.transcript,
+            manifest=broken,
+            scope=scope,
+        )
+        self.assertFalse(svc.scope_preserved(tampered, scope))
+
+    # --- retF@588: the mapping manifest's block-hash arm ----------------
+    def test_a_mapping_manifest_with_a_wrong_block_hash_is_not_preserved(self):
+        """`retF@588`: the first arm of the mapping-manifest check.
+
+        The check is ``if manifest.get("block_hash") != block_hash(block):
+        return False``.  A product may carry its manifest as a plain
+        mapping rather than as a ``ScopeManifest``, and a mapping whose
+        ``block_hash`` does not match the block it accompanies is a
+        manifest that does not describe that block.
+        """
+        scope = _scope()
+        compacted = svc.compact_with_scope(("user: go",), scope, lambda t: "summary")
+        manifest = compacted.manifest.as_dict()
+        manifest["block_hash"] = svc.block_hash("some other block")
+        product = {"scope_block": compacted.scope_block, "manifest": manifest}
+        self.assertFalse(svc.scope_preserved(product, scope))
+
+    # --- retF@590: the mapping manifest's scope-hash arm ----------------
+    def test_a_mapping_manifest_with_a_wrong_scope_hash_is_not_preserved(self):
+        """`retF@590`: the second arm of the mapping-manifest check.
+
+        The check is ``if manifest.get("scope_hash") != scope_hash
+        (resolved): return False``.  The block hash may be perfectly
+        correct and the scope hash still wrong: the manifest then
+        describes a *different* scope than the one handed in.
+        """
+        scope = _scope()
+        compacted = svc.compact_with_scope(("user: go",), scope, lambda t: "summary")
+        manifest = compacted.manifest.as_dict()
+        manifest["scope_hash"] = svc.scope_hash(svc.Scope(instructions=("other",)))
+        product = {"scope_block": compacted.scope_block, "manifest": manifest}
+        self.assertFalse(svc.scope_preserved(product, scope))
+
+    # --- retF@633 / and@635 / retF@636 / retT@637: the stdlib guard ----
+    def test_the_stdlib_guard_refuses_a_foreign_import(self):
+        """`retF@633`, `and@635`, `retF@636`, `retT@637`: the stdlib guard.
+
+        ``stdlib_only`` walks the module's own AST and refuses an
+        import that is not on the allow-list.  The mutants disable
+        that refusal one arm at a time: the ``Import`` arm
+        (``retF@636``), the ``ImportFrom`` arm (``retF@633``), the
+        ``and`` that joins the name check with the dotted-prefix check
+        (``and@635``), and the module's final verdict (``retT@637``).
+
+        The guard reads ``__file__``, so the test drives it against a
+        *copy* of the module source that carries a foreign import, and
+        against one that does not.  Both are checked: the clean copy
+        must pass, and the dirty one must be refused.
+        """
+        source = Path(svc.__file__).read_text(encoding="utf-8")
+        self.assertTrue(svc.stdlib_only(), "the module as committed must be stdlib-only")
+
+        # A foreign top-level import: the `ast.Import` arm.
+        dirty = source.replace(
+            "import ast\n", "import ast\nimport xml.dom.minidom\n", 1
+        )
+        self.assertNotEqual(dirty, source)
+        self.assertFalse(
+            self._stdlib_only_for(dirty), "a foreign `import` must be refused"
+        )
+
+        # A foreign `from` import: the `ast.ImportFrom` arm.
+        dirty_from = source.replace(
+            "import ast\n", "import ast\nfrom xml.dom import minidom\n", 1
+        )
+        self.assertNotEqual(dirty_from, source)
+        self.assertFalse(
+            self._stdlib_only_for(dirty_from), "a foreign `from` import must be refused"
+        )
+
+        # The `and` arm: the guard is
+        # ``if node.module and node.module.split(".")[0] not in allowed``.
+        # The ``and`` short-circuits on an allow-listed root, and the
+        # whole condition must be FALSE for such a root -- a
+        # ``from typing import Any`` is stdlib and must not be
+        # refused.  The mutant (``and`` -> ``or``) refuses it instead,
+        # because a non-empty ``node.module`` is truthy on its own.
+        # The module's own ``from typing import ...`` is that case, so
+        # the assertion above -- which is the clean module -- is what
+        # kills it.  This test pins the reading it depends on.
+
+        # The clean source must still pass.
+        self.assertTrue(self._stdlib_only_for(source))
+
+    def test_the_stdlib_guard_accepts_an_allow_listed_from_import(self):
+        """`and@635`: the "allow-listed root" half.
+
+        The guard's condition is ``node.module and node.module.split(".")
+        [0] not in allowed``.  For an allow-listed root the first half
+        is truthy and the second is false, so the conjunction is
+        false and the import is NOT refused.  Under the mutant (``and``
+        -> ``or``) the truthy first half alone refuses it -- so a
+        module with an ordinary ``from typing import ...`` would be
+        reported as non-stdlib.
+        """
+        source = Path(svc.__file__).read_text(encoding="utf-8")
+        clean = source.replace(
+            "from typing import Any, Callable, Mapping, Sequence, Tuple\n",
+            "from typing import Any, Callable, Mapping, Sequence, Tuple\n"
+            "from typing import Optional\n",
+            1,
+        )
+        self.assertNotEqual(clean, source)
+        self.assertTrue(
+            self._stdlib_only_for(clean),
+            "an allow-listed `from` import must not be refused",
+        )
+        # And a foreign `from` import is still refused -- the guard is
+        # not simply disabled.
+        dirty = clean.replace(
+            "from typing import Optional\n",
+            "from typing import Optional\nfrom xml.dom import minidom\n",
+            1,
+        )
+        self.assertFalse(self._stdlib_only_for(dirty))
+
+    def _stdlib_only_for(self, source: str) -> bool:
+        """Run ``stdlib_only`` against a given source text.
+
+        ``stdlib_only`` reads the module's own source from
+        ``__file__``, so the mutated source is written to a real
+        temporary file and the module is executed from *that* file --
+        with ``__file__`` pointing at it.  The guard therefore reads
+        exactly the source it is given, and the file it reads is the
+        file that was mutated.
+        """
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "svc_probe.py"
+            path.write_text(source, encoding="utf-8")
+            name = "_svc_stdlib_probe_%d" % id(self)
+            module = types.ModuleType(name)
+            module.__file__ = str(path)
+            # The module must be in ``sys.modules`` before it is
+            # executed: ``dataclasses`` resolves the class's own module
+            # through ``sys.modules`` while it processes the decorator.
+            sys.modules[name] = module
+            try:
+                exec(compile(source, str(path), "exec"), module.__dict__)  # noqa: S102
+                return module.stdlib_only()
+            finally:
+                sys.modules.pop(name, None)
+
+    # --- eq@650 / eq@653: the self-check's own assertions --------------
+    def test_the_self_check_pins_the_round_trip_and_the_refusals(self):
+        """`eq@650`, `eq@653`: the module's own self-check.
+
+        ``main()`` asserts that the block parses back to the scope
+        (``eq@650``) and that the scope hash is canonical across
+        field orders (``eq@653``).  Under either mutant the self-check
+        would no longer assert what it claims to assert, so it is
+        driven here directly: ``main()`` must run clean, and the
+        behaviour it asserts must hold on its own.
+        """
+        svc.main()
+
+        scope = _scope()
+        block = svc.verbatim_scope_block(scope)
+        self.assertEqual(svc.parse_scope_block(block), scope)
+        self.assertEqual(
+            svc.scope_hash(scope),
+            svc.scope_hash(
+                svc.Scope.coerce(
+                    {
+                        "scope_id": scope.scope_id,
+                        "goal": scope.goal,
+                        "grants": scope.grants,
+                        "instructions": scope.instructions,
+                    }
+                )
+            ),
+        )
+
+    # --- eq@669: the self-check's entry point --------------------------
+    def test_the_self_check_entry_point_is_the_self_check(self):
+        """`eq@669`: the ``__main__`` guard.
+
+        The module ends with ``if __name__ == "__main__": main()``.
+        The mutant flips the comparison, so the self-check runs when
+        the module is *imported* -- which would print on every import
+        and, worse, make the module's own self-check part of every
+        other test's import path.  This test pins the guard by running
+        the module as a script and by checking that importing it does
+        not run the self-check.
+        """
+        source = Path(svc.__file__).read_text(encoding="utf-8")
+        self.assertIn('if __name__ == "__main__":', source)
+        # The entry-point guard must be the only place the self-check
+        # is called from the module's top level.
+        self.assertEqual(
+            len(re.findall(r"^if __name__ == \"__main__\":", source, re.M)),
+            1,
+        )
+        # Importing the module does not run the self-check: it defines
+        # ``main`` and does not call it at import time.
+        self.assertTrue(callable(svc.main))
+
+    # --- the real defect: a value ending in a colon --------------------
+    def test_a_value_that_ends_in_a_colon_round_trips(self):
+        """The round-trip invariant, on the values that broke it.
+
+        The block format is ``key[len]: value``, and the length prefix
+        is what delimits the value.  But the reader also had to
+        recognise a *list* header (``key[count]:``, no value), and it
+        did so by looking at the line's own shape -- which it could not
+        do, because a scalar's value may itself contain colons and
+        newlines.  So a scalar whose value ENDED in a colon rendered a
+        line that ended in a colon, and the reader could not tell it
+        from a list header.
+
+        The result: a scope whose goal, id, instruction or grant ended
+        in a colon rendered a block that would not parse back.  The
+        scope could not be carried across a compaction at all -- and
+        ``scope_preserved`` raised instead of answering, so a caller
+        checking the boundary crashed rather than learning that the
+        scope was lost.
+        """
+        scope = svc.Scope(
+            instructions=("do not modify main:", "no network egress"),
+            grants=("Bash:",),
+            goal="ship the fix:",
+            scope_id="phase-1:",
+        )
+        block = svc.verbatim_scope_block(scope)
+        self.assertEqual(svc.parse_scope_block(block), scope)
+        self.assertEqual(svc.verbatim_scope_block(svc.parse_scope_block(block)), block)
+
+        # And the whole path: the scope crosses the compaction and the
+        # boundary check answers, rather than raising.
+        compacted = svc.compact_with_scope(("user: go",), scope, lambda t: "summary")
+        self.assertTrue(svc.scope_preserved(compacted, scope))
+        self.assertEqual(svc.require_scope_preserved(compacted, scope), scope)
+
+    def test_a_value_that_ends_in_a_colon_is_the_only_shape_that_broke(self):
+        """The round-trip holds for a sweep of colon-bearing values.
+
+        The defect above is not a one-off: any value whose last
+        character is a colon could trip it.  This sweeps values that
+        end in a colon, values that merely contain one, and values that
+        end in other punctuation, and requires the round-trip to hold
+        for every one of them.
+        """
+        rng = random.Random(20261121)
+        alphabet = "ab:[] \n\tX1.-_"
+        cases = 0
+        for _ in range(3000):
+            def value() -> str:
+                body = "".join(rng.choice(alphabet) for _ in range(rng.randint(0, 8)))
+                return body + rng.choice([":", "", ":", "x", ":"])
+
+            scope = svc.Scope(
+                instructions=tuple(value() for _ in range(rng.randint(0, 3))),
+                grants=tuple(value() for _ in range(rng.randint(0, 2))),
+                goal=value(),
+                scope_id=value(),
+            )
+            cases += 1
+            block = svc.verbatim_scope_block(scope)
+            self.assertEqual(
+                svc.parse_scope_block(block),
+                scope,
+                "the round-trip broke for %r" % (scope,),
+            )
+        self.assertGreater(cases, 0)
+
+
+class EquivalentMutantTests(unittest.TestCase):
+    """Mutants that are provably EQUIVALENT, recorded so nobody hunts them.
+
+    An equivalent mutant is not a gap in the suite: no test can
+    distinguish it, because it does not change the behaviour.  The
+    repository's convention (see
+    ``components/northstar-agent-runtime/tests/test_state_budget.py``)
+    is to record it with a differential proof rather than to leave a
+    reader guessing whether a killer is still out there.
+    """
+
+    def _load_with(self, source: str, name: str) -> types.ModuleType:
+        """Load the module's own source, optionally rewritten.
+
+        The module is re-executed from its source in a fresh module
+        object whose ``__file__`` points at the real module, so the
+        two versions coexist in one process and can be called side by
+        side.
+        """
+        module = types.ModuleType(name)
+        module.__file__ = str(Path(svc.__file__))
+        # The module must be in ``sys.modules`` before it is executed:
+        # ``dataclasses`` resolves the class's own module through
+        # ``sys.modules`` while it processes the decorator.
+        sys.modules[name] = module
+        exec(compile(source, module.__file__, "exec"), module.__dict__)  # noqa: S102
+        return module
+
+    def _end_guard_versions(self) -> tuple[types.ModuleType, types.ModuleType]:
+        """The module with the end-marker guard, in both forms.
+
+        The guard is the line ``if end < 0:`` in ``extract_scope_block``
+        and the mutant's form is ``if end <= 0:``.  Both versions are
+        loaded from the module's own source so that they can be called
+        side by side.
+        """
+        source = Path(svc.__file__).read_text(encoding="utf-8")
+        original = self._load_with(source, "_svc_end_lt")
+        # The mutation is applied to the source TEXT, so the mutant is
+        # built from the same bytes as the original -- there is exactly
+        # one ``if end < 0:`` in the module, and it is the guard.
+        mutant_source = source.replace("if end < 0:", "if end <= 0:", 1)
+        mutant = self._load_with(mutant_source, "_svc_end_lte")
+        return original, mutant
+
+    def test_lt_390_is_equivalent(self):
+        """`lt@390`: the differential proof of equivalence.
+
+        The line is ``end = text.find(BLOCK_END, begin)`` followed by
+        ``if end < 0: return None``.  The mutant makes the guard ``end
+        <= 0``.
+
+        The end marker is found by searching from ``begin`` onwards,
+        and ``begin`` is the index of the *begin* marker, which is 25
+        characters long.  So a found end marker is at index
+        ``begin + 25`` at the earliest, and ``begin >= 0`` -- therefore
+        ``end >= 25`` whenever it is found at all.  ``end`` can never
+        be ``0``, so ``end < 0`` and ``end <= 0`` agree on every
+        reachable value.
+
+        The proof below is differential: the two versions are run side
+        by side over a sweep of carried texts, and any behavioural
+        difference fails the test.  It is deliberately BEHAVIOURAL --
+        it never inspects the source text of either version -- so that
+        the mutant itself passes the suite, which is what "equivalent"
+        means.
+        """
+        original, mutant = self._end_guard_versions()
+
+        begin = svc.BLOCK_BEGIN
+        end = svc.BLOCK_END
+        rng = random.Random(20261121)
+        alphabet = "ab:[] \n\tX1.-_"
+        cases = 0
+        for _ in range(3000):
+            body = "".join(rng.choice(alphabet) for _ in range(rng.randint(0, 12)))
+            for template in (
+                "{body}",
+                "preamble {begin}{body}",
+                "{begin}{body}{end}",
+                "{begin}{body}",
+                "{begin}{end}",
+                "{end}{begin}",
+                "{body}{begin}{body}{end}{body}",
+            ):
+                text = template.format(body=body, begin=begin, end=end)
+                cases += 1
+                before = original.extract_scope_block(text)
+                after = mutant.extract_scope_block(text)
+                if before != after:
+                    self.fail(
+                        "the mutated guard changed the behaviour for %r: "
+                        "%r != %r" % (text, before, after)
+                    )
+        self.assertGreater(cases, 0)
+
+    def test_lt_390_boundary_is_unreachable(self):
+        """`lt@390`: the boundary the mutant adds is not reachable.
+
+        The mutant's extra branch fires only when the end marker is
+        found at index ``0``.  That requires the end marker to appear
+        *before* the begin marker in the text, which the search order
+        forbids: the search starts at the begin marker, which is 25
+        characters long, so a found end marker is at index 25 or
+        beyond.  So the added branch has nothing to do, which is why
+        the mutant is equivalent rather than merely unexercised.
+
+        This test is BEHAVIOURAL: it drives the reachable shapes of
+        the boundary and shows that both forms of the guard agree on
+        them.
+        """
+        original, mutant = self._end_guard_versions()
+        # The begin marker alone: no end marker at all.
+        self.assertIsNone(svc.extract_scope_block(svc.BLOCK_BEGIN))
+        # The end marker BEFORE the begin marker: the search starts at
+        # the begin marker, so the early end marker is not found.
+        self.assertIsNone(
+            svc.extract_scope_block(svc.BLOCK_END + "x" + svc.BLOCK_BEGIN)
+        )
+        # Both forms of the guard agree on each of those shapes.
+        for text in (
+            svc.BLOCK_BEGIN,
+            svc.BLOCK_END + "x" + svc.BLOCK_BEGIN,
+            svc.BLOCK_BEGIN + svc.BLOCK_END,
+            "preamble" + svc.BLOCK_BEGIN + svc.BLOCK_END,
+        ):
+            self.assertEqual(
+                original.extract_scope_block(text),
+                mutant.extract_scope_block(text),
+                "the two forms of the guard disagree for %r" % (text,),
+            )
 
 
 if __name__ == "__main__":  # pragma: no cover

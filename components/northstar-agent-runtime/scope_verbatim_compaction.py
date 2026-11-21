@@ -295,12 +295,12 @@ def _read_header(cursor: str) -> tuple[str, int, int]:
     """
     end = cursor.find("\n")
     line = cursor if end < 0 else cursor[:end]
-    if line.endswith(":"):
-        head = line[:-1]
-        value_offset = len(line) + 1 if end >= 0 else len(line)
-    elif ": " in line:
+    if ": " in line:
         head, _, _ = line.partition(": ")
         value_offset = len(head) + 2
+    elif line.endswith(":"):
+        head = line[:-1]
+        value_offset = len(line) + 1 if end >= 0 else len(line)
     else:
         raise MalformedScopeError(f"scope block header is malformed: {line!r}")
     if "[" not in head or not head.endswith("]"):
