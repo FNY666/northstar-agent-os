@@ -367,6 +367,14 @@ class WiringTests(unittest.TestCase):
         self.assertNotEqual(first, other)
         self.assertTrue(first.startswith("sha256:"))
 
+    def test_the_gate_decision_names_the_verdict_and_the_finding(self):
+        finding = true_finding()
+        decision = apply_finding_gate(finding)
+        self.assertIsInstance(decision, finding_gate.GateDecision)
+        self.assertIs(decision.finding, finding)
+        self.assertEqual(decision.verdict.outcome, VERDICT_PASS)
+        self.assertIn("verdict", decision.as_dict())
+
 
 class DesignDocTests(unittest.TestCase):
     """The design doc states what the gate does."""
