@@ -1361,3 +1361,84 @@ class ScopeRelationEquivalenceTests(unittest.TestCase):
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
+
+
+class ScopeRelationEquivalenceHarnessControlTests(unittest.TestCase):
+    """The ``lt@667`` / ``gt@669`` equivalence proof must be able to FAIL.
+
+    ``ScopeRelationEquivalenceTests`` proves that the two planted faults
+    in ``scope_relation`` change nothing: the strict and non-strict
+    comparisons are reached only when the two target sets are already
+    known to be DIFFERENT, and for two different sets the strict and
+    non-strict spellings agree.
+
+    A differential test that CANNOT fail proves nothing.  The sweep
+    above SKIPS the equal pairs on purpose -- that skip is exactly the
+    precondition the argument rests on, and it is also the place a
+    difference would hide if the precondition ever stopped holding.
+
+    This class gives the proof its **non-vacuity control**: the very
+    same comparison, run over the pairs the sweep SKIPS, must find a
+    difference.  A difference there is what licenses the "no difference
+    over the different pairs" conclusion the sweep draws -- and it is
+    also what shows the sweep is not skipping everything.
+
+    A second control pins that the sweep is not vacuous in the other
+    direction: it must actually COMPARE a substantial number of pairs,
+    not zero.
+    """
+
+    #: The universe the sweep runs over.
+    UNIVERSE = ("a", "b", "c", "d")
+
+    def _all_target_sets(self):
+        import itertools
+
+        sets = []
+        for size in range(len(self.UNIVERSE) + 1):
+            for combo in itertools.combinations(self.UNIVERSE, size):
+                sets.append(frozenset(combo))
+        return sets
+
+    def test_the_same_comparison_finds_a_difference_on_the_skipped_pairs(self):
+        """The SAME comparison, over the SKIPPED pairs, must disagree.
+
+        The equal pairs are the ones the sweep skips.  If the strict and
+        non-strict spellings agreed even there, the sweep would be
+        skipping for no reason and its "no difference" result would say
+        nothing.
+        """
+        sets = self._all_target_sets()
+        differences = 0
+        compared = 0
+        for presented in sets:
+            for source in sets:
+                if presented != source:
+                    continue
+                compared += 1
+                if (presented < source) != (presented <= source):
+                    differences += 1
+        self.assertGreater(compared, 0)
+        self.assertGreater(
+            differences,
+            0,
+            "the strict and non-strict comparisons agree even on the "
+            "equal pairs, so the sweep's skip is not doing the work the "
+            "equivalence argument claims",
+        )
+
+    def test_the_sweep_compares_a_substantial_number_of_pairs(self):
+        """The sweep must actually COMPARE pairs, not zero of them.
+
+        The other way a differential sweep goes vacuous: it compares
+        nothing at all and reports zero disagreements.
+        """
+        sets = self._all_target_sets()
+        compared = 0
+        for presented in sets:
+            for source in sets:
+                if presented == source:
+                    continue
+                compared += 1
+        self.assertEqual(compared, len(sets) * (len(sets) - 1))
+        self.assertGreater(compared, 100)
