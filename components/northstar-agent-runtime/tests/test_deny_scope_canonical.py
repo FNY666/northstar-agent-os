@@ -269,6 +269,62 @@ class DenySelfCheckTests(unittest.TestCase):
         self.assertIn("self-check ok", result.stdout)
 
 
+class DenySelfCheckSecondHalfTests(unittest.TestCase):
+    """The second half of the module's self-check assertions.
+
+    The self-check's row assertion is a PAIR:
+
+        assert row is not None and row["outcome"] == OUTCOME_DENIED
+
+    The FIRST half is "the row exists"; the SECOND half is "the row
+    records the denied outcome".  This slice's suite drove the first
+    half -- it asserts the row exists -- and left the second, so a
+    fault planted in the second half survived.
+
+    The halves are NOT interchangeable, and the difference is
+    observable.  Under ``and`` -> ``or`` the assertion reads "the row
+    exists OR the outcome is denied", so a row that EXISTS with the
+    WRONG outcome satisfies it.  The self-check would then pass on a
+    decision it is supposed to reject -- and this slice is precisely
+    about a refusal row that lands BEFORE the lookup, so the outcome
+    it records is the load-bearing part.
+    """
+
+    def test_the_self_check_fails_when_the_row_carries_the_wrong_outcome(self):
+        """`and@863`: the second half of the self-check's row assertion.
+
+        The row is made wrong by a store whose ``refusal`` reports an
+        allowed outcome for a denied decision.  The real self-check
+        must then FAIL; under the mutant it passes, because the row
+        exists and the ``or`` short-circuits on that.
+        """
+
+        class WrongOutcomeStore(DenyStore):
+            def refusal(self, refusal_id):
+                row = super().refusal(refusal_id)
+                if row is None:
+                    return None
+                row["outcome"] = deny_hotpath.OUTCOME_ALLOWED
+                return row
+
+        original = deny_hotpath.DenyStore
+        deny_hotpath.DenyStore = WrongOutcomeStore
+        try:
+            with self.assertRaises(AssertionError):
+                deny_hotpath.main()
+        finally:
+            deny_hotpath.DenyStore = original
+
+    def test_the_self_check_still_passes_on_the_real_code(self):
+        """`and@863`: the control -- the real self-check still passes.
+
+        The discriminator above needs the self-check to be capable of
+        FAILING.  If it could not fail, the test would pass for the
+        wrong reason and the fault would still be alive.
+        """
+        deny_hotpath.main()
+
+
 class DenyCacheabilityTests(unittest.TestCase):
     """A deny lookup result is never cacheable.
 
