@@ -161,6 +161,10 @@ class SandboxResult:
     capdrop: dict[str, Any] | None = None
     aggregate_setup_failed: bool = False
     aggregate_cleanup_failed: bool = False
+    #: Loud, human-readable notices about decisions the runtime took on the
+    #: operator behalf (e.g. auto backend fallback). Empty when nothing had
+    #: to be decided for the operator.
+    warnings: tuple[str, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -186,6 +190,7 @@ class SandboxResult:
             "capdrop": self.capdrop,
             "aggregate_cleanup_failed": self.aggregate_cleanup_failed,
             "aggregate_setup_failed": self.aggregate_setup_failed,
+            "warnings": list(self.warnings),
         }
 
     def render(self) -> str:
@@ -197,6 +202,8 @@ class SandboxResult:
         ]
         if self.detail:
             lines.append(f"note: {self.detail}")
+        for warning in self.warnings:
+            lines.append(f"warning: {warning}")
         if self.stdout:
             lines.append("--- stdout ---")
             lines.append(self.stdout if not self.stdout.endswith("\n") else self.stdout.rstrip("\n"))
@@ -943,6 +950,32 @@ def run_sandboxed(
         except (PledgeError, PledgeViolation) as error:
             raise SandboxError(f"pledge refused: {error}") from error
 
+    fallback_warnings: list[str] = []
+    if chosen == "bwrap" and (backend or "auto").strip().lower() == "auto":
+        # Auto picked bubblewrap, but bwrap cannot enforce the configured
+        # seccomp denylist on this kernel: its own BPF filter is rejected
+        # (prctl EINVAL). Refusing to run would make every shell request
+        # unusable, so fall back to the process backend, which applies the
+        # same denylist through its own prctl wrapper. Say so loudly.
+        if seccomp_mode != "off" and not caps.bwrap_seccomp:
+            chosen = "process"
+            fallback_warnings.append(
+                "auto backend fell back from bwrap to process: bwrap could not enforce "
+                f"the seccomp denylist on this host ({caps.bwrap_seccomp_detail}); "
+                "the process backend applies the same denylist through its own prctl "
+                "wrapper, but the host filesystem stays reachable (process isolation, "
+                "not OS isolation)"
+            )
+        elif request.capdrop_whitelist is not None and not caps.bwrap_cap_drop:
+            chosen = "process"
+            fallback_warnings.append(
+                "auto backend fell back from bwrap to process: bwrap could not enforce "
+                f"the capability drop on this host ({caps.bwrap_detail}); "
+                "the process backend applies the same capability drop through its own "
+                "launcher, but the host filesystem stays reachable (process isolation, "
+                "not OS isolation)"
+            )
+
     if chosen == "bwrap":
         assert caps.bwrap_path  # resolve_backend guaranteed usable
         if request.capdrop_whitelist is not None and not caps.bwrap_cap_drop:
@@ -1262,7 +1295,13 @@ def run_sandboxed(
     else:
         final_detail = result.detail
     # The audit trail records what the caller asked for, not the wrapper.
-    return replace(result, argv=request.argv, capdrop=capdrop_report, detail=final_detail)
+    return replace(
+        result,
+        argv=request.argv,
+        capdrop=capdrop_report,
+        detail=final_detail,
+        warnings=tuple(fallback_warnings),
+    )
 
 
 __all__ = [

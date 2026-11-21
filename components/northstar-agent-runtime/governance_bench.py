@@ -22,6 +22,7 @@ cases drive :class:`~loop.AgentRuntime` the same way production does.
 """
 from __future__ import annotations
 
+import base64
 import argparse
 import hashlib
 import hmac
@@ -13315,13 +13316,13 @@ def seccomp_filter_loadable() -> bool:
 # process, so a live filter is observable from inside the sandbox. Reading
 # /proc/self/status is not: a host whose Landlock rules confine /proc would
 # report a missing proof file even though the filter is installed.
+# The shell parser denies control characters (including the newline), so the
+# proof must be one line: the program text is carried inside a shell single
+# -quoted string with escaped newlines and executed with exec().
 _SECCOMP_LIVE_PROOF_COMMAND = (
-    "python3 -c 'import socket, sys\n"
-    "try:\n"
-    "    socket.socket()\n"
-    "except OSError as exc:\n"
-    "    sys.exit(0 if exc.errno == 1 else 3)\n"
-    "sys.exit(2)'"
+    "python3 -c 'import socket,sys; "
+    "exec(\"try:\\n socket.socket()\\nexcept OSError as e:\\n "
+    "sys.exit(0 if e.errno==1 else 3)\\n sys.exit(2)\")'"
 )
 
 
@@ -13869,6 +13870,19 @@ def _case_metrics_capdrop_table_and_policy(h: BenchHarness) -> BenchExpectation:
     )
 
 
+#: One grep per enforced capability set. The shell parser denies `for` loops
+#: as shell keywords, so the four sets are chained explicitly.
+# No trailing `$` anchor: the shell parser rejects unsupported `$` forms, and
+# /proc/self/status writes each capability set as exactly one 16-digit hex
+# field, so the prefix match is exact enough to prove the set is zeroed.
+_CAPDROP_DENY_ALL_COMMAND = (
+    "grep -q \"^CapInh:[[:space:]]*0000000000000000\" /proc/self/status && "
+    "grep -q \"^CapPrm:[[:space:]]*0000000000000000\" /proc/self/status && "
+    "grep -q \"^CapEff:[[:space:]]*0000000000000000\" /proc/self/status && "
+    "grep -q \"^CapAmb:[[:space:]]*0000000000000000\" /proc/self/status"
+)
+
+
 def _case_metrics_capdrop_deny_all_live(h: BenchHarness) -> BenchExpectation:
     # Behavioral proof the launcher really clears the child: only a
     # zeroed five-set lets the command create the proof file.
@@ -13877,33 +13891,45 @@ def _case_metrics_capdrop_deny_all_live(h: BenchHarness) -> BenchExpectation:
         h,
         ws,
         "metrics.capdrop_deny_all_live",
-        "for f in CapInh CapPrm CapEff CapAmb; do "
-        "grep -q \"^$f:[[:space:]]*0000000000000000$\" /proc/self/status || exit 1; "
-        "done && touch capdrop_deny_all_ok.txt",
+        _CAPDROP_DENY_ALL_COMMAND + " && touch capdrop_deny_all_ok.txt",
         "capdrop_deny_all_ok.txt",
         "deny-all clears enforced capability sets; bounding hardening is independently audited",
     )
+
+
+#: The escalation probe needs a multi-line Python program, but the shell
+#: parser denies control characters and shell keywords. The program is
+#: therefore carried base64-encoded in a single-line command.
+_CAPDROP_ESCALATION_PROGRAM = (
+    "import ctypes, platform, sys\n"
+    "libc = ctypes.CDLL(None, use_errno=True)\n"
+    "class Hdr(ctypes.Structure):\n"
+    "    _fields_ = [('version', ctypes.c_uint32), ('pid', ctypes.c_int)]\n"
+    "class Dat(ctypes.Structure):\n"
+    "    _fields_ = [('effective', ctypes.c_uint32), ('permitted', ctypes.c_uint32), "
+    "('inheritable', ctypes.c_uint32)]\n"
+    "hdr = Hdr(0x20080522, 0)\n"
+    "dat = (Dat * 2)((Dat(1 << 21, 1 << 21, 0)), (Dat(0, 0, 0)))\n"
+    "nr = 126 if platform.machine() == 'x86_64' else 91\n"
+    "ctypes.set_errno(0)\n"
+    "rc = libc.syscall(nr, ctypes.byref(hdr), ctypes.byref(dat))\n"
+    "sys.exit(0 if (rc != 0 and ctypes.get_errno() == 1) else 1)\n"
+)
 
 
 def _case_metrics_capdrop_escalation_eperm(h: BenchHarness) -> BenchExpectation:
     # After a deny-all drop the child must not be able to re-raise a
     # capability: capset(CAP_SYS_ADMIN) must fail EPERM from inside.
     ws = h.workspace()
+    # One line, no heredoc: the shell parser denies control characters and
+    # shell keywords, so the program text rides inside a shell single-quoted
+    # string with escaped newlines and is executed with exec().
     escalate_py = (
-        "python3 - <<'PYEOF'\n"
-        "import ctypes, platform, sys\n"
-        "libc = ctypes.CDLL(None, use_errno=True)\n"
-        "class Hdr(ctypes.Structure):\n"
-        "    _fields_ = [('version', ctypes.c_uint32), ('pid', ctypes.c_int)]\n"
-        "class Dat(ctypes.Structure):\n"
-        "    _fields_ = [('effective', ctypes.c_uint32), ('permitted', ctypes.c_uint32), ('inheritable', ctypes.c_uint32)]\n"
-        "hdr = Hdr(0x20080522, 0)\n"
-        "dat = (Dat * 2)((Dat(1 << 21, 1 << 21, 0)), (Dat(0, 0, 0)))\n"
-        "nr = 126 if platform.machine() == 'x86_64' else 91\n"
-        "rc = libc.syscall(nr, ctypes.byref(hdr), ctypes.byref(dat))\n"
-        "sys.exit(0 if (rc != 0 and ctypes.get_errno() == 1) else 1)\n"
-        "PYEOF\n"
-        "test $? -eq 0 && touch capdrop_eperm_ok.txt"
+        "python3 -c 'import base64; "
+        "exec(base64.b64decode(\"" + base64.b64encode(
+            _CAPDROP_ESCALATION_PROGRAM.encode("utf-8")
+        ).decode("ascii") + "\"))'"
+        " && touch capdrop_eperm_ok.txt"
     )
     return _capdrop_live(
         h,
@@ -13923,9 +13949,7 @@ def _case_metrics_capdrop_payload_cannot_loosen(h: BenchHarness) -> BenchExpecta
         h,
         ws,
         "metrics.capdrop_payload_cannot_loosen",
-        "for f in CapInh CapPrm CapEff CapAmb; do "
-        "grep -q \"^$f:[[:space:]]*0000000000000000$\" /proc/self/status || exit 1; "
-        "done && touch capdrop_tightened.txt",
+        _CAPDROP_DENY_ALL_COMMAND + " && touch capdrop_tightened.txt",
         "capdrop_tightened.txt",
         "operator --capdrop=on wins over a per-call capdrop=off (tighten-only)",
         payload_extra={"capdrop": "off"},
