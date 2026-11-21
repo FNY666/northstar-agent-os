@@ -19,6 +19,7 @@ The rules under test:
 from __future__ import annotations
 
 import contextlib
+import io
 import sys
 import unittest
 from unittest import mock
@@ -552,5 +553,681 @@ class MutantGtAt186RequireTextTests(unittest.TestCase):
         self.assertEqual(artifact_authority._require_text(value, "grant_id"), value)
 
 
+class MutantOrAt188SeparatorTests(unittest.TestCase):
+    """Kills the ``or@188`` mutant in ``_require_text``.
+
+    The guard is ``if ";" in value or "\\n" in value:`` -- the receipt
+    format uses ``;`` and newline as its field separators, so a text
+    field that carries either would break the receipt's own grammar.
+    Mutating ``or`` to ``and`` makes the guard fire only when *both*
+    separators are present, so a field carrying exactly one of them is
+    accepted and the receipt it produces cannot be parsed back.
+    """
+
+    def test_or188_a_field_carrying_the_semicolon_is_refused(self):
+        with self.assertRaises(ArtifactAuthorityError):
+            artifact_authority._require_text("a;b", "grant_id")
+
+    def test_or188_a_field_carrying_the_newline_is_refused(self):
+        with self.assertRaises(ArtifactAuthorityError):
+            artifact_authority._require_text("a\nb", "grant_id")
+
+    def test_or188_a_field_carrying_both_separators_is_refused(self):
+        # The control: the case the mutant still catches, so the fix
+        # cannot be "refuse only the both-at-once case".
+        with self.assertRaises(ArtifactAuthorityError):
+            artifact_authority._require_text("a;b\nc", "grant_id")
+
+    def test_or188_a_field_carrying_neither_separator_is_accepted(self):
+        value = "a;b".replace(";", ",")
+        self.assertEqual(artifact_authority._require_text(value, "grant_id"), value)
 
 
+class MutantOrAt197RequireSeqTests(unittest.TestCase):
+    """Kills the ``or@197`` mutant in ``_require_seq``.
+
+    The guard is ``if isinstance(value, bool) or not isinstance(value, int):``.
+    ``bool`` IS a subclass of ``int`` in Python, so the *explicit* bool
+    half is the only half that refuses a boolean -- the "not an int"
+    half never refuses one.  Mutating ``or`` to ``and`` lets a boolean
+    through as the integer 0 or 1, and a boolean seq is exactly what the
+    guard exists to refuse.
+    """
+
+    def test_or197_a_boolean_seq_is_refused(self):
+        for value in (True, False):
+            with self.subTest(value=value):
+                with self.assertRaises(ArtifactAuthorityError):
+                    artifact_authority._require_seq(value, "permitted_at")
+
+    def test_or197_a_non_integer_seq_is_refused(self):
+        # The other half, as the control.
+        for value in ("3", 3.0, None):
+            with self.subTest(value=value):
+                with self.assertRaises(ArtifactAuthorityError):
+                    artifact_authority._require_seq(value, "permitted_at")
+
+    def test_or197_a_real_integer_seq_is_accepted(self):
+        self.assertEqual(artifact_authority._require_seq(3, "permitted_at"), 3)
+
+
+class MutantLtAt199RequireSeqTests(unittest.TestCase):
+    """Kills the ``lt@199`` mutant in ``_require_seq``.
+
+    The guard is ``if value < 0:`` -- a seq is a *non-negative* integer.
+    Mutating ``<`` to ``<=`` refuses a seq of exactly zero, which the
+    rule allows: zero is a legal seq (the first ledger position).
+    """
+
+    def test_lt199_a_seq_of_exactly_zero_is_accepted(self):
+        self.assertEqual(artifact_authority._require_seq(0, "permitted_at"), 0)
+
+    def test_lt199_a_negative_seq_is_refused(self):
+        with self.assertRaises(ArtifactAuthorityError):
+            artifact_authority._require_seq(-1, "permitted_at")
+
+    def test_lt199_a_seq_of_one_is_accepted(self):
+        self.assertEqual(artifact_authority._require_seq(1, "permitted_at"), 1)
+
+
+class MutantOrAt272DigestTests(unittest.TestCase):
+    """Kills the ``or@272`` mutant in ``ArtifactReceipt.__post_init__``.
+
+    The guard is ``if not isinstance(self.artifact_digest, str) or not
+    self.artifact_digest.startswith("sha256:"):`` -- the digest must be
+    a string *and* a ``sha256:`` pin.  Mutating ``or`` to ``and`` refuses
+    only a value that fails both halves at once, so a non-string digest
+    (which then raises ``AttributeError`` on ``.startswith``) or a string
+    that is not a ``sha256:`` pin slips through.
+    """
+
+    def _receipt(self, digest):
+        return ArtifactReceipt(
+            artifact_digest=digest,
+            grant=GrantPin("grant-1", "v2", 7),
+            permitted_at=3,
+            revocation_epoch=3,
+            clock_id="host-clock",
+            issuer_id="issuer-a",
+        )
+
+    def test_or272_a_digest_that_is_not_a_sha256_pin_is_refused(self):
+        with self.assertRaises(MalformedReceiptError):
+            self._receipt("md5:" + "0" * 32)
+
+    def test_or272_a_non_string_digest_is_refused(self):
+        with self.assertRaises(MalformedReceiptError):
+            self._receipt(None)
+
+    def test_or272_a_digest_that_is_both_not_a_string_and_not_a_pin_is_refused(self):
+        # The control: the case the mutant still catches.
+        with self.assertRaises(MalformedReceiptError):
+            self._receipt(123)
+
+    def test_or272_a_sha256_pin_is_accepted(self):
+        receipt = self._receipt("sha256:" + "0" * 64)
+        self.assertTrue(receipt.artifact_digest.startswith("sha256:"))
+
+
+class MutantOrAt323ParseTests(unittest.TestCase):
+    """Kills the ``or@323`` mutant in ``ArtifactReceipt.parse``.
+
+    The guard is ``if not isinstance(rendered, str) or not rendered:`` --
+    a rendered receipt must be a string *and* non-empty.  Mutating
+    ``or`` to ``and`` refuses only a value that fails both halves at
+    once, so a non-string reaches ``rendered.split(";")`` (an
+    ``AttributeError``, not the module's own refusal) and the empty
+    string reaches the field-count check with a different message.
+    """
+
+    def test_or323_a_non_string_is_refused(self):
+        for value in (123, None, ["receipt"]):
+            with self.subTest(value=value):
+                with self.assertRaises(MalformedReceiptError):
+                    ArtifactReceipt.parse(value)
+
+    def test_or323_the_empty_string_is_refused(self):
+        with self.assertRaises(MalformedReceiptError):
+            ArtifactReceipt.parse("")
+
+    def test_or323_a_non_string_that_is_also_empty_is_refused(self):
+        # The control: the case the mutant still catches.
+        with self.assertRaises(MalformedReceiptError):
+            ArtifactReceipt.parse(None)
+
+    def test_or323_a_well_formed_receipt_still_parses(self):
+        receipt = _bind()
+        self.assertEqual(ArtifactReceipt.parse(receipt.render()), receipt)
+
+
+class MutantRetFAt393IsBoundToTests(unittest.TestCase):
+    """Kills the ``retF@393`` mutant in ``ArtifactReceipt.is_bound_to``.
+
+    The method returns ``False`` for a value that is not bytes -- the
+    bytes are simply not the ones the receipt was written for.  Mutating
+    ``return False`` to ``return True`` says the opposite: a receipt
+    would claim to describe a payload that is not bytes at all.
+    """
+
+    def test_retF393_a_non_bytes_value_is_not_bound(self):
+        receipt = _bind(b"artifact-bytes")
+        for value in ("artifact-bytes", None, 123, ["artifact-bytes"]):
+            with self.subTest(value=value):
+                self.assertIs(receipt.is_bound_to(value), False)
+
+    def test_retF393_the_real_bytes_are_bound(self):
+        receipt = _bind(b"artifact-bytes")
+        self.assertIs(receipt.is_bound_to(b"artifact-bytes"), True)
+        self.assertIs(receipt.is_bound_to(bytearray(b"artifact-bytes")), True)
+
+    def test_retF393_other_bytes_are_not_bound(self):
+        # The control: the case the mutant still catches.
+        receipt = _bind(b"artifact-bytes")
+        self.assertIs(receipt.is_bound_to(b"other-bytes"), False)
+
+
+class MutantSupersessionTests(unittest.TestCase):
+    """Kills the ``or@408``, ``gt@409`` and ``gt@410`` mutants.
+
+    ``is_superseded_by`` has two arms:
+
+    * ``or@408`` -- ``if self.grant.counter is None or
+      other.grant.counter is None:`` -- when either pin is unresolved
+      the comparison falls back to the *epoch*.  Mutating ``or`` to
+      ``and`` fires the fallback only when *both* counters are null, so
+      a receipt whose own counter is null and whose counterpart's is
+      not falls through to the counter comparison and answers wrongly.
+    * ``gt@409`` -- ``other.revocation_epoch > self.revocation_epoch`` --
+      mutating ``>`` to ``>=`` makes a *later* state at the *same* epoch
+      look like a supersession.
+    * ``gt@410`` -- ``other.grant.counter > self.grant.counter`` --
+      mutating ``>`` to ``>=`` makes two states at the *same* counter
+      look like a supersession.
+    """
+
+    def test_or408_an_unresolved_receipt_is_superseded_by_a_resolved_later_epoch(self):
+        unresolved = bind(
+            b"artifact-bytes", _pin(counter=None),
+            permitted_at_seq=3, epoch=3, clock_id="host-clock", issuer_id="issuer-a",
+        )
+        later = bind(
+            b"artifact-bytes", _pin(counter=None),
+            permitted_at_seq=4, epoch=4, clock_id="host-clock", issuer_id="issuer-a",
+        )
+        self.assertTrue(unresolved.is_superseded_by(later))
+
+    def test_or408_an_unresolved_receipt_is_not_superseded_at_the_same_epoch(self):
+        # The boundary of the epoch arm: the two states share an epoch,
+        # so neither supersedes the other.
+        first = bind(
+            b"artifact-bytes", _pin(counter=None),
+            permitted_at_seq=3, epoch=3, clock_id="host-clock", issuer_id="issuer-a",
+        )
+        second = bind(
+            b"artifact-bytes", _pin(counter=None),
+            permitted_at_seq=3, epoch=3, clock_id="host-clock", issuer_id="issuer-a",
+        )
+        self.assertFalse(first.is_superseded_by(second))
+
+    def test_or408_a_resolved_receipt_is_superseded_by_a_later_unresolved_epoch(self):
+        # The other direction of the same guard: the *other* pin's
+        # counter is the null one, so the epoch arm applies too.
+        resolved = bind(
+            b"artifact-bytes", _pin(counter=5),
+            permitted_at_seq=3, epoch=3, clock_id="host-clock", issuer_id="issuer-a",
+        )
+        later = bind(
+            b"artifact-bytes", _pin(counter=None),
+            permitted_at_seq=4, epoch=4, clock_id="host-clock", issuer_id="issuer-a",
+        )
+        self.assertTrue(resolved.is_superseded_by(later))
+
+    def test_gt409_two_states_at_the_same_epoch_do_not_supersede(self):
+        # The epoch arm's boundary: equal epochs are not "later".
+        first = bind(
+            b"artifact-bytes", _pin(counter=None),
+            permitted_at_seq=3, epoch=3, clock_id="host-clock", issuer_id="issuer-a",
+        )
+        second = bind(
+            b"artifact-bytes", _pin(counter=None),
+            permitted_at_seq=3, epoch=3, clock_id="host-clock", issuer_id="issuer-a",
+        )
+        self.assertFalse(first.is_superseded_by(second))
+
+    def test_gt410_two_states_at_the_same_counter_do_not_supersede(self):
+        # The counter arm's boundary: equal counters are not "later".
+        first = bind(
+            b"artifact-bytes", _pin(counter=5),
+            permitted_at_seq=3, epoch=3, clock_id="host-clock", issuer_id="issuer-a",
+        )
+        second = bind(
+            b"artifact-bytes", _pin(counter=5),
+            permitted_at_seq=4, epoch=4, clock_id="host-clock", issuer_id="issuer-a",
+        )
+        self.assertFalse(first.is_superseded_by(second))
+
+    def test_gt410_a_later_counter_supersedes(self):
+        # The control: the case the mutant still catches.
+        first = bind(
+            b"artifact-bytes", _pin(counter=5),
+            permitted_at_seq=3, epoch=3, clock_id="host-clock", issuer_id="issuer-a",
+        )
+        second = bind(
+            b"artifact-bytes", _pin(counter=6),
+            permitted_at_seq=4, epoch=4, clock_id="host-clock", issuer_id="issuer-a",
+        )
+        self.assertTrue(first.is_superseded_by(second))
+
+
+class MutantOrAt474BindSubjectTests(unittest.TestCase):
+    """Kills the ``or@474`` mutant in ``bind``.
+
+    The subject is carried through as ``subject=subject or ""``: a
+    subject that is absent (or empty) becomes the empty string.  Mutating
+    ``or`` to ``and`` produces the empty string only when the subject
+    is *also* empty -- so a subject that is present but falsy (the
+    integer ``0``, say) is carried through as that integer, and the
+    receipt renders a subject that is not a text field at all.
+    """
+
+    def test_or474_a_falsy_but_present_subject_becomes_the_empty_string(self):
+        receipt = bind(
+            b"artifact-bytes", _pin(),
+            permitted_at_seq=3, epoch=3, clock_id="host-clock", issuer_id="issuer-a",
+            subject=0,
+        )
+        self.assertEqual(receipt.subject, "")
+
+    def test_or474_a_none_subject_becomes_the_empty_string(self):
+        receipt = bind(
+            b"artifact-bytes", _pin(),
+            permitted_at_seq=3, epoch=3, clock_id="host-clock", issuer_id="issuer-a",
+            subject=None,
+        )
+        self.assertEqual(receipt.subject, "")
+
+    def test_or474_a_present_subject_is_carried_through(self):
+        receipt = bind(
+            b"artifact-bytes", _pin(),
+            permitted_at_seq=3, epoch=3, clock_id="host-clock", issuer_id="issuer-a",
+            subject="post-42",
+        )
+        self.assertEqual(receipt.subject, "post-42")
+        self.assertIn("subject=post-42", receipt.render())
+
+    def test_or474_the_empty_subject_is_carried_through_as_the_empty_string(self):
+        # The control: the case the mutant still catches.
+        receipt = bind(
+            b"artifact-bytes", _pin(),
+            permitted_at_seq=3, epoch=3, clock_id="host-clock", issuer_id="issuer-a",
+            subject="",
+        )
+        self.assertEqual(receipt.subject, "")
+
+
+class MutantLtAt526OpenSealedTests(unittest.TestCase):
+    """Kills the ``lt@526`` mutant in ``open_sealed``.
+
+    The guard is ``if newline < 0:`` -- the container carries a newline
+    that ends the receipt line.  Mutating ``<`` to ``<=`` treats a
+    newline at index ``0`` as "no newline at all": a container whose
+    receipt line is empty is then *opened* instead of being refused for
+    a missing receipt.
+    """
+
+    def _container_without_a_receipt_line(self) -> bytes:
+        return artifact_authority.SEAL_PREFIX + b"\n" + b"payload-bytes"
+
+    def test_lt526_a_container_whose_receipt_line_is_empty_is_refused(self):
+        # The boundary: the newline is at index 0, so the receipt line
+        # IS present and empty -- the newline is found, and the empty
+        # receipt is what the refusal names.  Under the mutant the
+        # newline at index 0 is treated as absent, and the refusal
+        # names the missing newline instead.
+        with self.assertRaises(MalformedReceiptError) as caught:
+            open_sealed(self._container_without_a_receipt_line())
+        self.assertIn("non-empty str", str(caught.exception))
+        self.assertNotIn("must carry its receipt", str(caught.exception))
+
+    def test_lt526_a_container_with_no_newline_at_all_is_refused(self):
+        # The control: the case the mutant still catches.
+        with self.assertRaises(MalformedReceiptError) as caught:
+            open_sealed(artifact_authority.SEAL_PREFIX + b"receipt-without-a-newline")
+        self.assertIn("must carry its receipt", str(caught.exception))
+
+    def test_lt526_a_well_formed_container_still_opens(self):
+        receipt = _bind(b"payload-bytes")
+        container = seal_bytes(b"payload-bytes", receipt)
+        payload, opened = open_sealed(container)
+        self.assertEqual(payload, b"payload-bytes")
+        self.assertEqual(opened, receipt)
+
+
+class MutantVerifyCounterTests(unittest.TestCase):
+    """Kills the ``and@627``, ``gt@628`` and ``and@632`` mutants.
+
+    ``verify`` compares the receipt's pin against the grant's current
+    state:
+
+    * ``and@627`` -- ``if receipt.grant.counter is not None and
+      current_grant.counter is not None:`` -- the counter comparison
+      needs *both* counters present.  Mutating ``and`` to ``or`` fires
+      the comparison when only one counter is present, so a receipt
+      whose counter is set and whose current grant's is null is treated
+      as a re-issued grant.
+    * ``gt@628`` -- ``current_grant.counter > receipt.grant.counter`` --
+      mutating ``>`` to ``>=`` makes the *same* counter look like a
+      re-issue.
+    * ``and@632`` -- ``elif receipt.grant.counter is None and
+      current_grant.counter is not None:`` -- the "became resolvable"
+      arm needs both halves.  Mutating ``and`` to ``or`` fires it when
+      either is null, so an unresolved receipt whose current grant is
+      *also* unresolved is reported as having become resolvable.
+    """
+
+    def test_and627_a_receipt_with_a_counter_against_an_unresolved_grant_is_not_stale(self):
+        receipt = bind(
+            b"artifact-bytes", _pin(counter=7),
+            permitted_at_seq=3, epoch=3, clock_id="host-clock", issuer_id="issuer-a",
+        )
+        verdict = verify(
+            receipt, 3, None, current_grant=GrantPin("grant-1", "v2", None)
+        )
+        self.assertEqual(verdict.state, VALID)
+
+    def test_and627_a_receipt_with_a_counter_against_the_same_counter_is_valid(self):
+        receipt = bind(
+            b"artifact-bytes", _pin(counter=7),
+            permitted_at_seq=3, epoch=3, clock_id="host-clock", issuer_id="issuer-a",
+        )
+        verdict = verify(
+            receipt, 3, None, current_grant=GrantPin("grant-1", "v2", 7)
+        )
+        self.assertEqual(verdict.state, VALID)
+
+    def test_gt628_a_re_issued_grant_is_stale(self):
+        # The control for both neighbours: the case the mutants still catch.
+        receipt = bind(
+            b"artifact-bytes", _pin(counter=7),
+            permitted_at_seq=3, epoch=3, clock_id="host-clock", issuer_id="issuer-a",
+        )
+        verdict = verify(
+            receipt, 3, None, current_grant=GrantPin("grant-1", "v2", 8)
+        )
+        self.assertEqual(verdict.state, STALE)
+
+    def test_and632_an_unresolved_receipt_against_an_unresolved_grant_is_valid(self):
+        receipt = bind(
+            b"artifact-bytes", _pin(counter=None),
+            permitted_at_seq=3, epoch=3, clock_id="host-clock", issuer_id="issuer-a",
+        )
+        verdict = verify(
+            receipt, 3, None, current_grant=GrantPin("grant-1", "v2", None)
+        )
+        self.assertEqual(verdict.state, VALID)
+
+    def test_and632_an_unresolved_receipt_that_became_resolvable_is_stale(self):
+        # The control: the case the mutant still catches.
+        receipt = bind(
+            b"artifact-bytes", _pin(counter=None),
+            permitted_at_seq=3, epoch=3, clock_id="host-clock", issuer_id="issuer-a",
+        )
+        verdict = verify(
+            receipt, 3, None, current_grant=GrantPin("grant-1", "v2", 5)
+        )
+        self.assertEqual(verdict.state, STALE)
+
+
+class MutantOrAt729LedgerSeqTests(unittest.TestCase):
+    """Kills the ``or@729`` mutant in ``ArtifactAuthorityLedger.artifact``.
+
+    The guard is ``if isinstance(seq, bool) or not isinstance(seq, int):``
+    -- a sequence number is an integer *and* not a boolean.  Mutating
+    ``or`` to ``and`` refuses only a value that fails both halves, so a
+    boolean seq reaches the range check and indexes the ledger with
+    ``True`` -- which is the integer 1, so the *first* artifact is
+    returned for a boolean request.
+    """
+
+    def test_or729_a_boolean_seq_is_refused(self):
+        ledger = ArtifactAuthorityLedger()
+        ledger.bind_and_seal(
+            b"artifact-bytes", _pin(),
+            permitted_at_seq=3, epoch=3, clock_id="host-clock", issuer_id="issuer-a",
+        )
+        for value in (True, False):
+            with self.subTest(value=value):
+                with self.assertRaises(ArtifactAuthorityError):
+                    ledger.artifact(value)
+
+    def test_or729_a_non_integer_seq_is_refused(self):
+        # The other half, as the control.
+        ledger = ArtifactAuthorityLedger()
+        for value in ("1", 1.0, None):
+            with self.subTest(value=value):
+                with self.assertRaises(ArtifactAuthorityError):
+                    ledger.artifact(value)
+
+    def test_or729_a_real_integer_seq_returns_the_artifact(self):
+        ledger = ArtifactAuthorityLedger()
+        artifact = ledger.bind_and_seal(
+            b"artifact-bytes", _pin(),
+            permitted_at_seq=3, epoch=3, clock_id="host-clock", issuer_id="issuer-a",
+        )
+        self.assertIs(ledger.artifact(1), artifact)
+
+
+class MutantStdlibOnlyTests(unittest.TestCase):
+    """Kills the ``retF@783``, ``retF@786`` and ``retT@787`` mutants.
+
+    ``stdlib_only`` walks the module's own AST and refuses any import
+    that is not stdlib:
+
+    * ``retF@783`` -- ``return False`` for a disallowed ``import`` --
+      mutating it to ``return True`` claims the module is stdlib-only
+      when it is not.
+    * ``retF@786`` -- ``return False`` for a disallowed ``from ... import``
+      -- the same, for the other import form.
+    * ``retT@787`` -- ``return True`` at the end -- mutating it to
+      ``return False`` refuses a module that really is stdlib-only.
+
+    The check reads the module's source through ``Path.read_text``, so
+    the tests substitute the source the check is supposed to judge.
+    """
+
+    def _stdlib_only_for(self, source: str) -> bool:
+        with mock.patch.object(
+            artifact_authority.Path, "read_text", return_value=source
+        ):
+            return artifact_authority.stdlib_only()
+
+    def test_retF783_a_non_stdlib_import_is_refused(self):
+        self.assertIs(self._stdlib_only_for("import numpy\n"), False)
+
+    def test_retF786_a_non_stdlib_from_import_is_refused(self):
+        self.assertIs(self._stdlib_only_for("from numpy import array\n"), False)
+
+    def test_retF786_a_non_stdlib_submodule_from_import_is_refused(self):
+        self.assertIs(self._stdlib_only_for("from numpy.linalg import array\n"), False)
+
+    def test_retT787_a_stdlib_only_module_is_accepted(self):
+        # The control for the ``retT@787`` mutant: a module that really
+        # is stdlib-only must be accepted.
+        self.assertIs(
+            self._stdlib_only_for(
+                "import ast\nimport json\nfrom dataclasses import dataclass\n"
+            ),
+            True,
+        )
+
+    def test_retT787_this_module_is_stdlib_only(self):
+        # The real module, not a substitute: the check must accept the
+        # module it is checking.
+        self.assertIs(artifact_authority.stdlib_only(), True)
+
+
+class MutantMainSelfCheckTests(unittest.TestCase):
+    """Kills the ``eq@802`` and ``eq@803`` mutants in ``main``.
+
+    ``main`` is the module's self-check: it seals a receipt, reads it
+    back at the epoch it was sealed under (``VALID``) and one epoch
+    later (``STALE``).  Mutating either comparison (``==`` -> ``!=``)
+    makes the self-check demand the *wrong* verdict, so the self-check
+    fails on the module's own correct behaviour -- which is exactly how
+    a broken self-check is caught.
+    """
+
+    def test_eq802_the_self_check_sees_the_receipt_valid_at_its_own_epoch(self):
+        receipt = _bind(epoch=3)
+        self.assertEqual(verify(receipt, epoch_now=3).state, VALID)
+
+    def test_eq803_the_self_check_sees_the_receipt_stale_one_epoch_later(self):
+        receipt = _bind(epoch=3)
+        self.assertEqual(verify(receipt, epoch_now=4).state, STALE)
+
+    def test_eq802_the_self_check_runs_to_completion(self):
+        # The control: the module's own self-check must pass on the
+        # unmutated module.
+        with contextlib.redirect_stdout(io.StringIO()):
+            artifact_authority.main()
+
+    def test_eq803_the_self_check_refuses_a_tampered_container(self):
+        receipt = _bind(b"artifact-bytes")
+        container = seal_bytes(b"artifact-bytes", receipt)
+        tampered = container[:-1] + b"X"
+        with self.assertRaises(MalformedReceiptError):
+            open_sealed(tampered)
+
+    def test_eq817_importing_the_module_does_not_run_the_self_check(self):
+        """``eq@817`` -- the ``if __name__ == "__main__":`` guard.
+
+        The self-check belongs to the module *run as a script*, not to the
+        module *imported*.  Mutating the comparison to ``!=`` makes the
+        self-check run on every import, so importing the module prints the
+        self-check's line.  The observation is the import's own output: a
+        fresh interpreter that imports the module must say nothing.
+        """
+        import subprocess
+
+        result = subprocess.run(
+            [sys.executable, "-c", "import artifact_authority"],
+            cwd=str(Path(artifact_authority.__file__).resolve().parent),
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout, "",
+            "importing the module must not run its self-check",
+        )
+
+    def test_eq817_running_the_module_as_a_script_does_run_the_self_check(self):
+        # The control: run as a script, the self-check DOES run and the
+        # module reports its verdict.
+        import subprocess
+
+        result = subprocess.run(
+            [sys.executable, str(Path(artifact_authority.__file__).resolve())],
+            cwd=str(Path(artifact_authority.__file__).resolve().parent),
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("artifact-authority OK", result.stdout)
+
+
+
+
+
+
+class ReceiptSeparatorRoundTripTests(unittest.TestCase):
+    """A receipt must survive its own round trip.
+
+    The receipt's text is a ``;``-separated list on a single line, and
+    the sealed container carries that text as one line.  A field that
+    carries a separator therefore breaks the format the receipt itself
+    defines: the text cannot be parsed back into a receipt, and a
+    container whose receipt line carries a newline is cut short at that
+    newline, so it cannot be opened at all.
+
+    The fields that could carry a separator are the digest and the pin's
+    own text fields (the grant id and the grant version) -- the pin is
+    reused verbatim from ``grant_pin_ledger``, which does not police the
+    receipt's grammar, so the rule belongs here, where the grammar
+    lives.
+    """
+
+    def _receipt(self, **overrides):
+        fields = dict(
+            artifact_digest="sha256:" + "0" * 64,
+            grant=GrantPin("grant-1", "v2", 7),
+            permitted_at=3,
+            revocation_epoch=3,
+            clock_id="host-clock",
+            issuer_id="issuer-a",
+        )
+        fields.update(overrides)
+        return ArtifactReceipt(**fields)
+
+    def test_a_grant_id_carrying_the_semicolon_is_refused(self):
+        with self.assertRaises(MalformedReceiptError):
+            self._receipt(grant=GrantPin("grant;1", "v2", 7))
+
+    def test_a_grant_id_carrying_a_newline_is_refused(self):
+        with self.assertRaises(MalformedReceiptError):
+            self._receipt(grant=GrantPin("grant\n1", "v2", 7))
+
+    def test_a_grant_version_carrying_the_semicolon_is_refused(self):
+        with self.assertRaises(MalformedReceiptError):
+            self._receipt(grant=GrantPin("grant-1", "v;2", 7))
+
+    def test_a_grant_version_carrying_a_newline_is_refused(self):
+        with self.assertRaises(MalformedReceiptError):
+            self._receipt(grant=GrantPin("grant-1", "v\n2", 7))
+
+    def test_a_digest_carrying_the_semicolon_is_refused(self):
+        with self.assertRaises(MalformedReceiptError):
+            self._receipt(artifact_digest="sha256:a;b")
+
+    def test_a_digest_carrying_a_newline_is_refused(self):
+        with self.assertRaises(MalformedReceiptError):
+            self._receipt(artifact_digest="sha256:a\nb")
+
+    def test_a_receipt_without_a_separator_round_trips(self):
+        # The control: an ordinary receipt is unaffected by the rule.
+        receipt = self._receipt()
+        self.assertEqual(ArtifactReceipt.parse(receipt.render()), receipt)
+
+    def test_a_sealed_container_built_from_a_receipt_opens(self):
+        payload = b"artifact-bytes"
+        receipt = ArtifactReceipt(
+            artifact_digest=artifact_authority._digest_bytes(payload),
+            grant=GrantPin("grant-1", "v2", 7),
+            permitted_at=3,
+            revocation_epoch=3,
+            clock_id="host-clock",
+            issuer_id="issuer-a",
+        )
+        container = seal_bytes(payload, receipt)
+        opened_payload, opened = open_sealed(container)
+        self.assertEqual(opened_payload, payload)
+        self.assertEqual(opened, receipt)
+
+    def test_the_receipts_own_fields_carry_no_separator(self):
+        # The rule, stated over the whole receipt: no field of a receipt
+        # that can be rendered may carry a separator.
+        receipt = self._receipt()
+        for value in (
+            receipt.artifact_digest,
+            receipt.grant.grant_id,
+            receipt.grant.version,
+            receipt.clock_id,
+            receipt.issuer_id,
+            receipt.action,
+            receipt.subject,
+        ):
+            with self.subTest(value=value):
+                self.assertNotIn(";", value)
+                self.assertNotIn("\n", value)

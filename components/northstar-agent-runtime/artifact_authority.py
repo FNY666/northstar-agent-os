@@ -192,6 +192,28 @@ def _require_text(value: Any, name: str, *, limit: int = _MAX_ID_CHARS) -> str:
     return value
 
 
+def _reject_separators(value: Any, name: str) -> None:
+    """Refuse a receipt field that carries the format's own separators.
+
+    The receipt's text is a ``;``-separated list on a single line.  A
+    field that carries a separator cannot be parsed back out of the text
+    it produced, so the receipt would not survive its own round trip --
+    and, worse, a sealed container whose receipt line carries a newline
+    is cut short at that newline, so it cannot be opened at all.
+
+    The fields this guards (the digest, the grant id, the grant version)
+    arrive from outside this module -- the pin is reused verbatim from
+    ``grant_pin_ledger`` -- so the rule is stated here, where the
+    receipt's grammar lives.
+    """
+    if not isinstance(value, str):
+        return
+    if any(separator in value for separator in (";", "\n")):
+        raise MalformedReceiptError(
+            f"{name} must not contain ';' or a newline: those separate the receipt's fields"
+        )
+
+
 def _require_seq(value: Any, name: str) -> int:
     """A non-negative integer seq (never a wall clock)."""
     if isinstance(value, bool) or not isinstance(value, int):
@@ -273,6 +295,13 @@ class ArtifactReceipt:
             raise MalformedReceiptError("artifact_digest must be a 'sha256:' pin")
         if not isinstance(self.grant, GrantPin):
             raise MalformedReceiptError("grant must be a GrantPin")
+        # The digest and the pin's own text fields are rendered into the
+        # receipt's ';'-separated line, so they must be free of the
+        # separators: a receipt that cannot be parsed back out of its own
+        # text is not a receipt.
+        _reject_separators(self.artifact_digest, "artifact_digest")
+        _reject_separators(self.grant.grant_id, "grant_id")
+        _reject_separators(self.grant.version, "version")
         _require_seq(self.permitted_at, "permitted_at")
         _require_seq(self.revocation_epoch, "revocation_epoch")
         _require_text(self.clock_id, "clock_id")
