@@ -6,6 +6,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from support import doctor_capability_skip_reason
+
 import cli
 import policy_file
 from scaffold import AGENTS_MD, scaffold_project
@@ -141,6 +143,9 @@ class ScaffoldTests(unittest.TestCase):
         self.assertIn("project instructions", (self.project / AGENTS_MD).read_text(encoding="utf-8").lower())
 
     def test_scaffolded_project_passes_doctor(self):
+        reason = doctor_capability_skip_reason()
+        if reason:
+            self.skipTest(reason)
         self.scaffold()
         code, out, _ = run_cli("doctor", "--workspace", str(self.project), "--mcp-network", "allowed")
         self.assertEqual(code, 0)

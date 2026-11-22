@@ -16,7 +16,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 import support  # noqa: F401  (bootstraps sys.path)
-from support import RuntimeTestCase
+import command_hooks
+from support import RuntimeTestCase, doctor_capability_skip_reason
 
 import plugin_load as pl
 import plugin_manifest as pm
@@ -770,6 +771,10 @@ class LoadAndPinTests(BundleTestCase):
         self.assertEqual(contributions.context_blocks[0][1].strip(), NOTES.strip())
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "sealed hook snapshots are Linux-only")
+    @unittest.skipUnless(
+        command_hooks.sealed_snapshot_supported(),
+        "this host cannot seal script snapshots",
+    )
     def test_plugin_snapshot_mode_and_reviewed_digest_reach_runtime_hook(self):
         source = self.variant(
             "snapshot",
@@ -1076,6 +1081,9 @@ class CliTests(RuntimeTestCase):
         self.assertIn("no plugin installed", err)
 
     def test_doctor_tells_the_truth_about_installed_bundles(self):
+        reason = doctor_capability_skip_reason()
+        if reason:
+            self.skipTest(reason)
         code, out, err = self._invoke(["doctor", "--workspace", str(self.workspace), "--mcp-network", "allowed"])
         self.assertIn("plugins", out)
         self.assertIn("none", out)

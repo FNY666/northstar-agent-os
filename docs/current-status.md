@@ -36,9 +36,15 @@ python3 tests/docbuild.py verify
 
 ## 仍然明确不属于当前实现
 
-- 没有托管云、团队 fleet 或生产级远程 Worker 服务。Profile A 的本地 SSH socket channel helper 已实现；Profile B 的 fleet transport 和真实主机 canary 仍未完成。
+- 没有托管云、团队 fleet 或生产级远程 Worker 服务。Profile A 的本地 SSH socket channel helper 已实现；Profile B 的 fleet transport 和真实主机 canary 阶段 2 仍未完成（阶段 1 于 2026-11-06 在 `muse-newapi@140.245.125.82` 实跑通过）。
 - `northstar-agent-interop` 提供签名 attestation、handoff grant、process adapter 和 fake/local canary；它没有连接真实 Codex、Claude Code、Cursor、Hermes 或 OpenBot 后端。
-- 远程 Worker 静态就绪度为 97/100（35/36，ops 5/6）。剩余缺口是真实主机端到端 canary 实跑；现有 spec、身份/轮换说明、运维指南和本地 recipe 不等于已部署服务。
+- 远程 Worker 静态就绪度为 100/100（36/36，ops 6/6）`. CI 随 `make test` 重算。
+  剩余缺口为阶段 2 的真实主机端到端 canary：phase 1 于 2026-11-06 在
+  `muse-newapi@140.245.125.82` 实跑通过（证据：
+  `examples/remote-canary/runs/2026-11-06-140.md`），phase 2 `FAIL: timed out`
+ （worker 侧 `codex` 存在但未配置服务账号凭据，未增加任何凭据），标记为
+  open/inconclusive，不构成信道失败。现有 spec、身份/轮换说明、运维指南
+  和本地 recipe 不等于已部署服务。
 - 没有交互式 TUI、IDE 插件、插件在线市场、浏览器/计算机操作或宿主机 Full Auto shell。
 - Sidecar、host、durable-run 和 interop 的本地测试不构成生产隔离、企业身份、密钥管理、队列调度或合规存储保证。
 
