@@ -13283,7 +13283,11 @@ def _case_seccomp_filter_live_on_process(h: BenchHarness) -> BenchExpectation:
         turns=[
             _tool(
                 "Shell",
-                {"command": "grep -q 'Seccomp:\t2' /proc/self/status && touch filter_live.txt"},
+                # The pattern must NOT contain a literal TAB: the bash_parser
+                # gate denies control characters, so the case was blocked
+                # before the command ever ran.  "[[:space:]]" matches the
+                # TAB without spelling one.
+                {"command": "grep -q 'Seccomp:[[:space:]]*2' /proc/self/status && touch filter_live.txt"},
             ),
             _text("done"),
         ],
@@ -13312,7 +13316,8 @@ def _case_seccomp_payload_cannot_loosen(h: BenchHarness) -> BenchExpectation:
             _tool(
                 "Shell",
                 {
-                    "command": "grep -q 'Seccomp:\t2' /proc/self/status && touch tightened.txt",
+                    # No literal TAB here either -- see the sibling case.
+                    "command": "grep -q 'Seccomp:[[:space:]]*2' /proc/self/status && touch tightened.txt",
                     "seccomp": "off",
                 },
             ),
@@ -13342,6 +13347,14 @@ def _capdrop_live(h: BenchHarness, ws, title: str, command: str, marker: str,
     On non-Linux the case does not pretend to test capset/prctl: it passes
     explicitly with ``supported: false`` recorded in the metrics so the gap
     is visible instead of silent.
+
+    The command must survive the ``bash_parser`` gate.  The gate denies a
+    shell ``for`` loop and a heredoc outright, so a command written in
+    either shape is blocked BEFORE it runs and the case can never be
+    green -- the marker file is never created, and the case reports
+    "required path missing" for a reason that has nothing to do with the
+    capability drop it claims to measure.  The commands below therefore
+    use single-quoted patterns and plain ``&&`` chains.
     """
     if not sys.platform.startswith("linux"):
         runtime = h.runtime(
@@ -13791,6 +13804,17 @@ def _case_metrics_capdrop_table_and_policy(h: BenchHarness) -> BenchExpectation:
     )
 
 
+#: The four capability sets a deny-all drop must zero.  The check counts
+#: the zeroed lines with ONE grep so it needs no shell loop -- the
+#: ``bash_parser`` gate denies a ``for`` loop outright, and a case blocked
+#: by the gate never runs, so it can never prove anything.
+_CAPDROP_ZEROED_SETS = "CapInh CapPrm CapEff CapAmb"
+_CAPDROP_ZEROED_CHECK = (
+    "grep -cE '^Cap(Inh|Prm|Eff|Amb):[[:space:]]*0000000000000000$' "
+    "/proc/self/status | grep -q '^4$'"
+)
+
+
 def _case_metrics_capdrop_deny_all_live(h: BenchHarness) -> BenchExpectation:
     # Behavioral proof the launcher really clears the child: only a
     # zeroed five-set lets the command create the proof file.
@@ -13799,9 +13823,7 @@ def _case_metrics_capdrop_deny_all_live(h: BenchHarness) -> BenchExpectation:
         h,
         ws,
         "metrics.capdrop_deny_all_live",
-        "for f in CapInh CapPrm CapEff CapAmb; do "
-        "grep -q \"^$f:[[:space:]]*0000000000000000$\" /proc/self/status || exit 1; "
-        "done && touch capdrop_deny_all_ok.txt",
+        f"{_CAPDROP_ZEROED_CHECK} && touch capdrop_deny_all_ok.txt",
         "capdrop_deny_all_ok.txt",
         "deny-all clears enforced capability sets; bounding hardening is independently audited",
     )
@@ -13810,22 +13832,29 @@ def _case_metrics_capdrop_deny_all_live(h: BenchHarness) -> BenchExpectation:
 def _case_metrics_capdrop_escalation_eperm(h: BenchHarness) -> BenchExpectation:
     # After a deny-all drop the child must not be able to re-raise a
     # capability: capset(CAP_SYS_ADMIN) must fail EPERM from inside.
+    #
+    # The probe runs as ``python3 -c "<one-liner>"`` -- NOT a heredoc.  The
+    # ``bash_parser`` gate denies a heredoc outright (a NEWLINE is a
+    # control character), so the heredoc form was blocked before it ran
+    # and the case could never be green.
+    #
+    # The one-liner packs the capset structs with ``struct.pack`` rather
+    # than declaring ctypes Structures: a struct DECLARATION contains
+    # braces, and the gate denies a quoted brace expansion, so the
+    # ctypes form was blocked too.  ``struct.pack`` produces the same
+    # bytes: ``linux_cap_user_header`` is two u32 and ``linux_cap_user_data``
+    # is two triples of u32.
     ws = h.workspace()
     escalate_py = (
-        "python3 - <<'PYEOF'\n"
-        "import ctypes, platform, sys\n"
-        "libc = ctypes.CDLL(None, use_errno=True)\n"
-        "class Hdr(ctypes.Structure):\n"
-        "    _fields_ = [('version', ctypes.c_uint32), ('pid', ctypes.c_int)]\n"
-        "class Dat(ctypes.Structure):\n"
-        "    _fields_ = [('effective', ctypes.c_uint32), ('permitted', ctypes.c_uint32), ('inheritable', ctypes.c_uint32)]\n"
-        "hdr = Hdr(0x20080522, 0)\n"
-        "dat = (Dat * 2)((Dat(1 << 21, 1 << 21, 0)), (Dat(0, 0, 0)))\n"
-        "nr = 126 if platform.machine() == 'x86_64' else 91\n"
-        "rc = libc.syscall(nr, ctypes.byref(hdr), ctypes.byref(dat))\n"
-        "sys.exit(0 if (rc != 0 and ctypes.get_errno() == 1) else 1)\n"
-        "PYEOF\n"
-        "test $? -eq 0 && touch capdrop_eperm_ok.txt"
+        "python3 -c \"import ctypes,platform,struct,sys;"
+        "libc=ctypes.CDLL(None,use_errno=True);"
+        "ctypes.set_errno(0);"
+        "hdr=struct.pack('=II',0x20080522,0);"
+        "dat=struct.pack('=IIIIII',2097152,2097152,0,0,0,0);"
+        "nr=126 if platform.machine()=='x86_64' else 91;"
+        "rc=libc.syscall(nr,hdr,dat);"
+        "sys.exit(0 if (rc!=0 and ctypes.get_errno()==1) else 1)\""
+        " && touch capdrop_eperm_ok.txt"
     )
     return _capdrop_live(
         h,
@@ -13845,9 +13874,7 @@ def _case_metrics_capdrop_payload_cannot_loosen(h: BenchHarness) -> BenchExpecta
         h,
         ws,
         "metrics.capdrop_payload_cannot_loosen",
-        "for f in CapInh CapPrm CapEff CapAmb; do "
-        "grep -q \"^$f:[[:space:]]*0000000000000000$\" /proc/self/status || exit 1; "
-        "done && touch capdrop_tightened.txt",
+        f"{_CAPDROP_ZEROED_CHECK} && touch capdrop_tightened.txt",
         "capdrop_tightened.txt",
         "operator --capdrop=on wins over a per-call capdrop=off (tighten-only)",
         payload_extra={"capdrop": "off"},
