@@ -15,6 +15,7 @@ Northstar is for people who want to **hand work to an AI coworker** that operate
 
 - **Programming path:** `northstar code "…" --check "…"` — isolated worktree, a host-enforced `SubmitPlan` phase gate, structured repository tools, completion checks, patch and evidence bundle.
 - **General product path:** `northstar agent "…"` — session transcript and per-turn checkpoints on by default.
+- **Skill audit:** persisted transcripts record successful reads of SHA-256-pinned root `SKILL.md` files as `skill_loaded` events (path and digest only; no instruction body).
 - **Kernel path:** `northstar run …` — every default explicit (embedding, CI, advanced operators).
 - **Invariant:** every tool call crosses the permission gate, hooks, budget ceilings, and the audit trail. Policy may only tighten.
 
