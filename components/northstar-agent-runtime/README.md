@@ -16,7 +16,7 @@ prompt ──► AgentRuntime ──► provider (Anthropic Messages API, or scr
                  ├─ hooks (10 lifecycle events, veto-capable)
                  ├─ permission gate (disallowed → allowed → mode + host callback)
                  ├─ ceilings (turns / tool calls / USD)
-                 ├─ tools (Read, Grep, LS, Write, Edit, DescribeTools, Shell, Task)
+                 ├─ tools (kernel: Read/Grep/Write/Edit/Shell; code: RepoMap/SearchCode/GitInspect/SubmitPlan/ApplyPatch/RunCheck)
                  │        └── CodexReadOnly ──Unix socket──► northstar-codex-sidecar ──► codex --sandbox read-only
                  ├─ subagents (own context, tool subset, ceilings, provider)
                  ├─ compaction (safe boundaries only)
@@ -44,6 +44,7 @@ offline provider works with no extras at all:
 pip install .                       # offline scripted provider, doctor, dry-run
 pip install '.[anthropic]'          # + live Anthropic provider
 pip install '.[tracing]'            # + OpenTelemetry span export
+pip install '.[json-schema]'        # + 2020-12 validation, local refs, timed regex
 # or, once published:
 pip install 'northstar-agent-runtime[full]'
 ```
@@ -68,6 +69,66 @@ The installed names mirror the in-tree layout (`python -m cli run ...` works
 identically from a checkout). The version has one source of truth (`_version.py`)
 and the test suite asserts it equals the `pyproject.toml` version, so an
 installed wheel and a source checkout can never disagree.
+
+## Programming tasks
+
+`northstar code` is the programming product profile. It records the exact
+starting commit, creates a detached Git worktree, adds five bounded repository
+tools plus the host-owned `SubmitPlan` phase gate, runs host-declared checks independently
+when the model stops, and writes `task.json`, `repository-snapshot.json`, `phases.json`,
+`verification.json`, `changes.patch`, `git-status.txt`, and a
+hash-bearing `manifest.json` to one evidence directory. It never commits or
+pushes, and it removes only the disposable worktree after success.
+
+Before declared checks run, the host independently proves that the patch
+replays from the recorded start commit and audits the final diff for protected
+governance paths, special files, generated artifacts, oversized changes, and
+high-confidence credential patterns. Receipts are stored as
+`patch-replay.json` and `patch-audit.json`.
+
+After host checks, `delivery-seal.json` confirms that the delivered patch is
+unchanged from the one checked before verification. A check that rewrites source
+cannot return a successful code outcome, even when its own exit code is zero.
+
+If the process is interrupted, `northstar code-reconcile EVIDENCE_DIR` inspects
+the durable phase/effect journal and referenced artifact hashes. A mutating tool
+or host check with a start record and no completion record, or a handler that
+raised after it may have changed state, is classified `manual_review_required`.
+The command never replays it. Python callers can use `reconcile_code_run()` for
+the same receipt. See the [code recovery guide](../../docs/guides/code-recovery.md)
+for classification and exit-code semantics.
+
+## Unified run evidence
+
+Generic runs can write an optional digest-first evidence bundle:
+
+```sh
+northstar run --workspace . --run-evidence-dir ./run-evidence --require-evidence \
+  --prompt "summarise README" --provider scripted --scripted-text ok
+northstar evidence inspect ./run-evidence --json
+```
+
+The bundle records run configuration, permission decisions, tool outcomes,
+checkpoints, verification/postconditions, egress decisions, subagent results,
+and the terminal outcome as a canonical hash-chained ledger. It contains no
+prompts, raw tool arguments, tool output bodies, credentials, or handoff tokens.
+
+Capture is opt-in. A sink failure is reported in `RunReport.evidence`; with
+`--require-evidence` it changes the result to `error_evidence_incomplete`
+(exit 8). Existing tool effects are never replayed or silently undone. Runtime
+code loads the evidence component lazily, so a bare runtime remains importable
+without it.
+
+```sh
+northstar code "fix the parser regression" --workspace . \
+  --check "python3 -m unittest discover -s tests" \
+  --provider anthropic --model claude-sonnet-4-5
+```
+
+Network access remains denied unless the host configures the governed egress
+sidecar and exact targets. A run with no `--check` finishes as
+`success_unverified`; a failed completion check becomes
+`error_postconditions_failed`.
 
 ## Quick start (offline, no API key)
 
@@ -117,18 +178,147 @@ python3 -m cli run --workspace . --provider anthropic \
 warnings, not failures); `--dry-run` prints the resolved tools, allow/deny
 lists, ceilings, and pricing, then exits without constructing the provider.
 
+### Local defensive assessment
+
+The runtime also exposes a deterministic blue-team checkpoint for untrusted
+content and declared fetch targets. It is read-only: it makes no network
+request, executes no command, and never attempts to exploit a finding. The
+result is safe to pass to CI or an approval gate:
+
+```sh
+python3 -m cli security assess --text "summarise this document" --json
+python3 -m cli security assess --text-file tool-output.txt --json
+python3 -m cli security assess --text "fetch it" \
+  --tool-name browser --url https://example.com/api --json
+```
+
+The command returns `allow` for clean input, `review` for known instruction
+forgery patterns, and exit code `5` with `block` for high-confidence
+credential exposure, jailbreaks, or internal/metadata targets. Findings keep
+rule identifiers, severities, spans, and masked values only; raw text,
+credentials, and URLs never cross the result boundary.
+
+The same checkpoint runs on context-compaction summaries before they become
+model-visible again. Provider-written summaries that contain a high-confidence
+credential or jailbreak are replaced with a fixed quarantine marker; review
+findings are span-redacted and recorded in the compaction boundary metadata.
+Tool-result redaction preserves the original character budget with inert
+whitespace, so security filtering cannot silently disable context ceilings.
+Unicode format/control characters are removed at the model boundary and mixed
+script or other adversarial-perturbation signals are recorded as review
+findings; a clean result still means only that no known tripwire fired.
+Known lexical rules are also checked against an NFKC compatibility-normalized
+view, closing fullwidth and presentation-form variants without normalizing
+clean content unnecessarily.
+The same high-confidence input gate applies to read-only tools: a reader cannot
+be used as a transcript return channel for a literal credential or jailbreak.
+High-confidence payloads are refused before `PreToolUse` hooks receive them, so
+extensions cannot observe or copy a secret that the runtime would later deny.
+The same ordering applies to user prompts: high-confidence prompts are refused
+before `UserPromptSubmit`, while actionable review findings are redacted before
+the hook and provider boundaries.
+Review-level findings on tool inputs are retained as redaction-safe
+`defensive_assessment` records even when the call is allowed, so operators can
+measure suspicious traffic without collecting the original argument.
+The free-form provenance header attached to unstructured tool results is
+screened separately from the artifact body, closing metadata-only injection and
+credential bypasses.
+Hook-injected context is screened at the same boundary before it is added to
+the transcript; this keeps extension callbacks from becoming an untracked
+prompt-injection channel.
+Hook denial reasons are screened before they enter run reports, refusal
+messages, or durable audit records, so extension diagnostics cannot become a
+credential exfiltration channel.
+Post-tool hooks receive a sanitized copy of tool arguments; execution and
+authorization continue to use the original, schema-validated payload.
+Pre-tool hooks receive the same sanitized copy for review-level findings, while
+high-confidence findings are refused before any hook is invoked.
+Provider and retry failure text is screened before it becomes a result error or
+retry event, preventing upstream response bodies from leaking through failure
+handling.
+Unexpected runtime and delivery-protocol errors use the same boundary before
+they enter traces or result records.
+Sidecar transport and remote error fields are screened as well, including the
+diagnostic `raw` payload retained for host inspection.
+The local SSRF checkpoint normalizes IPv4-mapped IPv6 and legacy numeric,
+hexadecimal, and octal IPv4 spellings before applying internal-network rules.
+Special-use destinations such as CGNAT/shared space, protocol-assignment,
+benchmarking, multicast, and reserved ranges are denied as well.
+Host parsing applies NFKC normalization before these checks, closing fullwidth
+dot and digit/letter spellings of internal destinations.
+IPv6 zone identifiers are removed before classification, so link-local
+addresses with an interface suffix cannot evade the SSRF guard.
+Unicode control and format characters in host authorities are rejected
+fail-closed, including zero-width and bidirectional markers.
+Percent-decoded authority delimiters and whitespace are rejected as ambiguous
+hosts before a downstream HTTP client can reinterpret them.
+The standalone literal-URL signal applies the same NFKC, control-character,
+and decoded-authority checks, so callers cannot weaken the policy by choosing
+the older helper.
+Webhook endpoint registration reuses the protocol detector and refuses
+internal, metadata, or ambiguous destinations before a host can deliver.
+The encoded-payload tripwire also rejects repetitive filler as a carrier only
+when it has enough alphabet diversity, reducing long-input false positives.
+On resume, the final provider payload is screened again copy-on-write, so old
+or imported transcripts cannot bypass the current rules; the durable transcript
+itself is never rewritten by this compatibility pass.
+Both structured block content and legacy plain-string message content pass
+through that checkpoint.
+Unknown multimodal `data` fields are screened unless their parent explicitly
+declares a binary media type; opaque provider signatures remain untouched.
+String, tuple, and single-block content forms are normalized into the same
+screening path for imported provider messages.
+Malformed non-message records in an imported sequence are dropped from the
+copy-on-write request instead of crashing the runtime, and recorded as a
+`D-RESUME-001` defensive assessment.
+Non-message values are filtered before any defensive copy operation, so
+untrusted object hooks cannot run during transcript admission.
+After Unicode cleanup, the detector rechecks collapsed whitespace so hidden
+instruction spans cannot reassemble into a jailbreak at the release boundary.
+If that second pass finds an instruction pattern, the release is quarantined
+even when the original obfuscated form was only review-level.
+Equivalent Unicode dash and space separators receive the same second-pass
+check, closing punctuation-based variants of known instruction spans.
+Length-preserving cleanup uses a visible one-character marker for hidden
+controls, so budget stability cannot turn obfuscation into ordinary whitespace.
+Nested string fields inside resumed tool arguments are screened recursively,
+including review-level findings, while the original argument shape is retained.
+Delegation prompts receive an additional review-level redaction before a child
+runtime is created, preventing low-confidence injection text from propagating
+through the agent tree.
+Tool descriptions and JSON Schema `description` annotations are screened before
+they are sent to the provider as well, while schema keys and enum values remain
+unchanged so the authorization contract cannot drift during sanitization.
+Provider thinking blocks are checked too; a flagged signed block is dropped as
+a unit instead of being rewritten into an invalid signature, while its rule
+IDs remain in the defensive audit record.
+
 Transcripts are append-only JSONL, but they are meant to be read back:
 
 ```sh
 python3 -m cli sessions list --session-dir /tmp/northstar-sessions
 python3 -m cli sessions show --session-dir /tmp/northstar-sessions <session-id>
 python3 -m cli sessions show --session-dir /tmp/northstar-sessions <session-id> --json
+python3 -m cli sessions retention --session-dir /tmp/northstar-sessions --older-than-days 90 --json
 ```
 
 `list` summarizes every transcript; `show` renders one as a timeline (records,
 turns, result subtype, cost); `--json` exports the raw records. The viewer is
 read-only: it never creates the directory, never writes a file, and reports a
 damaged record instead of "repairing" an audit trail.
+`retention` is a read-only inventory for host-managed retention jobs. It marks a
+transcript as a candidate only when it is old, complete, hash-chain valid, and its
+recorded session-lease guarantee is probeable and currently unlocked. A candidate
+is advisory: a host deleting it later must recheck the lease at deletion time.
+Northstar does not automatically remove transcripts.
+
+Session content is retained by default for exact replay and resume. Use
+`--redact-session-content` to omit conversational and tool-body values from chained
+session records while keeping governance metadata and usage. Redacted sessions are
+readable and verifiable, but resume is refused because their provider context is
+incomplete. This does not remove workspace paths or other governance metadata;
+protect the session directory and apply host-level retention rules. The Python SDK
+exposes the same choice as `RunOptions(redact_session_content=True)`.
 
 Two of its actions are about *fork points* rather than about reading:
 
@@ -154,6 +344,12 @@ the only switch; without it `CodexReadOnly` is not registered at all:
 python3 -m cli run --sidecar-socket /var/run/northstar-codex/sidecar.sock \
   --probe-sidecar            # one health-check prompt, then exit
 ```
+
+Sidecar responses are screened at the client boundary too: direct SDK callers
+receive a blocked marker or sanitized text before remote output can become an
+instruction channel. The main loop applies its own result-boundary checks as a
+second defense. Malformed or excessively recursive response JSON is reported as
+`protocol_error` rather than escaping as a client exception.
 
 ## Creating a governed project (`new`)
 
@@ -304,6 +500,20 @@ python3 -m cli run --workspace . --prompt "summarise the files" \
   operator names it with `--allow-tool` (or a policy file denies it, which
   stays terminal). MCP is a tool *transport*; permission decisions remain in
   the three-layer gate and every call still fires the hooks.
+- **Arguments are checked against the declared input schema before approval.** The
+  runtime validates object shape, required fields, JSON types, enums and supported
+  bounds, with a 1 MiB serialized-size estimate, 50,000-node and 32-level depth
+  ceilings checked before copying provider input; it repeats bounded validation
+  if a `PreToolUse` hook rewrites the payload.
+  MCP schemas are meta-validated during `tools/list`, before they are exposed to
+  the model. If a server declares `outputSchema`, returned `structuredContent` is
+  required and validated before being forwarded; a mismatch quarantines that
+  server. Input and output schemas are both covered by the tool-definition pin.
+  Install `.[json-schema]` for JSON Schema 2020-12 validation (Draft 7 is also
+  recognized). `$ref` resolution is local to the supplied schema; it never
+  fetches remote references. Regex work uses a timeout and a per-call budget.
+  Without the extra, the dependency-free validator supports a documented subset
+  and refuses unknown assertions. `format` remains an annotation and is not asserted.
 - **A server that wants something from a human goes through the approval gate,
   not around it.** The 2026-07-28 revision forbids servers from initiating
   JSON-RPC requests, so `elicitation/create`, `sampling/createMessage` and
@@ -337,7 +547,10 @@ python3 -m cli run --workspace . --prompt "summarise the files" \
   "answered_fields"}`, and a short `[governance] …` note is appended to the tool
   result so the refusal is inside the transcript rather than beside it.
 - Output is bounded client-side (per-line and per-call caps); image/resource
-  content blocks are replaced with a placeholder rather than rendered.
+  content blocks are replaced with a placeholder rather than rendered. The
+  low-level `McpStdioClient.call_tool()` path also runs the defensive-agent
+  output screen, so callers that bypass the main loop still get hostile
+  instruction/credential payloads blocked or sanitized before they see them.
 - `run --dry-run` lists the configured servers **and the stance**
   (`protocol=auto, elicit=off→input_required is declined, roots=off,
   sensitive_input=off, rounds=3`) without spawning them, and appends what an import
@@ -384,7 +597,14 @@ path = "uv.lock"
 agent = "explorer"              # run as a built-in agent by default (CLI --agent wins)
 compaction_threshold_tokens = 30000   # 0 disables compaction
 project_context = "AGENTS.md"   # file name inside the workspace, or false to disable
+egress_targets = ["api.example.com"] # exact Fetch hosts; an empty array denies Fetch
 ```
+
+The optional `egress_targets` set is inherited by subagents and reloaded on
+`agent` and `resume` entry points. Repeatable CLI `--egress-target HOST`
+values can narrow it further; the runtime intersects the two sets, so a CLI
+flag cannot widen a workspace restriction. The egress sidecar's global
+destination policy remains independently enforced.
 
   `allow_tools` is not accepted in a policy file: auto-approval is an operator
   decision made per run (`--allow-tool`). When both the file and the CLI set a
@@ -497,6 +717,13 @@ silently costs `$0.000000` looks like a free model.
 The key comes from the environment only (`OPENAI_API_KEY`, `OPENAI_BASE_URL`) - a
 flag would put a credential in the process list and in CI logs. A `base_url` with no
 key still works, because local servers ignore it while the SDK demands one.
+
+Both SDK-owned synchronous provider clients cap each HTTP response body at 8 MiB
+before SDK JSON parsing; direct provider construction can tune this with
+`max_response_bytes`. The transport requests identity encoding and rejects a
+compressed response, then counts bounded chunks for ordinary and streaming
+calls. A caller-injected `client` bypasses this wrapper, so its host must apply
+an equivalent body limit.
 
 ## Streaming assistant text
 
@@ -782,13 +1009,80 @@ recomputes the digest through the same `prepare_resume` gate a runtime checkpoin
 a foreign boundary meets the same gate, and `EventStore.restore()` correspondingly *refuses*
 a runtime document, which the tests assert instead of merely claiming.
 
+## Workspace memory integrity
+
+Workspace memory remains under `.northstar/memory/` and still passes the poisoning
+gate before a Write/Edit persists. Each successful tool-mediated write now stages an
+exact-content SHA-256 in `.northstar/memory-integrity.json`, a path the ordinary
+agent file tools cannot modify. On the next recall, Northstar verifies the full
+memory file before adding it to the system prompt. A mismatch or deletion of a pinned
+file stops the run instead of silently using the altered memory. The dry-run report
+and prompt delimiter identify whether memory is `verified` or `unverified`.
+
+Before a memory file is injected or accessed by `Read`, `Write`, `Edit`, `Grep`,
+or `LS`, its workspace-relative path must have an operator-owned audience grant
+in `.northstar/memory-audience.json`:
+
+```json
+{"schema":"northstar.memory-audience.v1","entries":{
+  ".northstar/memory/MEMORY.md":["public"],
+  ".northstar/memory/team.md":["alice","bob"]
+}}
+```
+
+`public` grants access to any viewer set. A named grant is allowed only when every
+current viewer is listed; the host passes those identities with repeated
+`--memory-viewer IDENTITY` flags. If identity is absent, only an explicit `public`
+grant can match. An absent manifest or path entry grants nobody, so legacy memory
+is withheld until an operator labels it. Invalid or symlinked manifests fail
+closed. Channel adapters must derive viewer identities from authenticated channel
+metadata, never from prompt or memory text. Shell has workspace-wide read/write
+access on the process backend, so it is refused whenever the audience manifest
+exists; otherwise a command could rewrite its own grants. Separate OS workspaces
+keep Shell available across private audiences. MCP servers and other host-defined
+tools need separately scoped workspaces because this file-tool ACL cannot constrain
+their own filesystem access. Designated memory files outside `.northstar/memory/`
+are protected by the same manifest entry.
+
+When `--dataflow-policy` is enabled, an injected memory file with a named audience
+also seeds the run's dataflow audience. Audience-restricted sinks must then fit
+within that grant; later source labels intersect with it. A sink without an explicit
+audience contract (including an unlisted sink) escalates while the trajectory is
+audience-labeled. If resume has no integrity-bound dataflow checkpoint, the prior
+audience is treated as unknown and every known or unmatched egress escalates; a
+policy-classified source-only read remains a non-egress path. Explicit `public` memory
+does not add an audience restriction. The dataflow policy remains opt-in, so memory
+audience ACL alone does not constrain network or custom-tool sinks.
+
+Existing memory with no integrity baseline remains usable only when audience-authorized,
+and is explicitly unverified; the first successful tool-mediated update pins it. The
+integrity manifest is a local baseline, not a signature: a host actor who can
+rewrite both the memory and manifest
+can replace the baseline. On the process sandbox fallback, an explicitly authorized
+Shell can do this too; the bwrap backend mounts `.northstar/` read-only. Managed
+memory integrity requires POSIX no-follow directory descriptors and `flock`; on a
+host without those primitives, memory reads/writes fail closed with a capability
+error rather than silently bypassing the baseline. Review and restore a failed file
+outside the agent before running it again.
+
+For shared or untrusted-content workspaces, set `NORTHSTAR_MEMORY_QUARANTINE=1` to
+enable corroboration-based quarantine. The optional
+`NORTHSTAR_MEMORY_QUARANTINE_CONF` threshold must be finite and between 0 and 1;
+invalid environment values fail startup rather than weakening the gate. Invalid
+per-write confidence values are treated as suspicious and quarantined when this
+mode is enabled. The write-time poisoning scanner normalizes NFKC and removes
+Unicode format controls before matching, so soft hyphens, word joiners, and
+bidirectional overrides cannot split trigger phrases in the inspection view. It
+also checks bounded HTML-entity, percent, `\\u`/`\\x`, visual-homoglyph and
+printable-Base64 views without rewriting the stored text.
+
 ## Reviewing Agent Skills (`skills check`)
 
-The Agent Skills standard fixed the file format and left review out: skills are
-unsigned, and 2026's third-party surveys found instruction-override phrasing and
-install-the-world instructions in a large share of them. A skill is text the model
-reads, so the risk is not code execution - it is the model being *told* something by
-a file nobody read.
+The Agent Skills standard fixed the file format and left review out. Skills include
+both instructions the model reads and executable helper scripts, so review must cover
+both behavior layers: poisoned instructions and code that can make network calls,
+execute dynamic payloads, or carry hardcoded credentials. The checker is static and
+offline; it reports risk shapes for review rather than claiming to prove a skill safe.
 
 ```console
 $ northstar-agent-runtime skills check --workspace .
@@ -808,11 +1102,15 @@ Three properties that make this a gate rather than a linter:
 - **Deterministic, offline, no model.** Every rule is a function of the bytes
   (`skill_audit.RULES_VERSION`), so it cannot be talked out of by the file it is
   reviewing, and `make test` proves it.
-- **Reviewed means pinned.** `--write-lock` writes `.northstar/skills.lock` - a
-  content digest per skill path - and `run --require-skill-lock` refuses to start
-  (exit 64) if a skill's bytes changed, if a skill was added without review, or if
-  the lock was made under an older rule set. Renaming a skill does not inherit
-  someone else's review, because the pin binds the path *and* its bytes.
+- **Reviewed means pinned.** `--write-lock` writes `.northstar/skills.lock` with a
+  digest for each `SKILL.md` and every runnable file under its `scripts/` directory,
+  including each script's permission mode.
+  `run --require-skill-lock` refuses to start (exit 64) if instructions or executable
+  assets changed, were added or removed, or if the lock was made under an older rule
+  set. Script content also passes deterministic static checks. Symlinked script
+  directories and files are refused so the reviewed bytes are the executed bytes.
+  Renaming a skill does not inherit someone else's review, because the pin binds the
+  path and its content.
 - **The model cannot forge the record.** `skills.lock` lives under `.northstar`,
   which the tool layer refuses to write during a run, so "I checked the skills" is
   not something a run can produce for itself.
@@ -1051,6 +1349,7 @@ condition arrives as an event, never as a raised exception:
 | `error_permission_denied`   | a denial ended the run (`halt_on_denial`)           |
 | `error_postconditions_failed` | the model stopped, but a declared workspace check did not hold |
 | `error_session_busy` | another live run holds this session's transcript; nothing was written |
+| `error_evidence_incomplete` | required evidence capture failed; the run may have had effects |
 | `error_during_execution`    | provider failure, malformed tool input, internal bug |
 
 The three ceilings are independent, each with its own subtype, so an operator can
@@ -1062,7 +1361,7 @@ tell "it ran out of money" from "it ran in circles". `RunReport` (from
 
 Ten events, uniform handler signature, and a deny that cannot be argued with:
 
-`PreToolUse` (veto or rewrite the input) · `PostToolUse` · `PostToolUseFailure` ·
+`PreToolUse` (veto or rewrite tool input) · `PostToolUse` · `PostToolUseFailure` ·
 `UserPromptSubmit` (inject context or refuse the whole run) · `Stop` (may refuse
 to stop, feeding its reason back as a new user turn) · `SubagentStart` ·
 `SubagentStop` · `PreCompact` · `SessionStart` · `SessionEnd`.
@@ -1078,6 +1377,11 @@ to stop, feeding its reason back as a new user turn) · `SubagentStart` ·
 - `PreToolUse` runs *before* the permission gate so a hook can rewrite arguments
   that policy then inspects — a rewrite can narrow what is allowed, never bypass
   the gate.
+- `SubagentStart` runs after the target agent and its declared tools pass the
+  delegation gate. A hook may rewrite only `{"prompt": "..."}` to redact or
+  minimize what the child model receives; it cannot retarget the agent or alter
+  the checked tool set. Prompts are capped at 64,000 characters, including after
+  rewriting. Invalid rewrites fail closed.
 
 ### Hooks a repository may declare
 
@@ -1130,15 +1434,23 @@ mutating tool with no host approval callback is **denied, not executed** — the
 fail-safe direction is always "no". A denial is not an exception: the model
 receives an `is_error` `tool_result` naming the rule that refused it, and the run
 records a `Denial` with `tool`, `source`, and `reason`.
+The host callback receives a deep copy of nested arguments, so an approver that
+annotates or edits its view cannot silently change what the approved handler runs.
 
 ## Cost
 
-`max_budget_usd` is checked before every generation against real per-million-token
-prices, including prompt-cache discounts (`cache_read` 0.1×, `cache_write` 1.25×).
+`max_budget_usd` reserves a request envelope before every provider attempt. The
+envelope uses the serialized request's UTF-8 byte length plus framing headroom as
+a conservative input-token estimate, the requested maximum output tokens, and
+the configured model's cache-write price (1.25×), without assuming cache-read
+discounts. When usage arrives, the reservation is atomically settled against
+provider-reported usage. A failed request with unknown billing outcome keeps its
+estimate charged and appears as `unverified_cost_usd`; retries must reserve again.
+The request estimate is not an invoice or a formal upper bound for every provider
+tokenizer or a later price change, so reported usage can still reveal an overrun.
 An unknown model id falls back to conservative pricing and flips
-`pricing_estimated=True` on the result, so an estimate is never mistaken for an
-invoice. A subagent's cost rolls up into its parent's meter: delegation cannot be
-used to multiply a budget.
+`pricing_estimated=True` on the result. A subagent's actual and unverified spend
+rolls up into its parent's meter: delegation cannot be used to multiply a budget.
 
 ## Subagents
 
@@ -1148,7 +1460,10 @@ expensive one decides. Delegation is permission-gated **per tool the subagent
 declared**, never by the literal name `Task`: blanket-denying `Task` as "mutating"
 would mean subagents never get created at all, and the error message would blame
 the wrong thing. Nested delegation is off by default; `max_subagent_depth` is the
-backstop even when it is enabled.
+backstop even when it is enabled. The parent `max_tool_calls` ceiling is shared
+across the delegation lineage: each `Task` consumes one parent call, and the
+child receives only the remaining slots after earlier parent and ancestor calls.
+A child cannot restart the parent's tool allowance.
 
 Four built-ins ship in `agents.py`: `general`, `explorer`, `planner`, and
 `evaluator`. The evaluator is read-only, `plan`-mode, and **default-FAIL**: an
@@ -1191,9 +1506,10 @@ A passing verdict is an assertion the runtime can audit, not a vibe.
 Every tool path is resolved through `ToolSandbox.resolve`: lexical normalisation,
 then `realpath` of the nearest existing ancestor, then a containment check against
 the workspace root, then (for writes) protection of `.git` and `.northstar`.
-Symlinks are followed *before* the check, and a path that does not exist yet is
-checked through its existing parents, so `link/../../etc/passwd` cannot smuggle a
-write out.
+Protected paths are checked in both lexical and resolved form, so an in-workspace
+symlink cannot redirect a protected path to an ordinary file or redirect an
+ordinary path into protected metadata. A path that does not exist yet is checked
+through its existing parents, so `link/../../etc/passwd` cannot smuggle a write out.
 
 **The agent cannot rewrite its own governance.** `.northstar` holds the policy
 file, the repository subagent definitions, and the skill packages that reach the
@@ -1260,7 +1576,7 @@ size (`result_chars`), so truncation is visible instead of inferred.
 
 `0` success · `1` error_during_execution · `2` error_max_turns ·
 `3` error_max_tool_calls · `4` error_max_budget_usd · `5` error_permission_denied ·
-`6` error_postconditions_failed · `7` error_session_busy ·
+`6` error_postconditions_failed · `7` error_session_busy · `8` error_evidence_incomplete ·
 `64` usage or configuration error (nothing was run). Result errors and refusals
 are printed to stderr; `--json` emits one object per event.
 
@@ -1277,12 +1593,14 @@ otherwise report as a policy conflict.
 
 ```sh
 cd components/northstar-agent-runtime
+python3 -m pip install -r requirements-test.txt -r requirements-tracing.txt
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-1197 tests, fully offline and deterministic: the scripted provider is the only
-model, and `test_integration_sidecar.py` runs the real sidecar `serve()` over a
-real Unix socket with a 100,000-Chinese-character prompt.
+The test runner dependency is kept separate from runtime requirements. After
+installing it, the suite itself is offline and deterministic: the scripted
+provider is the only model, and `test_integration_sidecar.py` runs the real
+sidecar `serve()` over a Unix socket with a 100,000-Chinese-character prompt.
 
 The TypeScript face adds 57 more, run without a build step or a package install:
 

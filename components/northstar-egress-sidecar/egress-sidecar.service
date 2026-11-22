@@ -8,19 +8,23 @@ User=northstar-egress
 Group=northstar-egress
 RuntimeDirectory=northstar-egress
 RuntimeDirectoryMode=0770
+StateDirectory=northstar-egress
+StateDirectoryMode=0700
 Environment=HOME=/var/lib/northstar-egress
 # The policy engine lives in the northstar-agent-runtime component; the
 # sidecar imports it from there. Point at the installed component directory.
 Environment=NORTHSTAR_RUNTIME_DIR=/opt/northstar/components/northstar-agent-runtime
 Environment=NORTHSTAR_EGRESS_POLICY_DIR=/etc/northstar-egress
 Environment=NORTHSTAR_EGRESS_SOCKET=/var/run/northstar-egress/egress.sock
+Environment=NORTHSTAR_EGRESS_FEED=/var/lib/northstar-egress/receipts.jsonl
+Environment=NORTHSTAR_EGRESS_TRUSTED_KEYS=/etc/northstar-egress/trusted-public-keys.json
 # Brokered credentials: NORTHSTAR_EGRESS_CRED_<NAME> for each credential
 # reference named in the policy. Load these from a root-only EnvironmentFile,
 # never from the agent's environment.
 # EnvironmentFile=/etc/northstar-egress/credentials.env
-# Receipt signing key (32 bytes, hex). Optional; receipts are hash-chained
-# regardless, and signed when this is set.
-# Environment=NORTHSTAR_EGRESS_SIGNING_SEED=
+# Required receipt signing seed and key ID. Keep both in the root-only
+# EnvironmentFile; do not put the literal key in this unit.
+EnvironmentFile=/etc/northstar-egress/signing.env
 ExecStart=/usr/bin/python3 /opt/northstar-egress-sidecar/egress_socket.py
 Restart=on-failure
 TimeoutStopSec=15

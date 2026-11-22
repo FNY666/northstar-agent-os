@@ -131,6 +131,18 @@ class TestSpec(RuntimeTestCase):
         self.assertIn(ws, paths)
         self.assertIn("/usr", paths)
 
+    def test_default_profile_grants_only_specific_device_nodes(self):
+        with tempfile.TemporaryDirectory() as ws:
+            spec = default_profile(ws)
+        rights_by_path = {rule["path"]: set(rule["rights"]) for rule in spec["rules"]}
+        self.assertNotIn("/dev", rights_by_path)
+        self.assertNotIn("/dev/shm", rights_by_path)
+        self.assertNotIn("/dev/pts", rights_by_path)
+        self.assertEqual(rights_by_path["/dev/null"], {"READ_FILE", "WRITE_FILE"})
+        for path in ("/dev/zero", "/dev/random", "/dev/urandom"):
+            if path in rights_by_path:
+                self.assertEqual(rights_by_path[path], {"READ_FILE"})
+
     def test_loader_argv_shape(self):
         spec = {"mode": "auto", "rules": [], "network": False, "tcp_ports": []}
         argv = landlock_loader_argv(["/bin/true"], spec)
@@ -175,6 +187,21 @@ class TestLiveLoader(RuntimeTestCase):
                 self.assertIn("Permission denied", fh.read())
             self.assertFalse(os.path.exists("/tmp/landlock_unit_nope"))
 
+    def test_symlink_inside_workspace_cannot_read_outside_file(self):
+        # Path-beneath confinement must follow the resolved target for access
+        # checks; a workspace symlink must not expose an otherwise denied file.
+        with tempfile.TemporaryDirectory() as root:
+            workspace = os.path.join(root, "workspace")
+            os.mkdir(workspace)
+            secret = os.path.join(root, "host-secret.txt")
+            with open(secret, "w", encoding="utf-8") as handle:
+                handle.write("host-only-secret")
+            os.symlink(secret, os.path.join(workspace, "escape.txt"))
+            result = self._run("cat escape.txt", workspace)
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertNotIn("host-only-secret", result.stdout)
+            self.assertIn("Permission denied", result.stderr)
+
     def test_tcp_denied(self):
         with tempfile.TemporaryDirectory() as ws:
             result = self._run(
@@ -183,6 +210,15 @@ class TestLiveLoader(RuntimeTestCase):
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("Permission denied", result.stderr)
+
+    def test_dev_shm_is_not_reachable_but_null_remains_writable(self):
+        with tempfile.TemporaryDirectory() as ws:
+            if os.path.isdir("/dev/shm"):
+                result = self._run("ls /dev/shm", ws)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("Permission denied", result.stderr)
+            null_result = self._run("printf ok >/dev/null", ws)
+            self.assertEqual(null_result.returncode, 0, null_result.stderr)
 
     def test_restriction_is_irreversible_for_child(self):
         # A second restrict_self can only add restrictions: the child tries to

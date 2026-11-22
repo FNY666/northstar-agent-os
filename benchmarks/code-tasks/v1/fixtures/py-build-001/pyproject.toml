@@ -1,0 +1,11 @@
+[build-system]
+requires = []
+build-backend = "backend"
+backend-path = ["."]
+
+[project]
+name = "demo-templates"
+version = "1.0.0"
+
+[tool.demo]
+include-templates = false

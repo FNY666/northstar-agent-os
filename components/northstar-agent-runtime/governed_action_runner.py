@@ -40,10 +40,14 @@ House style: stdlib-only, no wall-clock, fail-closed, version/schema pins,
 from __future__ import annotations
 
 import ast
+import copy
 import hashlib
+import importlib.util as _importlib_util
 import json
+import sys as _sys
 import threading
 from dataclasses import dataclass
+from pathlib import Path as _Path
 from typing import Any, Callable, Dict, Optional
 
 #: Module version pin.  v2: real digests (no placeholder pins), the ledger
@@ -72,6 +76,46 @@ class GovernedRunnerError(Exception):
     """Fail-closed: any gate failure or malformed input raises."""
 
 
+#: Tools whose ``command``/``cmd``/``argv`` argument carries shell source.
+#: Canonicalized the same way the PermissionEngine canonicalizes tool names.
+_SHELL_TOOL_NAMES = frozenset({"shell", "bash", "sh", "zsh"})
+
+
+def _load_bash_parser() -> Any:
+    """Load sibling ``bash_parser`` by path (component convention)."""
+    module = _sys.modules.get("bash_parser")
+    if module is not None:
+        return module
+    path = _Path(__file__).resolve().parent / "bash_parser.py"
+    spec = _importlib_util.spec_from_file_location("bash_parser", str(path))
+    if spec is None or spec.loader is None:  # pragma: no cover - defensive
+        raise ImportError("bash_parser not loadable")
+    module = _importlib_util.module_from_spec(spec)
+    _sys.modules["bash_parser"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _shell_command_text(tool_args: Dict[str, Any]) -> Optional[str]:
+    """Return the shell source carried by tool args, or None when there is none.
+
+    Mirrors the Shell handler's accepted shapes: ``command``/``cmd`` text, or
+    ``argv`` (joined so the parser inspects executable positions).
+    """
+    argv = tool_args.get("argv")
+    if isinstance(argv, (list, tuple)) and argv and all(
+        isinstance(item, str) for item in argv
+    ):
+        import shlex
+
+        return shlex.join(argv)
+    for key in ("command", "cmd"):
+        value = tool_args.get(key)
+        if isinstance(value, str):
+            return value
+    return None
+
+
 @dataclass(frozen=True)
 class GovernedOutcome:
     """Result of a governed action run."""
@@ -88,6 +132,10 @@ class GovernedOutcome:
     #: The runtime maps it to the tool report's error_class, preserving
     #: the pre-runner behavior where handler failures kept their type.
     error_class: str = ""
+    #: Non-empty when the post-execution forward-seal append failed. The
+    #: action may already have happened, so callers must report this distinctly
+    #: without claiming that execution was rolled back.
+    audit_seal_error: str = ""
 
 
 class GovernedActionRunner:
@@ -192,7 +240,7 @@ class GovernedActionRunner:
         subject: str,
         declaration_id: str,
         criteria_digest: str,
-        args_pin: str,
+        inputs_digest: str,
         gate_decision: str,
         observer_verdict: str,
         outcome: str,
@@ -200,10 +248,9 @@ class GovernedActionRunner:
     ) -> str:
         """Seal the 4-gate trail to the forward-seal ledger.
 
-        Returns "" on success, or a ``[seal_failed:...]`` marker (mirroring
-        the permission engine's audit-sink failure handling: visible, never
-        fatal -- a broken seal chain must not crash the run, but it must
-        not be silent either).
+        Returns an error class on failure. The caller exposes this separately
+        from execution status because a post-execution seal failure cannot
+        undo a side effect and must not invite an unsafe blind retry.
         """
         try:
             self._ledger.append(
@@ -211,7 +258,7 @@ class GovernedActionRunner:
                 action=tool,
                 subject=subject,
                 authorization=f"gate:{gate_decision}",
-                inputs_digest=args_pin,
+                inputs_digest=inputs_digest,
                 logic_digest=self.pin(
                     {
                         "declaration_id": declaration_id,
@@ -223,7 +270,7 @@ class GovernedActionRunner:
                 outcome=outcome,
             )
         except Exception as error:  # noqa: BLE001 - seal failure is marked, not fatal
-            return f" [seal_failed:{type(error).__name__}]"
+            return type(error).__name__
         return ""
 
     def run(
@@ -266,7 +313,13 @@ class GovernedActionRunner:
         """
         if not intent or not action or not subject or not tool:
             raise GovernedRunnerError("intent/action/subject/tool required")
-        tool_args = dict(tool_args or {})
+        # The assess pin only protects execution if the executor receives the
+        # same snapshot that was checked. A shallow copy leaves nested objects
+        # reachable by hooks/callers and permits a post-assess mutation race.
+        try:
+            tool_args = copy.deepcopy(tool_args or {})
+        except Exception as error:  # noqa: BLE001 - malformed inputs fail closed
+            raise GovernedRunnerError("tool arguments could not be snapshotted") from error
         run_executor = executor if executor is not None else self._executor
         if run_executor is None:
             raise GovernedRunnerError("executor is required")
@@ -312,15 +365,17 @@ class GovernedActionRunner:
                     decision="deny",
                     reason=gate_reason,
                 )
-                seal_note = self._seal(
+                seal_error = self._seal(
                     tool=tool, subject=subject, declaration_id=decl_id,
-                    criteria_digest=criteria_digest, args_pin=args_pin,
+                    criteria_digest=criteria_digest, inputs_digest=inputs_digest,
                     gate_decision=gate_decision, observer_verdict="-",
                     outcome="denied:authorize", reason=gate_reason,
                 )
-                if seal_note:
+                seal_note = f" [seal_failed:{seal_error}]" if seal_error else ""
+                if seal_error:
                     outcome = GovernedOutcome(
-                        decl_id, False, "authorize", "deny", gate_reason + seal_note
+                        decl_id, False, "authorize", "deny", gate_reason + seal_note,
+                        audit_seal_error=seal_error,
                     )
                 return outcome
 
@@ -358,19 +413,77 @@ class GovernedActionRunner:
                     decision="blocked",
                     reason=blocked_reason,
                 )
-                seal_note = self._seal(
+                seal_error = self._seal(
                     tool=tool, subject=subject, declaration_id=decl_id,
-                    criteria_digest=criteria_digest, args_pin=args_pin,
+                    criteria_digest=criteria_digest, inputs_digest=inputs_digest,
                     gate_decision=gate_decision, observer_verdict=verdict,
                     outcome="denied:assess", reason=blocked_reason,
                 )
-                if seal_note:
+                seal_note = f" [seal_failed:{seal_error}]" if seal_error else ""
+                if seal_error:
                     outcome = GovernedOutcome(
-                        decl_id, False, "assess", "blocked", blocked_reason + seal_note
+                        decl_id, False, "assess", "blocked", blocked_reason + seal_note,
+                        audit_seal_error=seal_error,
                     )
                 return outcome
 
-        # Gate 4: EXECUTE (outside the lock -- parallelism preserved).
+            # Gate 3b: BASH PARSER (fail-closed AST allowlist).  Shell source
+            # gets a second, structural check after the PermissionEngine's
+            # substring denylist and before the executor sees it.  Non-shell
+            # tools skip this entirely.  The parser is specified never to
+            # raise; we still treat any failure as a block rather than trust
+            # that promise with a real command.
+            if tool.strip().casefold() in _SHELL_TOOL_NAMES:
+                blocked_reason = ""
+                bash_verdict = None
+                command_text = _shell_command_text(tool_args)
+                if command_text is not None:
+                    try:
+                        bash_verdict = _load_bash_parser().check_command(command_text)
+                        kind = getattr(
+                            getattr(bash_verdict, "kind", None), "value", ""
+                        )
+                    except Exception as error:  # noqa: BLE001 - fail closed
+                        kind = ""
+                        blocked_reason = (
+                            "bash_parser raised "
+                            f"{type(error).__name__}: {error}"
+                        )
+                    if not blocked_reason:
+                        if kind == "deny":
+                            blocked_reason = (
+                                "bash_parser denied: "
+                                f"{bash_verdict.node}: {bash_verdict.reason}"
+                            )
+                        elif kind != "allow":
+                            blocked_reason = (
+                                "bash_parser too complex for automatic approval: "
+                                f"{getattr(bash_verdict, 'node', '')}: "
+                                f"{getattr(bash_verdict, 'reason', '') or kind or 'unknown'}"
+                            )
+                if blocked_reason:
+                    outcome = GovernedOutcome(
+                        declaration_id=decl_id,
+                        executed=False,
+                        gate="bash_parser",
+                        decision="blocked",
+                        reason=blocked_reason,
+                    )
+                    seal_error = self._seal(
+                        tool=tool, subject=subject, declaration_id=decl_id,
+                        criteria_digest=criteria_digest, inputs_digest=inputs_digest,
+                        gate_decision=gate_decision, observer_verdict=verdict,
+                        outcome="denied:bash_parser", reason=blocked_reason,
+                    )
+                    seal_note = f" [seal_failed:{seal_error}]" if seal_error else ""
+                    if seal_error:
+                        outcome = GovernedOutcome(
+                            decl_id, False, "bash_parser", "blocked",
+                            blocked_reason + seal_note,
+                            audit_seal_error=seal_error,
+                        )
+                    return outcome
+
         try:
             result = run_executor(tool, tool_args)
         except Exception as error:  # noqa: BLE001 - a broken tool must not kill the run
@@ -378,9 +491,9 @@ class GovernedActionRunner:
                 seq = self._next_seq()
                 self._safr.audit(seq, decl_id, "aborted", inputs_digest)
                 fail_reason = f"execution failed: {type(error).__name__}: {error}"
-                seal_note = self._seal(
+                seal_error = self._seal(
                     tool=tool, subject=subject, declaration_id=decl_id,
-                    criteria_digest=criteria_digest, args_pin=args_pin,
+                    criteria_digest=criteria_digest, inputs_digest=inputs_digest,
                     gate_decision=gate_decision, observer_verdict=verdict,
                     outcome="aborted", reason=fail_reason,
                 )
@@ -389,16 +502,17 @@ class GovernedActionRunner:
                     executed=False,
                     gate="audit",
                     decision="blocked",
-                    reason=fail_reason + seal_note,
+                    reason=fail_reason + (f" [seal_failed:{seal_error}]" if seal_error else ""),
                     error_class=type(error).__name__,
+                    audit_seal_error=seal_error,
                 )
 
         with self._lock:
             seq = self._next_seq()
             self._safr.audit(seq, decl_id, "executed", inputs_digest)
-            seal_note = self._seal(
+            seal_error = self._seal(
                 tool=tool, subject=subject, declaration_id=decl_id,
-                criteria_digest=criteria_digest, args_pin=args_pin,
+                criteria_digest=criteria_digest, inputs_digest=inputs_digest,
                 gate_decision=gate_decision, observer_verdict=verdict,
                 outcome="executed", reason="",
             )
@@ -407,8 +521,9 @@ class GovernedActionRunner:
                 executed=True,
                 gate="executed",
                 decision="allow",
-                reason=seal_note.strip(),
+                reason=f"[seal_failed:{seal_error}]" if seal_error else "",
                 result=result,
+                audit_seal_error=seal_error,
             )
 
 
@@ -417,7 +532,10 @@ def stdlib_only() -> bool:
     import pathlib
 
     tree = ast.parse(pathlib.Path(__file__).read_text(encoding="utf-8"), filename=__file__)
-    allowed = {"__future__", "ast", "dataclasses", "hashlib", "json", "pathlib", "threading", "typing", "unittest"}
+    allowed = {
+        "__future__", "ast", "copy", "dataclasses", "hashlib", "importlib",
+        "json", "pathlib", "shlex", "sys", "threading", "typing", "unittest",
+    }
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:

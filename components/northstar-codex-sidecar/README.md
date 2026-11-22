@@ -4,6 +4,8 @@ A restricted local adapter for running Codex as a supervised worker in an OpenBo
 
 ## Concepts, guides and API reference
 
+Current repository scope and verification: [current status](../../docs/current-status.md).
+
 - Concepts: [handoff and contracts](../../docs/concepts/handoff-and-contracts.md) ·
   [governance and the permission gate](../../docs/concepts/governance.md)
 - Guides: [packaging and CI](../../docs/guides/packaging-and-ci.md)
@@ -32,6 +34,23 @@ The response is one JSON object followed by a newline. The request surface is in
 - `tests/` — deterministic unit and local fake-Codex tests.
 
 ## Integration warning
+
+## Local validation and optional service installation
+
+From the repository root:
+
+```sh
+cd components/northstar-codex-sidecar
+python3 -m unittest discover -s tests -p 'test_*.py' -v
+```
+
+Installing a service is a separate operator action on the target Linux host:
+review `install.sh` and the systemd unit, supply the Codex executable and its
+authentication for the service account, then run `sudo ./install.sh` and
+`sudo systemctl enable --now northstar-codex-sidecar.service`. No such service
+installation is needed for the scripted runtime demo.
+
+## Integration boundary
 
 The sidecar authenticates callers through Unix permissions only. The parent runtime must provide identity binding, per-run workspace authorization, cancellation propagation, and production observability. Do not expose the socket over TCP.
 
