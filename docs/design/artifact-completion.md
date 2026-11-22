@@ -422,20 +422,33 @@ was to add a sourced line where none existed.
 
 1. **Fifteen canaries.**  The coordinator must mint and re-issue them; until
    then those slices cannot pass `CANARY`.  See the table above.
-2. **Six mutant survivors.**  `slice2`, `slice6`, `audit-head`, `diviner`,
-   `e2b` and `fable` have modules whose tests do not detect the planted
-   faults (0/3 each).  That is the `mutant-evidence-closure` slice's work,
+2. **Six mutant survivors -- CLOSED.**  `slice2`, `slice6`, `audit-head`,
+   `diviner`, `e2b` and `fable` had modules whose tests did not detect
+   the planted faults (0/3 each).  That is the `mutant-evidence-closure` slice's work,
    as the task book says: *"探针打中什么、要不要修，是 mutant-evidence-closure
    片的活。本片只负责把 manifest 建出来"*.  This slice built the manifests
    and recorded the `k/3`; it changed no production code to make any mutant
    die.
-   Five more slices are below the 3/3 line but still `PASS` the criterion
-   (`c52` 1/3, `horizon` 1/3, `unwind` 1/3, `langgraph-durability` 1/3,
-   `refusal-row` 1/3, `evidence-independence` 1/3, `c54` 2/3, `langgraph`
-   2/3, `autogen-speaker-selector` 2/3, `langgraph-retry-clears-writes` 2/3,
-   `silent-failure-detector` 2/3, `tool-output-filter` 2/3, `strands` 2/3,
-   `slice1` 2/3) — the criterion is "≥1 killed", and the ledger explicitly
-   declines to raise that bar.
+   **AMENDED 2026-11-22 -- this open item is CLOSED.**  The six
+   zero-of-three slices (`slice2`, `slice6`, `audit-head`, `diviner`,
+   `e2b`, `fable`) were lifted on 2026-11-16 and now measure 3/3 (see
+   `docs/design/mutant-evidence-closure.md` §8), and every slice that was
+   below the 3/3 line has since been lifted too: re-measuring each
+   slice's first three constructs at its current pinned commit gives
+   **3/3 for all 24** of them — `c52`, `horizon`, `unwind`,
+   `langgraph-durability`, `refusal-row`, `evidence-independence`,
+   `c54`, `langgraph`, `autogen-speaker-selector`,
+   `langgraph-retry-clears-writes`, `silent-failure-detector`,
+   `tool-output-filter`, `strands`, `ageofagents`,
+   `anthropic-effort-scaling`, `asinhhc`, `cost-per-delivery`,
+   `dynamiq`, `horizon-gate`, `intent-bound-retry`, `jido-statebudget`,
+   `revision-checked-tool-results`, `step-reliability-budget`,
+   `verifiability-tier`.
+
+   The list above was also **fourteen entries long and called
+   "five more"** — the count and the set disagreed, and neither matched
+   the table.  A count check would have passed either way; only reading
+   the table against the list found it.
 3. **The `REPORT_NUMBERS` session-resolution defect.**  `b173-accept.sh:166`
    uses `grep -rl "$CANARY" … | head -n1`, which is read-order dependent and
    picks the wrong session whenever another session has read the same task
