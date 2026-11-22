@@ -361,6 +361,55 @@ This is the same defect as
 `docs/design/mutant-evidence-closure.md` §8's AMENDED (e), measured
 against the same trees with the same probe.
 
+### AMENDED 2026-11-22 (b) -- the WHOLE-FILE numbers, and what is still open
+
+The table above reports each slice's **first three** constructs.  The
+whole-file measurement is the one that shows the real coverage, and it
+is a different number:
+
+| slice | module | whole-file | first three |
+|---|---|---|---|
+| `agent-handoff` | `agent_handoff.py` | **38/38** | 3/3 |
+| `c58` | `bash_parser.py` | **73/115** | 3/3 |
+| `slice3` | `bash_parser.py` | **73/115** (90/90 at its own pin) | 3/3 |
+| `lightningzero` | `coverage_manifest.py` | **12/24** | 3/3 |
+| `slice4` | `alert_trigger_registry.py` | **4/4** | 3/3 |
+| `slice5` | `blind_rerunner.py` | **13/13** | 3/3 |
+| `toolfail` | `tool_failure.py` | **11/11** | 3/3 |
+
+**The first three constructs are NOT a sample of the file.**  A slice
+can read 3/3 on its first three constructs while more than half its
+mutants survive -- `c58` and `slice3` read 73/115, and `lightningzero`
+reads 12/24.  The 3/3 is a claim about three constructs; the whole-file
+number is a claim about the module.  A census that reports only the
+first three cannot see the difference, which is why the whole-file
+sweep is the number that matters when the question is "is this module
+covered".
+
+**What is still open, measured 2026-11-22.**  After the closure work
+described in `docs/design/mutant-evidence-closure.md` §9's AMENDED
+(d)-(g):
+
+* `agent_handoff.py` -- **closed**: 38/38 at HEAD and at the pinned
+  commit `249f9a5c` (was 25/38).  Thirteen survivors, thirteen new
+  killer tests, module body unchanged.
+* `bash_parser.py` -- 42 survivors open at `c58`'s pin and at `slice3`'s
+  pin.
+* `coverage_manifest.py` -- 12 survivors open.  Nine of the twelve are
+  inside `stdlib_only()` and `main()`, so they are only reachable by
+  running the module as a **script** -- a test that only imports the
+  module cannot observe them.
+* `alert_trigger_registry.py` -- **closed**: 4/4 (was 3/4).
+* `tool_failure.py` -- **closed**: 11/11 (was 10/11).  Its
+  `from_provider_fault` had **no test at all**; the suite covered
+  `provider_retry.fault_to_failure`, which delegates to it.
+
+The check that now keeps this honest is
+`components/northstar-agent-runtime/tests/test_equivalence_table_coverage.py`,
+which reads the **slice** census and requires every surviving site to
+carry either an equivalence row in §9.1's table or a killer test in the
+suite the census row names.
+
 The task book also says the mutant survivors are the `mutant-evidence-closure`
 slice's job: *"探针打中什么、要不要修，是 mutant-evidence-closure 片的活。
 本片只负责把 manifest 建出来"*.  This slice did exactly that: it built the
