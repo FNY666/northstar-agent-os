@@ -85,6 +85,24 @@ Transcripts are append-only JSONL; the final summary line prints
 `turns=… tool_calls=… cost=$… session=…` and is the one stable line scripts
 should parse (`--quiet` keeps it).
 
+For a cross-component, digest-first audit artifact, opt in to a run evidence
+bundle:
+
+```sh
+python3 -m cli run --workspace . --prompt "..." \
+  --run-evidence-dir ./evidence/run-1 --require-evidence
+python3 -m cli evidence inspect ./evidence/run-1 --json
+```
+
+The bundle chains run configuration, permission decisions, tool outcomes,
+checkpoints, verification/postconditions, egress decisions, delegation, and the
+terminal result without copying prompts, raw arguments, or tool bodies.
+`--require-evidence` makes a capture failure end as
+`error_evidence_incomplete` (exit 8); omit it to preserve the business result
+while reporting the incomplete bundle in `RunReport.evidence`. Unsigned bundles
+are structurally verifiable, not authenticated; use a sealed run receipt when
+authenticity matters.
+
 ## 7. Make "it says it finished" not the evidence
 
 ```sh
