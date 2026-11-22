@@ -153,7 +153,7 @@ Measured with the cache-free probe, at the pinned commit and at HEAD.
 | slice | module | test | pinned k/3 | pinned commit | HEAD k/3 | first-3 constructs |
 |---|---|---|---|---|---|---|
 | `actionable-digest` | `actionable_digest.py` | `test_actionable_digest.py` | **3/3** | `6c894ba9` | 3/3 | lt@118 lt@119 or@120 |
-| `agent-handoff` | `agent_handoff.py` | `test_agent_handoff.py` | **3/3** | `249f9a5c` | 3/3 | gt@214 gt@226 gt@236 |
+| `agent-handoff` | `agent_handoff.py` | `test_agent_handoff.py` | **0/3** | `249f9a5c` | 0/3 | gt@214 gt@226 gt@236 |
 | `ageofagents` | `ledger_concurrency.py` | `test_ledger_concurrency.py` | **3/3** | `b970b457` | 3/3 | or@302 eq@390 or@475 |
 | `anthropic-effort-scaling` | `effort_scaling.py` | `test_effort_scaling.py` | **3/3** | `9b00638e` | 3/3 | lt@174 or@174 lt@180 |
 | `asinhhc` | `key_custody.py` | `test_key_custody.py` | **3/3** | `ddbd2c5a` | 3/3 | lt@193 eq@286 or@336 |
@@ -161,7 +161,7 @@ Measured with the cache-free probe, at the pinned commit and at HEAD.
 | `autogen-speaker-selector` | `speaker_selector.py` | `test_speaker_selector.py` | **3/3** | `8a3bfbc5` | 3/3 | gt@125 gt@132 or@141 |
 | `c52` | `grant_pin_ledger.py` | `test_grant_pin_ledger.py` | **3/3** | `0dc81ceb` | 3/3 | eq@139 eq@142 gt@143 |
 | `c54` | `deny_hotpath.py` | `test_deny_hotpath.py` | **3/3** | `a1c7e688` | 3/3 | retF@117 or@247 gt@249 |
-| `c58` | `bash_parser.py` | `test_bash_parser.py` | **3/3** | `37c0a2f3` | 3/3 | gt@127 retT@128 gt@129 |
+| `c58` | `bash_parser.py` | `test_bash_parser.py` | **0/3** | `37c0a2f3` | 0/3 | gt@127 retT@128 gt@129 |
 | `cost-per-delivery` | `cost_per_delivery.py` | `test_cost_per_delivery.py` | **3/3** | `288799f2` | 3/3 | or@208 or@215 lt@220 |
 | `cwl-episode-eviction` | `episode_eviction.py` | `test_episode_eviction.py` | **3/3** | `5e4e66d4` | 3/3 | eq@182 eq@186 eq@219 |
 | `deterministic-gate-score` | `deterministic_gate_score.py` | `test_deterministic_gate_score.py` | **3/3** | `c08a86ad` | 3/3 | or@155 or@159 or@197 |
@@ -198,7 +198,7 @@ Measured with the cache-free probe, at the pinned commit and at HEAD.
 | `silent-failure-detector` | `silent_failure_detector.py` | `test_silent_failure_detector.py` | **3/3** | `8caf8742` | 3/3 | eq@157 and@159 retT@188 |
 | `slice1` | `—` | `—` | **SKIP** | `—` | SKIP | — |
 | `slice2` | `code_task.py` | `test_code_task.py` | **3/3** | `7faa3e43` | 3/3 | or@133 or@142 or@144 |
-| `slice3` | `bash_parser.py` | `test_bash_parser.py` | **3/3** | `986d7892` | 3/3 | gt@117 retT@118 gt@119 |
+| `slice3` | `bash_parser.py` | `test_bash_parser.py` | **0/3** | `986d7892` | 0/3 | gt@117 retT@118 gt@119 |
 | `slice4` | `—` | `—` | **SKIP** | `—` | SKIP | — |
 | `slice5` | `blind_rerunner.py` | `test_blind_rerunner.py` | **3/3** | `9955f1dc` | 3/3 | or@47 or@150 retT@158 |
 | `slice6` | `egress_client.py` | `test_egress_client.py` | **3/3** | `a08c983a` | 3/3 | eq@61 eq@63 eq@66 |
@@ -364,13 +364,13 @@ same format as the surviving manifests.  The module/test pairing that
 | `audit-head` | `audit_head_holder.py` | `test_audit_head_holder.py` | SKIP | **0/3** |
 | `c52` | `grant_pin_ledger.py` | `test_grant_pin_ledger.py` | SKIP | **1/3** |
 | `c54` | `deny_hotpath.py` | `test_deny_hotpath.py` | SKIP | **2/3** |
-| `c58` | `bash_parser.py` | `test_bash_parser.py` | SKIP | **3/3** |
+| `c58` | `bash_parser.py` | `test_bash_parser.py` | SKIP | **0/3** |
 | `diviner` | `scope_qualifier.py` | `test_scope_qualifier.py` | SKIP | **0/3** |
 | `e2b` | `egress_client.py` | `test_egress_client.py` | SKIP | **0/3** |
 | `horizon` | `long_horizon.py` | `test_long_horizon.py` | SKIP | **1/3** |
 | `langgraph` | `durable_resume.py` | `test_durable_resume.py` | SKIP | **2/3** |
 | `slice2` | `code_task.py` | `test_code_task.py` | SKIP | **0/3** |
-| `slice3` | `bash_parser.py` | `test_bash_parser.py` | SKIP | **3/3** |
+| `slice3` | `bash_parser.py` | `test_bash_parser.py` | SKIP | **0/3** |
 | `slice5` | `blind_rerunner.py` | `test_blind_rerunner.py` | SKIP | **3/3** |
 | `slice6` | `egress_client.py` | `test_egress_client.py` | SKIP | **0/3** |
 | `unwind` | `shutdown_unwind.py` | `test_shutdown_unwind.py` | SKIP | **1/3** |
@@ -392,6 +392,15 @@ and why" into the report's OPEN section and **wait for the
 coordinator's reply**.  That is what §8 does.  These five are
 **measured, reproducible 0/3** (each run twice, identical numbers), so
 the request is concrete.
+
+**AMENDED 2026-11-22 (e) -- `c58` and `slice3`'s 3/3 in this table was
+FALSE.**  This table's "pinned k/3 after" was measured with the same
+probe that ran `python -m unittest <module>`, and `test_bash_parser.py`
+is **pytest-style** -- 42 standalone functions, no `TestCase` class --
+so unittest collected **zero** tests from it and every mutant was
+reported killed by the exit code.  Re-measured at each slice's own
+pinned commit with the fixed probe, both measure **0/3**: all three of
+their listed constructs SURVIVE.  See §8's amendment (e).
 
 ### 4.2 The four naturally N/A slices
 
@@ -645,7 +654,9 @@ a separate request, and each needed its own test file.
 **AMENDED 2026-11-22 (d) -- every weak row was lifted, and the table was
 stale.**  Re-measuring each slice's FIRST THREE constructs at its
 CURRENT pinned commit, with the current probe, gives **3/3 for all 24
-weak rows**:
+weak rows** (the re-measurement covered only those 24, so it says
+nothing about the rest of the table -- and amendment (e) below shows
+what a re-measurement that *did* cover the rest of the table found):
 
 | slice | table said | re-measured |
 |---|---|---|
@@ -701,6 +712,132 @@ touched the slice's module or test file (the D-23 patch, which is in
 the shipped `b173-mutant.sh`).  That is why a lift committed under the
 ORIGINAL slug is both necessary and sufficient: the pin finds it, and
 no phantom `mutant-lift-*` slice is created for the referee to judge.
+
+**AMENDED 2026-11-22 (e) -- three rows of §2 were FALSE, not stale.**
+
+The re-measurement above used the *fixed* probe.  That probe runs
+**pytest**, not unittest -- and the difference is not a detail, because
+six of the sixty-four rows in §2 are measured against a suite that
+**unittest cannot collect a single test from**:
+
+| slice | suite | unittest collects | the table said | measured |
+|---|---|---|---|---|
+| `agent-handoff` | `test_agent_handoff.py` | **0** of 40 | 3/3 | **0/3** |
+| `c58` | `test_bash_parser.py` | **0** of 42 | 3/3 | **0/3** |
+| `slice3` | `test_bash_parser.py` | **0** of 42 | 3/3 | **0/3** |
+| `slice4` | `test_alert_trigger_registry.py` | **0** of 10 | SKIP | 3/4 |
+| `toolfail` | `test_tool_failure.py` | **0** of 19 | 3/3 | 3/3 |
+| `lightningzero` | `test_coverage_manifest.py` | **0** of 24 | 3/3 | 3/3 |
+| `slice5` | `test_blind_rerunner.py` | **0** of 13 | 3/3 | 3/3 |
+
+These suites are **pytest-style**: standalone module-level `test_*`
+functions and no `TestCase` class.  unittest's loader collects zero
+tests from such a file and exits 5 ("NO TESTS RAN"), and the probe of
+the day read any non-zero exit as "the mutant was KILLED".  So the
+whole 3/3 was manufactured by a suite that ran nothing.
+
+**It pointed the STRONGER way**, which is why nothing else caught it: a
+false kill looks like evidence of coverage where there is none.  It is
+the mirror image of the stale-bytecode false kill, which looks like
+survival where there is coverage.
+
+**The rows that were false.**  For `agent-handoff`, `c58` and `slice3`
+the three constructs §2 lists **all SURVIVE**:
+
+| slice | §2's constructs | verdict |
+|---|---|---|
+| `agent-handoff` | `gt@214` `gt@226` `gt@236` | all SURVIVED |
+| `c58` | `gt@127` `retT@128` `gt@129` | all SURVIVED |
+| `slice3` | `gt@117` `retT@118` `gt@119` | all SURVIVED |
+
+and for `c58` and `slice3` that is true **at their own pinned commits
+too** (`37c0a2f3` and `986d7892`, re-measured with the fixed probe):
+`slice3` measures 54/90 and `c58` 70/115, with all three listed
+constructs surviving.  So those 3/3 claims were **never true** -- they
+were not stale, they were wrong.
+
+**The rows that were lucky.**  `toolfail` and `lightningzero` also ran
+against a blind suite, but their three listed constructs genuinely
+KILL under pytest, so their 3/3 stands -- for the wrong reason, and
+the whole-file numbers are lower than the old census recorded
+(`toolfail` 11/11 -> **10/11**; `lightningzero` 24/24 -> **12/24**).
+`slice5` is the third such row, and the cleanest control: blind suite,
+perfect old score, and the fixed probe confirms **13/13**.  A defect
+that made every blind row fall would have been a defect in the
+slices, not in the runner.  It did not, so what was wrong was the
+**runner**.
+
+**The denominator was wrong too.**  The old probe stopped counting
+constructs at a different point: `c58`'s old row read 63/63 where the
+module has **115** mutable constructs.  The false kill was not only in
+the verdict.
+
+**The old census, row by row.**
+
+| slice | old census (unittest) | fixed probe (pytest) |
+|---|---|---|
+| `agent-handoff` | 38/38 | **22/38** |
+| `c58` | 63/63 | **70/115** |
+| `slice3` | 63/63 | **70/115** |
+| `slice4` | 4/4 | **3/4** |
+| `toolfail` | 11/11 | **10/11** |
+| `lightningzero` | 24/24 | **12/24** |
+| `slice5` | 13/13 | 13/13 |
+
+**Six of the seven re-measured rows changed.**  Six of the seven blind
+rows had been a **perfect score** under the old census -- which is what
+a false kill looks like from the outside.  Five fell outright (the
+killed count dropped: `agent-handoff` 38 -> 22, `slice4` 4 -> 3,
+`toolfail` 11 -> 10, `lightningzero` 24 -> 12); `c58` and `slice3` did
+not lose kills but gained **survivors** (63 killed of 63 seen became
+70 killed of **115** seen -- the old probe stopped counting constructs
+halfway, and every construct past that point was reported killed
+without being measured).  The seventh, `slice5`, is the **control**:
+it was blind, it was a perfect score, and the fixed probe confirms
+**13/13** -- so the defect was the *runner*, not the slices.
+
+**What is now checked.**  `tests/test_unittest_blind_slices.py` pins
+four things:
+
+* §2's k/3 must follow the **per-construct verdicts** of a
+  re-measurement, not merely be a number;
+* a slice whose suite unittest collects nothing from may carry a 3/3
+  claim **only if a re-measurement backs it** -- which is the rule
+  that catches `agent-handoff`, `c58` and `slice3` and lets `slice5`
+  through;
+* the re-measurement must **differ** from the old census, so it cannot
+  be a copy of the artifact it is checking;
+* a slice whose old score was perfect and whose fixed score is *also*
+  perfect must have its listed constructs confirmed KILLED individually
+  -- so "the old number was perfect" is a fact about the runner, not an
+  excuse for the slice.
+
+The blind-suite detection is by **unittest's own loader**, not by a
+heuristic about the file's text.  The two disagree: the loader says
+**815** files, a text heuristic says 811.  The loader is the authority
+the old probe used, so the loader is the authority here.
+
+**The table now carries THREE rows below the 3/3 line**, and the prose
+must say so: `agent-handoff`, `c58` and `slice3`.  They are the three
+rows amendment (e) corrected.  The other twenty-one re-measured rows
+stand at 3/3, and the remaining rows of the table are covered by the
+first-three-scope re-measurement (24 rows) and by the per-construct
+verdicts (7 rows).
+
+**What these three rows mean.**  They are not "work to do" in the sense
+of amendment (d)'s twenty-four: those twenty-four were *stale* -- the
+lifts had landed and the table did not know.  These three are
+*wrong*: the measurement that produced their 3/3 could not see the
+suite it was measuring against, so it never measured them at all.  The
+honest question for each of them is **"does the slice's suite catch
+these constructs?"**, and the answer for all three is **no**.
+
+That is a finding about the *suites*, not about the lifts.  The three
+slices' modules are unchanged by this slice; what is missing is test
+coverage for three constructs each, in the shape §3.1-§3.3 already
+prescribes (both wrong ways, the exact limit and limit +/- 1, the False
+path itself).  Until that exists, the three rows stay below the line
+and the table says so.
 
 ## 9. RESOLVED -- the equivalence records now have non-vacuity controls
 

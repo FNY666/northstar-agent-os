@@ -107,15 +107,15 @@ script can print.
 |---|---|---|---|---|
 | `slice1` | FAIL (4/9, 3 skipped) | REPORT, CANARY, FABLE_VERIF, FULL_SUITE, BENCH | full report written from the slice's own commits `c780c6db`/`985d9efa` + session `cda665a1`; FABLE VERIFICATION section; sourced `Ran 19388` line; `161/169` line; bench product; manifest + mutant probe (2/3) | **FAIL** (10/11, 1 skipped) — only CANARY left (pending coordinator canary) |
 | `slice2` | FAIL (4/10, 2 skipped) | REPORT, CANARY, FABLE_VERIF, FULL_SUITE, BENCH, MUTANT | full report written from commit `7faa3e43`; FABLE VERIFICATION section (Codex-implemented: no CC session exists, stated as such); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (0/3) | **FAIL** (9/11, 1 skipped) — CANARY (pending coordinator canary) + MUTANT (0/3 survived) |
-| `slice3` | FAIL (5/10, 2 skipped) | REPORT, CANARY, FABLE_VERIF, FULL_SUITE, BENCH | full report written from commit `986d7892`; FABLE VERIFICATION section (session `ca78c9dd`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (3/3) | **FAIL** (10/11, 1 skipped) — only CANARY left (pending coordinator canary) |
-| `slice4` | FAIL (0/9, 3 skipped) | COMMIT, REPORT, CANARY, FABLE_VERIF, FULL_SUITE, BENCH, NEW_TESTS, WORKTREE_CLEAN, TESTS_RAN | standalone empty commit `c42bae66` `B173 slice4: consolidate the slice-4 commits under one slug prefix`; full report from the slice-4 commits + the coordinator's follow-up summary; FABLE VERIFICATION section; sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (3/3) | **FAIL** (8/10, 2 skipped) — CANARY (pending coordinator canary) + NEW_TESTS (the ten test methods live in the `(part 2)` commit, which the script's slug-scoped aggregation does not reach) |
-| `slice5` | FAIL (6/10, 2 skipped) | CANARY, FABLE_VERIF, FULL_SUITE, BENCH | FABLE VERIFICATION section (session `4d909e3b`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (3/3) | **FAIL** (10/11, 1 skipped) — only CANARY left (pending coordinator canary) |
+| `slice3` | FAIL (5/10, 2 skipped) | REPORT, CANARY, FABLE_VERIF, FULL_SUITE, BENCH | full report written from commit `986d7892`; FABLE VERIFICATION section (session `ca78c9dd`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (0/3, AMENDED 2026-11-22) | **FAIL** (10/11, 1 skipped) — only CANARY left (pending coordinator canary) |
+| `slice4` | FAIL (0/9, 3 skipped) | COMMIT, REPORT, CANARY, FABLE_VERIF, FULL_SUITE, BENCH, NEW_TESTS, WORKTREE_CLEAN, TESTS_RAN | standalone empty commit `c42bae66` `B173 slice4: consolidate the slice-4 commits under one slug prefix`; full report from the slice-4 commits + the coordinator's follow-up summary; FABLE VERIFICATION section; sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (3/3, AMENDED 2026-11-22) | **FAIL** (8/10, 2 skipped) — CANARY (pending coordinator canary) + NEW_TESTS (the ten test methods live in the `(part 2)` commit, which the script's slug-scoped aggregation does not reach) |
+| `slice5` | FAIL (6/10, 2 skipped) | CANARY, FABLE_VERIF, FULL_SUITE, BENCH | FABLE VERIFICATION section (session `4d909e3b`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (3/3, AMENDED 2026-11-22) | **FAIL** (10/11, 1 skipped) — only CANARY left (pending coordinator canary) |
 | `slice6` | FAIL (4/10, 2 skipped) | REPORT, CANARY, FABLE_VERIF, FULL_SUITE, BENCH, MUTANT | full report written from the slice-6 commits; FABLE VERIFICATION section (Codex-implemented: no CC session exists, stated as such); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (0/3) | **FAIL** (9/11, 1 skipped) — CANARY (pending coordinator canary) + MUTANT (0/3 survived) |
 | `runtime-registration` | FAIL (3/9, 3 skipped) | REPORT, CANARY, FABLE_VERIF, FULL_SUITE, BENCH, TESTS_RAN | full report written from commits `5708edb3`/`f197c6f2`/`77332a31`/`adcaad02`; FABLE VERIFICATION section (session `60a92cf5`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (3/3) | **FAIL** (9/11, 1 skipped) — CANARY (pending coordinator canary) + TESTS_RAN (the suite is red on 3 pre-existing `merged-tree-review` failures, not this slice's) |
 | `audit-head` | FAIL (5/10, 2 skipped) | CANARY, FABLE_VERIF, FULL_SUITE, BENCH, MUTANT | FABLE VERIFICATION section (session `b923bdb8`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (0/3) | **FAIL** (9/11, 1 skipped) — CANARY (pending coordinator canary) + MUTANT (0/3 survived) |
 | `c52` | FAIL (7/10, 2 skipped) | CANARY, FABLE_VERIF, FULL_SUITE | FABLE VERIFICATION section (session `6fdf83a2`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (1/3) | **FAIL** (10/11, 1 skipped) — only CANARY left (pending coordinator canary) |
 | `c54` | FAIL (8/11, 1 skipped) | CANARY, FABLE_VERIF, FULL_SUITE | FABLE VERIFICATION section (session `6db4dda9`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (2/3) | **FAIL** (10/11, 1 skipped) — only CANARY left (pending coordinator canary) |
-| `c58` | FAIL (7/10, 2 skipped) | CANARY, FABLE_VERIF, FULL_SUITE | FABLE VERIFICATION section (session `fd5920eb`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (3/3) | **FAIL** (10/11, 1 skipped) — only CANARY left (pending coordinator canary) |
+| `c58` | FAIL (7/10, 2 skipped) | CANARY, FABLE_VERIF, FULL_SUITE | FABLE VERIFICATION section (session `fd5920eb`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (0/3, AMENDED 2026-11-22) | **FAIL** (10/11, 1 skipped) — only CANARY left (pending coordinator canary) |
 | `diviner` | FAIL (7/10, 2 skipped) | CANARY, FABLE_VERIF, MUTANT | FABLE VERIFICATION section (session `cd6f8952`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (0/3) | **FAIL** (9/11, 1 skipped) — CANARY (pending coordinator canary) + MUTANT (0/3 survived) |
 | `e2b` | FAIL (6/10, 2 skipped) | CANARY, FABLE_VERIF, FULL_SUITE, MUTANT | FABLE VERIFICATION section (session `95b89bb3`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (0/3) | **FAIL** (9/11, 1 skipped) — CANARY (pending coordinator canary) + MUTANT (0/3 survived) |
 | `unwind` | FAIL (7/10, 2 skipped) | CANARY, FABLE_VERIF, FULL_SUITE | FABLE VERIFICATION section (session `3fae30b8`); sourced `Ran 19388`; `161/169`; bench product; manifest + mutant probe (1/3) | **FAIL** (10/11, 1 skipped) — only CANARY left (pending coordinator canary) |
@@ -258,10 +258,10 @@ than a remembered one.
 
 | slice | module probed | result |
 |---|---|---|
-| `c58` | `bash_parser.py` | **3/3** |
-| `slice3` | `bash_parser.py` | **3/3** |
-| `slice4` | `alert_trigger_registry.py` | **3/3** |
-| `slice5` | `blind_rerunner.py` | **3/3** |
+| `c58` | `bash_parser.py` | **0/3** (AMENDED 2026-11-22 -- see below) |
+| `slice3` | `bash_parser.py` | **0/3** (AMENDED 2026-11-22 -- see below) |
+| `slice4` | `alert_trigger_registry.py` | **3/3** (AMENDED 2026-11-22 -- whole-file 3/4) |
+| `slice5` | `blind_rerunner.py` | **3/3** (AMENDED 2026-11-22 -- whole-file 13/13) |
 | `runtime-registration` | `runtime_registration.py` | **3/3** |
 | `stale-checkpoint-gate` | `stale_checkpoint_gate.py` | **3/3** |
 | `false-green-detector` | `false_green_detector.py` | **3/3** |
@@ -324,6 +324,40 @@ this slice measured the truth:
    (slice1 and slice2 both extend it) and `slice6` probes `egress_client.py`,
    the *client* half of a slice whose main body is in the egress sidecar
    component, which the probe does not reach.
+
+### AMENDED 2026-11-22 -- four of these rows were measured with a runner that saw nothing
+
+This census was measured by `b173-mutant.sh`, which runs the slice's suite
+through **unittest**.  unittest's loader collects only test methods inside
+`TestCase` classes; the runtime's suites are mostly standalone module-level
+`test_*` functions.  For a file unittest collects nothing from, the runner
+exits 5 ("NO TESTS RAN") and the probe read the non-zero exit as "the mutant
+was KILLED".
+
+Measured by **unittest's own loader**, four of the rows in the table above
+name a suite the runner could not see:
+
+| slice | suite | unittest collects | old census | fixed probe (pytest) |
+|---|---|---|---|---|
+| `c58` | `test_bash_parser.py` | **0** of 42 | 3/3 | **0/3** (first three) |
+| `slice3` | `test_bash_parser.py` | **0** of 42 | 3/3 | **0/3** (first three) |
+| `slice4` | `test_alert_trigger_registry.py` | **0** of 10 | 3/3 | 3/4 |
+| `slice5` | `test_blind_rerunner.py` | **0** of 13 | 3/3 | 13/13 |
+
+For `c58` and `slice3` the false kill is total: all three of their listed
+constructs SURVIVE at the slice's **own pinned commit** (`37c0a2f3` and
+`986d7892`), so the 3/3 was never true.  For `slice4` and `slice5` the
+listed three constructs do die, so the 3/3 claim survives -- but the
+**denominator** was wrong (63 seen against 115 real for `c58`), and the
+claim rested on a suite that ran nothing.
+
+`slice5` is the control: blind suite, perfect old score, and the fixed
+probe confirms 13/13.  So what was wrong was the **runner**, not the
+slices.
+
+This is the same defect as
+`docs/design/mutant-evidence-closure.md` §8's AMENDED (e), measured
+against the same trees with the same probe.
 
 The task book also says the mutant survivors are the `mutant-evidence-closure`
 slice's job: *"探针打中什么、要不要修，是 mutant-evidence-closure 片的活。

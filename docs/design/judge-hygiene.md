@@ -722,7 +722,7 @@ crosses zero.
 |---|---|---|---|---|---|---|
 | `acceptance-conformance` | 0/3 | 1/3 | 1/3 | 1/3 | 1/3 | **FAIL -> PASS** |
 | `actionable-digest` | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | - |
-| `agent-handoff` | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | - |
+| `agent-handoff` | 3/3 | 3/3 | 3/3 | 3/3 | **0/3** | **AMENDED 2026-11-22 -- the runner saw no tests** |
 | `ageofagents` | 1/3 | 1/3 | 1/3 | 1/3 | 1/3 | - |
 | `anthropic-effort-scaling` | 1/3 | 1/3 | 1/3 | 1/3 | 1/3 | - |
 | `artifact-completion` | - | - | - | - | - | - |
@@ -746,7 +746,7 @@ crosses zero.
 | `langgraph-durability` | 1/3 | 1/3 | 1/3 | 1/3 | 1/3 | - |
 | `langgraph-retry-clears-writes` | 2/3 | 2/3 | 2/3 | 2/3 | 2/3 | - |
 | `leased-task-claim` | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | - |
-| `lightningzero` | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | - |
+| `lightningzero` | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | AMENDED 2026-11-22 -- blind suite, but the fixed probe confirms the three constructs |
 | `merged-tree-review` | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | - |
 | `msaf-lineage` | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | - |
 | `mutant-evidence-closure` | 0/3 | 0/3 | 0/3 | 0/3 | 0/3 | - |
@@ -772,7 +772,7 @@ crosses zero.
 | `tombstone-mutant-blindspots` | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | - |
 | `tombstone` | 0/3 | 0/3 | 0/3 | 0/3 | 3/3 | **FAIL -> PASS** |
 | `tool-output-filter` | 2/3 | 2/3 | 2/3 | 2/3 | 2/3 | - |
-| `toolfail` | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | - |
+| `toolfail` | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | AMENDED 2026-11-22 -- blind suite, but the fixed probe confirms the three constructs |
 | `turn-truncation` | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | - |
 | `verifiability-tier` | 2/3 | 2/3 | 2/3 | 2/3 | 2/3 | - |
 | `vina-mutant-blindspots` | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | - |
@@ -835,6 +835,53 @@ Before the patch, 10 of 58 slices gave **different** numbers for the
 default and the cache-free run of the *same* code.  After the patch,
 **0 of 58** do.  That is this slice's real output: not a better number,
 but a number that is the same every time it is measured.
+
+### 8.5 AMENDED 2026-11-22 -- this table's runner was ALSO wrong
+
+§4b.7 above fixed the probe's **cache** dependence.  It did not fix the
+probe's **runner**: at the time this table was measured, the probe ran
+`python -m unittest <module>`, and unittest collects only test methods
+inside `TestCase` classes.
+
+Three rows in this table are measured against a suite unittest could
+**not see at all**:
+
+| slice | suite | unittest collects | this table says | fixed probe (pytest) |
+|---|---|---|---|---|
+| `agent-handoff` | `test_agent_handoff.py` | **0** of 40 | 3/3 | **0/3** (first three) |
+| `lightningzero` | `test_coverage_manifest.py` | **0** of 24 | 3/3 | 3/3 (whole-file 12/24) |
+| `toolfail` | `test_tool_failure.py` | **0** of 19 | 3/3 | 3/3 (whole-file 10/11) |
+
+Those suites are pytest-style -- standalone module-level `test_*`
+functions and no `TestCase` class -- so unittest's loader collected
+**zero** tests, exited 5 ("NO TESTS RAN"), and the probe read the
+non-zero exit as "the mutant was KILLED".  The 3/3 in those three rows
+was the exit code, not a measurement.
+
+For `agent-handoff` that is a **total** false kill: all three of its
+listed constructs (`gt@214 gt@226 gt@236`) SURVIVE, both at HEAD and at
+the slice's own pinned commit `249f9a5c`.  Its row above is now 0/3.
+For `lightningzero` and `toolfail` the listed three constructs do die
+under the fixed probe, so their 3/3 stands -- but it now rests on a
+measurement rather than on an exit code, and the whole-file counts
+(12/24 and 10/11) show the suite does not cover the whole file.
+
+**Two more rows of the same shape are not in this table at all**,
+because this table's slice set is not the census's: `c58` and
+`slice3` (both `test_bash_parser.py`, 0 of 42) are in
+`docs/design/mutant-evidence-closure.md` §2, where both are now
+recorded as **0/3**.
+
+**What this means for the numbers in this table.**  Every row whose
+suite unittest can see is unaffected -- the runner change only moves
+the rows above.  And the direction is fixed: the false kills all
+pointed the *stronger* way, so a corrected number can only be LOWER
+than the one here.  Two of the three do drop below 3/3, and
+`agent-handoff`'s three listed constructs all SURVIVE.
+
+The suite-blindness is now measured by **unittest's own loader**, and
+the check lives in
+`components/northstar-agent-runtime/tests/test_unittest_blind_slices.py`.
 
 ## 9. The conformance test
 
