@@ -248,6 +248,167 @@ class OsSandboxProbeTests(unittest.TestCase):
         self.assertIn("disabled by operator", launch.call_args.kwargs["detail"])
 
 
+class SeccompFilterFdOffsetTests(unittest.TestCase):
+    """The BPF filter fd must be rewound before bwrap reads it.
+
+    ``bwrap --seccomp FD`` reads the filter from the fd's CURRENT offset.
+    A write leaves that offset at the end of the file, so an unrewound fd
+    hands bwrap ZERO bytes: it installs an empty BPF program, and
+    ``prctl(PR_SET_SECCOMP)`` rejects that with EINVAL. The symptom is not
+    a wrong filter but a refused one, so the whole bwrap backend dies on
+    EVERY host -- measured: the probe exits 1 with "reported EINVAL"
+    without the rewind and exits 0 with it.
+    """
+
+    class FakeProcess:
+        """A stand-in for the launched child; never actually spawned."""
+
+        pid = 4242
+        returncode = 0
+
+        def communicate(self, *args, **kwargs):
+            return ("", "")
+
+        def poll(self):
+            return 0
+
+        def wait(self, *args, **kwargs):
+            return 0
+
+        def kill(self):
+            return None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def _filter_bytes(self) -> bytes:
+        from tools.seccomp import build_default_filter
+
+        return build_default_filter()
+
+    def test_an_unrewritten_filter_fd_hands_bwrap_zero_bytes(self):
+        """The defect, reproduced: the fd's offset is at the end."""
+        with tempfile.TemporaryFile() as handle:
+            handle.write(self._filter_bytes())
+            handle.flush()
+            fd = handle.fileno()
+            self.assertEqual(os.lseek(fd, 0, os.SEEK_CUR), len(self._filter_bytes()))
+            os.lseek(fd, 0, os.SEEK_SET)
+            self.assertEqual(len(os.read(fd, 4096)), len(self._filter_bytes()))
+
+    def test_the_seam_returns_a_fd_that_yields_the_whole_filter(self):
+        """The seam must hand over a fd bwrap can read the filter FROM."""
+        from tools.os_sandbox import _seccomp_filter_fd
+        from tools.seccomp import build_default_filter
+
+        with tempfile.TemporaryFile() as handle:
+            fd = _seccomp_filter_fd(handle)
+            self.assertEqual(os.lseek(fd, 0, os.SEEK_CUR), 0)
+            self.assertEqual(len(os.read(fd, 4096)), len(build_default_filter()))
+
+    def test_the_probe_site_hands_over_a_readable_filter(self):
+        """The live capability probe must hand bwrap a readable filter."""
+        from tools import os_sandbox
+
+        captured: dict[str, int] = {}
+
+        def fake_probe(path, *, cap_drop=False, seccomp_fd=None):
+            if seccomp_fd is not None:
+                captured["bytes"] = len(os.read(seccomp_fd, 4096))
+            return subprocess.CompletedProcess([], 0, "", "")
+
+        with tempfile.TemporaryDirectory() as root, patch.object(
+            os_sandbox, "_probe_bwrap_feature", side_effect=fake_probe
+        ), patch.object(
+            os_sandbox.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "", "")
+        ):
+            probe_capabilities(force=True, bwrap_bin="/fake/bwrap")
+        self.assertIn("bytes", captured, "the seccomp probe did not run")
+        from tools.seccomp import build_default_filter
+
+        self.assertEqual(captured["bytes"], len(build_default_filter()))
+
+    def test_the_run_site_hands_over_a_readable_filter(self):
+        """The bwrap run site must hand bwrap a readable filter."""
+        from tools import os_sandbox
+
+        caps = SandboxCapabilities(
+            bwrap_path="/fake/bwrap", bwrap_usable=True, bwrap_detail="base probe passed",
+            bwrap_cap_drop=True, bwrap_seccomp=True, preferred="bwrap",
+        )
+        captured: dict[str, int] = {}
+
+        def fake_popen(argv, **kwargs):
+            for fd in kwargs.get("pass_fds", ()):  # read the filter as bwrap would
+                captured.setdefault("bytes", len(os.read(fd, 4096)))
+            return FakeProcess()
+
+        with tempfile.TemporaryDirectory() as root, patch.object(
+            os_sandbox, "_run_popen", side_effect=fake_popen
+        ):
+            request = SandboxRequest(argv=("true",), cwd=Path(root), workspace=Path(root))
+            try:
+                run_sandboxed(request, backend="bwrap", capabilities=caps)
+            except Exception:
+                pass
+        self.assertIn("bytes", captured, "no filter fd was handed to the launcher")
+        from tools.seccomp import build_default_filter
+
+        self.assertEqual(captured["bytes"], len(build_default_filter()))
+
+
+class RuntimeReadPathTests(unittest.TestCase):
+    """Every Landlock rule path must exist on THIS host.
+
+    The loader opens each rule path with ``O_PATH``; a path that does not
+    exist raises FileNotFoundError inside the loader and kills every tool
+    subprocess. ``/lib64`` is x86-only, so an unfiltered system read-path
+    list makes the whole process backend unusable on aarch64 -- measured:
+    the loader died with "No such file or directory: '/lib64'".
+    """
+
+    def test_the_system_read_paths_are_filtered_to_the_ones_that_exist(self):
+        from tools.sandbox import _SYSTEM_READ_PATHS, _runtime_read_paths
+
+        runtime = _runtime_read_paths()
+        for path in runtime:
+            self.assertTrue(os.path.isdir(path), f"rule path does not exist: {path!r}")
+        for path in _SYSTEM_READ_PATHS:
+            if os.path.isdir(path):
+                self.assertIn(path, runtime)
+
+    def test_a_system_path_that_does_not_exist_is_dropped(self):
+        from tools import sandbox
+
+        original = sandbox._SYSTEM_READ_PATHS
+        try:
+            sandbox._SYSTEM_READ_PATHS = (*original, "/nonexistent-northstar-probe")
+            runtime = sandbox._runtime_read_paths()
+            self.assertNotIn("/nonexistent-northstar-probe", runtime)
+            self.assertTrue(all(os.path.isdir(path) for path in runtime))
+        finally:
+            sandbox._SYSTEM_READ_PATHS = original
+
+    def test_the_loader_can_open_every_rule_path_it_is_given(self):
+        """The rule list the loader receives must be openable."""
+        from tools.pledge import filesystem_rules
+        from tools.sandbox import _runtime_read_paths
+
+        rules = filesystem_rules(
+            frozenset({"stdio", "rpath", "wpath", "cpath"}),
+            workspace="/tmp",
+            tmpdir="/tmp",
+        )
+        for rule in rules:
+            self.assertTrue(
+                os.path.isdir(rule.path),
+                f"loader would fail to open rule path {rule.path!r}",
+            )
+
+
 class OsSandboxProcessBackendTests(RuntimeTestCase):
     def setUp(self) -> None:
         super().setUp()
