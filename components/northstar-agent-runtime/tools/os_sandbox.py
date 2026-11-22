@@ -213,6 +213,28 @@ class SandboxResult:
 _CAP_CACHE: SandboxCapabilities | None = None
 
 
+def _seccomp_filter_fd(handle: Any) -> int:
+    """Write the BPF denylist into ``handle`` and return a READABLE fd.
+
+    ``bwrap --seccomp FD`` reads the filter from the fd's CURRENT offset.
+    The write below leaves that offset at the end of the file, so an
+    unrewound fd hands bwrap ZERO bytes: bwrap installs an empty BPF
+    program and ``prctl(PR_SET_SECCOMP)`` rejects that with EINVAL. The
+    symptom is a refused filter rather than a wrong one, so the whole
+    bwrap backend dies on every host.
+
+    Measured: without the rewind the live probe exits 1 with
+    "prctl(PR_SET_SECCOMP) reported EINVAL"; with it, exit 0.
+    """
+    import os as _os
+
+    handle.write(build_default_filter())
+    handle.flush()
+    fd = handle.fileno()
+    _os.lseek(fd, 0, _os.SEEK_SET)
+    return fd
+
+
 def _probe_bwrap_feature(
     path: str,
     *,
@@ -311,12 +333,9 @@ def probe_capabilities(*, force: bool = False, bwrap_bin: str | None = None) -> 
         except (OSError, subprocess.TimeoutExpired):
             cap_drop = False
         try:
-            from tools.seccomp import build_default_filter
-
             with tempfile.TemporaryFile() as filter_file:
-                filter_file.write(build_default_filter())
-                filter_file.flush()
-                seccomp_probe = _probe_bwrap_feature(path, seccomp_fd=filter_file.fileno())
+                filter_fd = _seccomp_filter_fd(filter_file)
+                seccomp_probe = _probe_bwrap_feature(path, seccomp_fd=filter_fd)
             seccomp_usable = seccomp_probe.returncode == 0
             seccomp_output = (seccomp_probe.stderr or seccomp_probe.stdout or "").strip().splitlines()
             seccomp_detail = (
@@ -1008,9 +1027,7 @@ def run_sandboxed(
                 prefix="seccomp-", suffix=".bpf", dir=str(tmpdir), delete=False
             )
             try:
-                seccomp_file.write(build_default_filter())
-                seccomp_file.flush()
-                seccomp_fd = seccomp_file.fileno()
+                seccomp_fd = _seccomp_filter_fd(seccomp_file)
                 pass_fds.append(seccomp_fd)
                 detail += "; seccomp denies network socket creation and escape syscalls (EPERM)"
             except Exception:
