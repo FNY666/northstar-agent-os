@@ -53,7 +53,12 @@ from typing import Any, Mapping
 
 from _version import __version__
 from tools.seccomp import prctl_loader_argv, validate_mode
-from tools.sandbox import landlock_abi_version, landlock_loader_argv, network_deny_profile
+from tools.sandbox import (
+    landlock_abi_version,
+    landlock_loader_argv,
+    _mcp_workspace_profile,
+    network_deny_profile,
+)
 from mcp_elicitation import (
     ACCEPT,
     CANCEL,
@@ -66,6 +71,7 @@ from mcp_negotiate import (
     LEGACY_VERSIONS,
     MAX_INPUT_ROUNDS,
     MODERN_VERSION,
+    RESULT_COMPLETE,
     RESULT_INPUT_REQUIRED,
     client_capabilities,
     decide_era,
@@ -88,6 +94,8 @@ MAX_UNTRUSTED_NOTIFICATION_BYTES = 64 * 1024
 MAX_SCHEMA_CHARS = 30_000           # one inputSchema
 MAX_TOOL_ANNOTATIONS_BYTES = 8 * 1024
 MAX_TOOLS_PER_SERVER = 25
+# Bound pagination even when a server keeps returning empty pages and fresh cursors.
+MAX_TOOL_LIST_PAGES = 25
 MAX_DESCRIPTION_CHARS = 600
 MIN_TIMEOUT_MS = 100
 MAX_TIMEOUT_MS = 300_000
@@ -124,6 +132,10 @@ _TOOL_PART_RE = re.compile(TOOL_NAME_PART_RE)
 
 class McpError(ValueError):
     """MCP transport, protocol, or configuration error. Operator-facing."""
+
+
+class _McpToolListError(McpError):
+    """The server returned an invalid or over-budget tools/list pagination chain."""
 
 
 def _strict_json_loads(raw: str, *, server: str) -> Any:
@@ -341,6 +353,7 @@ class McpStdioClient:
         cwd: str | None = None,
         seccomp: str = "auto",
         network: str = "denied",
+        filesystem: str = "unconfined",
     ) -> None:
         if not 100 <= timeout_ms <= MAX_TIMEOUT_MS:
             raise ValueError(f"--mcp-timeout-ms must be between {MIN_TIMEOUT_MS} and {MAX_TIMEOUT_MS}")
@@ -350,6 +363,7 @@ class McpStdioClient:
             raise ValueError("--mcp-max-rounds must be between 1 and 8")
         self.seccomp = validate_mode(seccomp)
         self.network = self._validate_network_mode(network)
+        self.filesystem = self._validate_filesystem_mode(filesystem)
         self.name = name
         self.command = list(command)
         self.timeout_ms = timeout_ms
@@ -405,6 +419,41 @@ class McpStdioClient:
         self._untrusted_notification_bytes = 0
         self._untrusted_notifications_dropped = 0
         self._info = {"name": "northstar-agent-runtime", "version": __version__}
+
+    def _list_all_tools(self) -> list[Any]:
+        """Fetch every MCP tools/list page under fixed page and tool-count caps."""
+        tools: list[Any] = []
+        params: dict[str, Any] = {}
+        seen_cursors: set[str] = set()
+        for _page_number in range(MAX_TOOL_LIST_PAGES):
+            listed = self._request("tools/list", params)
+            page = listed.get("tools")
+            if not isinstance(page, list):
+                raise _McpToolListError(
+                    f"mcp server {self.name!r}: tools/list must return an array"
+                )
+            if len(tools) + len(page) > MAX_TOOLS_PER_SERVER:
+                raise _McpToolListError(
+                    f"mcp server {self.name!r}: tools/list returned more than "
+                    f"{MAX_TOOLS_PER_SERVER} tools"
+                )
+            tools.extend(page)
+            cursor = listed.get("nextCursor")
+            if cursor is None:
+                return tools
+            if not isinstance(cursor, str):
+                raise _McpToolListError(
+                    f"mcp server {self.name!r}: tools/list nextCursor must be a string"
+                )
+            if cursor in seen_cursors:
+                raise _McpToolListError(
+                    f"mcp server {self.name!r}: tools/list repeated a pagination cursor"
+                )
+            seen_cursors.add(cursor)
+            params = {"cursor": cursor}
+        raise _McpToolListError(
+            f"mcp server {self.name!r}: tools/list exceeded the {MAX_TOOL_LIST_PAGES} page limit"
+        )
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -536,41 +585,57 @@ class McpStdioClient:
             raise ValueError('--mcp-network must be "denied" or "allowed"')
         return normalized
 
-    def _network_spec(self) -> dict:
-        """Landlock spec denying IP networking for this server, fail-closed.
+    @staticmethod
+    def _validate_filesystem_mode(mode: str) -> str:
+        normalized = str(mode or "").strip().lower()
+        if normalized not in {"unconfined", "workspace"}:
+            raise ValueError('--mcp-filesystem must be "unconfined" or "workspace"')
+        return normalized
 
-        Filesystem access is unchanged from running unconfined (the server
-        is third-party code living anywhere on disk); the *only* thing taken
-        away is TCP. Mode ``on`` inside the spec: a Landlock failure exits
-        instead of running the server unconfined.
-        """
+    def _network_spec(self) -> dict:
+        """Build the fail-closed Landlock profile selected for this server."""
+        if self.filesystem == "workspace":
+            try:
+                return _mcp_workspace_profile(self.workspace_root, network=self.network)
+            except ValueError as error:
+                raise McpError(f"mcp server {self.name!r}: {error}") from error
         spec = network_deny_profile()
         spec["mode"] = "on"
         return spec
 
     def _apply_network_policy(self, argv: list[str]) -> list[str]:
-        """Wrap the spawn argv with IP network denial when configured.
+        """Apply the requested network and optional filesystem policy.
 
-        ``denied`` (default) refuses to start where the denial cannot be
-        enforced for both TCP and UDP: that needs Landlock ABI 10+. The profile
-        also scopes abstract Unix sockets and denies pathname socket resolution
-        where supported. Running the server with
-        full host network after a warning would be a lie, so there is no
-        graceful degradation here -- only ``allowed`` opts out, explicitly.
+        Network denial still requires Landlock ABI 10+ for TCP and UDP. The
+        opt-in workspace filesystem boundary requires ABI 1+ and refuses to
+        start on any platform without Landlock. There is no fallback to an
+        unconfined server when either selected boundary cannot be enforced.
         """
-        if self.network == "allowed":
+        if self.network == "allowed" and self.filesystem == "unconfined":
             return argv
-        if not sys.platform.startswith("linux") or landlock_abi_version() < 10:
+
+        abi = landlock_abi_version()
+        minimum_abi = 10 if self.network == "denied" else 1
+        requirement = (
+            "--mcp-network denied requires Landlock ABI 10+ for TCP and UDP denial"
+            if self.network == "denied"
+            else "--mcp-filesystem workspace requires Landlock ABI 1+"
+        )
+        if not sys.platform.startswith("linux") or abi < minimum_abi:
+            if self.network == "denied":
+                raise McpError(
+                    f"mcp server {self.name!r}: {requirement} "
+                    f"(this host: {sys.platform}, ABI {abi}); pass --mcp-network allowed "
+                    "to opt out explicitly"
+                )
             raise McpError(
-                f"mcp server {self.name!r}: --mcp-network denied requires Linux "
-                f"with Landlock ABI 10+ for TCP and UDP denial (this host: {sys.platform}, "
-                f"ABI {landlock_abi_version()}); pass --mcp-network allowed to "
-                "opt out explicitly"
+                f"mcp server {self.name!r}: {requirement} "
+                f"(this host: {sys.platform}, ABI {abi}); pass "
+                "--mcp-filesystem unconfined to opt out explicitly"
             )
         # The policy loader is part of the trusted bootstrap chain; PATH may
         # contain server-controlled or user-writable entries.
-        python = sys.executable
-        return landlock_loader_argv(argv, self._network_spec(), python=python)
+        return landlock_loader_argv(argv, self._network_spec(), python=sys.executable)
 
     def _spawn_argv(self) -> list[str]:
         """Command argv with the seccomp-BPF denylist applied per the mode.
@@ -635,13 +700,7 @@ class McpStdioClient:
             self._negotiate()
             if self.modern and self._server_supports_tool_list_changed():
                 self.subscribe_list_changed()
-            listed = self._request("tools/list", {})
-            tools = listed.get("tools") if isinstance(listed, dict) else None
-            if not isinstance(tools, list) or len(tools) > MAX_TOOLS_PER_SERVER:
-                raise McpError(
-                    f"mcp server {self.name!r}: tools/list must return an array of at most "
-                    f"{MAX_TOOLS_PER_SERVER} tools"
-                )
+            tools = self._list_all_tools()
             for raw in tools:
                 if not isinstance(raw, dict):
                     raise McpError(f"mcp server {self.name!r}: a tool entry is not an object")
@@ -724,6 +783,20 @@ class McpStdioClient:
             # Also restore distrust state: a server that flapped in a
             # previous session stays distrusted across restarts.
             self._load_distrust_state()
+            if callable(self.audit):
+                self.audit(
+                    {
+                        "type": "mcp.server_isolation",
+                        "server": self.name,
+                        "filesystem_scope": self.filesystem,
+                        "network": self.network,
+                        "landlock_abi": (
+                            landlock_abi_version()
+                            if self.network == "denied" or self.filesystem == "workspace"
+                            else None
+                        ),
+                    }
+                )
             if self._re_admit_pending:
                 # Explicit re-admission accepts the fully validated tool list
                 # from this new process as the replacement pin.
@@ -1011,15 +1084,10 @@ class McpStdioClient:
         """
         if not self.connected:
             raise McpError(f"mcp server {self.name!r} is not connected")
-        listed = self._request("tools/list", {})
-        tools = listed.get("tools") if isinstance(listed, dict) else None
-        if not isinstance(tools, list):
-            raise McpError(f"mcp server {self.name!r}: tools/list must return an array")
-        if len(tools) > MAX_TOOLS_PER_SERVER:
-            self._quarantine(
-                f"tools/list returned more than {MAX_TOOLS_PER_SERVER} tools during refresh",
-                at="refresh",
-            )
+        try:
+            tools = self._list_all_tools()
+        except _McpToolListError as error:
+            self._quarantine(str(error), at="refresh")
             return ()
         observed: dict[str, str] = {}
         for raw in tools:
@@ -1224,6 +1292,34 @@ class McpStdioClient:
                 )
             if not isinstance(result, dict):
                 return ToolResult.error(f"mcp {self.name}/{tool_name}: tools/call returned a non-object result")
+            # The client only supports core result types and does not negotiate
+            # result extensions. Do not let result_type() normalize an unknown
+            # discriminator to "complete" and report unfinished work as success.
+            response_type = result.get("resultType")
+            if "resultType" in result and response_type not in (
+                RESULT_COMPLETE,
+                RESULT_INPUT_REQUIRED,
+            ):
+                is_task_result = response_type == "task"
+                if is_task_result:
+                    reason = "asynchronous result without negotiated task support"
+                    message = (
+                        "server returned an asynchronous task result "
+                        "without negotiated task support"
+                    )
+                else:
+                    reason = "unsupported result type without negotiated extension support"
+                    message = (
+                        "server returned an unsupported result type "
+                        "without negotiated extension support"
+                    )
+                self._quarantine(
+                    f"tool {tool_name!r} returned {reason}",
+                    at="output_validation",
+                )
+                return ToolResult.error(
+                    f"mcp {self.name}/{tool_name}: {message}; completion is unknown"
+                )
             if result_type(result) != RESULT_INPUT_REQUIRED:
                 break
             rounds += 1
