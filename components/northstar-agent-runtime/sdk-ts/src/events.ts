@@ -114,6 +114,7 @@ export type ResultEvent = {
   permission_denials: Denial[];
   tool_call_reports: ToolCallReport[];
   subagents: SubagentReport[];
+  evidence: Record<string, unknown> | null;
 };
 
 /** `system` / `init` carries the resolved configuration under `data`; see `initLimits`. */
@@ -164,6 +165,7 @@ export const KNOWN_EVENT_TYPES = ["result", "system", "assistant", "user", "stre
  */
 export const EXIT_CODES = {
   success: 0,
+  success_unverified: 0,
   error_during_execution: 1,
   error_max_turns: 2,
   error_max_tool_calls: 3,
@@ -171,6 +173,7 @@ export const EXIT_CODES = {
   error_permission_denied: 5,
   error_postconditions_failed: 6,
   error_session_busy: 7,
+  error_evidence_incomplete: 8,
 } as const;
 
 export type ResultSubtype = keyof typeof EXIT_CODES;

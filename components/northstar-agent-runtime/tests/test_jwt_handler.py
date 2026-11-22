@@ -162,6 +162,17 @@ class TestVerify(unittest.TestCase):
         with self.assertRaises(MalformedTokenError):
             h.verify("%s.%s.%s" % (fake_head, body, sig), seq=2)
 
+    def test_ambiguous_json_and_invalid_base64_are_refused(self):
+        import base64
+        h = make()
+        s = h.sign({"sub": "a", "aud": "agents"}, seq=1)
+        head, body, sig = s.token.split(".")
+        duplicate = base64.urlsafe_b64encode(b'{"alg":"HS256","alg":"none"}').rstrip(b"=").decode()
+        with self.assertRaises(MalformedTokenError):
+            h.verify(f"{duplicate}.{body}.{sig}", seq=2)
+        with self.assertRaises(MalformedTokenError):
+            h.verify(f"{head}!{body}.{sig}", seq=2)
+
 
 class TestRevocation(unittest.TestCase):
     def test_revoke(self):
