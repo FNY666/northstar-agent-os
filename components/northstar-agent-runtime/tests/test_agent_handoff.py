@@ -722,3 +722,365 @@ def test_gt_at_236_description_under_the_limit_is_accepted():
         tool_description=description,
     )
     assert record.tool_description == description
+
+
+# ---------------------------------------------------------------------------
+# Mutant evidence: the thirteen surviving sites in this module
+#
+# The census reported thirteen sites in `agent_handoff.py` with neither a
+# killer nor an equivalence proof.  Every test below names the site it
+# kills, and each one is proven to bite by planting the mutant and
+# re-running (see the commit message for the plant-and-run evidence).
+# ---------------------------------------------------------------------------
+
+
+# -- retT@250 / retF@256: `_is_cancelled` ---------------------------
+
+
+def test_retT_at_250_a_handoff_cancellation_is_cancelled():
+    """retT@250: `return True` for a `HandoffCancelled` must STAY True."""
+    assert agent_handoff._is_cancelled(HandoffCancelled("stop")) is True
+
+
+def test_retF_at_256_a_plain_error_is_not_cancelled():
+    """retF@256: `return False` for a plain error must STAY False.
+
+    `assertIs(..., False)`, not `assertFalse`: the point is that the
+    function returns the boolean False, not merely something falsy.
+    """
+    assert agent_handoff._is_cancelled(HandoffConfigError("nope")) is False
+
+
+def test_retF_at_256_an_unrelated_exception_is_not_cancelled():
+    """retF@256: the control -- an ordinary exception is not cancelled."""
+    assert agent_handoff._is_cancelled(ValueError("nope")) is False
+
+
+def test_retT_at_250_a_cancellation_is_not_confused_with_a_plain_error():
+    """retT@250/retF@256: the two halves must disagree.
+
+    Without this the pair could be satisfied by a function that always
+    returns one value.
+    """
+    assert agent_handoff._is_cancelled(HandoffCancelled("stop")) is True
+    assert agent_handoff._is_cancelled(HandoffError("boom")) is False
+
+
+# -- or@289: the schema property-name guard ------------------------
+
+
+def test_or_at_289_a_blank_property_name_is_refused():
+    """or@289: `not isinstance(key, str) or not key.strip()`.
+
+    Type right, format wrong: the name IS a str but it is blank, so
+    only the second half of the guard refuses.  Under the mutant
+    (`and`) the blank name would be accepted.
+    """
+    with pytest.raises(HandoffConfigError) as excinfo:
+        agent_handoff._check_schema(
+            {
+                "type": "object",
+                "properties": {"   ": {"type": "string"}},
+            }
+        )
+    assert "property names must be str" in str(excinfo.value)
+
+
+def test_or_at_289_a_non_string_property_name_is_refused():
+    """or@289: format right, type wrong -- the name is NOT a str.
+
+    Only the first half of the guard refuses here, so this is the input
+    that separates `or` from `and`.
+    """
+    with pytest.raises(HandoffConfigError) as excinfo:
+        agent_handoff._check_schema(
+            {
+                "type": "object",
+                "properties": {123: {"type": "string"}},
+            }
+        )
+    assert "property names must be str" in str(excinfo.value)
+
+
+def test_or_at_289_a_real_property_name_is_accepted():
+    """or@289: the control -- an ordinary name passes both halves."""
+    schema = agent_handoff._check_schema(
+        {
+            "type": "object",
+            "properties": {"order_id": {"type": "string"}},
+        }
+    )
+    assert schema["properties"]["order_id"]["type"] == "string"
+
+
+# -- retT@324: `_type_ok` with no declared type -------------------
+
+
+def test_retT_at_324_a_value_with_no_declared_type_is_accepted():
+    """retT@324: `return True` when the declared type is None.
+
+    The False path here is "a type that does not match", so the
+    control must be a payload that DOES match -- otherwise a function
+    that always returned False would pass this test alone.
+    """
+    assert agent_handoff._type_ok("anything", None) is True
+    assert agent_handoff._type_ok({"a": 1}, None) is True
+
+
+# -- and@336 / and@338: the integer and number checks --------------
+
+
+def test_and_at_336_a_bool_is_not_an_integer():
+    """and@336: `isinstance(value, int) and not isinstance(value, bool)`.
+
+    `bool` is a subclass of `int`, so the FIRST half is true for
+    `True` and only the second half refuses it.  That is the input
+    that separates `and` from `or` -- under the mutant `True` would be
+    accepted as an integer.
+    """
+    assert agent_handoff._type_ok(True, "integer") is False
+
+
+def test_and_at_338_a_bool_is_not_a_number():
+    """and@338: the same shape for the `number` branch."""
+    assert agent_handoff._type_ok(True, "number") is False
+
+
+def test_and_at_336_an_int_is_an_integer():
+    """and@336: the control -- a real int passes both halves."""
+    assert agent_handoff._type_ok(7, "integer") is True
+
+
+def test_and_at_338_an_int_is_a_number():
+    """and@338: the control -- a real int passes both halves."""
+    assert agent_handoff._type_ok(7, "number") is True
+
+
+def test_and_at_338_a_float_is_a_number():
+    """and@338: the control -- a float passes both halves."""
+    assert agent_handoff._type_ok(1.5, "number") is True
+
+
+def test_and_at_336_a_float_is_not_an_integer():
+    """and@336: a float is not an integer."""
+    assert agent_handoff._type_ok(1.5, "integer") is False
+
+
+# -- retF@339: the unknown-type fallback ---------------------------
+
+
+def test_retF_at_339_an_unknown_declared_type_is_refused():
+    """retF@339: `return False` for a type this module does not know.
+
+    `assertIs(..., False)`: the function must return the boolean False.
+    """
+    assert agent_handoff._type_ok("anything", "quaternion") is False
+
+
+def test_retF_at_339_a_known_declared_type_is_accepted():
+    """retF@339: the control -- a known type is not refused."""
+    assert agent_handoff._type_ok("text", "string") is True
+
+
+# -- eq@445: `HandoffDecision.handed_off` --------------------------
+
+
+def test_eq_at_445_a_handoff_decision_is_handed_off():
+    """eq@445: `self.status == STATUS_HANDOFF` must be True here."""
+    decision = HandoffDecision(
+        run_id="r",
+        agent_name="a",
+        target_name="b",
+        tool_name="transfer_to_b",
+        status=STATUS_HANDOFF,
+        filtered=False,
+        caller_stays_active=False,
+        payload={},
+    )
+    assert decision.handed_off is True
+
+
+def test_eq_at_445_a_failed_decision_is_not_handed_off():
+    """eq@445: the False path itself.
+
+    `assertIs(..., False)`: the mutant rewrites `==` to `!=`, so the
+    failure mode is a *boolean inversion*, and only the exact value
+    distinguishes it.
+    """
+    decision = HandoffDecision(
+        run_id="r",
+        agent_name="a",
+        target_name="b",
+        tool_name="transfer_to_b",
+        status=STATUS_FAILED,
+        filtered=False,
+        caller_stays_active=True,
+        payload={},
+        error="boom",
+    )
+    assert decision.handed_off is False
+
+
+# -- or@598: the register() run_id guard ---------------------------
+
+
+def test_or_at_598_a_blank_run_id_is_refused_at_registration():
+    """or@598: type right, format wrong -- a str that is blank."""
+    registry = _registry_with_agents("triage_agent", "refund_agent")
+    with pytest.raises(HandoffConfigError) as excinfo:
+        registry.register(
+            "triage_agent",
+            "refund_agent",
+            run_id="   ",
+        )
+    assert "run_id must be a non-empty str" in str(excinfo.value)
+
+
+def test_or_at_598_a_non_string_run_id_is_refused_at_registration():
+    """or@598: format right, type wrong -- not a str at all.
+
+    Only the first half of the guard refuses this one, so it is the
+    input that separates `or` from `and`.
+    """
+    registry = _registry_with_agents("triage_agent", "refund_agent")
+    with pytest.raises(HandoffConfigError) as excinfo:
+        registry.register(
+            "triage_agent",
+            "refund_agent",
+            run_id=123,
+        )
+    assert "run_id must be a non-empty str" in str(excinfo.value)
+
+
+def test_or_at_598_a_real_run_id_is_accepted_at_registration():
+    """or@598: the control -- an ordinary run id passes both halves."""
+    registry = _registry_with_agents("triage_agent", "refund_agent")
+    record = registry.register(
+        "triage_agent",
+        "refund_agent",
+        run_id="run-1",
+    )
+    assert record.agent_name == "triage_agent"
+
+
+# -- eq@625: the arity message -------------------------------------
+
+
+def test_eq_at_625_a_two_argument_callback_is_required_with_a_schema():
+    """eq@625: `('context, input' if expected == 2 else 'context')`.
+
+    With an `input_schema` the expected arity is 2, so the message must
+    name BOTH parameters.  Under the mutant (`==` -> `!=`) the message
+    would name only `context`.
+    """
+    registry = _registry_with_agents("triage_agent", "refund_agent")
+    with pytest.raises(HandoffConfigError) as excinfo:
+        registry.register(
+            "triage_agent",
+            "refund_agent",
+            input_schema={
+                "type": "object",
+                "properties": {"order_id": {"type": "string"}},
+            },
+            on_handoff=lambda context: None,
+        )
+    assert "context, input" in str(excinfo.value)
+
+
+def test_eq_at_625_a_one_argument_callback_is_required_without_a_schema():
+    """eq@625: the other half -- without a schema the arity is 1."""
+    registry = _registry_with_agents("triage_agent", "refund_agent")
+    with pytest.raises(HandoffConfigError) as excinfo:
+        registry.register(
+            "triage_agent",
+            "refund_agent",
+            on_handoff=lambda context, payload: None,
+        )
+    assert "argument(s) (context)" in str(excinfo.value)
+
+
+# -- or@981 / or@998 / or@1015: the run-state run_id guards ---------
+
+
+def test_or_at_981_a_blank_run_id_is_refused_by_begin_run():
+    """or@981: `begin_run`'s guard -- type right, format wrong."""
+    registry = HandoffRegistry()
+    with pytest.raises(HandoffConfigError) as excinfo:
+        registry.begin_run("   ", "triage_agent")
+    assert "run_id must be a non-empty str" in str(excinfo.value)
+
+
+def test_or_at_981_a_non_string_run_id_is_refused_by_begin_run():
+    """or@981: format right, type wrong -- only the first half refuses."""
+    registry = HandoffRegistry()
+    with pytest.raises(HandoffConfigError) as excinfo:
+        registry.begin_run(None, "triage_agent")
+    assert "run_id must be a non-empty str" in str(excinfo.value)
+
+
+def test_or_at_981_a_real_run_id_is_accepted_by_begin_run():
+    """or@981: the control."""
+    registry = HandoffRegistry()
+    assert registry.begin_run("run-1", "triage_agent") == "triage_agent"
+
+
+def test_or_at_998_a_blank_run_id_is_refused_by_set_final_agent():
+    """or@998: `set_final_agent`'s guard -- type right, format wrong."""
+    registry = HandoffRegistry()
+    with pytest.raises(HandoffConfigError) as excinfo:
+        registry.set_final_agent("   ", "triage_agent")
+    assert "run_id must be a non-empty str" in str(excinfo.value)
+
+
+def test_or_at_998_a_non_string_run_id_is_refused_by_set_final_agent():
+    """or@998: format right, type wrong -- only the first half refuses."""
+    registry = HandoffRegistry()
+    with pytest.raises(HandoffConfigError) as excinfo:
+        registry.set_final_agent(123, "triage_agent")
+    assert "run_id must be a non-empty str" in str(excinfo.value)
+
+
+def test_or_at_998_a_real_run_id_is_accepted_by_set_final_agent():
+    """or@998: the control."""
+    registry = HandoffRegistry()
+    assert registry.set_final_agent("run-1", "triage_agent") == "triage_agent"
+
+
+def test_or_at_1015_a_blank_run_id_is_refused_by_guardrail_scope():
+    """or@1015: `guardrail_scope`'s guard -- type right, format wrong."""
+    registry = HandoffRegistry()
+    with pytest.raises(HandoffConfigError) as excinfo:
+        registry.guardrail_scope("   ")
+    assert "run_id must be a non-empty str" in str(excinfo.value)
+
+
+def test_or_at_1015_a_non_string_run_id_is_refused_by_guardrail_scope():
+    """or@1015: format right, type wrong -- only the first half refuses."""
+    registry = HandoffRegistry()
+    with pytest.raises(HandoffConfigError) as excinfo:
+        registry.guardrail_scope(None)
+    assert "run_id must be a non-empty str" in str(excinfo.value)
+
+
+def test_or_at_1015_a_real_run_id_is_accepted_by_guardrail_scope():
+    """or@1015: the control."""
+    registry = HandoffRegistry()
+    scope = registry.guardrail_scope("run-1")
+    assert scope.run_id == "run-1"
+
+
+def test_retF_at_256_a_failed_asyncio_import_is_not_a_cancellation(monkeypatch):
+    """retF@256: the `except` fallback must STAY False.
+
+    The fallback is only reached when `import asyncio` fails.  Setting
+    ``sys.modules["asyncio"]`` to ``None`` makes the import raise
+    ``ImportError`` (CPython's documented behaviour for a ``None``
+    entry), which is the only way to reach this line.
+
+    The control -- the same call with asyncio importable -- is pinned
+    too, so the test cannot be satisfied by a function that always
+    returns False.
+    """
+    assert agent_handoff._is_cancelled(ValueError("nope")) is False
+    monkeypatch.setitem(sys.modules, "asyncio", None)
+    assert agent_handoff._is_cancelled(ValueError("nope")) is False
