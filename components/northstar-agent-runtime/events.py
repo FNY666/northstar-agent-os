@@ -23,8 +23,9 @@ from __future__ import annotations
 from typing import Any
 
 #: Terminal convention for each result subtype (0 success … 5 permission, 6 postconditions,
-#: 7 session contention). Only 64 means "nothing was run and the operator should fix the
-#: command"; 7 means "the command was fine, another run owns the session - wait, retry".
+#: 7 session contention, 8 incomplete required evidence). Only 64 means "nothing was run
+#: and the operator should fix the command"; 8 means the run happened but its evidence
+#: could not be captured completely.
 EXIT_CODES: dict[str, int] = {
     "success": 0,
     "success_unverified": 0,
@@ -36,6 +37,8 @@ EXIT_CODES: dict[str, int] = {
     "error_postconditions_failed": 6,
     # Another live process holds this session's transcript; nothing was written.
     "error_session_busy": 7,
+    # Required evidence capture failed or left an unverifiable bundle.
+    "error_evidence_incomplete": 8,
 }
 
 
@@ -57,6 +60,10 @@ def event_to_dict(event: Any) -> dict[str, Any]:
             "permission_denials": list(event.permission_denials),
             "tool_call_reports": [dict(row) for row in event.tool_call_reports],
             "subagents": [dict(row) for row in event.subagents],
+            # Added by SDK.run() from the runtime's final capture report. The event
+            # itself remains the transport-independent ResultMessage and has no
+            # bundle path of its own.
+            "evidence": None,
         }
     if kind == "SystemMessage":
         return {"type": "system", "subtype": event.subtype, "content": event.content, "data": event.data}

@@ -98,6 +98,27 @@ The command never replays it. Python callers can use `reconcile_code_run()` for
 the same receipt. See the [code recovery guide](../../docs/guides/code-recovery.md)
 for classification and exit-code semantics.
 
+## Unified run evidence
+
+Generic runs can write an optional digest-first evidence bundle:
+
+```sh
+northstar run --workspace . --run-evidence-dir ./run-evidence --require-evidence \
+  --prompt "summarise README" --provider scripted --scripted-text ok
+northstar evidence inspect ./run-evidence --json
+```
+
+The bundle records run configuration, permission decisions, tool outcomes,
+checkpoints, verification/postconditions, egress decisions, subagent results,
+and the terminal outcome as a canonical hash-chained ledger. It contains no
+prompts, raw tool arguments, tool output bodies, credentials, or handoff tokens.
+
+Capture is opt-in. A sink failure is reported in `RunReport.evidence`; with
+`--require-evidence` it changes the result to `error_evidence_incomplete`
+(exit 8). Existing tool effects are never replayed or silently undone. Runtime
+code loads the evidence component lazily, so a bare runtime remains importable
+without it.
+
 ```sh
 northstar code "fix the parser regression" --workspace . \
   --check "python3 -m unittest discover -s tests" \
@@ -250,6 +271,8 @@ screening path for imported provider messages.
 Malformed non-message records in an imported sequence are dropped from the
 copy-on-write request instead of crashing the runtime, and recorded as a
 `D-RESUME-001` defensive assessment.
+Non-message values are filtered before any defensive copy operation, so
+untrusted object hooks cannot run during transcript admission.
 After Unicode cleanup, the detector rechecks collapsed whitespace so hidden
 instruction spans cannot reassemble into a jailbreak at the release boundary.
 If that second pass finds an instruction pattern, the release is quarantined
@@ -321,6 +344,12 @@ the only switch; without it `CodexReadOnly` is not registered at all:
 python3 -m cli run --sidecar-socket /var/run/northstar-codex/sidecar.sock \
   --probe-sidecar            # one health-check prompt, then exit
 ```
+
+Sidecar responses are screened at the client boundary too: direct SDK callers
+receive a blocked marker or sanitized text before remote output can become an
+instruction channel. The main loop applies its own result-boundary checks as a
+second defense. Malformed or excessively recursive response JSON is reported as
+`protocol_error` rather than escaping as a client exception.
 
 ## Creating a governed project (`new`)
 
@@ -518,7 +547,10 @@ python3 -m cli run --workspace . --prompt "summarise the files" \
   "answered_fields"}`, and a short `[governance] …` note is appended to the tool
   result so the refusal is inside the transcript rather than beside it.
 - Output is bounded client-side (per-line and per-call caps); image/resource
-  content blocks are replaced with a placeholder rather than rendered.
+  content blocks are replaced with a placeholder rather than rendered. The
+  low-level `McpStdioClient.call_tool()` path also runs the defensive-agent
+  output screen, so callers that bypass the main loop still get hostile
+  instruction/credential payloads blocked or sanitized before they see them.
 - `run --dry-run` lists the configured servers **and the stance**
   (`protocol=auto, elicit=off→input_required is declined, roots=off,
   sensitive_input=off, rounds=3`) without spawning them, and appends what an import
@@ -1317,6 +1349,7 @@ condition arrives as an event, never as a raised exception:
 | `error_permission_denied`   | a denial ended the run (`halt_on_denial`)           |
 | `error_postconditions_failed` | the model stopped, but a declared workspace check did not hold |
 | `error_session_busy` | another live run holds this session's transcript; nothing was written |
+| `error_evidence_incomplete` | required evidence capture failed; the run may have had effects |
 | `error_during_execution`    | provider failure, malformed tool input, internal bug |
 
 The three ceilings are independent, each with its own subtype, so an operator can
@@ -1543,7 +1576,7 @@ size (`result_chars`), so truncation is visible instead of inferred.
 
 `0` success · `1` error_during_execution · `2` error_max_turns ·
 `3` error_max_tool_calls · `4` error_max_budget_usd · `5` error_permission_denied ·
-`6` error_postconditions_failed · `7` error_session_busy ·
+`6` error_postconditions_failed · `7` error_session_busy · `8` error_evidence_incomplete ·
 `64` usage or configuration error (nothing was run). Result errors and refusals
 are printed to stderr; `--json` emits one object per event.
 

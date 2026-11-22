@@ -225,6 +225,27 @@ class DecisionTests(unittest.TestCase):
         v = decide(pol=pol, resolve=lambda h: ["10.0.0.5"])
         self.assertTrue(v.allowed)
         self.assertEqual(v.dial_ips, ("10.0.0.5",))
+        nat64 = decide(pol=pol, resolve=lambda h: ["64:ff9b::a00:5"])
+        self.assertTrue(nat64.allowed)
+        self.assertEqual(nat64.dial_ips, ("64:ff9b::a00:5",))
+
+    def test_nat64_private_ipv4_destinations_are_denied(self):
+        for ip in (
+            "64:ff9b::a9fe:a9fe",  # NAT64 of cloud metadata
+            "64:ff9b::a00:1",       # NAT64 of RFC 1918
+            "64:ff9b::7f00:1",     # NAT64 of loopback
+            "64:ff9b:1::a9fe:a9fe", # local-use NAT64 is never globally reachable
+        ):
+            with self.subTest(ip=ip):
+                verdict = decide(resolve=lambda _host, address=ip: [address])
+                self.assertFalse(verdict.allowed, ip)
+                self.assertEqual(verdict.deny_code, DENY_DESTINATION_DENIED, ip)
+
+    def test_nat64_public_ipv4_destination_remains_allowed(self):
+        ip = "64:ff9b::5db8:d70e"  # NAT64 of 93.184.215.14
+        verdict = decide(resolve=lambda _host: [ip])
+        self.assertTrue(verdict.allowed)
+        self.assertEqual(verdict.dial_ips, (ip,))
 
     def test_mixed_ips_filters_to_public(self):
         v = decide(resolve=lambda h: ["169.254.169.254", "100.64.0.1", "1.2.3.4"])

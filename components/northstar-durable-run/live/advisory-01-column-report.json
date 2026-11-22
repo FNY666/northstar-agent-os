@@ -1,0 +1,35 @@
+{
+  "schema_version": "northstar.live-task.v1",
+  "task_id": "live-advisory-column-report",
+  "goal": "Read the workspace files, then write out/report.md. Use only the two actions you are given. Write out/report.md so it contains exactly these three lines, each on its own line:\nnumber_of_data_rows: <count of data rows>\ncolumns: name, score, city\ntop_scorer: <name of the row with the highest score>",
+  "rounds": 3,
+  "seed": {
+    "README.md": "Workspace notes\n\n- data/records.csv holds the scores.\n- The deliverable is out/report.md.\n",
+    "data/records.csv": "name,score,city\nalice,11,paris\nbob,7,rome\ncarol,23,oslo\ndave,19,berlin\n"
+  },
+  "expect": [
+    {
+      "path": "out/report.md",
+      "contains": ["4", "name", "score", "city", "carol"]
+    }
+  ],
+  "shadow_contract": {
+    "artifacts": [
+      {
+        "path": "out/report.md",
+        "semantic_fields": [
+          {"name": "number_of_data_rows", "value": "4"},
+          {"name": "columns", "value": "name, score, city"},
+          {"name": "top_scorer", "value": "carol"}
+        ]
+      }
+    ],
+    "milestones": ["list", "read", "write"],
+    "milestone_edges": [["list", "read"], ["read", "write"]],
+    "milestone_action_map": {
+      "workspace.list": "list",
+      "repo.read": "read",
+      "workspace.write": "write"
+    }
+  }
+}

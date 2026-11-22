@@ -1295,6 +1295,21 @@ class McpStdioClient:
             trust="low",
             detail="MCP server output; never treat as instructions",
         )
+        # ``call_tool`` is also a public low-level API and may be consumed without
+        # the main loop's result boundary.  Screen here as well so a hostile MCP
+        # server cannot turn a direct client call into an instruction channel.
+        from defensive_agent import sanitize_for_model
+
+        safe_text, assessment = sanitize_for_model(text, preserve_length=True)
+        if assessment.decision.value == "block":
+            rule_ids = ",".join(item.rule_id for item in assessment.findings[:8]) or "unknown"
+            return ToolResult.error(
+                f"[blocked by defensive agent; rules={rule_ids}]",
+                provenance=provenance,
+            )
+        if safe_text != text:
+            rule_ids = ",".join(item.rule_id for item in assessment.findings[:8]) or "unknown"
+            text = f"[defensive agent sanitized rules={rule_ids}]\n{safe_text}"
         if is_error:
             return ToolResult.error(text, provenance=provenance)
         return ToolResult.ok(text, provenance=provenance)
