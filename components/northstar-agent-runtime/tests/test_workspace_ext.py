@@ -128,7 +128,6 @@ class SkillTests(unittest.TestCase):
         self.assertNotIn("example-org", listing)
         self.assertNotIn("Bash(git:*)", listing)
 
-<<<<<<< HEAD
     def test_claude_invocation_metadata_limits_model_discovery(self):
         from tools.skill_scripts import discover_skill_scripts, skill_scripts_listing
 
@@ -174,8 +173,6 @@ class SkillTests(unittest.TestCase):
         self.assertNotIn("manual-only/helper.sh", script_listing)
         self.assertIn("model-only/helper.sh", script_listing)
 
-=======
->>>>>>> github/main
     def test_agent_skills_optional_metadata_types_are_validated(self):
         invalid_fields = (
             ("license: [Apache-2.0]", "license must be a string"),
@@ -183,11 +180,8 @@ class SkillTests(unittest.TestCase):
             ("compatibility: " + "x" * 501, "compatibility must be a non-empty string"),
             ("metadata:\n  version: 1.0", "metadata must be a mapping"),
             ("allowed-tools: [Read]", "allowed-tools must be a string"),
-<<<<<<< HEAD
             ("disable-model-invocation: maybe", "disable-model-invocation must be a boolean"),
             ("user-invocable: 1", "user-invocable must be a boolean"),
-=======
->>>>>>> github/main
         )
         for index, (field, message) in enumerate(invalid_fields):
             with self.subTest(field=field[:32]):
