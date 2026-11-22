@@ -467,6 +467,118 @@ code).
 | **A-9** | **correct the strategy ledger** (`b173-strategy-ledger-2026-11-14.md` §5): its 27-item list and its "缺 optional extra 4 / 内核能力缺失 6–8 / 本机环境 6 / 本批自造 1" table are all wrong for the current tree | the ledger is the input to the next slice's brief; a wrong ledger produces wrong briefs | prevents the next slice repeating this measurement |
 | **A-10** | **fix `b173-accept.sh`'s `FULL_SUITE` grep** (`Ran 19[0-9]{3}`) — the suite is at 21 072 tests | the pattern was written when the suite was ~19 000 and was never widened; it false-fails every slice that reports its current count | grader correctness (not a code fix) |
 
+### 6.1 What actually landed (2026-11-22)
+
+**A-1, A-2, A-3 and A-4 are DONE**, and the bench now scores **169/169**
+on this machine — the figure §5 predicted once the three code defects
+were fixed.
+
+| # | status | what landed | measured effect |
+|---|---|---|---|
+| **A-1** | **done** | `tools/os_sandbox.py` gained `_seccomp_filter_fd(handle)`, which writes the filter, flushes it, and **rewinds the fd** with `os.lseek(fd, 0, os.SEEK_SET)` before it is handed to bwrap. Both call sites (the live capability probe and the production run) now go through that one seam. | without the rewind the probe exits 1 with `prctl(PR_SET_SECCOMP) reported EINVAL`; with it, exit 0. **4 test items + 3 bench cases** green. |
+| **A-2** | **done** | `tools/sandbox.py::_runtime_read_paths` now filters `_SYSTEM_READ_PATHS` to the entries that exist here, exactly as the interpreter-derived candidates already were — which is what the constant's own comment promised. | the pledge loader no longer dies with `FileNotFoundError: '/lib64'`. **3 test items + 1 bench case** green. |
+| **A-3** | **done, differently** | the five affected bench cases were **rewritten into command shapes the parser allows**, rather than the parser being taught to allow `for`/heredoc. The parser's denials are sound — a `for` loop and a heredoc ARE more complex than the gate's AST model — so loosening the gate to let a benchmark through would weaken a security control for a test's convenience. The rewritten commands keep the same semantics: a literal TAB became `[[:space:]]`, a `for` loop became one counted `grep -cE`, and a heredoc became a `python3 -c` one-liner whose ctypes struct declaration became `struct.pack` (a struct *declaration* contains braces, and the gate denies a quoted brace expansion). | **5 bench cases** green; the bench went from **161/169** to **169/169**. |
+| **A-4** | **already done** | `merged_tree_review` is registered in `pyproject.toml` `py-modules` (`:976`) and in `runtime_registration` (`:1097`) — by an earlier slice, not by this one. | the four D-4 items were already green at HEAD. |
+| **A-5** | **confirmed, and it uncovered two real defects** | with the declared extra installed in a venv (`jsonschema>=4.26,<5` + `regex`), `test_tool_input_schema` is **25/25 OK** and `test_shell_sessions` is **6/6 OK**. But installing the extra into a venv **broke the live sandbox cases** — and the cause was a runtime defect, not a test artifact. See §6.2. And the *un*-installed case exposed a second defect: a type-confusion in the `enum` keyword. See §6.4. | the 4 `tool_input_schema` items and the 6 `shell_sessions` items are now green **on both** interpreters. |
+| **A-6** | **open** | the `pyproject.toml` `dependencies` comment still claims "the whole deterministic test suite run on a bare interpreter". **That claim is now true** — the suite is green on a bare interpreter — but the comment is still misleading about *why*, and the `json-schema` extra is not in `requirements.txt`. | documentation only |
+| **A-7** | **open** | `scripts/b173-baseline-check.sh` is not wired into CI. | — |
+| **A-8** | **open, and now stale in the OTHER direction** | the 26-item baseline file is still the authority, but **all 26 of its items are green**. The file now over-reports failures by 26. | — |
+| **A-9** | **open** | the strategy ledger's §5 list is still uncorrected. | — |
+| **A-10** | **already done** | `b173-accept.sh`'s `FULL_SUITE` grep was widened to `Ran [0-9]{4,}` in round 7; the `Ran 19[0-9]{3}` string survives only in the comment that explains the change. | — |
+
+**The baseline after these fixes** — measured on this host, full runtime
+suite, `Ran 23161 tests`, against the 26-item baseline file:
+
+```
+OK (skipped=20)
+```
+
+* **26 of the 26** baseline items are now green — the baseline file is
+  **empty**, not merely shorter. Zero failures, zero errors.
+* The bench is **169/169**.
+
+### 6.2 Installing the extra exposed a REAL defect: a virtualenv cannot sandbox itself
+
+A-5's verification was supposed to be a check, not a change. It was a
+change, because **the runtime could not run its own tools from inside a
+virtualenv**.
+
+`site.py` looks for `pyvenv.cfg` one directory **above** the
+interpreter's directory — that is, at the venv **prefix root**, which is
+neither `prefix/bin` nor `prefix/lib`. `_runtime_read_paths()` granted
+only those subdirectories, so the prefix root was never readable inside
+the sandbox and the sandboxed interpreter died in `init_import_site`:
+
+```
+PermissionError: [Errno 13] Permission denied: '/tmp/a5venv/pyvenv.cfg'
+```
+
+The bwrap backend had the same gap with a different symptom: it bound
+only the five hardcoded system roots, so a venv interpreter was simply
+**absent from the namespace**:
+
+```
+bwrap: execvp /tmp/a5venv/bin/python: No such file or directory
+```
+
+The file existed on the host. It was absent from the sandbox.
+
+Both are the same shape as **A-2**, one layer up: A-2 was a rule path
+that did not exist; this is a file that exists but is **not covered by
+any rule**. The lesson generalises — *the sandbox grants directories,
+so every file the interpreter needs must be inside one of them, and
+"the interpreter's own directory" is not the same as "the prefix the
+interpreter lives under".*
+
+The fix is one helper, `tools/sandbox.py::_virtualenv_roots()`, which
+yields the prefix root of a venv **and only of a venv**:
+
+* a prefix qualifies only if it actually holds a `pyvenv.cfg`, so a
+  system interpreter — whose base prefix is `/` — never causes `/` to
+  be granted. Granting `/` would hand the whole filesystem over;
+* the prefix root is **read-only**: a runtime root, never a writable one;
+* bwrap adds the interpreter's own directory and the venv prefix only
+  when they are not already reachable through an existing bind, so the
+  argv does not grow for nothing (a bind of `/usr` already covers
+  `/usr/bin`).
+
+Measured, under a virtualenv:
+
+| measurement | before | after |
+|---|---|---|
+| process backend, child interpreter | exit 1 (`pyvenv.cfg` denied) | **exit 0** |
+| bwrap backend, child interpreter | `execvp ...: No such file or directory` | **exit 0** |
+| governance bench under the venv | 50/53 (3 live sandbox cases failing) | **53/53** |
+| bench product under the venv | — | **169/169** |
+| runtime suite under the venv, focused | — | `test_os_sandbox` 69 OK, `test_pledge` OK, `test_tool_input_schema` 25 OK, `test_shell_sessions` 6 OK |
+
+The defect was **latent in CI**, which installs into the system
+interpreter, and **live for anyone who installs the runtime's declared
+extras into a venv** — which is exactly what A-5 proposes. A-5 was not
+just "install a package"; it was "install a package and find out
+whether the runtime still works when you have".
+
+### 6.3 The measurement itself, and one surprise
+
+Two failures appeared in *other* modules while this slice's work was in
+flight, and both were **caused by the new tests, not by the fixes**:
+
+1. `test_runtime_roots_are_always_read_exec` asserted a Landlock rule
+   for `/lib64` **unconditionally** — the very path that does not exist
+   on an aarch64 host. The assertion is now conditional on the root
+   existing, with a second test asserting the other half.
+2. The capabilities cache is **module-level**, and the new
+   `SeccompFilterFdOffsetTests` probed with a fake bwrap path and left
+   the cache pointing at `/fake/bwrap` — a binary that does not exist.
+   Every later test in the process then ran against it, and the failure
+   surfaced in an unrelated module as `Shell failed: no such path
+   inside the workspace`. The class now resets the cache in `setUp` and
+   `tearDown`.
+
+Both are the same lesson as the rest of this document: **a fix moves
+the failure somewhere else, and the somewhere-else has to be measured
+too.**
+
 ---
 
 ## 7. How to reproduce this slice's own verification
@@ -493,3 +605,100 @@ scripts/b173-baseline-check.sh /path/to/other.txt    # compare against another b
 The script is read-only with respect to the repository and never writes a
 baseline: re-taking a baseline is a human decision.
 
+
+
+### 6.4 The missing extra was hiding a TYPE-CONFUSION, not just a version skew
+
+§6.1 attributed the four `tool_input_schema` failures to a "jsonschema
+version skew". That was the wrong explanation, and the wrong explanation
+was hiding a **real defect**.
+
+The installed `jsonschema` here is **4.19.2**, below the extra's own
+`>=4.26` floor. The natural reading was "an old library behaves
+differently, install the right one". But the *difference* was not a
+cosmetic API change — it was a **type-confusion in the `enum` keyword**:
+
+```python
+# jsonschema 4.19.2
+{'flag': 1} in [{'flag': True}]   ->   True      # accepted!
+```
+
+4.19.2's `enum` compares **nested containers** with `==`, so a value
+whose boolean flag carries the number `1` satisfies a schema that says
+*"flag must be `True`"*. 4.26 compares with the `equal()` helper, which
+keeps booleans and numbers distinct.
+
+So on any host with an older `jsonschema`, the runtime's schema
+validator would **accept a wrong-typed value**. The extra's version
+floor papers over it; the runtime itself was relying on it.
+
+**The fix does not rely on the version.** The runtime already had the
+correct comparison — `_json_equal`, used by its internal fallback for
+`enum` and `const` — so the `enum` keyword is now **overridden** with
+it. The check holds whichever `jsonschema` is installed.
+
+Measured on the 4.19.2 host, after the fix:
+
+```
+validate_tool_input({"value": {"flag": 1}},
+    {"properties": {"value": {"enum": [{"flag": True}]}}})
+-> ToolInputSchemaError: arguments violate schema keyword 'enum'
+```
+
+and the reverse direction too — a schema demanding `1` does not accept
+`True` — while the legitimate value is still accepted.
+
+**The other two failures were not the same thing at all.** The
+`json-schema` extra is **two packages**: `jsonschema` *and* `regex`. The
+`pattern` and `patternProperties` keywords are served by the
+timeout-capable `regex` engine. The tests guarded only on
+`_jsonschema is None`, so a host with `jsonschema` but no `regex`
+reported three failures — which reads as a runtime defect and is not
+one. The runtime's answer there is **correct**: it fails closed with
+`"pattern validation requires the regex extra"`, which is the right
+posture for an untrusted pattern. The guard now requires both halves of
+the extra, and the tests that need only `jsonschema` keep their narrower
+guard.
+
+> **The generalisable form.** "The library is the wrong version" is a
+> conclusion that *stops* the investigation, and it cost a real
+> type-confusion one extra look. The right question was never "is the
+> version right?" but **"what does this version do differently, and is
+> the difference a behaviour or an API?"** A version skew that changes
+> *behaviour* is a defect in every host that has it, and the fix belongs
+> in the runtime, not in the install instructions.
+
+### 6.5 What this section closes, and what it does not
+
+**The baseline is empty.**  The 26-item baseline file named in
+`b173-baseline-CURRENT` now has **zero** failing items against this
+branch: `Ran 23161 tests — OK (skipped=20)`, zero failures, zero
+errors.  The bench is **169/169**.
+
+That closes **A-1, A-2, A-3** (and confirms **A-4** and **A-10**),
+fixes **A-5**'s items, and turns **A-6**'s claim from false to true.
+
+**What remains open, and why:**
+
+* **A-6** — the `pyproject.toml` comment.  The suite now really does
+  pass on a bare interpreter, so the claim is *true*; what is still
+  wrong is that the `json-schema` extra is not in `requirements.txt`,
+  so a CI image that installs only the requirements still runs without
+  `regex` and skips four pattern tests.  That is a CI decision, not a
+  code fix.
+* **A-7** — `scripts/b173-baseline-check.sh` is not wired into CI.  The
+  script exists; nothing runs it.
+* **A-8** — the baseline file now over-reports by 26.  It should be
+  re-pinned to an empty set, with the provenance header naming the
+  commit that earned it.  **A baseline file is a claim about a tree**;
+  leaving a stale one in place is worse than having none, because a
+  reader cannot tell which items are still real.
+* **A-9** — the strategy ledger's §5 list still carries the old
+  attribution.
+
+**And one thing this section did not touch:** the 15 mutant-survivor
+equivalence proofs.  Their census row (`gt@640`) turned out to have
+**no row** in `mutant-evidence-closure.md` §9.1's table — the same
+class of gap as the `merged_tree_review` one, found by diffing the
+table against the census rather than against the proofs.  That file
+carries the correction.

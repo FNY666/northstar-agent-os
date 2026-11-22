@@ -21,8 +21,9 @@ already had one (`cancellation-gate`'s `or@504` and `durable-resume`'s
 
 The whole-batch census
 (`/home/muse-newapi/census-parallel.txt`, 104 slices, the same probe with
-`--tries 64 --no-early-stop`) reports **thirteen distinct survivor
-sites**:
+`--tries 64 --no-early-stop`) reports **fifteen distinct survivor
+sites** across **18 survivor instances** — three of the names survived
+twice, because their slices were censused under two names:
 
 ```
 eq@387  gt@304  gt@533  gt@640  gt@669 (x2)  gt@681  gt@741
@@ -30,7 +31,7 @@ lt@152  lt@390 (x2)  lt@579  lt@667 (x2)  lt@701  lt@928
 or@504  or@527
 ```
 
-Fifteen sites across thirteen proofs — and `merged_tree_review`'s two
+Fifteen sites across fifteen proofs — and `merged_tree_review`'s two
 (`gt@451` and `eq@494`) were **not among them**. They were recorded in
 `test_merged_tree_review.py::MutantEquivalentTests`, but they had
 **neither** of the two shapes §9 requires:
@@ -47,6 +48,13 @@ what a broken premise would do.
 **The count in §9 was 13; the number of recorded equivalence proofs was
 15.** §9.1's table listed eleven with a control, and named two more that
 already had one — thirteen — but two more existed and had none.
+
+> **Why the two sites were missing from the census.** The census
+> reported this slice as `ERROR`, not as a count. A slice with no
+> census number contributes no site, so it contributes no row in any
+> table derived from it — the two proofs were invisible in the count for
+> the same reason they were invisible in the census. §5.1 has the
+> re-measurement.
 
 ## 2. The worse defect: the proofs were ASYMMETRIC
 
@@ -165,12 +173,12 @@ compared zero spans would reach the same conclusion and mean nothing.
 
 | metric | before | after |
 |---|---|---|
-| census, `merged_tree_review` | **no number at all** (the run died) | see §5.1 |
+| census, `merged_tree_review` | **no number at all** (the run died) | **`killed 37/39`** — see §5.1 |
 | `gt@451` with the mutant planted | FAIL (textual) | **OK** |
 | `eq@494` with the mutant planted | FAIL (textual) | **OK** |
 | equivalence proofs with a non-vacuity control | 13 of 15 | **15 of 15** |
 
-### 5.1 The census had NO number for this slice
+### 5.1 The census had NO number for this slice — and now has one
 
 The whole-batch census reported this slice as `ERROR` — not a count.
 Two causes, both measured:
@@ -189,6 +197,33 @@ surviving mutant in the batch's census is an equivalent mutant" was
 made without a number for this slice. The same lesson as
 `cwl-episode-eviction`: **a number that is missing is a finding**.
 
+**Re-measured after this slice**, with the same probe
+(`--tries 64 --no-early-stop`) against a copy of the tree:
+
+```
+MUTANT RESULT: killed 37/39
+```
+
+with exactly two survivors:
+
+```
+MUTANT gt@451 SURVIVED (> -> >=)
+MUTANT eq@494 SURVIVED (== -> !=)
+```
+
+Those are the two sites this slice's equivalence proofs cover — so the
+slice now contributes **two sites to the census and two rows to §9.1's
+table**, which is what it could not do while it read `ERROR`.
+
+**One probe change was needed to get this number, and it is worth
+recording.** The probe collected every verdict in memory and printed
+them all at the end, so a run that hit the wall clock produced **no
+output at all** — and "no output" and "no mutants survived" look
+identical to whatever reads the file. That is the same shape as
+`b173-a-timeout-is-not-a-verdict`: a missing number is not a verdict.
+The probe now prints each verdict **as it is measured**, so a killed run
+still reports the sites it reached.
+
 ## 6. What this does NOT change
 
 * The module's diff is **zero**. Nothing about the runtime's behaviour
@@ -205,6 +240,9 @@ made without a number for this slice. The same lesson as
 
 * Focused suite: `Ran 72 tests — OK` (was 66; +6).
 * Module diff: **zero** (`git diff` on `merged_tree_review.py` empty).
+* Whole-file census for the slice: **`killed 37/39`**, with exactly
+  `gt@451` and `eq@494` surviving (§5.1). The slice no longer reads
+  `ERROR` in the census.
 * Repo-level suite: `426 passed, 1 failed` — the failure is
   `test_code_task_pack.py::CodeTaskPackTests::test_northstar_delivered_patch_passes_clean_fixture_evaluation`,
   the known Node 24 vs 22 baseline failure, byte-identical to the

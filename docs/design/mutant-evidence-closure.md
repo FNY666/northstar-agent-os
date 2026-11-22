@@ -692,6 +692,50 @@ proofs are now symmetric and have a control; see
 `docs/design/merged-tree-review-equivalence-controls.md`.  The
 enumeration is now **15 sites, 15 proofs, 15 controls**.
 
+**AMENDED 2026-11-22.**  The two sites now have a **census number of
+their own**, which is what closed the loop.  The whole-file census for
+`merged_tree_review.py` reads:
+
+```
+MUTANT RESULT: killed 37/39
+```
+
+with exactly two survivors -- `gt@451` and `eq@494` -- the two this
+slice covers.  So the slice contributes **two sites to the census and
+two rows to §9.1's table**, where before it contributed neither.
+
+**AMENDED 2026-11-22 (b).**  Checking §9.1's table against the census --
+rather than against the proofs -- found **one more gap of the same
+kind**: the census's `gt@640` (`refusal-hold-wiring`'s audit-trail trim
+bound) had **no row in §9.1's table**.  It does have a proof, and a
+good one: `tests/test_refusal_hold_wiring.py` runs the strict and the
+loose spelling as **two separate imported copies** of the real module,
+drives both through the same recording sequence, and compares the two
+trails event by event -- with the non-vacuity control
+`test_the_differential_harness_would_catch_an_observable_mutation`
+planting a mutation that IS observable.
+
+So the proof existed and was correct; only the **table row** was
+missing.  That is the *second* time this enumeration was short by
+exactly the sites the census could not reach -- and the *third* time
+the count was locally right and wrong.  The census reports **15
+distinct sites**; §9.1's table now carries **14 rows for 15 sites**
+(the `diviner` row carries two).
+
+> **The enumeration is now derived from the census, not from memory.**
+> The census is the only artifact that sees every slice; a hand-kept
+> table is one edit away from being a subset of it.  And the check is
+> cheap: extract the site names from the table, extract them from the
+> census, and diff.  Two of the three gaps were found by that diff and
+> not by reading any proof.
+
+The probe needed one change to produce that number: it collected every
+verdict in memory and printed them all at the end, so a run that hit
+the wall clock produced **no output at all**.  It now prints each
+verdict **as it is measured**.  The generalisable form is the one from
+`cwl-episode-eviction`: **a missing number is not a verdict**, and a
+probe that reports nothing when it dies makes that invisible.
+
 **A count is a claim too.**  This section's own "13" was locally
 correct -- thirteen proofs had been *written* -- and it was still wrong,
 because the enumeration behind it was drawn from memory of the proofs
@@ -716,11 +760,21 @@ the planted fault.
 | `horizon` | `gt@741` | the truncation keeping one character fewer |
 | `jido-statebudget` | `gt@304` | a deliberately wrong expression -- the original with the bound one step further |
 | `openhands-stuck-detector` | `gt@681` | the source-index line with a ONE-element message key |
+| `refusal-hold-wiring` | `gt@640` | the differential harness planted with a mutation that IS observable -- the delete removes one event too many at the boundary |
 | `scope-verbatim-compaction` | `lt@390` | the end-marker guard moved to a bound that never fires |
 | `scorer-disagreement` | `gt@533` | the threshold comparison widened instead of the scorer-count one |
 | `step-reliability-budget` | `lt@152` | the final formula of `max_steps` shifted by one |
 | `merged-tree-review` | `gt@451` | the trim bound moved one step further -- `len(parts) > 2` -- which the harness must detect |
 | `merged-tree-review` | `eq@494` | the same harness, over the class-membership half the equivalence rests on |
+
+**The table has 14 rows for 15 sites.**  `diviner` /
+`scope-verb-canonical` carries TWO sites (`lt@667` and `gt@669`) in one
+row, so the row count and the site count differ by one.  The census
+reports **15 distinct survivor sites** across **18 survivor instances**
+-- `lt@667`, `gt@669` and `lt@390` each survived TWICE, because their
+slices were censused under two names.  So "15 sites, 15 proofs, 15
+controls" is a count of **distinct sites**, and the three duplicated
+names are the same site counted once.
 
 **The skipped inputs.**  A sweep that SKIPS a class of pairs -- the
 equal target sets, the equal row counts -- is skipping exactly where
