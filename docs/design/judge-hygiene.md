@@ -405,6 +405,73 @@ its own.  The rule is now: *the module's own suite, if it has one*.
 or the accept thresholds.  It changes only **which suite is asked**, so
 the census measures the module rather than a bystander.
 
+### 4b.7 The runner could not SEE the suite it was asked to run
+
+§4b.5 and §4b.6 both fixed **which suite** the probe was given.  They
+missed the more basic question: **could the runner see that suite at
+all?**
+
+The probe ran:
+
+```python
+subprocess.run([sys.executable, "-m", "unittest", test_module], ...)
+```
+
+`unittest`'s discovery collects only test **METHODS** inside `TestCase`
+classes.  The component's suite is mostly the other shape -- standalone
+module-level `test_*` **FUNCTIONS**:
+
+```
+1,545 test files
+  812 have ONLY standalone functions  (unittest sees 0 of them)
+  730 have only TestCase classes
+    0 have both
+  815 files where unittest collects ZERO tests, holding 9,815 test
+  functions in total
+```
+
+For those 815 suites `unittest` exits **5** (`NO TESTS RAN`), and the
+probe read **any non-zero exit** as "the mutant was KILLED":
+
+```python
+elif rc != 0:
+    killed += 1
+```
+
+So every mutant in the module was reported **killed by a suite that ran
+no tests at all**.
+
+**Measured 2026-11-22**, `agents.py` paired with `test_agent_handoff.py`
+(40 standalone functions, 0 discoverable by unittest):
+
+| suite | verdict | what actually happened |
+|---|---|---|
+| `test_agent_handoff.py` | `killed 31/31` | **0 tests ran**; every "kill" was the exit code |
+| `test_agents.py` | `killed 14/31` | 45 tests ran; 17 genuine survivors |
+
+This is the **most consequential** of the four defects, and the reason is
+directional.  The stale-bytecode false kill (D-22) made a mutant look
+*surviving* when the tests had caught it -- over-reporting weakness.
+D-24 made a mutant look *killed* when the tests had failed for an
+unrelated reason.  This one makes a mutant look *killed* when **no test
+ran**: it manufactures evidence of coverage where there is none, and it
+points the *stronger* way, so no other check would have caught it.
+
+**The fix.**  Two parts.
+
+1. **The runner.**  The probe runs `pytest`, which collects both test
+   shapes -- and is the runner CI already uses
+   (`python -m pytest -q tests`).
+2. **"Collected nothing" is not a kill.**  Even under pytest, a suite
+   that cannot be imported exits 5.  The probe therefore checks the
+   output for pytest's own wording (`no tests ran`, `error during
+   collection`, `collected 0 items`) and reports **SKIP**, not KILLED.
+
+The probe also accepts **several** test modules, because a module's real
+coverage is the **union** of the suites that reference it:
+`agents.py` is exercised by `test_agents.py` (773 lines) *and*
+`test_agent_handoff.py` (601 lines).
+
 ## 5. What is deliberately **not** changed
 * `b173-accept.sh` is **not modified by a single character** — it is the
   referee for the twelve acceptance items; changing it changes the
