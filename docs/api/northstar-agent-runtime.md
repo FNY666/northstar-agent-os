@@ -90066,6 +90066,10 @@ The stable idempotency key ``<task_id>:<event_type>``.
 
 Lease a task with a fencing token; reap the dead; refuse the zombies.
 
+- `refusal_gate` (property)
+  - The installed refusal gate, if any.
+- `set_refusal_gate(gate: Optional[Any])`
+  - Install (or remove) the refusal gate.
 - `queue_name_for(task_id: str)`
   - The queue-mirror queue name of a task.
 - `task(task_id: str)`
@@ -90400,6 +90404,8 @@ The registry the seal ledger's injection point accepts.
   - True when the action is blocked by a refusal (or by a broken gate).
 - `record(grant_id: str, action: str, subject: Optional[str]=None, *, row: Optional[RefusalRow]=None, now: Optional[float]=None)`
   - Record a refusal against one ledger-side identity.
+- `record_entry(key: RefusalHoldKey, *, row: Optional[RefusalRow]=None, now: Optional[float]=None)`
+  - Record a refusal against an **already-built** hold key.
 - `lift(lift: Any)`
   - A tombstone lift offered against a refusal is refused.
 - `bind_gate(lock: Any)`
@@ -90415,6 +90421,36 @@ Authorize one grant seal against the refusal hold.
 #### `install_refusal_gate(ledger: Any, registry: RefusalHoldRegistry, *, action: str='dispatch', subject: str='', now: Optional[float]=None, grant_id: Optional[str]=None)`
 
 Bind the refusal gate into a ledger's commit critical section.
+
+#### `queue_hold_key(job_id: str, action: str, *, scope_kind: str=SCOPE_KIND_QUEUE)`
+
+The hold key for one queue-side action identity.
+
+#### `task_hold_key(task_id: str, action: str, *, scope_kind: str=SCOPE_KIND_LEASE)`
+
+The hold key for one lease-side action identity.
+
+#### `RefusalHoldQueueGate`
+
+The queue-side gate: one refusal registry, two queue namespaces.
+
+- `registry` (property)
+  - The registry this gate consults.
+- `check_queue(job_id: str, action: str, *, now: Optional[float]=None)`
+  - The gate's answer for one **queue-side** re-dispatch.
+- `check_task(task_id: str, action: str, *, now: Optional[float]=None)`
+  - The gate's answer for one **lease-side** re-dispatch.
+- `require_queue_allowed(job_id: str, action: str, *, now: Optional[float]=None)`
+  - Raise :class:`RefusalRefusedError` when the job may not re-dispatch.
+- `require_task_allowed(task_id: str, action: str, *, now: Optional[float]=None)`
+  - Raise :class:`RefusalRefusedError` when the task may not re-dispatch.
+- `record_queue(job_id: str, action: str, *, row: Optional[RefusalRow]=None, now: Optional[float]=None)`
+  - Record a refusal against one queue-side identity.
+- `record_task(task_id: str, action: str, *, row: Optional[RefusalRow]=None, now: Optional[float]=None)`
+  - Record a refusal against one lease-side identity.
+#### `install_queue_refusal_gate(queue: Any, gate: RefusalHoldQueueGate, *, job_id: str, action: str, now: Optional[float]=None)`
+
+Bind the queue-side refusal gate into a queue's retry path.
 
 #### `stdlib_only()`
 

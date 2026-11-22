@@ -530,6 +530,7 @@ class LeasedTaskClaim:
         backoff_factor: float = 2.0,
         max_backoff_seconds: float = 300.0,
         clock: Callable[[], float] = time.time,
+        refusal_gate: Optional[Any] = None,
     ) -> None:
         if isinstance(max_failures, bool) or not isinstance(max_failures, int):
             raise ValueError("max_failures must be an int")
@@ -546,6 +547,51 @@ class LeasedTaskClaim:
         self.max_backoff_seconds = float(max_backoff_seconds)
         self._clock = clock
         self._seq = 0
+        #: The optional **refusal gate** (see
+        #: ``refusal_hold_wiring.RefusalHoldQueueGate``).  When one is
+        #: installed, a task whose re-dispatch is covered by a recorded
+        #: refusal is NOT put back to ``ready`` -- ``fail()`` refuses the
+        #: write and the task stays where it is.
+        #:
+        #: The gate is **duck-typed**: this module does not import the
+        #: wiring (the wiring imports the hold, and the hold must not
+        #: drag the lease ledger in).  It must offer
+        #: ``require_task_allowed(task_id, action, now=...)``.
+        self._refusal_gate = refusal_gate
+
+    @property
+    def refusal_gate(self) -> Optional[Any]:
+        """The installed refusal gate, if any."""
+        return self._refusal_gate
+
+    def set_refusal_gate(self, gate: Optional[Any]) -> None:
+        """Install (or remove) the refusal gate.
+
+        The gate is asked about the task's **action identity**, which the
+        task already carries: the ``task`` column of ``ltc_task`` is the
+        work item's action, so no schema change is needed.
+        """
+        self._refusal_gate = gate
+
+    def _require_refusal_allows(self, task_id: str, action: str,
+                                now: float) -> None:
+        """Ask the refusal gate, if one is installed.
+
+        Called **inside** ``fail()``'s transaction, immediately before the
+        ``UPDATE`` that flips the task back to ``ready``.  A refusal
+        raises, so the transaction rolls back and the task keeps its
+        state, its failure count and its delay.
+        """
+        gate = self._refusal_gate
+        if gate is None:
+            return
+        require = getattr(gate, "require_task_allowed", None)
+        if not callable(require):
+            raise TypeError(
+                "the refusal gate must offer require_task_allowed(task_id, "
+                f"action, now=...), got {type(gate).__name__}"
+            )
+        require(task_id, action, now=now)
 
     # -- helpers ---------------------------------------------------------
 
@@ -1002,6 +1048,13 @@ class LeasedTaskClaim:
 
         The crash path (``reap``) never comes here, which is exactly the
         distinction the source text draws: a crash eats no backoff.
+
+        **A recorded refusal blocks the re-dispatch.**  When a refusal
+        gate is installed and a refusal covers this task's action, the
+        write is refused: the task does not go back to ``ready``, its
+        failure count does not advance, and no backoff is booked.  The
+        check runs inside the transaction, immediately before the
+        ``UPDATE``, so a refusal and the re-dispatch cannot interleave.
         """
         task_id = _check_text(task_id, "task_id")
         now = self._clock() if now is None else float(now)
@@ -1010,6 +1063,7 @@ class LeasedTaskClaim:
             failures = int(row["failures"]) + 1
             dead = failures >= self.max_failures
             delay = 0.0 if dead else self._backoff_for(failures)
+            self._require_refusal_allows(task_id, str(row["task"]), now)
             conn.execute(
                 "UPDATE ltc_task SET state = ?, worker = '', failures = ?, "
                 "delay_until = ? WHERE task_id = ?",

@@ -104,6 +104,7 @@ from refusal_hold import (
     REASON_BLOCKED_ROW_INVALID,
     REASON_BLOCKED_ROW_TAMPERED,
     REASON_BLOCKED_STORE_UNREADABLE,
+    SCOPE_KIND_LEASE,
     SCOPE_KIND_QUEUE,
     SCOPE_KIND_TASK,
     SCOPE_KINDS,
@@ -132,9 +133,13 @@ __all__ = [
     "RefusalRefusedError",
     "scope_kind_for",
     "refusal_hold_key",
+    "queue_hold_key",
+    "task_hold_key",
     "authorize",
     "install_refusal_gate",
+    "install_queue_refusal_gate",
     "RefusalHoldRegistry",
+    "RefusalHoldQueueGate",
 ]
 
 #: Module version pin.
@@ -567,6 +572,39 @@ class RefusalHoldRegistry:
             )
         _require_row(row)
         key = self.key_for(grant_id, action, subject)
+        return self.record_entry(key, row=row, now=now)
+
+    def record_entry(
+        self,
+        key: RefusalHoldKey,
+        *,
+        row: Optional[RefusalRow] = None,
+        now: Optional[float] = None,
+    ) -> RefusalHoldKey:
+        """Record a refusal against an **already-built** hold key.
+
+        :meth:`record` is the ledger-side entry point: it maps the
+        ledger's ``(grant_id, action, subject)`` onto a key and records
+        against it.  The queue side has a different namespace, so it
+        builds its own key (see :func:`queue_hold_key` and
+        :func:`task_hold_key`) and needs a recording path that takes the
+        key directly.
+
+        The two paths share this method, so the recording semantics --
+        the row check, the lock order, the store rebuild, the event --
+        cannot drift apart between the two sides.  Only the *key* differs.
+        """
+        if row is None:
+            raise RefusalHoldWiringError(
+                "wiring: record_entry() needs the refusal row itself -- a "
+                "refusal with no row is not a refusal"
+            )
+        _require_row(row)
+        if not isinstance(key, RefusalHoldKey):
+            raise RefusalHoldKeyMappingError(
+                "wiring: record_entry() needs a RefusalHoldKey, got "
+                f"{type(key).__name__}"
+            )
         with self._gate():
             with self._lock:
                 self._entries = list(self._entries) + [
@@ -785,6 +823,249 @@ def _current_pin(ledger: Any) -> Any:
         if pin is not None:
             return pin
     return None
+
+
+# ---------------------------------------------------------------------------
+# The queue side: a recorded refusal blocks the re-dispatch of the same job
+# ---------------------------------------------------------------------------
+#
+# `docs/design/refusal-hold-wiring.md` §4 names the two re-dispatch paths
+# and says why the wiring could not land them: the queue side holds no
+# **action identity**, so the hold cannot be asked a question in its own
+# vocabulary.
+#
+# The action identity turns out to be **already carried**.  `JobQueue`
+# keeps the job's `task` string on every entry, and `LeasedTaskClaim`
+# keeps it in the `ltc_task.task` column.  Neither is a *grant* id, but
+# the hold's key does not need one: `scope_id` is the job id or the task
+# id, and `action` is the work item's action.  So the queue side needs a
+# **mapping**, not a schema change -- which is what this section adds.
+#
+# The scope namespaces are DIFFERENT and are not interchangeable:
+#
+#   ledger side    task:<grant id>:<action>
+#   queue side     queue:<job id>:<action>
+#   lease side     lease:<task id>:<action>
+#
+# The same refusal row can be registered in more than one namespace, but
+# the two keys are not the same key, and a refusal recorded in one does
+# not block the other.  The lease side needed its OWN scope kind: the
+# ledger side's ``scope_id`` is a grant id and the lease side's is a task
+# id, and both are plain strings, so on a shared scope kind the two keys
+# were the SAME whenever the id strings matched -- a refusal recorded
+# against a grant blocked an unrelated lease.
+
+
+def queue_hold_key(
+    job_id: str,
+    action: str,
+    *,
+    scope_kind: str = SCOPE_KIND_QUEUE,
+) -> RefusalHoldKey:
+    """The hold key for one queue-side action identity.
+
+    ``scope_id`` is the **job id**, ``action`` is the work item's action.
+    The scope kind is ``"queue"`` -- a different namespace from the
+    ledger side's ``"task"``, and the two are deliberately not
+    interchangeable.
+
+    A malformed input **fails closed**: it raises rather than
+    constructing an empty key, because an empty key would name *every*
+    action.
+    """
+    if scope_kind not in SCOPE_KINDS:
+        raise RefusalHoldKeyMappingError(
+            f"wiring: scope kind {scope_kind!r} is not one of "
+            f"{sorted(SCOPE_KINDS)}"
+        )
+    job_text = _require_grant_id(job_id)
+    action_text = _require_action(action)
+    try:
+        return RefusalHoldKey(scope_kind, job_text, action_text)
+    except RefusalHoldKeyError as error:
+        raise RefusalHoldKeyMappingError(
+            f"wiring: the queue-side identity does not map onto a hold key: {error}"
+        ) from error
+
+
+def task_hold_key(
+    task_id: str,
+    action: str,
+    *,
+    scope_kind: str = SCOPE_KIND_LEASE,
+) -> RefusalHoldKey:
+    """The hold key for one lease-side action identity.
+
+    The lease side's namespace is ``lease:<task id>:<action>``.
+
+    It was **not** ``task:``, and that is a fix rather than a choice.
+    The ledger side's namespace is ``task:<grant id>:<action>`` and both
+    sides put a plain string in ``scope_id`` -- a grant id and a task id
+    are the same *shape*.  So with both sides on ``task``, the two keys
+    were the SAME whenever the id strings matched, and a refusal
+    recorded against a grant blocked an unrelated lease.  The lease side
+    therefore has its own scope kind.
+
+    A malformed input fails closed, as in :func:`queue_hold_key`.
+    """
+    if scope_kind not in SCOPE_KINDS:
+        raise RefusalHoldKeyMappingError(
+            f"wiring: scope kind {scope_kind!r} is not one of "
+            f"{sorted(SCOPE_KINDS)}"
+        )
+    task_text = _require_grant_id(task_id)
+    action_text = _require_action(action)
+    try:
+        return RefusalHoldKey(scope_kind, task_text, action_text)
+    except RefusalHoldKeyError as error:
+        raise RefusalHoldKeyMappingError(
+            f"wiring: the lease-side identity does not map onto a hold key: {error}"
+        ) from error
+
+
+class RefusalHoldQueueGate:
+    """The queue-side gate: one refusal registry, two queue namespaces.
+
+    The registry it wraps is the same :class:`RefusalHoldRegistry` the
+    ledger side uses, so a host can record a refusal once and consult it
+    from either side -- but through **this** gate's two methods, which
+    build the right key for each side.
+
+    The gate **fails closed**: a gate that cannot answer blocks.  An
+    unreadable store, a tampered row, a malformed identity -- all of them
+    refuse the re-dispatch rather than letting the job go back to
+    ``ready``.
+    """
+
+    def __init__(self, registry: RefusalHoldRegistry) -> None:
+        if registry is None:
+            raise RefusalHoldWiringError(
+                "wiring: the queue gate needs a registry, got None"
+            )
+        self._registry = registry
+
+    @property
+    def registry(self) -> RefusalHoldRegistry:
+        """The registry this gate consults."""
+        return self._registry
+
+    # -- the two sides ----------------------------------------------------
+
+    def check_queue(
+        self, job_id: str, action: str, *, now: Optional[float] = None
+    ) -> RefusalHoldResult:
+        """The gate's answer for one **queue-side** re-dispatch."""
+        key = queue_hold_key(job_id, action)
+        result = self._registry.hold.check(key, now=int(now) if now is not None else None)
+        return result
+
+    def check_task(
+        self, task_id: str, action: str, *, now: Optional[float] = None
+    ) -> RefusalHoldResult:
+        """The gate's answer for one **lease-side** re-dispatch."""
+        key = task_hold_key(task_id, action)
+        result = self._registry.hold.check(key, now=int(now) if now is not None else None)
+        return result
+
+    # -- the check that refuses -------------------------------------------
+
+    def require_queue_allowed(
+        self, job_id: str, action: str, *, now: Optional[float] = None
+    ) -> None:
+        """Raise :class:`RefusalRefusedError` when the job may not re-dispatch.
+
+        The caller calls this **inside** the critical section that would
+        flip the job back to ``ready``, so a refusal recorded under the
+        same lock is serialized with the re-dispatch: there is no
+        interleaving in which the refusal is on the books and the job
+        still goes back to ``ready``.
+        """
+        result = self.check_queue(job_id, action, now=now)
+        if result.blocked:
+            raise RefusalRefusedError(
+                f"job {job_id!r} may not be re-dispatched for action "
+                f"{action!r}: a recorded refusal covers it "
+                f"({result.reason}); the job stays where it is",
+                reason=result.reason,
+            )
+
+    def require_task_allowed(
+        self, task_id: str, action: str, *, now: Optional[float] = None
+    ) -> None:
+        """Raise :class:`RefusalRefusedError` when the task may not re-dispatch."""
+        result = self.check_task(task_id, action, now=now)
+        if result.blocked:
+            raise RefusalRefusedError(
+                f"task {task_id!r} may not be re-dispatched for action "
+                f"{action!r}: a recorded refusal covers it "
+                f"({result.reason}); the task stays where it is",
+                reason=result.reason,
+            )
+
+    # -- recording --------------------------------------------------------
+
+    def record_queue(
+        self,
+        job_id: str,
+        action: str,
+        *,
+        row: Optional[RefusalRow] = None,
+        now: Optional[float] = None,
+    ) -> RefusalHoldKey:
+        """Record a refusal against one queue-side identity.
+
+        The **scope lives on the hold side** and the **row lives on the
+        :mod:`refusal_row` side** -- the same split the ledger side uses,
+        and the same reason for it: the row's digest is computed over
+        exactly its own fields, so a scope cannot be added to it without
+        breaking ``verify_row``.
+        """
+        key = queue_hold_key(job_id, action)
+        return self._registry.record_entry(key, row=row, now=now)
+
+    def record_task(
+        self,
+        task_id: str,
+        action: str,
+        *,
+        row: Optional[RefusalRow] = None,
+        now: Optional[float] = None,
+    ) -> RefusalHoldKey:
+        """Record a refusal against one lease-side identity."""
+        key = task_hold_key(task_id, action)
+        return self._registry.record_entry(key, row=row, now=now)
+
+
+@contextlib.contextmanager
+def install_queue_refusal_gate(
+    queue: Any,
+    gate: RefusalHoldQueueGate,
+    *,
+    job_id: str,
+    action: str,
+    now: Optional[float] = None,
+):
+    """Bind the queue-side refusal gate into a queue's retry path.
+
+    The **executable form** of the queue-side wiring: it takes the
+    queue's own lock, consults the refusal hold inside it, and lets the
+    job go back to ``ready`` only when no refusal covers the action.
+
+    The binding makes "a refusal was recorded but the job was re-dispatched
+    anyway" impossible: the refusal is recorded under the *same* lock, so
+    a re-dispatch and a recording are serialized with respect to each
+    other.  A re-dispatch that runs first commits before the refusal
+    lands (the job was issued, and is then refused); a recording that
+    runs first blocks the re-dispatch.
+    """
+    lock = getattr(queue, "_lock", None)
+    if lock is None:
+        raise RefusalHoldWiringError(
+            "wiring: the queue must expose a lock to bind the gate into"
+        )
+    with lock:
+        gate.require_queue_allowed(job_id, action, now=now)
+        yield
 
 
 def stdlib_only() -> bool:

@@ -415,3 +415,105 @@ protection is assumed rather than measured.
 * The queue-side wiring (open item 1) is still open. It needs the work
   item to carry an action identity first, and it is a different seam
   from this one.
+
+## 7. RESOLVED — the queue side carries its own action identity
+
+Open item 1 above said the queue-side wiring could not land because
+"the work item must carry an action identity first", and that adding
+that field was "a change to `job_queue.py` / `leased_task_claim.py`".
+**It is closed, and the premise was wrong in a useful way.**
+
+### 7.1 The action identity was already there
+
+The open item asked for a *grant-pin-shaped field* on the job. The job
+already carries an action:
+
+* `JobQueue` keeps the work item's `task` string on every entry, and
+* `LeasedTaskClaim` keeps it in the `ltc_task.task` column.
+
+Neither is a grant id, and neither needs to be. The hold's key is
+`(scope_kind, scope_id, action)`, where `scope_id` is a **job id** or a
+**task id** and `action` is the work item's action. So the queue side
+needed a **mapping**, not a schema change — and no schema change means
+no migration, no requeue of in-flight jobs, and no change to the
+`job_queue.py` / `leased_task_claim.py` table layout.
+
+### 7.2 The three namespaces, and the collision that proved they must be three
+
+The wiring adds three namespaces, and the third exists because the
+first two were not enough:
+
+```
+ledger side    task:<grant id>:<action>
+queue side     queue:<job id>:<action>
+lease side     lease:<task id>:<action>
+```
+
+`task_hold_key()` originally used the ledger side's scope kind, `task`.
+That is a **collision**, and it was found by a test, not by reading:
+the ledger side's `scope_id` is a grant id and the lease side's is a
+task id, and **both are plain strings**. So on a shared scope kind
+`task:<grant id>:<action>` and `task:<task id>:<action>` are the *same
+key* whenever the id strings match — and a refusal recorded against a
+grant blocked an unrelated lease. The failure direction is "stops
+work", so it fails safe; but it blocks the *wrong* work, which is not
+safe at all.
+
+`refusal_hold.py` therefore gains a third scope kind, `SCOPE_KIND_LEASE`
+(`"lease"`), and `SCOPE_KINDS` now names three. The hold's own key
+format is unchanged — this is a new *namespace*, not a new key shape.
+
+### 7.3 What landed
+
+* `refusal_hold_wiring.queue_hold_key(job_id, action)` — the queue-side
+  key. `task_hold_key(task_id, action)` — the lease-side key. Both fail
+  closed on a malformed identity (they raise; they never construct an
+  empty key, because an empty key would name *every* action).
+* `refusal_hold_wiring.RefusalHoldQueueGate` — one registry, two
+  namespaces, with `check_queue` / `check_task` and the matching
+  `require_*_allowed` / `record_*`. It **fails closed**: an unreadable
+  store, a tampered row or a malformed identity refuses the re-dispatch.
+* `RefusalHoldRegistry.record_entry(key, row=...)` — a recording path
+  that takes an **already-built** key. `record()` now delegates to it,
+  so the two sides share the row check, the lock order, the store
+  rebuild and the event, and those semantics cannot drift apart.
+* `install_queue_refusal_gate(queue, gate, job_id=..., action=...)` — a
+  context manager that binds the gate into the queue's lock, so the
+  check and the re-dispatch are serialized against the queue's own
+  critical section.
+* `LeasedTaskClaim` gains an optional, **duck-typed** refusal gate
+  (`refusal_gate=` / `set_refusal_gate()`), and `fail()` consults it
+  **inside the transaction**, immediately before the `UPDATE` that
+  flips the task back to `ready`. A refusal raises, the transaction
+  rolls back, and the task keeps its state, its failure count and its
+  delay.
+
+The gate is duck-typed on purpose: `leased_task_claim.py` does not
+import `refusal_hold_wiring` (the wiring imports the hold, and the
+hold must not drag the lease ledger in). The lease side asks the gate
+for `require_task_allowed(task_id, action, now=...)`, and a gate that
+does not offer it is a `TypeError` at the call site rather than a
+silent pass-through.
+
+### 7.4 Measured
+
+`tests/test_refusal_hold_queue_wiring.py` — 40 tests. Among them:
+
+* a refused `fail()` leaves `state='leased'`, `failures=0` and
+  `delay_until=0.0`, and the queue-mirror job stays `reserved`;
+* the queue-side and lease-side keys for the *same* id string are
+  **different** keys (the collision above), and the ledger-side and
+  lease-side keys are different too;
+* the gate is bound under the queue's own lock, so a refusal recorded
+  concurrently with a re-dispatch cannot interleave.
+
+The targeted suites (`test_leased_task_claim`, `test_refusal_hold`,
+`test_refusal_hold_wiring`, `test_refusal_hold_queue_wiring`,
+`test_job_queue`) are green, and the repo-level suite is green (452
+tests) after the regenerated `docs/api` page.
+
+### 7.5 What is still open
+
+Open items 2 (the subject layer), 3 (no lift path) and 4 (the ledger
+file itself) are unchanged by this section — item 4 was closed by §6.
+Open item 1 is closed by this section.

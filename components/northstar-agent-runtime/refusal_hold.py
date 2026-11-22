@@ -85,6 +85,7 @@ __all__ = [
     "SCHEMA_PIN",
     "SCOPE_KIND_QUEUE",
     "SCOPE_KIND_TASK",
+    "SCOPE_KIND_LEASE",
     "SCOPE_KINDS",
     "REASON_ALLOWED_NO_REFUSAL",
     "REASON_BLOCKED_BY_REFUSAL",
@@ -108,12 +109,32 @@ REFUSAL_HOLD_VERSION = "refusal-hold.v1"
 #: Schema pin carried by hold entries.
 SCHEMA_PIN = "northstar.refusal-hold.v1"
 
-#: The two scope granularities a key can name.
+#: The scope granularities a key can name.
+#:
+#: There are **three**, and the third was added when the queue side was
+#: wired (see ``docs/design/refusal-hold-wiring.md`` §4 and
+#: ``refusal_hold_wiring``'s queue section).  ``queue`` and ``task`` were
+#: not enough because the ledger side and the lease side both used
+#: ``task`` and both put a plain string in ``scope_id``: a grant id and
+#: a task id are the same *shape*, so ``task:<grant id>:<action>`` and
+#: ``task:<task id>:<action>`` were the SAME key whenever the id strings
+#: matched.  A refusal recorded against a grant would then block an
+#: unrelated lease -- a false block, in the direction that stops work.
+#:
+#: The lease side therefore has its own scope kind.  The three are:
+#:
+#: * ``queue`` -- a job in the job queue (``scope_id`` is the job id);
+#: * ``task`` -- a grant pin on the seal ledger (``scope_id`` is the
+#:   grant id);
+#: * ``lease`` -- a task in the lease ledger (``scope_id`` is the task id).
 SCOPE_KIND_QUEUE = "queue"
 SCOPE_KIND_TASK = "task"
+SCOPE_KIND_LEASE = "lease"
 
 #: Every scope kind a key may use.
-SCOPE_KINDS = frozenset({SCOPE_KIND_QUEUE, SCOPE_KIND_TASK})
+SCOPE_KINDS = frozenset(
+    {SCOPE_KIND_QUEUE, SCOPE_KIND_TASK, SCOPE_KIND_LEASE}
+)
 
 #: A hold carries at most this many refusals (house convention, as in
 #: ``cancellation_tombstone.MAX_TOMBSTONES``).  A hold is a *gate*, not
