@@ -1116,67 +1116,6 @@ class MutantEquivalentTests(_TreeCase):
             offset += len(lines[index])
         return offset + col_offset
 
-    @staticmethod
-    def _spellings(old: str, new: str):
-        """The AST operator classes for the two spellings.
-
-        The spellings are given as source text (``len(parts) > 1`` and
-        ``len(parts) >= 1``); the operator inside each is mapped to the
-        AST class that stands for it.
-        """
-        import ast
-
-        def operator_of(text: str):
-            tree = ast.parse(text)
-            for node in ast.walk(tree):
-                if isinstance(node, ast.Compare):
-                    return type(node.ops[0])
-            raise AssertionError("no comparison in %r" % (text,))
-
-        return operator_of(old), operator_of(new)
-
-    #: The source text of each comparison operator the proofs use.
-    #: ``ast.unparse`` on an operator NODE returns the empty string --
-    #: it only unparses an expression -- so the mapping is explicit.
-    OPERATOR_TEXT = {
-        "Eq": "==",
-        "NotEq": "!=",
-        "Lt": "<",
-        "LtE": "<=",
-        "Gt": ">",
-        "GtE": ">=",
-    }
-
-    @classmethod
-    def _operator_spellings(cls, old: str, new: str):
-        """The two operator spellings, LONGEST first.
-
-        The longest is tried first so that a rewrite of ">=" into ">"
-        does not match the ">" inside the ">=" and produce ">==".
-        """
-        spellings = sorted(
-            (cls._operator_text(old), cls._operator_text(new)),
-            key=len,
-            reverse=True,
-        )
-        return spellings
-
-    @classmethod
-    def _operator_text(cls, text: str) -> str:
-        """The operator text of the given spelling."""
-        import ast
-
-        tree = ast.parse(text)
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Compare):
-                name = type(node.ops[0]).__name__
-                if name not in cls.OPERATOR_TEXT:
-                    raise AssertionError(
-                        "unsupported comparison operator %r" % (name,)
-                    )
-                return cls.OPERATOR_TEXT[name]
-        raise AssertionError("no comparison in %r" % (text,))
-
     def test_gt_at_451_is_equivalent_because_a_span_with_a_dot_has_two_parts(self):
         """`gt@451`: the ``len(parts) > 1`` bound.
 
