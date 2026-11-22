@@ -137,6 +137,21 @@ FIXTURE_TEST = (
     "    unittest.main()\n"
 )
 
+# A test file whose tests are STANDALONE FUNCTIONS -- the shape 815 of the
+# component's 1,545 test files have.  unittest's discovery does not see
+# these at all: it collects only test METHODS inside TestCase classes.
+FIXTURE_STANDALONE_TEST = (
+    "from probe_mod import pick\n"
+    "\n"
+    "\n"
+    "def test_first_branch():\n"
+    "    assert pick(True, False) == 'first'\n"
+    "\n"
+    "\n"
+    "def test_second_branch():\n"
+    "    assert pick(False, False) == 'second'\n"
+)
+
 
 def _write_fixture(root: Path) -> Path:
     root.mkdir(parents=True, exist_ok=True)
@@ -466,6 +481,91 @@ class JudgeHygieneProbeBehaviourTests(unittest.TestCase):
         rc, out = _run_probe(self.probe, wd)
         self.assertEqual(rc, 2, out)
         self.assertIn("MUTANT SKIP", out)
+
+    def test_a_suite_that_ran_no_tests_does_not_kill_the_mutant(self):
+        """A non-zero exit from "NO TESTS RAN" is not a kill.
+
+        ``unittest`` exits **5** when it collects no tests, and the probe
+        reads any non-zero exit as "the mutant was KILLED".  So a test
+        file whose tests are STANDALONE FUNCTIONS -- which is 815 of the
+        component's 1,545 test files, holding 9,815 test functions --
+        makes the probe report every mutant in the module as killed
+        without a single test having run.
+
+        Measured 2026-11-22 on ``agents.py``: paired with
+        ``test_agent_handoff.py`` (40 standalone functions, 0 discoverable
+        by unittest) the census reported ``killed 31/31``.  With
+        ``test_agents.py`` it reports ``killed 14/31``, and the 17
+        "kills" were an artefact of a suite that ran nothing.
+        """
+        wd = self._tmp / "standalone"
+        wd.mkdir(parents=True, exist_ok=True)
+        (wd / "probe_mod.py").write_text(FIXTURE_MODULE, encoding="utf-8")
+        (wd / "test_probe_mod.py").write_text(
+            FIXTURE_STANDALONE_TEST, encoding="utf-8")
+        rc, out = _run_probe(self.probe, wd, no_early_stop=True)
+        self.assertIn("MUTANT RESULT:", out, out)
+        verdicts = [ln.split(" ")[2] for ln in _mutant_lines(out)]
+        self.assertIn(
+            "SURVIVED", verdicts,
+            "a suite that collected no tests reported every mutant as "
+            f"KILLED: {out}",
+        )
+        self.assertNotIn(
+            "SKIP", verdicts,
+            "the standalone suite must be RUN, not skipped: " + out,
+        )
+        # The fixture's two mutants are now measured by a suite that
+        # actually ran: `pick` is tested, `pick_other` is not.  So exactly
+        # one is caught.  Before the fix this was "2/2 KILLED" from a
+        # suite that ran nothing.
+        self.assertEqual(
+            verdicts.count("KILLED"), 1,
+            "the standalone suite must catch the tested mutant and only it: "
+            + out,
+        )
+
+    def test_a_suite_that_collects_nothing_is_skipped_not_a_kill(self):
+        """A collection error must not be reported as a caught mutant.
+
+        Even under pytest, a suite that cannot be collected exits 5 -- the
+        same code a failing suite would not use, but a code the probe must
+        not read as "the tests failed, so the mutant was caught".
+        """
+        wd = self._tmp / "broken"
+        wd.mkdir(parents=True, exist_ok=True)
+        (wd / "probe_mod.py").write_text(FIXTURE_MODULE, encoding="utf-8")
+        (wd / "test_probe_mod.py").write_text(
+            "import a_module_that_does_not_exist\n", encoding="utf-8")
+        rc, out = _run_probe(self.probe, wd, no_early_stop=True)
+        verdicts = [ln.split(" ")[2] for ln in _mutant_lines(out)]
+        self.assertNotIn(
+            "KILLED", verdicts,
+            "a suite that could not be collected reported a kill: " + out,
+        )
+
+    def test_the_probe_runs_the_suite_it_was_given(self):
+        """The probe must use a runner that can SEE the suite's tests.
+
+        The component's suite is mostly standalone functions, so a runner
+        that only discovers TestCase methods sees none of it.  This
+        asserts the probe's runner collects the standalone form.
+        """
+        wd = self._tmp / "standalone2"
+        wd.mkdir(parents=True, exist_ok=True)
+        (wd / "probe_mod.py").write_text(FIXTURE_MODULE, encoding="utf-8")
+        (wd / "test_probe_mod.py").write_text(
+            FIXTURE_STANDALONE_TEST, encoding="utf-8")
+        env = dict(os.environ)
+        env["PYTHONPATH"] = ".:tests"
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        proc = subprocess.run(
+            [sys.executable, "-m", "pytest", "-q", "test_probe_mod.py"],
+            cwd=str(wd), env=env, timeout=300,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        self.assertIn("2 passed", proc.stdout, proc.stdout)
 
     def test_probe_script_files_exist_and_are_executable(self):
         """(d) The tool scripts must still be present and executable."""

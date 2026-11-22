@@ -2,7 +2,7 @@
 """b173-mutant.py -- planted-fault probe: does the slice's test suite notice
 a small semantic fault in the new module?
 Usage: b173-mutant.py --file <abs path to module in worktree>
-         --test-module <unittest module, e.g. test_retry_config>
+         --test-module <unittest module(s), e.g. test_retry_config,test_x>
          --workdir <abs path to component dir in worktree> [--tries N=3]
 Method (from the mutation-testing literature: coverage is execution proof,
 mutation score is verification proof; mutmut is not installed here, so this
@@ -85,26 +85,102 @@ def drop_cached_bytecode(path):
             except OSError:
                 pass
 
-def run_tests(workdir, test_module, timeout=180):
+def run_tests(workdir, test_modules, timeout=180):
+    """Run the given test modules as ONE suite.
+
+    ``test_modules`` may be a single name or a list.  Several modules can
+    be given because a module's real coverage is the UNION of the suites
+    that reference it: ``agents.py`` is exercised by ``test_agents.py``
+    (its own suite, 773 lines) AND by ``test_agent_handoff.py`` (601
+    lines), and the second catches faults the first does not.
+
+    THE RUNNER MATTERS, AND IT WAS WRONG
+    ------------------------------------
+    This used to run ``python -m unittest <module>``.  unittest's
+    discovery collects only test METHODS inside TestCase classes.  The
+    component's suite is mostly the other shape -- standalone module-level
+    ``test_*`` FUNCTIONS:
+
+        1,545 test files
+          812 have ONLY standalone functions  (unittest sees 0 of them)
+          730 have only TestCase classes
+          815 files where unittest collects ZERO tests, holding 9,815
+          test functions in total
+
+    So for 815 of the suites the runner exited **5** ("NO TESTS RAN") and
+    the probe read any non-zero exit as "the mutant was KILLED": every
+    mutant in the module was reported killed by a suite that ran nothing.
+
+    Measured 2026-11-22 on ``agents.py``, paired with
+    ``test_agent_handoff.py``: ``killed 31/31``.  With the suite that
+    unittest can actually see, ``test_agents.py``: ``killed 14/31``.
+
+    pytest collects both shapes, and it is the runner CI uses, so the
+    probe now runs pytest.
+
+    "NO TESTS RAN" is ALSO not a kill, even under pytest: a collection
+    error must not be reported as a caught mutant.  The probe therefore
+    checks the output for a collected-test count and treats "collected
+    nothing" as a SKIP.
+    """
     env = dict(os.environ)
     env["PYTHONPATH"] = ".:tests"
     # Round 5: never write new .pyc files during a probe. This alone is NOT
     # enough -- it stops writing but not reading an existing stale one --
     # so drop_cached_bytecode() is called before every rewrite as well.
     env["PYTHONDONTWRITEBYTECODE"] = "1"
+    # The suite lives in ``tests/`` in the component, but a probe workdir
+    # may hold it at the root.  Resolve whichever exists.
+    paths = []
+    for m in test_modules:
+        candidate = os.path.join("tests", f"{m}.py")
+        if not os.path.exists(os.path.join(workdir, candidate)):
+            candidate = f"{m}.py"
+        paths.append(candidate)
     try:
         r = subprocess.run(
-            [sys.executable, "-m", "unittest", test_module],
+            [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+             *paths],
             cwd=workdir, env=env, timeout=timeout,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         return r.returncode, r.stdout
     except subprocess.TimeoutExpired:
         return None, "TIMEOUT"
 
+
+def collected_nothing(output):
+    """True when the runner collected NO tests.
+
+    A mutant cannot be caught by a suite that ran no tests, so this must
+    never be reported as a kill.  pytest's own exit code for "no tests
+    collected" is 5, the same code unittest uses, so the exit code alone
+    does not distinguish "collection error" from "tests failed" -- the
+    output does.
+
+    The signals checked here, in the order pytest emits them:
+
+      * "no tests ran"            -- pytest's wording
+      * "error during collection" -- a suite that could not be imported
+      * "collected 0 items"       -- an empty selection
+    """
+    lowered = output.lower()
+    if "no tests ran" in lowered:
+        return True
+    if "error during collection" in lowered:
+        return True
+    if "collected 0 items" in lowered:
+        return True
+    return False
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--file", required=True)
-    ap.add_argument("--test-module", required=True)
+    ap.add_argument(
+        "--test-module", required=True,
+        help="unittest module(s) to run; comma-separated for several. "
+             "A module's real coverage is the UNION of the suites "
+             "that reference it, so several may be given.",
+    )
     ap.add_argument("--workdir", required=True)
     ap.add_argument("--tries", type=int, default=3)
     ap.add_argument("--no-early-stop", action="store_true",
@@ -204,10 +280,21 @@ def main():
         # Round 5: drop the cached bytecode of the module under mutation so
         # the freshly written source is actually compiled and executed.
         drop_cached_bytecode(a.file)
-        rc, out = run_tests(a.workdir, a.test_module)
+        test_modules = [m.strip() for m in a.test_module.split(",")
+                         if m.strip()]
+        if not test_modules:
+            print("MUTANT SKIP: no test module given")
+            return 2
+        rc, out = run_tests(a.workdir, test_modules)
         applied += 1
         if rc is None:
             results.append(f"MUTANT {kind}@{lineno} SKIP (test timeout: {desc})")
+        elif collected_nothing(out):
+            # A suite that collected NO tests cannot have caught anything.
+            # Reporting this as KILLED is a false kill: it looks like
+            # evidence where there is none.
+            results.append(
+                f"MUTANT {kind}@{lineno} SKIP (no tests collected: {desc})")
         elif rc != 0:
             killed += 1
             results.append(f"MUTANT {kind}@{lineno} KILLED ({desc})")
