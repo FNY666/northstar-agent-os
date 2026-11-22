@@ -481,21 +481,35 @@ were fixed.
 | **A-4** | **already done** | `merged_tree_review` is registered in `pyproject.toml` `py-modules` (`:976`) and in `runtime_registration` (`:1097`) — by an earlier slice, not by this one. | the four D-4 items were already green at HEAD. |
 | **A-5** | **confirmed, and it uncovered two real defects** | with the declared extra installed in a venv (`jsonschema>=4.26,<5` + `regex`), `test_tool_input_schema` is **25/25 OK** and `test_shell_sessions` is **6/6 OK**. But installing the extra into a venv **broke the live sandbox cases** — and the cause was a runtime defect, not a test artifact. See §6.2. And the *un*-installed case exposed a second defect: a type-confusion in the `enum` keyword. See §6.4. | the 4 `tool_input_schema` items and the 6 `shell_sessions` items are now green **on both** interpreters. |
 | **A-6** | **open** | the `pyproject.toml` `dependencies` comment still claims "the whole deterministic test suite run on a bare interpreter". **That claim is now true** — the suite is green on a bare interpreter — but the comment is still misleading about *why*, and the `json-schema` extra is not in `requirements.txt`. | documentation only |
-| **A-7** | **open** | `scripts/b173-baseline-check.sh` is not wired into CI. | — |
-| **A-8** | **open, and now stale in the OTHER direction** | the 26-item baseline file is still the authority, but **all 26 of its items are green**. The file now over-reports failures by 26. | — |
+| **A-7** | **open, but no longer blocked** | `scripts/b173-baseline-check.sh` is still not wired into CI.  Two things blocked it and both are now fixed: (i) the baseline file lives at `/home/muse-newapi/`, which a CI runner does not have, so a checkout-local copy now exists at `docs/baseline/current.failures.txt`; and (ii) the check ran the suite with **unittest** while CI runs **pytest**, so it was watching 23,171 tests while CI watched 33,295 -- the check missed the suite's 9,815 standalone module-level test functions.  The runner is now selectable and defaults to the one CI uses.  What remains is the one-line workflow step, which is a decision about CI time rather than about correctness. | the check now watches the same suite CI watches, and can run on a bare checkout. |
+| **A-8** | **open, and now stale in the OTHER direction** | the 30-item baseline file is still the authority, but **all 30 of its items are green**.  The file now over-reports failures by 30.  Re-pinning it is the **coordinator's** call (`r6-baseline-unify.md` §5.1: "a slice that legitimately fixes a pre-existing failure will show 'fewer items than the baseline', which is a real finding to report, not a reason to re-take the baseline").  A checkout-local copy of the same measurement, with provenance, is at `docs/baseline/current.failures.txt` -- it is a FALLBACK for machines that have no `/home/muse-newapi`, not a re-take. | — |
 | **A-9** | **done** | the strategy ledger (`b173-strategy-ledger-2026-11-14.md`) now carries a §5.1 correction: its "内核能力缺失" attribution was **wrong** — Landlock *is* available on this host (`landlock_create_ruleset works (ABI v1 flags)`); the 8 bench failures were two code defects (D-1, D-2). Its §1 table carries the re-measured suite line. | the ledger no longer tells the next slice's brief that `161/169` is an environment artifact. It was not. |
 | **A-10** | **already done** | `b173-accept.sh`'s `FULL_SUITE` grep was widened to `Ran [0-9]{4,}` in round 7; the `Ran 19[0-9]{3}` string survives only in the comment that explains the change. | — |
 
 **The baseline after these fixes** — measured on this host, full runtime
-suite, `Ran 23161 tests`, against the 26-item baseline file:
+suite, `Ran 23171 tests`, against the 30-item baseline file:
 
 ```
 OK (skipped=20)
 ```
 
-* **26 of the 26** baseline items are now green — the baseline file is
+* **30 of the 30** baseline items are now green — the baseline file is
   **empty**, not merely shorter. Zero failures, zero errors.
 * The bench is **169/169**.
+
+**AMENDED 2026-11-22.**  The count is **30**, not 26.  The original
+30-item file was narrowed to a "26-item core" for cross-run comparison
+because three of its items were flaky; but the file the check actually
+compares against — `b173-baseline-failures-2026-11-14.txt` — holds all
+**30** raw lines, and `scripts/b173-baseline-check.sh` reports against
+the file it is given.  The measured reading on this tree is:
+
+```
+BASELINE DRIFT: expected 30 item(s), found 0 item(s)
+```
+
+which is the expected reading of a fully retired baseline, not a
+regression: every one of the 30 items is green.
 
 ### 6.2 Installing the extra exposed a REAL defect: a virtualenv cannot sandbox itself
 
@@ -670,9 +684,9 @@ guard.
 
 ### 6.5 What this section closes, and what it does not
 
-**The baseline is empty.**  The 26-item baseline file named in
+**The baseline is empty.**  The 30-item baseline file named in
 `b173-baseline-CURRENT` now has **zero** failing items against this
-branch: `Ran 23161 tests — OK (skipped=20)`, zero failures, zero
+branch: `Ran 23171 tests — OK (skipped=20)`, zero failures, zero
 errors.  The bench is **169/169**.
 
 That closes **A-1, A-2, A-3** (and confirms **A-4** and **A-10**),
@@ -686,13 +700,40 @@ fixes **A-5**'s items, and turns **A-6**'s claim from false to true.
   so a CI image that installs only the requirements still runs without
   `regex` and skips four pattern tests.  That is a CI decision, not a
   code fix.
-* **A-7** — `scripts/b173-baseline-check.sh` is not wired into CI.  The
-  script exists; nothing runs it.
-* **A-8** — the baseline file now over-reports by 26.  It should be
+* **A-7** — `scripts/b173-baseline-check.sh` is still not wired into CI.
+  The script exists; nothing runs it.  **Two blockers were removed on
+  2026-11-22**, so what remains is one workflow step:
+
+  * the baseline file lived at `/home/muse-newapi/`, which a CI runner
+    does not have — a checkout-local copy with provenance now exists at
+    `docs/baseline/current.failures.txt`, and the script prefers the
+    coordinator's file when it is present;
+  * the check ran the suite with **unittest** while CI runs **pytest**.
+    unittest's discovery finds only test METHODS inside TestCase
+    classes, so the check was watching **23,171** tests while CI
+    watched **33,295** — it never saw the suite's **9,815** standalone
+    module-level `test_*` functions, in 812 files.  The runner is now
+    selectable and defaults to the one CI uses, and both runners'
+    failure lines are normalised to one shape so a baseline taken with
+    either is comparable against the other.
+
+  A separate defect in the same script was found and fixed: a **full
+  tmpfs** made four unrelated tests fail with `Disk quota exceeded`,
+  and the check reported them as **BASELINE DRIFT** — which reads as
+  "the code regressed".  The check now refuses to measure (exit 2)
+  rather than report drift, and distinguishes the full disk from the
+  broken code.
+
+* **A-8** — the baseline file now over-reports by **30**.  It should be
   re-pinned to an empty set, with the provenance header naming the
   commit that earned it.  **A baseline file is a claim about a tree**;
   leaving a stale one in place is worse than having none, because a
-  reader cannot tell which items are still real.
+  reader cannot tell which items are still real.  Re-pinning is the
+  **coordinator's** call (`r6-baseline-unify.md` §5.1), so it is
+  reported here and NOT done.  The same measurement, with provenance, is
+  recorded at `docs/baseline/current.failures.txt` as a FALLBACK for
+  machines with no `/home/muse-newapi` — the coordinator's file remains
+  the authority and the script prefers it.
 * **A-9** — **done**.  The strategy ledger now carries a §5.1
   correction, and the correction is worth more than the fix: its
   "内核能力缺失" attribution was **wrong**, and the evidence that
