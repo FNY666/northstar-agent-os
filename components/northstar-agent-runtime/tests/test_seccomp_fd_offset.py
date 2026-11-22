@@ -29,7 +29,14 @@ def _caps() -> SandboxCapabilities:
         bwrap_path="/usr/bin/bwrap",
         bwrap_usable=True,
         bwrap_detail="fake",
-        bwrap_cap_drop=False,
+        # This test is about the seccomp descriptor hand-off, not about the
+        # capability or syscall boundary.  The default request asks for
+        # "deny all" capabilities, and the bwrap backend refuses to run when
+        # the live --cap-drop or seccomp probe failed.  Declare the boundaries
+        # this test does not exercise so the run reaches the seccomp hand-off
+        # it actually inspects.
+        bwrap_cap_drop=True,
+        bwrap_seccomp=True,
         process_available=True,
         preferred="bwrap",
     )
