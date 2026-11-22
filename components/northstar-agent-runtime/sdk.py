@@ -86,6 +86,9 @@ class RunOptions:
     postconditions: Sequence[Any] = ()  # validated host-owned workspace checks evaluated after the run
     evidence_dir: str | None = None  # write a digest-first evidence bundle for this run
     evidence_required: bool = False  # evidence capture failure changes the terminal subtype
+    shell_backend: str = "auto"  # auto (host-chosen) | process | bwrap; the sandbox backend the Shell tool uses
+    shell_seccomp: str = "auto"  # auto (apply when supported) | on (require) | off
+    shell_capdrop: str = "on"  # on (deny-all) | off; the capability-drop launcher the Shell tool uses
 
 
 @dataclass
@@ -201,6 +204,9 @@ def _build(options: RunOptions, resume: str | None = None) -> tuple[Any, Any, li
         "code_phase_machine": options.code_phase_machine,
         "evidence_dir": options.evidence_dir,
         "evidence_required": options.evidence_required,
+        "shell_backend": options.shell_backend,
+        "shell_seccomp": options.shell_seccomp,
+        "shell_capdrop": options.shell_capdrop,
     }
     if options.system_prompt is not None:
         config_kwargs["system_prompt"] = options.system_prompt
