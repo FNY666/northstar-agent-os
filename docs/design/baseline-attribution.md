@@ -12,7 +12,9 @@
 
 | File | Content | Role |
 |---|---|---|
-| `/home/muse-newapi/b173-baseline-failures-2026-11-14.txt` | the 30 raw failure lines, verbatim | authority for baseline comparison |
+| `/home/muse-newapi/b173-baseline-CURRENT` | ONE line: the name of the baseline file in force | **the** authority for baseline comparison -- the checker follows this pointer |
+| `/home/muse-newapi/b173-baseline-<sha>.failures.txt` | the baseline for one commit sha, one file per sha | the file the pointer names; the generator writes it |
+| `/home/muse-newapi/b173-baseline-failures-2026-11-14.txt` | the 30 raw failure lines, verbatim | a RETIRED baseline, kept for history |
 | `/home/muse-newapi/b173-baseline-failures-attributed-2026-11-14.txt` | the same 30 lines, each prefixed with its category | human-readable attribution view |
 | `/home/muse-newapi/b173-bench-baseline-failures-2026-11-14.txt` | the bench's 8 failing item ids | authority for bench comparison |
 
@@ -482,7 +484,7 @@ were fixed.
 | **A-5** | **confirmed, and it uncovered two real defects** | with the declared extra installed in a venv (`jsonschema>=4.26,<5` + `regex`), `test_tool_input_schema` is **25/25 OK** and `test_shell_sessions` is **6/6 OK**. But installing the extra into a venv **broke the live sandbox cases** — and the cause was a runtime defect, not a test artifact. See §6.2. And the *un*-installed case exposed a second defect: a type-confusion in the `enum` keyword. See §6.4. | the 4 `tool_input_schema` items and the 6 `shell_sessions` items are now green **on both** interpreters. |
 | **A-6** | **open** | the `pyproject.toml` `dependencies` comment still claims "the whole deterministic test suite run on a bare interpreter". **That claim is now true** — the suite is green on a bare interpreter — but the comment is still misleading about *why*, and the `json-schema` extra is not in `requirements.txt`. | documentation only |
 | **A-7** | **done** | `scripts/b173-baseline-check.sh` is now wired into CI as a step of the `agent-runtime` job -- the job whose unit-test step runs the very suite the check compares.  Three things blocked it and all three are now fixed: (i) the baseline file lives at `/home/muse-newapi/`, which a CI runner does not have, so a checkout-local copy with provenance now exists at `docs/baseline/current.failures.txt`; (ii) the check ran the suite with **unittest** while CI runs **pytest**, so it was watching 23,171 tests while CI watched 33,295 -- the check missed the suite's 9,815 standalone module-level test functions, so the runner is now selectable and defaults to the one CI uses; and (iii) the runtime job's `working-directory` is the component, so the step reaches the script at `../../scripts/`.  A fourth defect was found in the same script: a **full tmpfs** was reported as `BASELINE DRIFT`, which reads as "the code regressed" when nothing in the code changed -- the check now REFUSES to measure (exit 2, distinct from both MATCH and DRIFT).  `tests/test_baseline_check_ci_wiring.py` (8 tests) pins the wiring, and 4 of them fail against the pre-fix workflow. | the check now watches the same suite CI watches, runs on a bare checkout, and **CI actually runs it** -- so "the failure set is identical to the baseline" is machine-checked rather than asserted in prose. |
-| **A-8** | **open, and now stale in the OTHER direction** | the 30-item baseline file is still the authority, but **all 30 of its items are green**.  The file now over-reports failures by 30.  Re-pinning it is the **coordinator's** call (`r6-baseline-unify.md` §5.1: "a slice that legitimately fixes a pre-existing failure will show 'fewer items than the baseline', which is a real finding to report, not a reason to re-take the baseline").  A checkout-local copy of the same measurement, with provenance, is at `docs/baseline/current.failures.txt` -- it is a FALLBACK for machines that have no `/home/muse-newapi`, not a re-take. | — |
+| **A-8** | **open, and now stale in the OTHER direction** | the baseline in force (the one `b173-baseline-CURRENT` names) held **26** items, and **all 26 are green**.  The newest baseline file on this machine holds **ZERO**.  Re-pinning is the **coordinator's** call (`r6-baseline-unify.md` §5.1: "a slice that legitimately fixes a pre-existing failure will show 'fewer items than the baseline', which is a real finding to report, not a reason to re-take the baseline").  The checker now follows the pointer, so it compares against whatever the coordinator has pinned; a checkout-local copy of an empty measurement, with provenance, is at `docs/baseline/current.failures.txt` -- it is a FALLBACK for machines that have no `/home/muse-newapi`, not a re-take. | — |
 | **A-9** | **done** | the strategy ledger (`b173-strategy-ledger-2026-11-14.md`) now carries a §5.1 correction: its "内核能力缺失" attribution was **wrong** — Landlock *is* available on this host (`landlock_create_ruleset works (ABI v1 flags)`); the 8 bench failures were two code defects (D-1, D-2). Its §1 table carries the re-measured suite line. | the ledger no longer tells the next slice's brief that `161/169` is an environment artifact. It was not. |
 | **A-10** | **already done** | `b173-accept.sh`'s `FULL_SUITE` grep was widened to `Ran [0-9]{4,}` in round 7; the `Ran 19[0-9]{3}` string survives only in the comment that explains the change. | — |
 
@@ -700,21 +702,14 @@ fixes **A-5**'s items, and turns **A-6**'s claim from false to true.
   so a CI image that installs only the requirements still runs without
   `regex` and skips four pattern tests.  That is a CI decision, not a
   code fix.
-* **A-7** — `scripts/b173-baseline-check.sh` is now wired into CI as a step
-  of the `agent-runtime` job (see the §6.1 table).  What remains is a
-  **CI-time** question, not a correctness one: the check runs the suite a
-  second time, so the job's measured workload grows by roughly the
-  suite's runtime (measured here: 8m43s for the pytest runner).  The job's
-  `timeout-minutes: 45` is set well above its current ~13 minutes, so
-  the added run fits; if it ever stops fitting, the fix is to raise the
-  timeout, not to drop the step.
-  The script exists; nothing runs it.  **Two blockers were removed on
-  2026-11-22**, so what remains is one workflow step:
+* **A-7** — **done.**  `scripts/b173-baseline-check.sh` is wired into CI as
+  a step of the `agent-runtime` job (see the §6.1 table), and three
+  blockers were removed on 2026-11-22:
 
   * the baseline file lived at `/home/muse-newapi/`, which a CI runner
     does not have — a checkout-local copy with provenance now exists at
-    `docs/baseline/current.failures.txt`, and the script prefers the
-    coordinator's file when it is present;
+    `docs/baseline/current.failures.txt`, and the script uses it as a
+    **fallback**;
   * the check ran the suite with **unittest** while CI runs **pytest**.
     unittest's discovery finds only test METHODS inside TestCase
     classes, so the check was watching **23,171** tests while CI
@@ -722,16 +717,52 @@ fixes **A-5**'s items, and turns **A-6**'s claim from false to true.
     module-level `test_*` functions, in 812 files.  The runner is now
     selectable and defaults to the one CI uses, and both runners'
     failure lines are normalised to one shape so a baseline taken with
-    either is comparable against the other.
+    either is comparable against the other;
+  * a separate defect in the same script: a **full tmpfs** made four
+    unrelated tests fail with `Disk quota exceeded`, and the check
+    reported them as **BASELINE DRIFT** — which reads as "the code
+    regressed".  The check now refuses to measure (exit 2) rather than
+    report drift, and distinguishes the full disk from the broken code.
 
-  A separate defect in the same script was found and fixed: a **full
-  tmpfs** made four unrelated tests fail with `Disk quota exceeded`,
-  and the check reported them as **BASELINE DRIFT** — which reads as
-  "the code regressed".  The check now refuses to measure (exit 2)
-  rather than report drift, and distinguishes the full disk from the
-  broken code.
+  What remains is a **CI-time** question, not a correctness one: the
+  check runs the suite a second time, so the job's measured workload
+  grows by roughly the suite's runtime (measured here: 8m43s for the
+  pytest runner).  The job's `timeout-minutes: 45` is set well above
+  its current ~13 minutes, so the added run fits; if it ever stops
+  fitting, the fix is to raise the timeout, not to drop the step.
 
-* **A-8** — the baseline file now over-reports by **30**.  It should be
+* **A-7b** — **done, 2026-11-22.**  The check's **baseline selection**
+  was wrong in three ways at once, and each of them made the check
+  compare against the wrong file:
+
+  1. **It ignored the pointer.**  `r6-baseline-unify.md` §5.1 says the
+     coordinator re-takes the baseline "when main advances" and then
+     "repoints `b173-baseline-CURRENT` at it".  The script never read
+     that pointer; it hardcoded a filename.  Measured on this host:
+     the pointer named a **26**-item baseline, the hardcoded name held
+     **30** items, and the newest baseline on the machine held
+     **ZERO**.  A check comparing against the hardcoded name would have
+     reported **30 spurious failures** for a tree that is clean.
+  2. **The checkout-local copy came FIRST** in the candidate list, so
+     even when the coordinator's file was present the in-repo copy won
+     — the opposite of what the script's own test claimed.
+  3. **The test that claimed otherwise proved nothing.**  It compared
+     the *string positions* of the two paths in the script, and
+     `text.index(authority)` found the occurrence on the script's
+     **header comment** — never the candidate list.  The assertion
+     passed while the script did the opposite of what it claimed.
+     Proved with a fixture directory holding both files: the script
+     picked the checkout-local copy.
+
+  The script now reads `b173-baseline-CURRENT`, puts the coordinator's
+  authority ahead of the fallback, and echoes the baseline it chose.
+  The three checks are **run** against a fixture directory rather than
+  read as text, and each of them fails when the defect is planted back
+  in (measured: the old order fails two of them; ignoring the pointer
+  fails two).
+
+* **A-8** — the baseline in force over-reports by **26** (the newest
+  baseline file on this machine holds ZERO).  It should be
   re-pinned to an empty set, with the provenance header naming the
   commit that earned it.  **A baseline file is a claim about a tree**;
   leaving a stale one in place is worse than having none, because a

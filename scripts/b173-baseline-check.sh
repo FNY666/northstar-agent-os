@@ -4,7 +4,9 @@
 #
 #   scripts/b173-baseline-check.sh [BASELINE_FILE]
 #
-# Default baseline: /home/muse-newapi/b173-baseline-failures-2026-11-14.txt
+# Default baseline: the coordinator's pointer,
+# /home/muse-newapi/b173-baseline-CURRENT, which names the baseline file
+# in force.  See the selection block below.
 #
 # Behaviour:
 #   * clears the /tmp/nsar-* scratch residue the runtime suite leaves behind
@@ -29,24 +31,57 @@ RUNTIME_DIR="$REPO_ROOT/components/northstar-agent-runtime"
 
 # The baseline file to compare against.
 #
-# The authority is the COORDINATOR's file, outside the repository:
-#     /home/muse-newapi/b173-baseline-failures-2026-11-14.txt
-# It is named by an argument, or by the environment, or by the default.
+# The authority is the COORDINATOR's file, outside the repository, and it
+# is named by a POINTER, not by a hardcoded filename:
+#
+#     /home/muse-newapi/b173-baseline-CURRENT
+#
+# That pointer holds the name of the baseline file in force (one line).
+# `docs/design/r6-baseline-unify.md` §5.1 says the coordinator re-takes
+# the baseline "when main advances" and then "repoints
+# b173-baseline-CURRENT at it", so the pointer IS the mechanism -- a
+# hardcoded name would keep comparing against a retired baseline
+# forever, and would report DRIFT for a tree that is actually clean.
+#
+# Measured 2026-11-22: the pointer named a 26-item baseline, a
+# hardcoded legacy name held 30 items, and the newest baseline on the
+# machine held ZERO.  A check that compared against the hardcoded name
+# would have reported 30 spurious failures.
 #
 # A CI runner has no /home/muse-newapi, so a checkout-local file is
 # also accepted:
-#     docs/baseline/<name>.failures.txt
+#     docs/baseline/current.failures.txt
 # The in-repository copy is what makes the check runnable off this
 # machine at all -- see §A-7 in docs/design/baseline-attribution.md.
 # RE-TAKING a baseline is the coordinator's decision (r6-baseline-unify
 # §5.1), so this script only ever COMPARES; it never writes one.
+#
+# The ORDER below is the behaviour, and it is pinned by a test that
+# RUNS the selection rather than reading the file's text: the
+# coordinator's authority comes FIRST, the checkout-local copy is a
+# fallback.
 BASELINE=""
+# The coordinator's pointer, if it exists, names the authority.
+COORDINATOR_BASELINE=""
+COORDINATOR_DIR="${B173_BASELINE_DIR:-/home/muse-newapi}"
+CURRENT_POINTER="$COORDINATOR_DIR/b173-baseline-CURRENT"
+if [ -f "$CURRENT_POINTER" ]; then
+  # The pointer holds ONE line: the file's name, next to the pointer.
+  CURRENT_NAME="$(head -n 1 "$CURRENT_POINTER" | tr -d '\r' | sed 's/[[:space:]]*$//')"
+  if [ -n "$CURRENT_NAME" ]; then
+    case "$CURRENT_NAME" in
+      /*) COORDINATOR_BASELINE="$CURRENT_NAME" ;;
+      *)  COORDINATOR_BASELINE="$COORDINATOR_DIR/$CURRENT_NAME" ;;
+    esac
+  fi
+fi
 for candidate in \
     "${1:-}" \
     "${B173_BASELINE_FILE:-}" \
+    "$COORDINATOR_BASELINE" \
+    "$COORDINATOR_DIR/b173-baseline-failures-2026-11-14.txt" \
     "$REPO_ROOT/docs/baseline/current.failures.txt" \
-    "$REPO_ROOT/docs/baseline/b173-baseline-failures-2026-11-14.txt" \
-    "/home/muse-newapi/b173-baseline-failures-2026-11-14.txt"; do
+    "$REPO_ROOT/docs/baseline/b173-baseline-failures-2026-11-14.txt"; do
   [ -n "$candidate" ] || continue
   if [ -f "$candidate" ]; then BASELINE="$candidate"; break; fi
 done
@@ -54,15 +89,20 @@ done
 if [ -z "$BASELINE" ]; then
   echo "BASELINE CHECK ERROR: no baseline file found." >&2
   echo "  Looked at: the argument, \$B173_BASELINE_FILE," >&2
+  echo "    the coordinator's baseline, via $CURRENT_POINTER," >&2
+  echo "    $COORDINATOR_DIR/b173-baseline-failures-2026-11-14.txt," >&2
   echo "    $REPO_ROOT/docs/baseline/current.failures.txt," >&2
-  echo "    $REPO_ROOT/docs/baseline/b173-baseline-failures-2026-11-14.txt," >&2
-  echo "    /home/muse-newapi/b173-baseline-failures-2026-11-14.txt" >&2
+  echo "    $REPO_ROOT/docs/baseline/b173-baseline-failures-2026-11-14.txt" >&2
   exit 2
 fi
 if [ ! -d "$RUNTIME_DIR" ]; then
   echo "BASELINE CHECK ERROR: runtime component not found: $RUNTIME_DIR" >&2
   exit 2
 fi
+# Say WHICH baseline was chosen, always.  A drift report that does not
+# name the baseline it compared against cannot be acted on, and the
+# choice is not obvious -- it depends on a pointer file.
+echo "baseline file: $BASELINE"
 
 WORK="$(mktemp -d /tmp/b173-baseline-check.XXXXXX)"
 trap 'rm -rf "$WORK"' EXIT
@@ -211,6 +251,7 @@ if diff -q "$EXPECTED" "$ACTUAL" >/dev/null 2>&1; then
 fi
 
 echo "BASELINE DRIFT: expected $(wc -l < "$EXPECTED") item(s), found $(wc -l < "$ACTUAL") item(s)"
+echo "baseline file: $BASELINE"
 echo "--- diff (< only in baseline, > only in current run) ---"
 diff "$EXPECTED" "$ACTUAL"
 exit 1

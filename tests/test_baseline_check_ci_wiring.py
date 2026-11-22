@@ -32,7 +32,10 @@ run the suite: the check itself does that, and CI is about to run it.
 """
 from __future__ import annotations
 
+import os
 import re
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -133,18 +136,135 @@ class BaselineCheckPrerequisitesTests(unittest.TestCase):
 
         Re-taking a baseline is the coordinator's decision
         (docs/design/r6-baseline-unify.md section 5.1).
+
+        This test **RUNS** the selection.  The previous version of it
+        compared the string positions of the two paths in the script,
+        which proved nothing: ``text.index(authority)`` found the
+        occurrence on the script's **header comment**, while the real
+        candidate list put the checkout-local copy **first**.  The
+        assertion passed and the script did the opposite of what it
+        claimed.
+
+        So the selection is exercised against a fixture directory that
+        holds BOTH the coordinator's baseline and the checkout-local
+        copy, and the file it picks is asserted.
         """
         if not SCRIPT.exists():
             self.skipTest(f"baseline check script missing: {SCRIPT}")
-        text = SCRIPT.read_text(encoding="utf-8")
-        authority = "/home/muse-newapi/b173-baseline-failures-2026-11-14.txt"
-        self.assertIn(authority, text)
-        self.assertLess(
-            text.index(authority),
-            text.index("docs/baseline/current.failures.txt"),
-            "the checkout-local baseline must be a FALLBACK, not the "
-            "authority",
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "home"
+            (home / "docs" / "baseline").mkdir(parents=True)
+            authority = home / "authority.failures.txt"
+            authority.write_text("# coordinator's authority\n", encoding="utf-8")
+            (home / "b173-baseline-CURRENT").write_text(
+                authority.name + "\n", encoding="utf-8"
+            )
+            fallback = home / "docs" / "baseline" / "current.failures.txt"
+            fallback.write_text("# checkout-local fallback\n", encoding="utf-8")
+            picked = self._select_baseline(home, fallback)
+            self.assertEqual(
+                picked, authority,
+                "the coordinator's baseline must win over the checkout-local "
+                "fallback",
+            )
+
+    def test_the_script_follows_the_coordinators_current_pointer(self):
+        """The authority is named by a POINTER, not by a hardcoded name.
+
+        ``docs/design/r6-baseline-unify.md`` §5.1 says the coordinator
+        re-takes the baseline "when main advances" and then "repoints
+        b173-baseline-CURRENT at it".  The check script has to follow
+        that pointer; a hardcoded filename keeps comparing against a
+        retired baseline.
+
+        Measured on this host before the fix: the pointer named a
+        26-item baseline, a hardcoded legacy name held 30 items, and the
+        newest baseline held ZERO -- so the check would have reported 30
+        spurious failures for a tree that is clean.
+
+        So the fixture holds a legacy-named file that IS present, and
+        the pointer names a different one: the pointer must win.
+        """
+        if not SCRIPT.exists():
+            self.skipTest(f"baseline check script missing: {SCRIPT}")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "home"
+            (home / "docs" / "baseline").mkdir(parents=True)
+            pointed = home / "b173-baseline-deadbeef.failures.txt"
+            pointed.write_text("# the baseline in force\n", encoding="utf-8")
+            legacy = home / "b173-baseline-failures-2026-11-14.txt"
+            legacy.write_text("# a retired baseline\n", encoding="utf-8")
+            (home / "b173-baseline-CURRENT").write_text(
+                pointed.name + "\n", encoding="utf-8"
+            )
+            fallback = home / "docs" / "baseline" / "current.failures.txt"
+            fallback.write_text("# checkout-local fallback\n", encoding="utf-8")
+            picked = self._select_baseline(home, fallback)
+            self.assertEqual(
+                picked, pointed,
+                "the check must follow b173-baseline-CURRENT, not a "
+                "hardcoded baseline filename",
+            )
+
+    def test_the_check_falls_back_when_there_is_no_pointer(self):
+        """No coordinator directory means the checkout-local copy.
+
+        A CI runner has no ``/home/muse-newapi``, so the in-repo copy is
+        the only thing it can compare against -- and it must still be
+        found.  The fallback is the repository's own
+        ``docs/baseline/current.failures.txt``, which is tracked, so a
+        CI checkout has it.
+        """
+        if not SCRIPT.exists():
+            self.skipTest(f"baseline check script missing: {SCRIPT}")
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            home.mkdir(parents=True)
+            picked = self._select_baseline(home, LOCAL_BASELINE)
+            self.assertEqual(
+                picked.resolve(), LOCAL_BASELINE.resolve(),
+                "without a coordinator's pointer the checkout-local copy "
+                "must be used",
+            )
+
+    # -- helpers --------------------------------------------------------
+
+    @staticmethod
+    def _select_baseline(coordinator_dir: Path, fallback: Path):
+        """Run the script's baseline SELECTION and report which file it picked.
+
+        The selection is exercised without running the suite: the script
+        echoes the baseline it chose, and the suite is skipped with
+        ``B173_BASELINE_CHECK_SKIP_SUITE=1``.  The script's repository
+        root is this repository's, but the baseline candidates are
+        redirected with ``B173_BASELINE_DIR`` -- so the fixture
+        directory stands in for ``/home/muse-newapi``.
+        """
+        env = dict(os.environ)
+        env["B173_BASELINE_DIR"] = str(coordinator_dir)
+        env["B173_BASELINE_CHECK_SKIP_SUITE"] = "1"
+        env.pop("B173_BASELINE_FILE", None)
+        proc = subprocess.run(
+            ["bash", str(SCRIPT)],
+            cwd=str(REPO_ROOT),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=120,
         )
+        picked = None
+        for line in proc.stdout.splitlines():
+            if line.startswith("baseline file: "):
+                picked = line.split("baseline file: ", 1)[1].strip()
+        if picked is None:
+            raise AssertionError(
+                "the script did not report a baseline; it said:\n"
+                + proc.stdout
+                + proc.stderr
+            )
+        return Path(picked)
 
     def test_the_default_runner_is_the_one_ci_uses(self):
         """pytest, not unittest.

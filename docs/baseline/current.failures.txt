@@ -31,16 +31,24 @@
 #     Ran 23171 tests in 373.162s
 #     OK (skipped=20)
 #
-# Both runners agree the failure set is EMPTY.  The 30-item baseline
-# the coordinator holds
-# (`/home/muse-newapi/b173-baseline-failures-2026-11-14.txt`) is STALE
-# in the other direction: every one of its 30 items is now green.
-# `scripts/b173-baseline-check.sh` against that file reports
+# Both runners agree the failure set is EMPTY.
 #
-#     BASELINE DRIFT: expected 30 item(s), found 0 item(s)
+# The authority is the coordinator's baseline, named by the POINTER
+# `/home/muse-newapi/b173-baseline-CURRENT` -- which is what
+# `scripts/b173-baseline-check.sh` now follows.  The baseline in force
+# when this file was written held 26 items, and every one of them is now
+# green; the newest baseline file on the machine holds ZERO.  So the
+# check against the pointer reports
+#
+#     BASELINE DRIFT: expected 26 item(s), found 0 item(s)
 #
 # which is the expected reading of a baseline that has been fully
-# retired, not a regression.
+# retired, not a regression.  Re-pinning it is the coordinator's call
+# (`docs/design/r6-baseline-unify.md` §5.1).
+#
+# This file is the FALLBACK for a machine with no `/home/muse-newapi` --
+# a CI runner has none.  It is NOT a re-take, and it does not outrank
+# the coordinator's file.
 #
 # RE-TAKING a baseline is the COORDINATOR's decision
 # (`docs/design/r6-baseline-unify.md` §5.1): "The baseline is re-taken

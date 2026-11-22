@@ -194,14 +194,23 @@ class BaselineCheckRunnerTests(unittest.TestCase):
         Re-taking a baseline is the coordinator's decision
         (r6-baseline-unify §5.1), so the coordinator's file must win
         when it exists.
+
+        This used to compare the *string positions* of the two paths in
+        the script, which proved nothing: ``text.index(authority)``
+        found the occurrence on the script's **header comment**, while
+        the real candidate list put the checkout-local copy **first**.
+        The assertion passed and the script did the opposite of what it
+        claimed.  The selection is now exercised by RUNNING it, in
+        ``tests/test_baseline_check_ci_wiring.py`` -- where the probe
+        lives, so there is one of it.
         """
-        authority = "/home/muse-newapi/b173-baseline-failures-2026-11-14.txt"
-        self.assertIn(authority, self.text)
-        self.assertLess(
-            self.text.index(authority),
-            self.text.index("docs/baseline/current.failures.txt"),
-            "the checkout-local baseline must be a FALLBACK, not the authority",
+        from tests.test_baseline_check_ci_wiring import BaselineCheckPrerequisitesTests
+
+        self.assertIn("b173-baseline-CURRENT", self.text)
+        probe = BaselineCheckPrerequisitesTests(
+            "test_the_script_prefers_the_coordinators_file_when_present"
         )
+        probe.test_the_script_prefers_the_coordinators_file_when_present()
 
 
 class BaselineCheckQuotaDetectionTests(unittest.TestCase):
