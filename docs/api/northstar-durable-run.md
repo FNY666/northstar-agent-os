@@ -712,3 +712,305 @@ Return None when the journal is intact, otherwise a reason code.
 #### `replay_task_report(report_path: str | Path, evidence_path: str | Path, *, task_id: str, contract: CompletionContractV2, before: WorkspaceSnapshot, after: WorkspaceSnapshot, milestones: tuple[str, ...] | None, provenance: Provenance | None=None)`
 
 Replay one task through the test-only contract.
+
+### `advisory_report`
+
+Source: `components/northstar-durable-run/advisory_report.py`
+
+Summarise stored reports into a difference distribution.
+
+#### `Sample`
+
+One observed run, reduced to the verdicts that can be compared.
+
+- `as_dict()`
+#### `sample_from_shadow(report: dict[str, Any], label: str)`
+
+Normalise the shadow harness report (production/contract/layered).
+
+#### `sample_from_production(report: dict[str, Any], label: str)`
+
+Normalise a production run report, or None when it carries no advisory.
+
+#### `load_samples(paths: list[Path])`
+
+Load every readable report; return the samples and the skipped paths.
+
+#### `summarize(samples: list[Sample], skipped: list[str] | None=None)`
+
+Count the observed combinations and name the disagreements.
+
+#### `render_markdown(summary: dict[str, Any])`
+
+#### `collect_paths(roots: list[str])`
+
+#### `main(argv: list[str] | None=None)`
+
+### `agent_benchmark`
+
+Source: `components/northstar-durable-run/agent_benchmark.py`
+
+Task-level benchmark for the multi-step entry.
+
+#### `BenchmarkTask`
+
+- `from_dict(value: dict)`
+#### `load_tasks(path: str | Path=DEFAULT_TASKS)`
+
+#### `plan_value(task: BenchmarkTask, run)`
+
+#### `ScriptedCaller`
+
+Deterministic fixture caller with host-declared model identity.
+
+#### `run_task(task: BenchmarkTask, root: Path)`
+
+#### `run_benchmark(tasks, *, workdir: str | Path | None=None)`
+
+#### `format_report(report: dict)`
+
+#### `main(argv=None)`
+
+### `completion_advisory`
+
+Source: `components/northstar-durable-run/completion_advisory.py`
+
+Read-only layered completion advisory for real production runs.
+
+#### `contract_from_spec(spec: dict[str, Any], provenance: Provenance)`
+
+Build the host-owned shadow contract declared by a fixture.
+
+#### `file_digest(path: str | Path)`
+
+#### `provenance_from(*, contract_revision: str, fixture_path: str | Path, evaluator_path: str | Path, model_id: str, model_revision: str, reasoning_effort: str, max_output_tokens: int, seed: str, trial_id: str)`
+
+Build the host-owned provenance envelope for one observed run.
+
+#### `DriverAdvisory`
+
+A layered opinion recorded beside a real run, never an authorization.
+
+- `as_report_dict()`
+#### `verify_advisory_digest(payload: dict[str, Any])`
+
+Recompute a recorded advisory's digest so later edits are detectable.
+
+#### `evaluate_driver_advisory(*, contract: CompletionContractV2, provenance: Provenance, verification: Any, run_status: str, before: WorkspaceSnapshot, after: WorkspaceSnapshot, evidence_path: str | Path, milestones: tuple[str, ...] | None=None, milestone_action_map: dict[str, str] | None=None, round_steps: tuple[dict[str, Any], ...] | list[dict[str, Any]]=())`
+
+Compute the layered advisory for one finished production run.
+
+### `completion_batch_replay`
+
+Source: `components/northstar-durable-run/completion_batch_replay.py`
+
+Test-only batch replay of archived Northstar runs through Completion Contract v2.
+
+#### `SemanticRequirement`
+
+A host-declared field that the deliverable must state and not negate.
+
+#### `TaskReplaySpec`
+
+#### `RunReplaySpec`
+
+#### `HostReplayContext`
+
+Host-owned run conditions shared by every replayed task.
+
+#### `TaskReplayOutcome`
+
+#### `load_spec(path: str | Path)`
+
+#### `observed_milestones(events: Sequence[Mapping[str, Any]], labels: Sequence[str])`
+
+Derive the committed milestone order from the journal, never from prose.
+
+#### `observe_archived_workspace(context: HostReplayContext, run: RunReplaySpec, spec: TaskReplaySpec, dest: str | Path)`
+
+Observe the archived workspace the way a live run would be observed.
+
+#### `replay_archive_task(context: HostReplayContext, run: RunReplaySpec, spec: TaskReplaySpec, *, mode: str, observed_root: Path | None=None)`
+
+Replay one archived task in one mode. Fail closed on any missing ground truth.
+
+#### `replay_archive(context: HostReplayContext, specs: Sequence[RunReplaySpec], *, modes: Sequence[str]=_MODES, observed_root: Path | None=None)`
+
+#### `summarize(outcomes: Sequence[TaskReplayOutcome])`
+
+Aggregate verdicts per mode, and name every non-verified task explicitly.
+
+#### `default_context(archive_root: Path, evaluator_path: Path)`
+
+#### `main(argv: Sequence[str] | None=None)`
+
+### `completion_coverage`
+
+Source: `components/northstar-durable-run/completion_coverage.py`
+
+Test-only requirement coverage audit for the completion contract.
+
+#### `TaskCoverage`
+
+- `complete` (property)
+#### `fixture_requirements(fixture: Mapping[str, Any])`
+
+Read the values a fixture actually asserted, in declaration order.
+
+#### `audit_task(context: HostReplayContext, run: RunReplaySpec, spec: TaskReplaySpec)`
+
+#### `audit(context: HostReplayContext, specs: Sequence[RunReplaySpec])`
+
+#### `summarize(coverage: Sequence[TaskCoverage])`
+
+#### `main(argv: Sequence[str] | None=None)`
+
+### `completion_live_shadow`
+
+Source: `components/northstar-durable-run/completion_live_shadow.py`
+
+Test-only shadow adapter for a real AgentHarness run.
+
+#### `LiveShadowResult`
+
+#### `production_result_from_host_check(*, verdict: str, failures: tuple[str, ...] | list[str], checked: tuple[str, ...] | list[str], run_status: str, after: WorkspaceSnapshot)`
+
+Adapt a host check without trusting its boolean summary.
+
+#### `run_live_shadow(harness: Any, goal: str, planner: Any, *, contract: CompletionContractV2, expectations: list[Any] | tuple[Any, ...], provenance: Provenance, milestones: tuple[str, ...] | None=None, milestone_action_map: dict[str, str] | None=None, evidence_path: str | Path | None=None)`
+
+Run one real harness goal and calculate a non-authorizing shadow result.
+
+### `completion_shadow`
+
+Source: `components/northstar-durable-run/completion_shadow.py`
+
+Shadow-only composition of the production and completion-contract gates.
+
+#### `LayeredVerificationResult`
+
+A shadow verdict from both gates, never an execution authorization.
+
+#### `compose_shadow(production: VerificationResult, contract: CompletionResult)`
+
+Compose both gates fail-closed while preserving useful disagreement data.
+
+### `completion_workspace_snapshot`
+
+Source: `components/northstar-durable-run/completion_workspace_snapshot.py`
+
+Test-only host-side workspace observation for the completion contract.
+
+#### `WorkspaceObservationRefused`
+
+Raised when the workspace cannot be observed without ambiguity.
+
+#### `SnapshotPolicy`
+
+Host-declared observation bounds.
+
+#### `observe_workspace(root: str | Path, policy: SnapshotPolicy | None=None)`
+
+Observe a real workspace directory into a contract snapshot.
+
+#### `materialize_workspace(dest: str | Path, files: Mapping[str, str])`
+
+Write declared files into ``dest`` so real observation can be exercised.
+
+### `live_benchmark`
+
+Source: `components/northstar-durable-run/live_benchmark.py`
+
+Bounded multi-task benchmark for the real planner path.
+
+#### `load_live_tasks(path: str | Path)`
+
+#### `UsageRecorderTransport`
+
+Wrap one OpenAI-compatible transport and retain usage only.
+
+#### `run_live_benchmark(tasks: tuple[dict[str, Any], ...] | list[dict[str, Any]], *, endpoint: str, key_env: str, model: str, provider: str, model_revision: str, reasoning_effort: str | None, max_output_tokens: int, sandbox: str | Path, transport_factory: Callable[[dict[str, Any]], Callable[[Any, float], bytes]] | None=None)`
+
+#### `build_parser()`
+
+#### `main(argv=None)`
+
+### `live_run`
+
+Source: `components/northstar-durable-run/live_run.py`
+
+Run one real-model task through the governed driver.
+
+#### `expected_from(item: dict)`
+
+#### `fresh_directory(path: Path)`
+
+Every run gets a clean sandbox: stale evidence would collide with it.
+
+#### `seed_workspace(root: Path, seed: dict[str, str])`
+
+#### `observe_or_none(root: Path)`
+
+Observation can refuse a tree it cannot vouch for; that is not a failure.
+
+#### `build_shadow_advisory(*, fixture: dict, fixture_path: str | Path, outcome, sandbox: Path, before, after, model_id: str, model_revision: str, reasoning_effort: str, max_output_tokens: int)`
+
+Compute the read-only advisory, or explain why it is unavailable.
+
+#### `build_parser()`
+
+#### `main(argv=None)`
+
+### `live_shadow_run`
+
+Source: `components/northstar-durable-run/live_shadow_run.py`
+
+Run one real-model AgentHarness task with non-authorizing shadow gates.
+
+#### `digest(path: Path)`
+
+#### `safe_reset(path: Path)`
+
+#### `seed(workspace: Path, files: dict[str, str])`
+
+#### `parse_args(argv=None)`
+
+#### `expected_from(item: dict)`
+
+#### `count_event_type(path: Path, event_type: str)`
+
+#### `main(argv=None)`
+
+### `mutation_check`
+
+Source: `components/northstar-durable-run/mutation_check.py`
+
+Mutation-check the completion guards.
+
+#### `Mutation`
+
+One declared weakening: replace ``old`` with ``new`` and expect ``expect``.
+
+#### `apply_mutation(mutation: Mutation, component_root: Path)`
+
+Replace the declared fragment, refusing when it is not unique.
+
+#### `run_guard(component_root: Path, guard: str, timeout: int=900)`
+
+Return True when the named guard tests pass.
+
+#### `main(argv=None)`
+
+### `recovery_shadow`
+
+Source: `components/northstar-durable-run/recovery_shadow.py`
+
+northstar 恢复决策的 shadow hook —— 只记录，永不干预执行。
+
+#### `record_recovery(plan_digest, step_id, attempt, max_attempts, reason_code=None, rule_decision='retry_same', state_text=None, extra=None)`
+
+记录一次恢复决策。返回 None —— 设计上就不能影响调用方。
+
+#### `record_outcome(plan_digest, step_id, outcome, detail=None)`
+
+事后补记结果，作为标签。outcome: recovered_after_retry / exhausted / rerouted / abandoned / human
