@@ -36,10 +36,23 @@ def _stdouts(report):
 
 
 class ShellSessionTests(RuntimeTestCase):
-    def _drive(self, turns):
+    def _drive(self, turns, *, capdrop: str = "on"):
         def approve(tool, args, context):
             return True
-        rt = self.runtime(turns, can_use_tool=approve, allowed_tools=["Shell"])
+        # Session semantics, not sandbox isolation. Pin the backend and the
+        # syscall filter so a host that cannot enforce them still exercises
+        # what these tests are about; capability drop stays on because it is
+        # the default and works on an ordinary Linux host. A caller that
+        # wants the session semantics alone on a host without
+        # /proc/self/status can turn the launcher off.
+        rt = self.runtime(
+            turns,
+            can_use_tool=approve,
+            allowed_tools=["Shell"],
+            shell_backend="process",
+            shell_seccomp="off",
+            shell_capdrop=capdrop,
+        )
         return self.drive(rt)
 
     def _turn(self, tid, tool_input, text="x"):

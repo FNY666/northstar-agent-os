@@ -687,6 +687,31 @@ class OsSandboxProcessBackendTests(RuntimeTestCase):
             run_sandboxed(request, backend="process")
 
 
+def _bwrap_capability_skip_reason(caps) -> str | None:
+    """Why the default bwrap request cannot run here, or None if it can.
+
+    The default request asks for deny-all capabilities and the seccomp
+    denylist. The backend refuses to start without either boundary, so a
+    host that cannot provide one cannot run the default request - that is
+    the product refusing correctly, not a defect. The reason names the
+    missing capability and quotes the probe, so a skipped test still tells
+    the reader what the host said.
+    """
+    if not caps.bwrap_usable:
+        return f"bwrap unusable on this host: {caps.bwrap_detail}"
+    if not caps.bwrap_cap_drop:
+        return (
+            "bwrap capability-drop probe failed on this host, so the default "
+            f"deny-all request cannot run: {caps.bwrap_detail}"
+        )
+    if not caps.bwrap_seccomp:
+        return (
+            "bwrap seccomp probe failed on this host, so the default request "
+            f"cannot run: {caps.bwrap_seccomp_detail}"
+        )
+    return None
+
+
 class OsSandboxBwrapBackendTests(RuntimeTestCase):
     def setUp(self) -> None:
         super().setUp()
@@ -699,10 +724,9 @@ class OsSandboxBwrapBackendTests(RuntimeTestCase):
         super().tearDown()
 
     def test_bwrap_backend_when_usable(self):
-        if not self.caps.bwrap_usable:
-            self.skipTest(f"bwrap unusable on this host: {self.caps.bwrap_detail}")
-        if not self.caps.bwrap_cap_drop or not self.caps.bwrap_seccomp:
-            self.skipTest("default bwrap request needs live capability-drop and seccomp probes")
+        reason = _bwrap_capability_skip_reason(self.caps)
+        if reason:
+            self.skipTest(reason)
         request = SandboxRequest(
             argv=("true",),
             cwd=self.root,
@@ -717,8 +741,9 @@ class OsSandboxBwrapBackendTests(RuntimeTestCase):
         self.assertIn("isolation=os", result.render())
 
     def test_bwrap_cannot_persist_changes_to_workspace_governance(self):
-        if not self.caps.bwrap_usable:
-            self.skipTest(f"bwrap unusable on this host: {self.caps.bwrap_detail}")
+        reason = _bwrap_capability_skip_reason(self.caps)
+        if reason:
+            self.skipTest(reason)
         northstar = self.root / ".northstar"
         northstar.mkdir()
         config = northstar / "config.toml"
@@ -734,8 +759,9 @@ class OsSandboxBwrapBackendTests(RuntimeTestCase):
         self.assertEqual(config.read_text(encoding="utf-8"), "original = true\n")
 
     def test_bwrap_temp_directory_is_ephemeral_and_writable(self):
-        if not self.caps.bwrap_usable:
-            self.skipTest(f"bwrap unusable on this host: {self.caps.bwrap_detail}")
+        reason = _bwrap_capability_skip_reason(self.caps)
+        if reason:
+            self.skipTest(reason)
         request = SandboxRequest(
             argv=("sh", "-c", "touch \"$TMPDIR/probe\""),
             cwd=self.root,
