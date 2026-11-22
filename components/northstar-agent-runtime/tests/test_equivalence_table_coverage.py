@@ -48,18 +48,34 @@ They are the reach difference between two censuses.
 So the test now states the scope it diffs at, and reads the artifact
 that matches it.
 
+THE VERDICT DEFECT (measured 2026-11-22)
+------------------------------------------
+A census line names EVERY mutant it planted -- the survivors AND the
+kills -- and the word ``SURVIVED`` appears in the line for either.  A
+line filter of "the line mentions SURVIVED" therefore collects the
+**killed** sites too, and reports a site as a survivor when the probe
+killed it.  Measured: a corrected census row for ``agent-handoff`` names
+38 sites, 13 of them SURVIVED, and reading the whole line reported all
+38 as survivors -- 25 phantom findings.
+
+So a site name is read **with its verdict**, and only the ``SURVIVED``
+ones are collected.
+
+THE PROOF-LOOKUP DEFECT (measured 2026-11-22)
+-----------------------------------------------
+A site name is relative to its module: ``or@45`` is a line number in
+whichever module the row names.  Searching every test file for the bare
+name therefore finds a *different* module's proof and calls it covered.
+The lookup is now **row-scoped**: the proof must be in the test file the
+census row itself names.
+
 WHAT THIS TEST PINS
 --------------------
-Every site the **slice** census reports must have a row in §9.1's table,
-and every site in the table must have a proof in some test file.  The
-census artifact lives outside the repository, so the test skips when it
-is absent -- but it does not skip silently: it reports what it skipped.
-
-The census cannot see ``merged-tree-review``, so the table is allowed to
-carry sites the census does not.  The test therefore checks the census's
-sites are a SUBSET of the table's, not that the two are equal -- and it
-checks the table's every site has a proof, which is what catches the
-table drifting away from the proofs.
+Every site the census reports as SURVIVED must be accounted for:
+either a row in §9.1's table (an equivalence proof) or a killer test in
+the suite the census row names.  The census artifact lives outside the
+repository, so the test skips when it is absent -- but it does not skip
+silently: it reports what it skipped.
 """
 
 from __future__ import annotations
@@ -72,14 +88,9 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 RUNTIME_DIR = REPO_ROOT / "components" / "northstar-agent-runtime"
 CLOSURE_DOC = REPO_ROOT / "docs" / "design" / "mutant-evidence-closure.md"
 
-#: The census artifact.  It lives outside the repository -- it is the
-#: referee's run over every slice -- so this test skips when it is
-#: absent rather than failing.
-#:
-#: Several are accepted, and the SCOPE is declared with each one.  The
-#: scope is not a detail: a diff between the table and a census of a
-#: different scope is meaningless, and the failure looks exactly like a
-#: finding.
+#: The census artifacts, each with the SCOPE it is read at.  The scope
+#: is not a detail: a diff between the table and a census of a different
+#: scope is meaningless, and the failure looks exactly like a finding.
 #:
 #: * ``scope="slice"`` -- one row per slice (the batch's own
 #:   deliveries).  This is the scope §9.1's table describes.
@@ -87,6 +98,7 @@ CLOSURE_DOC = REPO_ROOT / "docs" / "design" / "mutant-evidence-closure.md"
 #:   reaches modules no slice ever touched, so it reports many more
 #:   survivor sites, and it is NOT what the table is diffed against.
 CENSUS_CANDIDATES = (
+    ("slice", Path("/home/muse-newapi/census-parallel-corrected.txt")),
     ("slice", Path("/home/muse-newapi/census-parallel.txt")),
     ("module", Path("/home/muse-newapi/census-v3.txt")),
 )
@@ -108,24 +120,76 @@ def _census_path() -> tuple[str, Path] | None:
 #: A site name: ``eq@387``, ``gt@451`` and so on.
 SITE_RE = re.compile(r"\b(eq|gt|lt|retT|retF|and|or)@(\d+)\b")
 
+#: A site name **with its verdict**: ``eq@387 SURVIVED``.
+VERDICT_SITE_RE = re.compile(
+    r"\b(eq|gt|lt|retT|retF|and|or)@(\d+)\s+(SURVIVED|KILLED|SKIP)\b"
+)
+
 #: A §2 table row: ``| `slug` | `module.py` | `test_x.py` | ... |``.
 SLICE_MODULE_RE = re.compile(
     r"^\| `(?P<slug>[^`]+)` \| `(?P<module>[^`]+)` \|"
 )
 
+#: A census row's module/test pair: ``(a/b/mod.py / a/b/tests/test_x.py)``.
+CENSUS_PAIR_RE = re.compile(r"\(([^()]*\.py)\s*/\s*([^()]*\.py)\)")
+
+
+def _site_regex(site: str) -> re.Pattern[str]:
+    """A matcher for a site name in either spelling.
+
+    §3.4 names a test method after the mutant it kills, and the name
+    it prescribes is ``test_or_at_127_...`` -- the **underscore**
+    spelling.  The census spells the same site ``or@127``.  A proof
+    lookup that accepted only one of them would either miss every
+    §3.4-conforming test or match a different site.
+    """
+    kind, _, number = site.partition("@")
+    return re.compile(
+        rf"(?<![A-Za-z0-9]){re.escape(kind)}(?:@{re.escape(number)}"
+        rf"|_at_{re.escape(number)})(?![0-9])"
+    )
+
 
 def _table_sites(doc_text: str) -> set[str]:
     """The site names in §9.1's table."""
+    return {site for _slug, sites in _table_rows(doc_text).items() for site in sites}
+
+
+def _table_rows(doc_text: str) -> dict[str, set[str]]:
+    """``{slice: {site names}}`` from §9.1's table.
+
+    The table's rows are keyed by SLUG, and the slug is what makes a
+    site name unambiguous: ``or@45`` in ``slice4``'s row is
+    ``alert_trigger_registry.py``'s line 45, and a bare search across
+    the whole table would let one row's site satisfy another's.
+    """
     start = doc_text.find("### 9.1")
     if start < 0:
-        return set()
+        return {}
     end = doc_text.find("### 9.2", start)
     if end < 0:
         end = len(doc_text)
     section = doc_text[start:end]
-    # Only the TABLE's rows, not the prose around it.
-    rows = [ln for ln in section.splitlines() if ln.startswith("| `")]
-    return {f"{m}@{n}" for row in rows for m, n in SITE_RE.findall(row)}
+    out: dict[str, set[str]] = {}
+    for row in section.splitlines():
+        if not row.startswith("| `"):
+            continue
+        cells = [c.strip() for c in row.strip().strip("|").split("|")]
+        if len(cells) < 2:
+            continue
+        slug = cells[0].strip("`")
+        # One row may name TWO slugs (`diviner` / `scope-verb-canonical`
+        # -- the same module, censused under two names).  The row's
+        # sites belong to BOTH, and the census rows for the two are two
+        # rows naming the same sites, so the lookup must find the row
+        # under either name.
+        slugs = [s.strip("`") for s in slug.split("/")]
+        slugs = [s for part in slugs for s in part.split("` / `")]
+        sites = {f"{m}@{n}" for m, n in SITE_RE.findall(cells[1])}
+        if sites:
+            for s in slugs:
+                out.setdefault(s, set()).update(sites)
+    return out
 
 
 def _slice_modules(doc_text: str) -> dict[str, str]:
@@ -167,31 +231,74 @@ def _slice_census_modules() -> dict[str, str]:
         return {}
     out: dict[str, str] = {}
     for line in path.read_text(encoding="utf-8").splitlines():
-        match = re.search(r"\(([^ (]+)\.py\) /", line)
-        if match:
-            out.setdefault(match.group(1).split("/")[-1], line.split(" ", 1)[0])
+        pair = CENSUS_PAIR_RE.search(line)
+        if pair:
+            module = Path(pair.group(1)).name
+            out.setdefault(module[:-3], line.split(" ", 1)[0])
     return out
 
 
-def _census_sites(census_text: str) -> set[str]:
-    """The distinct survivor sites the census reports."""
-    return {
-        f"{m}@{n}"
-        for m, n in SITE_RE.findall(census_text)
-        if True
-    }
+def _census_rows(census_text: str) -> list[dict[str, object]]:
+    """The census's rows, each with its slug, module, suite and sites.
 
+    Only the sites that actually **SURVIVED** are collected.  A census
+    line names every mutant it planted -- the survivors AND the kills --
+    so a line filter of "the line mentions SURVIVED" is not enough: the
+    line also carries the KILLED sites, and including those would report
+    a site as a survivor when the probe killed it.
 
-def _survivor_sites_by_module(census_text: str) -> dict[str, set[str]]:
-    """``{module stem: {site names}}`` for the census's surviving rows."""
-    out: dict[str, set[str]] = {}
+    This was not a hypothetical: a corrected census row for
+    `agent-handoff` names 38 sites and 13 of them SURVIVED, and reading
+    the whole line would report all 38 as survivors.
+    """
+    rows: list[dict[str, object]] = []
     for line in census_text.splitlines():
         if "SURVIVED" not in line:
             continue
-        module = line.split(" ", 1)[0]
-        out.setdefault(module, set()).update(
-            f"{m}@{n}" for m, n in SITE_RE.findall(line)
+        slug = line.split(" ", 1)[0]
+        pair = CENSUS_PAIR_RE.search(line)
+        module = test = ""
+        if pair:
+            module = Path(pair.group(1)).name
+            test = Path(pair.group(2)).name
+        else:
+            # The MODULE census keys its rows by the module's own name
+            # (``agent_handoff``), not by a slice slug, and only names
+            # the pair in some rows.  Fall back to the row's own key.
+            module = f"{slug}.py"
+        survivors = {
+            f"{m}@{n}"
+            for m, n, verdict in VERDICT_SITE_RE.findall(line)
+            if verdict == "SURVIVED"
+        }
+        all_sites = {
+            f"{m}@{n}" for m, n, _verdict in VERDICT_SITE_RE.findall(line)
+        }
+        rows.append(
+            {
+                "slug": slug,
+                "module": module,
+                "test": test,
+                "survivors": survivors,
+                "sites": all_sites,
+            }
         )
+    return rows
+
+
+def _survivor_sites_by_module(census_text: str) -> dict[str, set[str]]:
+    """``{module stem: {site names}}`` for the census's surviving rows.
+
+    Verdict-filtered -- see :func:`_census_rows` for why the line
+    filter alone is not enough.
+    """
+    out: dict[str, set[str]] = {}
+    for row in _census_rows(census_text):
+        module = str(row["module"])
+        if not module:
+            continue
+        stem = module[:-3] if module.endswith(".py") else module
+        out.setdefault(stem, set()).update(row["survivors"])  # type: ignore[arg-type]
     return out
 
 
@@ -203,6 +310,7 @@ class EquivalenceTableCoverageTests(unittest.TestCase):
             self.skipTest(f"closure doc missing: {CLOSURE_DOC}")
         self.doc = CLOSURE_DOC.read_text(encoding="utf-8")
         self.table = _table_sites(self.doc)
+        self.rows = _table_rows(self.doc)
         # The batch's scope: the modules §9.1's table describes, unioned
         # with the modules the slice census names.  Either source alone
         # is incomplete -- §2's table has rows with no module (``fable``)
@@ -211,6 +319,36 @@ class EquivalenceTableCoverageTests(unittest.TestCase):
         self.slice_modules = dict(_slice_modules(self.doc))
         for module, slug in _slice_census_modules().items():
             self.slice_modules.setdefault(module, slug)
+
+    # -- helpers --------------------------------------------------------
+
+    def _census_text(self) -> str:
+        census_path = _census_path()
+        if census_path is None:
+            self.skipTest(
+                "census artifact not available: "
+                + ", ".join(str(c) for _scope, c in CENSUS_CANDIDATES)
+            )
+        return census_path[1].read_text(encoding="utf-8")
+
+    def _suite_text(self, name: str) -> str:
+        """The text of a suite named by a census row.
+
+        The lookup is **row-scoped**: the proof for a site must be in the
+        suite the census row itself names.  A bare search across every
+        test file would let one module's proof satisfy another module's
+        site -- and a site name is relative to its module, so that is a
+        false proof, not a lax one.
+        """
+        for candidate in (
+            RUNTIME_DIR / "tests" / name,
+            REPO_ROOT / "tests" / name,
+        ):
+            if candidate.exists():
+                return candidate.read_text(encoding="utf-8", errors="replace")
+        return ""
+
+    # -- the checks -----------------------------------------------------
 
     def test_the_table_is_not_empty(self):
         self.assertTrue(self.table, "§9.1's table parsed to no sites")
@@ -222,7 +360,9 @@ class EquivalenceTableCoverageTests(unittest.TestCase):
             found = False
             for test_file in list(RUNTIME_DIR.glob("tests/test_*.py")) + \
                     list(REPO_ROOT.glob("tests/test_*.py")):
-                if site in test_file.read_text(encoding="utf-8", errors="replace"):
+                if _site_regex(site).search(
+                    test_file.read_text(encoding="utf-8", errors="replace")
+                ):
                     found = True
                     break
             if not found:
@@ -232,53 +372,75 @@ class EquivalenceTableCoverageTests(unittest.TestCase):
             f"§9.1's table names sites with no proof in any test file: {missing}",
         )
 
-    def test_every_census_site_has_a_row_in_the_table(self):
-        """The census's sites must be a SUBSET of the table's.
+    def test_the_census_carries_per_site_verdicts(self):
+        """The non-vacuity guard.
 
-        The table is allowed to carry sites the census cannot see --
-        ``merged-tree-review``'s census row reads ``ERROR``, so
-        ``gt@451`` and ``eq@494`` are invisible to it.  The reverse is
-        not allowed: a census site with no row is a site whose proof is
-        not recorded.
+        The check above reads only the sites a census row marks
+        ``SURVIVED``.  If the artifact carried no per-site verdicts, that
+        set would be empty and the check would pass vacuously -- the
+        same failure mode as a count check that compares the wrong
+        number.
+
+        So the artifact must actually name the mutants it planted.  The
+        threshold is a floor on the ARTIFACT's detail, not on the number
+        of survivors: after the survivors are killed, a census row still
+        names every mutant it planted.
+        """
+        census_text = self._census_text()
+        rows = _census_rows(census_text)
+        with_verdicts = [r for r in rows if r["sites"]]
+        self.assertGreaterEqual(
+            len(with_verdicts), 5,
+            "the census artifact names per-site verdicts for fewer than "
+            f"five rows ({len(with_verdicts)}); the survivor check would "
+            "be vacuous",
+        )
+        named = sum(len(r["sites"]) for r in with_verdicts)  # type: ignore[arg-type]
+        self.assertGreaterEqual(
+            named, 50,
+            f"the census artifact names only {named} sites in total; the "
+            "survivor check would be vacuous",
+        )
+
+    def test_every_census_site_has_a_row_or_a_killer(self):
+        """Every surviving site must be accounted for, one way or the other.
+
+        There are TWO kinds of proof for a surviving mutant, and a site
+        needs only one of them:
+
+        * a row in §9.1's table -- an equivalence proof with a non-vacuity
+          control, for a mutant that genuinely cannot be killed;
+        * a killer test -- a test that observes the difference, for a
+          mutant that can be killed.
+
+        So the check is NOT "every survivor is in the table".  That was
+        the old shape, and it was wrong twice over: it demanded an
+        equivalence proof for sites that have a perfectly good killer
+        test, and it had no notion of the row a site belongs to.
 
         The census is read at the **slice** scope, which is the scope
         §9.1's table describes.  A module-scope census is filtered down
         to the batch's own modules first -- see
         ``test_a_module_scope_census_is_filtered_to_the_batch_scope``.
         """
-        census_path = _census_path()
-        if census_path is None:
-            self.skipTest(
-                "census artifact not available: "
-                + ", ".join(str(c) for _scope, c in CENSUS_CANDIDATES)
-            )
-        scope, path = census_path
-        census_text = path.read_text(encoding="utf-8")
-        census = {
-            f"{m}@{n}"
-            for line in census_text.splitlines()
-            if "SURVIVED" in line
-            for m, n in SITE_RE.findall(line)
-        }
-        if scope == "module":
-            by_module = _survivor_sites_by_module(census_text)
-            in_scope = {
-                site
-                for module, sites in by_module.items()
-                if module in self.slice_modules
-                for site in sites
-            }
-            self.assertTrue(
-                in_scope,
-                "the module census has no survivor site inside the batch's "
-                "own scope, so the subset check would be vacuous",
-            )
-            census = in_scope
-        self.assertTrue(census, "the census artifact reports no survivors")
-        missing = sorted(census - self.table)
+        census_text = self._census_text()
+        rows = _census_rows(census_text)
+        self.assertTrue(rows, "the census artifact carries no rows at all")
+        missing = []
+        for row in rows:
+            slug = str(row["slug"])
+            table_sites = self.rows.get(slug, set())
+            suite = self._suite_text(str(row["test"]))
+            for site in sorted(row["survivors"]):  # type: ignore[arg-type]
+                if site in table_sites:
+                    continue
+                if suite and _site_regex(site).search(suite):
+                    continue
+                missing.append(f"{slug}:{site}")
         self.assertEqual(
             missing, [],
-            f"census sites with no row in §9.1's table: {missing}",
+            "surviving census sites with no equivalence row and no killer "
+            f"test: {missing}",
         )
 
     def test_a_module_scope_census_is_filtered_to_the_batch_scope(self):
