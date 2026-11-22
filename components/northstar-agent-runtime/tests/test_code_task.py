@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -17,6 +18,7 @@ from code_task import (
     IsolatedCodeWorkspace,
     audit_delivery_patch,
     reconcile_code_evidence,
+    validate_check_inputs,
 )
 
 
@@ -389,6 +391,290 @@ class IsolatedCodeWorkspaceTests(unittest.TestCase):
                 {item["code"] for item in receipt["findings"]},
                 {"governance_path_changed", "private_key"},
             )
+
+
+class CheckInputPinningTests(unittest.TestCase):
+    """The delivery seal must bind the check's inputs, not just the patch.
+
+    A patch that rewrites the check script (or a helper/fixture the check
+    reads) to exit 0 must fail verification even though the rewritten check
+    itself reports success. These tests drive the real phase machine over a
+    real Git worktree and assert both halves: the tampered check passes, and
+    verification still refuses it.
+    """
+
+    CHECK_INPUTS = ("checks/run_check.py", "checks/helper.py")
+
+    def make_check_repository(self, parent: Path) -> Path:
+        root = parent / "repo"
+        root.mkdir()
+        git(root, "init")
+        git(root, "config", "user.email", "northstar-tests@example.invalid")
+        git(root, "config", "user.name", "Northstar Tests")
+        (root / "app.py").write_text("value = 1\n", encoding="utf-8")
+        (root / "checks").mkdir()
+        (root / "checks" / "helper.py").write_text("EXPECTED = 2\n", encoding="utf-8")
+        (root / "checks" / "run_check.py").write_text(
+            "import sys\n\n"
+            'sys.path.insert(0, "checks")\n'
+            "from helper import EXPECTED\n\n"
+            'text = open("app.py", encoding="utf-8").read()\n'
+            'sys.exit(0 if f"value = {EXPECTED}" in text else 1)\n',
+            encoding="utf-8",
+        )
+        git(root, "add", "app.py", "checks/helper.py", "checks/run_check.py")
+        git(root, "commit", "-m", "initial with host check")
+        return root
+
+    def _setup(self, parent: Path, check_inputs=CHECK_INPUTS):
+        source = self.make_check_repository(parent)
+        isolated = IsolatedCodeWorkspace(
+            source, evidence_root=parent / "evidence"
+        ).prepare()
+        assert isolated.worktree is not None
+        assert isolated.evidence_dir is not None
+        phases = CodePhaseMachine(
+            run_id=isolated.run_id,
+            evidence_dir=isolated.evidence_dir,
+            worktree=isolated.worktree,
+            start_commit=isolated.start_commit,
+            check_inputs=check_inputs,
+        )
+        return source, isolated, phases
+
+    def _drive_to_verifying(self, phases: CodePhaseMachine) -> None:
+        phases.start()
+        phases.submit_plan(
+            {
+                "summary": "change app",
+                "files": ["app.py"],
+                "steps": ["edit"],
+                "risks": [],
+                "check_indices": [0],
+            }
+        )
+
+    def _run_check(self, worktree: Path) -> int:
+        # PYTHONDONTWRITEBYTECODE keeps the run from leaving __pycache__
+        # artifacts in the worktree, which the delivery audit would flag.
+        environment = dict(os.environ)
+        environment["PYTHONDONTWRITEBYTECODE"] = "1"
+        process = subprocess.run(
+            [sys.executable, "checks/run_check.py"],
+            cwd=str(worktree),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=environment,
+            check=False,
+        )
+        return process.returncode
+
+    def test_validate_check_inputs_rejects_bad_paths(self):
+        self.assertEqual(validate_check_inputs(("a.py", "checks/b.py")), ("a.py", "checks/b.py"))
+        for bad in (
+            ("",),
+            ("  a.py",),
+            ("/abs/path.py",),
+            ("../escape.py",),
+            ("a/../b.py",),
+            ("a/./b.py",),
+            ("a//b.py",),
+            ("a:b.py",),
+            ("a.py", "a.py"),
+        ):
+            with self.assertRaises(CodeTaskError, msg=str(bad)):
+                validate_check_inputs(bad)
+        with self.assertRaises(CodeTaskError):
+            validate_check_inputs(tuple(f"f{n}.py" for n in range(65)))
+
+    def test_task_records_check_inputs(self):
+        task = CodeTask(goal="change app", check_inputs=self.CHECK_INPUTS)
+        self.assertEqual(task.as_dict()["check_inputs"], list(self.CHECK_INPUTS))
+        with self.assertRaises(CodeTaskError):
+            CodeTask(goal="change app", check_inputs=("../escape.py",))
+
+    def test_honest_patch_passes_with_pins(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            _, isolated, phases = self._setup(parent)
+            try:
+                assert isolated.worktree is not None
+                (isolated.worktree / "app.py").write_text("value = 2\n", encoding="utf-8")
+                self.assertEqual(self._run_check(isolated.worktree), 0)
+                self._drive_to_verifying(phases)
+                phases.begin_verification()
+                phases.seal_verification()
+                phases.finish("success")
+
+                seal = json.loads(
+                    (isolated.evidence_dir / "delivery-seal.json").read_text(encoding="utf-8")
+                )
+                self.assertTrue(seal["ok"])
+                self.assertTrue(seal["check_inputs_pinned"])
+                self.assertTrue(seal["check_inputs_unchanged"])
+                self.assertEqual(
+                    [pin["path"] for pin in seal["check_input_pins"]],
+                    list(self.CHECK_INPUTS),
+                )
+                self.assertTrue(all(pin["unchanged"] for pin in seal["check_input_pins"]))
+                persisted = json.loads(
+                    (isolated.evidence_dir / "phases.json").read_text(encoding="utf-8")
+                )
+                self.assertEqual(
+                    [pin["path"] for pin in persisted["check_input_pins"]],
+                    list(self.CHECK_INPUTS),
+                )
+            finally:
+                isolated.cleanup()
+
+    def test_patch_rewriting_check_script_fails_verification(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            _, isolated, phases = self._setup(parent)
+            try:
+                assert isolated.worktree is not None
+                # The honest check fails: app.py still holds value 1.
+                self.assertEqual(self._run_check(isolated.worktree), 1)
+                # The attack: rewrite the check script itself to exit 0.
+                (isolated.worktree / "checks" / "run_check.py").write_text(
+                    "import sys\nsys.exit(0)\n", encoding="utf-8"
+                )
+                self.assertEqual(self._run_check(isolated.worktree), 0)
+                self._drive_to_verifying(phases)
+                with self.assertRaisesRegex(
+                    CodeTaskError, r"pinned check inputs: checks/run_check\.py"
+                ):
+                    phases.begin_verification()
+            finally:
+                isolated.cleanup()
+
+    def test_patch_tampering_helper_fails_verification(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            source, isolated, phases = self._setup(parent)
+            try:
+                assert isolated.worktree is not None
+                self.assertEqual(self._run_check(isolated.worktree), 1)
+                # The attack: the check script is byte-identical, but the
+                # helper it reads now agrees with the broken app.
+                (isolated.worktree / "checks" / "helper.py").write_text(
+                    "EXPECTED = 1\n", encoding="utf-8"
+                )
+                self.assertEqual(
+                    (isolated.worktree / "checks" / "run_check.py").read_bytes(),
+                    subprocess.run(
+                        [
+                            "git", "-C", str(source), "show",
+                            f"{isolated.start_commit}:checks/run_check.py",
+                        ],
+                        check=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                    ).stdout,
+                )
+                self.assertEqual(self._run_check(isolated.worktree), 0)
+                self._drive_to_verifying(phases)
+                with self.assertRaisesRegex(
+                    CodeTaskError, r"pinned check inputs: checks/helper\.py"
+                ):
+                    phases.begin_verification()
+            finally:
+                isolated.cleanup()
+
+    def test_seal_rejects_input_changed_during_verification(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            _, isolated, phases = self._setup(parent)
+            try:
+                assert isolated.worktree is not None
+                (isolated.worktree / "app.py").write_text("value = 2\n", encoding="utf-8")
+                self._drive_to_verifying(phases)
+                phases.begin_verification()
+                # A pinned input is rewritten after the precheck: the seal
+                # must name it instead of validating.
+                (isolated.worktree / "checks" / "helper.py").write_text(
+                    "EXPECTED = 1\n", encoding="utf-8"
+                )
+                with self.assertRaisesRegex(
+                    CodeTaskError,
+                    r"pinned check inputs changed during verification: checks/helper\.py",
+                ):
+                    phases.seal_verification()
+                seal = json.loads(
+                    (isolated.evidence_dir / "delivery-seal.json").read_text(encoding="utf-8")
+                )
+                self.assertFalse(seal["ok"])
+                self.assertFalse(seal["check_inputs_unchanged"])
+            finally:
+                isolated.cleanup()
+
+    def test_verification_is_repeatable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            _, isolated, phases = self._setup(parent)
+            try:
+                assert isolated.worktree is not None
+                assert isolated.evidence_dir is not None
+                (isolated.worktree / "app.py").write_text("value = 2\n", encoding="utf-8")
+                self._drive_to_verifying(phases)
+                phases.begin_verification()
+                second = CodePhaseMachine(
+                    run_id=isolated.run_id,
+                    evidence_dir=parent / "evidence-second",
+                    worktree=isolated.worktree,
+                    start_commit=isolated.start_commit,
+                    check_inputs=self.CHECK_INPUTS,
+                )
+                self._drive_to_verifying(second)
+                second.begin_verification()
+                self.assertEqual(
+                    phases.as_dict()["check_input_pins"],
+                    second.as_dict()["check_input_pins"],
+                )
+                phases.seal_verification()
+                first_seal = (isolated.evidence_dir / "delivery-seal.json").read_bytes()
+                phases.seal_verification()
+                self.assertEqual(
+                    first_seal,
+                    (isolated.evidence_dir / "delivery-seal.json").read_bytes(),
+                )
+            finally:
+                isolated.cleanup()
+
+    def test_missing_baseline_input_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            _, isolated, phases = self._setup(
+                parent, check_inputs=("checks/run_check.py", "checks/missing.py")
+            )
+            try:
+                self._drive_to_verifying(phases)
+                with self.assertRaisesRegex(
+                    CodeTaskError, r"missing at the starting commit: checks/missing\.py"
+                ):
+                    phases.begin_verification()
+            finally:
+                isolated.cleanup()
+
+    def test_no_declared_inputs_behaves_as_before(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            _, isolated, phases = self._setup(parent, check_inputs=())
+            try:
+                assert isolated.worktree is not None
+                (isolated.worktree / "app.py").write_text("value = 2\n", encoding="utf-8")
+                self._drive_to_verifying(phases)
+                phases.begin_verification()
+                phases.seal_verification()
+                phases.finish("success")
+                seal = json.loads(
+                    (isolated.evidence_dir / "delivery-seal.json").read_text(encoding="utf-8")
+                )
+                self.assertTrue(seal["ok"])
+                self.assertFalse(seal["check_inputs_pinned"])
+                self.assertEqual(seal["check_input_pins"], [])
+            finally:
+                isolated.cleanup()
 
 
 if __name__ == "__main__":

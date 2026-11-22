@@ -398,6 +398,9 @@ class ChainResult:
         return self.ok
 
 
+MAX_RECORD_JSON_DEPTH = 128
+
+
 def _iter_records(lines: Iterable[str]) -> Iterator[tuple[int, dict[str, Any]]]:
     """Yield (physical_line_number, parsed_json) for non-blank lines."""
     def unique_object(pairs):
@@ -415,6 +418,28 @@ def _iter_records(lines: Iterable[str]) -> Iterator[tuple[int, dict[str, Any]]]:
         line = raw.strip()
         if not line:
             continue
+        depth = 0
+        in_string = False
+        escaped = False
+        for character in line:
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif character == "\\":
+                    escaped = True
+                elif character == '"':
+                    in_string = False
+                continue
+            if character == '"':
+                in_string = True
+            elif character in "[{":
+                depth += 1
+                if depth > MAX_RECORD_JSON_DEPTH:
+                    raise ValueError(
+                        f"JSON depth limit exceeded ({MAX_RECORD_JSON_DEPTH} containers)"
+                    )
+            elif character in "]}":
+                depth -= 1
         yield number, json.loads(line, object_pairs_hook=unique_object, parse_constant=reject_constant)
 
 

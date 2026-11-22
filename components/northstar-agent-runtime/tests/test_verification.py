@@ -41,7 +41,7 @@ class VerificationTests(unittest.TestCase):
                 provider=ScriptedProvider([{"text": "done"}]),
                 config=RuntimeConfig(
                     workspace=directory,
-                    verification_commands=("python -c 'raise SystemExit(7)'",),
+                    verification_commands=("python3 -c 'raise SystemExit(7)'",),
                     shell_backend="process",
                     shell_landlock="off",
                     shell_seccomp="off",
