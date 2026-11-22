@@ -6,6 +6,8 @@
 
 **Tek cümleyle:** Northstar küçük, hâlâ geliştirilmekte olan bir agent çalışma ortamıdır — tek giriş (`northstar agent`), görünür sınırlar, denetlenebilirlik ve kurtarılabilir yürütme. Çekirdek, açık alt sistemlerden (runtime, contract, host, durable, sidecar, interop) oluşur. Tamamlanmış bir çoklu-agent platformu **değildir** (barındırılan bulut yok, paralel filo yok); bugün sunulan, agent'ları sürprizsiz çalıştırmak için işe yarar altyapıdır: **varsayılan-red** korumalı **`Shell`** (mümkünse bubblewrap, değilse dürüst process yedeği) ve kısıtlı yerel worker adaptörü olarak Northstar Codex Sidecar.
 
+Kaydedilmiş oturumlarda, SHA-256 ile doğrulanmış bir `SKILL.md` dosyasının başarılı şekilde okunması `skill_loaded` denetim olayı olarak kaydedilir; kayıtta yol ve özet bulunur, yönerge metni bulunmaz.
+
 > English is the canonical project entry. Translations mirror its scope and security claims; update them when the canonical README changes.
 
 ## Nedir?

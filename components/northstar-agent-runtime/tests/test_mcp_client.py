@@ -737,6 +737,23 @@ class GenerationFlagTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("protocol=auto, elicit=off", out)
         self.assertIn("roots=off, sensitive_input=off, rounds=3", out)
+        self.assertIn("network=allowed, filesystem=unconfined", out)
+
+    def test_workspace_filesystem_scope_is_shown_in_dry_run_stance(self):
+        code, out, _ = run_cli(
+            "run", "--workspace", str(self.ws), "--prompt", "hi", "--scripted-text", "x",
+            "--mcp-server", self.server(), "--mcp-filesystem", "workspace", "--dry-run",
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("filesystem=workspace", out)
+
+    def test_mcp_filesystem_flag_rejects_unknown_modes(self):
+        with self.assertRaises(SystemExit) as exited:
+            run_cli(
+                "run", "--workspace", str(self.ws), "--prompt", "hi", "--scripted-text", "x",
+                "--mcp-server", self.server(), "--mcp-filesystem", "host",
+            )
+        self.assertEqual(exited.exception.code, 2)
 
     def test_unattended_a_remote_question_becomes_a_visible_tool_error(self):
         code, out, _ = self.run_with("--json")
@@ -803,6 +820,131 @@ class GenerationFlagTests(unittest.TestCase):
         self.assertIn("echo:still fine", out)
 
 
+class McpConnectPaginationTests(unittest.TestCase):
+    def test_connect_lists_tools_from_every_page_before_exposing_them(self):
+        client = McpStdioClient(
+            "demo", ["python3", str(FIXTURE)], timeout_ms=4000,
+            protocol="legacy", env={}, network="allowed",
+        )
+        pages = iter((
+            {
+                "tools": [{
+                    "name": "first",
+                    "description": "first tool",
+                    "inputSchema": {"type": "object", "properties": {}},
+                }],
+                "nextCursor": "second-page",
+            },
+            {
+                "tools": [{
+                    "name": "second",
+                    "description": "second tool",
+                    "inputSchema": {"type": "object", "properties": {}},
+                }],
+            },
+        ))
+        calls = []
+        original_request = client._request
+
+        def request(method, params=None):
+            if method == "tools/list":
+                calls.append(params)
+                return next(pages)
+            return original_request(method, params)
+
+        client._request = request  # type: ignore[method-assign]
+        try:
+            client.connect()
+            self.assertEqual(client.tool_names(), ("first", "second"))
+            self.assertEqual(calls, [{}, {"cursor": "second-page"}])
+        finally:
+            client.close()
+
+
+class ToolListPaginationTests(unittest.TestCase):
+    def client(self) -> McpStdioClient:
+        return McpStdioClient("demo", ["true"], env={})
+
+    def test_list_all_tools_follows_opaque_cursors_and_preserves_page_order(self):
+        client = self.client()
+        calls = []
+        pages = iter((
+            {"tools": [{"name": "first"}], "nextCursor": "opaque/page-2"},
+            {"tools": [{"name": "second"}]},
+        ))
+
+        def request(method, params):
+            calls.append((method, params))
+            return next(pages)
+
+        client._request = request  # type: ignore[method-assign]
+        self.assertEqual(
+            client._list_all_tools(),
+            [{"name": "first"}, {"name": "second"}],
+        )
+        self.assertEqual(calls, [
+            ("tools/list", {}),
+            ("tools/list", {"cursor": "opaque/page-2"}),
+        ])
+
+    def test_list_all_tools_accepts_a_final_page_at_the_page_limit(self):
+        from unittest.mock import patch
+
+        client = self.client()
+        pages = iter((
+            {"tools": [], "nextCursor": "page-2"},
+            {"tools": [{"name": "last"}]},
+        ))
+        client._request = lambda *_args, **_kwargs: next(pages)  # type: ignore[method-assign]
+        with patch.object(mcp_client, "MAX_TOOL_LIST_PAGES", 2):
+            self.assertEqual(client._list_all_tools(), [{"name": "last"}])
+
+    def test_list_all_tools_rejects_repeated_or_malformed_cursors(self):
+        cases = (
+            (
+                ({"tools": [], "nextCursor": "same"}, {"tools": [], "nextCursor": "same"}),
+                "repeated a pagination cursor",
+            ),
+            (({"tools": [], "nextCursor": 7},), "nextCursor must be a string"),
+        )
+        for pages, message in cases:
+            with self.subTest(message=message):
+                client = self.client()
+                responses = iter(pages)
+                client._request = lambda *_args, **_kwargs: next(responses)  # type: ignore[method-assign]
+                with self.assertRaisesRegex(McpError, message):
+                    client._list_all_tools()
+
+    def test_list_all_tools_bounds_empty_page_chains(self):
+        from unittest.mock import patch
+
+        client = self.client()
+        calls = []
+
+        def request(_method, _params):
+            calls.append(None)
+            return {"tools": [], "nextCursor": f"cursor-{len(calls)}"}
+
+        client._request = request  # type: ignore[method-assign]
+        with patch.object(mcp_client, "MAX_TOOL_LIST_PAGES", 2):
+            with self.assertRaisesRegex(McpError, "exceeded the 2 page limit"):
+                client._list_all_tools()
+        self.assertEqual(len(calls), 2)
+
+    def test_list_all_tools_preserves_the_aggregate_tool_count_cap(self):
+        from unittest.mock import patch
+
+        client = self.client()
+        pages = iter((
+            {"tools": [{"name": "first"}], "nextCursor": "page-2"},
+            {"tools": [{"name": "second"}]},
+        ))
+        client._request = lambda *_args, **_kwargs: next(pages)  # type: ignore[method-assign]
+        with patch.object(mcp_client, "MAX_TOOLS_PER_SERVER", 1):
+            with self.assertRaisesRegex(McpError, "more than 1 tools"):
+                client._list_all_tools()
+
+
 class ToolPinningTests(unittest.TestCase):
     """Tool-definition pinning: drift quarantines the server."""
 
@@ -813,11 +955,120 @@ class ToolPinningTests(unittest.TestCase):
         client.connect()
         return client
 
+    def test_unnegotiated_task_result_is_rejected_and_audited(self):
+        client = self.connect()
+        records: list[dict] = []
+        request_methods: list[str] = []
+        client.audit = records.append
+        try:
+            def task_response(method, *_args, **_kwargs):
+                request_methods.append(method)
+                return {
+                    "resultType": "task",
+                    "taskId": "server-task-secret",
+                    "status": "working",
+                }
+
+            client._request = task_response  # type: ignore[method-assign]
+            self.assertNotIn("extensions", client._capabilities())
+            result = client.call_tool("echo", {})
+            self.assertTrue(result.is_error)
+            self.assertIn("without negotiated task support", result.text())
+            self.assertNotIn("server-task-secret", result.text())
+            self.assertTrue(client.quarantined)
+            self.assertEqual(request_methods, ["tools/call"])
+            self.assertEqual(len(records), 1)
+            self.assertEqual(records[0]["type"], "mcp.tool_drift")
+            self.assertEqual(records[0]["at"], "output_validation")
+            self.assertNotIn("server-task-secret", json.dumps(records))
+
+            denied = client.call_tool("echo", {})
+            self.assertTrue(denied.is_error)
+            self.assertIn("quarantined", denied.text())
+            self.assertEqual(request_methods, ["tools/call"])
+        finally:
+            client.close()
+
+    def test_unknown_result_type_without_extension_is_rejected_and_audited(self):
+        client = self.connect()
+        records: list[dict] = []
+        request_methods: list[str] = []
+        client.audit = records.append
+        try:
+            def unknown_response(method, *_args, **_kwargs):
+                request_methods.append(method)
+                return {
+                    "resultType": "future_extension_result",
+                    "taskId": "server-task-secret",
+                    "status": "working",
+                }
+
+            client._request = unknown_response  # type: ignore[method-assign]
+            self.assertNotIn("extensions", client._capabilities())
+            result = client.call_tool("echo", {})
+            self.assertTrue(result.is_error)
+            self.assertIn("unsupported result type", result.text())
+            self.assertIn("completion is unknown", result.text())
+            self.assertNotIn("future_extension_result", result.text())
+            self.assertNotIn("server-task-secret", result.text())
+            self.assertTrue(client.quarantined)
+            self.assertEqual(request_methods, ["tools/call"])
+            self.assertEqual(len(records), 1)
+            self.assertEqual(records[0]["type"], "mcp.tool_drift")
+            self.assertEqual(records[0]["at"], "output_validation")
+            self.assertNotIn("future_extension_result", json.dumps(records))
+            self.assertNotIn("server-task-secret", json.dumps(records))
+
+            denied = client.call_tool("echo", {})
+            self.assertTrue(denied.is_error)
+            self.assertIn("quarantined", denied.text())
+            self.assertEqual(request_methods, ["tools/call"])
+        finally:
+            client.close()
+
     def test_refresh_with_no_drift_returns_empty(self):
         client = self.connect()
         try:
             self.assertEqual(client.refresh_tools(), ())
             self.assertFalse(client.quarantined)
+        finally:
+            client.close()
+
+    def test_refresh_checks_later_pages_before_returning_no_drift(self):
+        client = self.connect()
+        try:
+            echo = client._tools["echo"]
+            echo_definition = {
+                "name": echo.name,
+                "description": echo.description,
+                "inputSchema": echo.input_schema,
+            }
+            if echo.output_schema is not None:
+                echo_definition["outputSchema"] = echo.output_schema
+            pages = iter((
+                {"tools": [echo_definition], "nextCursor": "later-tools"},
+                {
+                    "tools": [{
+                        "name": "new_tool",
+                        "description": "added on page two",
+                        "inputSchema": {"type": "object", "properties": {}},
+                    }],
+                },
+            ))
+            calls = []
+
+            def request(method, params):
+                calls.append((method, params))
+                return next(pages)
+
+            client._request = request  # type: ignore[method-assign]
+            drifts = client.refresh_tools()
+            self.assertEqual(calls, [
+                ("tools/list", {}),
+                ("tools/list", {"cursor": "later-tools"}),
+            ])
+            self.assertIn("added", {drift.kind for drift in drifts})
+            self.assertTrue(client.quarantined)
         finally:
             client.close()
 
@@ -1071,9 +1322,12 @@ class ToolPinningTests(unittest.TestCase):
             client2.connect()
             try:
                 self.assertTrue(client2.quarantined)
-                self.assertEqual(len(records), 1)
-                self.assertEqual(records[0]["type"], "mcp.tool_drift")
-                self.assertEqual(records[0]["at"], "connect")
+                self.assertEqual(
+                    [record["type"] for record in records],
+                    ["mcp.server_isolation", "mcp.tool_drift"],
+                )
+                self.assertEqual(records[0]["filesystem_scope"], "unconfined")
+                self.assertEqual(records[1]["at"], "connect")
             finally:
                 client2.close()
 
