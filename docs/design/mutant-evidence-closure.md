@@ -690,7 +690,10 @@ reached the census the count was drawn from.  **A slice with no census
 number contributes no site, so it contributes no row.**  The two
 proofs are now symmetric and have a control; see
 `docs/design/merged-tree-review-equivalence-controls.md`.  The
-enumeration is now **15 sites, 15 proofs, 15 controls**.
+enumeration is now **15 sites, 15 proofs, 15 controls** -- which the
+2026-11-22 (c) amendment below corrects to **17 sites**: the census
+sees 15, and `lt@701` and `or@504` are two more the census can reach
+but §9.1's table had not listed.
 
 **AMENDED 2026-11-22.**  The two sites now have a **census number of
 their own**, which is what closed the loop.  The whole-file census for
@@ -719,8 +722,9 @@ So the proof existed and was correct; only the **table row** was
 missing.  That is the *second* time this enumeration was short by
 exactly the sites the census could not reach -- and the *third* time
 the count was locally right and wrong.  The census reports **15
-distinct sites**; §9.1's table now carries **14 rows for 15 sites**
-(the `diviner` row carries two).
+distinct sites**; §9.1's table now carries **16 rows for 17 sites**
+(the `diviner` row carries two; the 2026-11-22 (c) amendment below
+records how the count reached 17).
 
 > **The enumeration is now derived from the census, not from memory.**
 > The census is the only artifact that sees every slice; a hand-kept
@@ -754,8 +758,10 @@ the planted fault.
 |---|---|---|
 | `audit-head` | `or@527` | the two spellings of the monotonicity guard, over inputs that violate `seq == records_sealed` |
 | `audit-head` | `lt@928` | the strict and non-strict row comparisons, over the EQUAL counts the guard never reaches |
+| `cancellation-gate` | `or@504` | the same differential harness pointed at the resume file-size bound, a mutation that IS observable |
 | `cwl-episode-eviction` | `eq@387` | the validation call driven directly with an invalid dependency |
 | `diviner` / `scope-verb-canonical` | `lt@667`, `gt@669` | the same comparison, over the EQUAL target sets the sweep skips |
+| `durable-resume` | `lt@701` | the differential harness with the server-error branch emptied -- the two predicates must then DIFFER at status 500 |
 | `fable` | `lt@579` | the cap computation widened by one byte |
 | `horizon` | `gt@741` | the truncation keeping one character fewer |
 | `jido-statebudget` | `gt@304` | a deliberately wrong expression -- the original with the bound one step further |
@@ -767,7 +773,7 @@ the planted fault.
 | `merged-tree-review` | `gt@451` | the trim bound moved one step further -- `len(parts) > 2` -- which the harness must detect |
 | `merged-tree-review` | `eq@494` | the same harness, over the class-membership half the equivalence rests on |
 
-**The table has 14 rows for 15 sites.**  `diviner` /
+**The table has 16 rows for 17 sites.**  `diviner` /
 `scope-verb-canonical` carries TWO sites (`lt@667` and `gt@669`) in one
 row, so the row count and the site count differ by one.  The census
 reports **15 distinct survivor sites** across **18 survivor instances**
@@ -775,6 +781,50 @@ reports **15 distinct survivor sites** across **18 survivor instances**
 slices were censused under two names.  So "15 sites, 15 proofs, 15
 controls" is a count of **distinct sites**, and the three duplicated
 names are the same site counted once.
+
+**AMENDED 2026-11-22 (c) -- the table was missing TWO rows, and the
+count that reported the gap was the wrong count.**  Running the diff
+this section recommends -- extract the site names from §9.1's table,
+extract them from the census, and diff -- produced a **non-empty**
+diff, which is the check working:
+
+```
+census only:  lt@701  or@504
+table only:   eq@494  gt@451
+```
+
+The first line is the finding: `durable-resume`'s `lt@701` and
+`cancellation-gate`'s `or@504` had **no row in §9.1's table**, even
+though both have full differential proofs with non-vacuity controls
+(`test_durable_resume.py`'s `lt@701` class, and
+`test_cancellation_gate.py`'s `EquivalentMutantTests`).  The second
+line is not a finding: `gt@451` and `eq@494` are absent from the
+census because `merged-tree-review`'s census row reads `ERROR` -- the
+condition §9's own first amendment describes.  They are covered by
+the 2026-11-22 census of that module (`killed 37/39`).
+
+So the correct accounting is:
+
+| | census | §9.1's table (before) | §9.1's table (now) |
+|---|---|---|---|
+| distinct sites | 15 | 15 | **17** |
+| of which the census cannot see | — | `gt@451`, `eq@494` | `gt@451`, `eq@494` |
+
+The table now carries **17 sites in 16 rows** (`diviner` /
+`scope-verb-canonical` carries two sites in one row).  The census can
+only ever see **15** of them, because it does not reach
+`merged-tree-review` -- so **the census is NOT the upper bound on the
+number of sites**, and a table diffed against it will always show the
+two `merged-tree-review` sites as "extra".  That is the shape of the
+check: a diff is a diff, and each side must be read against what it
+can actually see.
+
+**A count of "15" was locally right and wrong for the fourth time.**
+The census says 15; the proofs say 17; and the table, read on its own,
+said 15 while carrying a *different* 15 -- it had `gt@451` and `eq@494`
+but not `lt@701` and `or@504`.  The number happened to be right and
+the SET was wrong, which is the worst of the two failure modes: a
+count check would have passed.  The **set** diff is what found it.
 
 **The skipped inputs.**  A sweep that SKIPS a class of pairs -- the
 equal target sets, the equal row counts -- is skipping exactly where
