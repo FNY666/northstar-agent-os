@@ -1187,15 +1187,48 @@ the planted fault.
 | `step-reliability-budget` | `lt@152` | the final formula of `max_steps` shifted by one |
 | `merged-tree-review` | `gt@451` | the trim bound moved one step further -- `len(parts) > 2` -- which the harness must detect |
 | `merged-tree-review` | `eq@494` | the same harness, over the class-membership half the equivalence rests on |
+| `c58` / `slice3` | `lt@547`, `lt@552`, `lt@557`, `lt@620`, `lt@686`, `lt@690`, `lt@709`, `lt@756`, `lt@773` | the same differential harness pointed at the bound turned the OTHER way (`< 0` -> `> 0`) -- a delimiter found at index 1 exists, so the two copies MUST differ there |
 
-**The table has 16 rows for 17 sites.**  `diviner` /
+**The table has 17 rows for 26 sites.**  `diviner` /
 `scope-verb-canonical` carries TWO sites (`lt@667` and `gt@669`) in one
-row, so the row count and the site count differ by one.  The census
-reports **15 distinct survivor sites** across **18 survivor instances**
+row, and `c58` / `slice3` carries NINE (`lt@547`, `lt@552`, `lt@557`,
+`lt@620`, `lt@686`, `lt@690`, `lt@709`, `lt@756`, `lt@773`) in one row,
+so the row count and the site count differ by eight.
+
+**AMENDED 2026-11-22 (i) -- the census grew a ninth distinct site
+family, and the table grew a row for it.**  The census above reports
+**15 distinct survivor sites** across **18 survivor instances**
 -- `lt@667`, `gt@669` and `lt@390` each survived TWICE, because their
 slices were censused under two names.  So "15 sites, 15 proofs, 15
 controls" is a count of **distinct sites**, and the three duplicated
 names are the same site counted once.
+
+That count was itself a **snapshot of a census that was still moving**.
+`bash_parser.py` had **42** survivors at `c58`'s pin, and 33 of them
+are now killed by named killer tests; the remaining **9** are the
+`lt` sites above, and they are **equivalent**, not merely untested.
+So the census now reports **24 distinct survivor sites** across **36
+survivor instances** -- the nine `lt` sites survive under both `c58`
+and `slice3`, which probe the same module, so each is counted twice --
+and the table carries a row for them.
+
+The equivalence itself is the "the value can never be 0" argument, and
+it is proved by differential sweep rather than asserted: all nine
+checks are "did I find the closing delimiter?" comparisons written
+`< 0`, and the mutant `<= 0` differs from them **only** at the value
+0.  The value the check compares can never be 0 at these call sites --
+`_find_matching(text, i + 1)` is called with `i` the index of the `(`
+just consumed, so the returned `)` index is at least `i + 2`, and
+`text.find(needle, start)` is always called with `start >= 1`.  So the
+comparison is never `0 < 0`.
+
+The **non-vacuity control** is the bound turned the OTHER way (`< 0` ->
+`> 0`), which IS observable -- a delimiter found at index 1 exists --
+so the two copies must differ there, and they do.  The harness also
+builds both copies from the module's **own source**, and the proof was
+re-verified with the fault planted in the live file: the suite still
+passes, so the agreement is a property of the mutant, not of the
+shipped spelling.
 
 **AMENDED 2026-11-22 (c) -- the table was missing TWO rows, and the
 count that reported the gap was the wrong count.**  Running the diff
