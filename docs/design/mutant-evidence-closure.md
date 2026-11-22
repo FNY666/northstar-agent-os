@@ -771,6 +771,7 @@ against a blind suite, but their three listed constructs genuinely
 KILL under pytest, so their 3/3 stands -- for the wrong reason, and
 the whole-file numbers are lower than the old census recorded
 (`toolfail` 11/11 -> **10/11**; `lightningzero` 24/24 -> **12/24**).
+Both of those two have since been closed -- see §9's AMENDED (h).
 `slice5` is the third such row, and the cleanest control: blind suite,
 perfect old score, and the fixed probe confirms **13/13**.  A defect
 that made every blind row fall would have been a defect in the
@@ -791,7 +792,7 @@ the verdict.
 | `slice3` | 63/63 | **70/115** |
 | `slice4` | 4/4 | **3/4** |
 | `toolfail` | 11/11 | **10/11** |
-| `lightningzero` | 24/24 | **12/24** |
+| `lightningzero` | 24/24 | **12/24** (since closed to **24/24**) |
 | `slice5` | 13/13 | 13/13 |
 
 **Six of the seven re-measured rows changed.**  Six of the seven blind
@@ -1047,6 +1048,31 @@ covered `provider_retry.fault_to_failure`, which delegates to it.
 |---|---|---|
 | `slice4` | 3/4 | **4/4** |
 | `toolfail` | 10/11 | **11/11** |
+
+**AMENDED 2026-11-22 (h) -- `lightningzero` is closed too.**
+
+`lightningzero`'s whole-file count read **12/24**, not 24/24: twelve
+survivors behind a 3/3 row that was, like the other blind rows, the
+exit code of a runner that had collected nothing.
+
+Nine of the twelve survivors sit inside `stdlib_only()` and `main()`.
+Those are only reachable by running the module as a **script** -- a
+test that merely *imports* `coverage_manifest` cannot observe them at
+all, because the guard that would catch the fault is in the
+`if __name__ == "__main__"` path and in the stdlib-only check.  The
+killers therefore drive the module **as a script** and assert on its
+own output, rather than calling an internal function.
+
+The remaining three were ordinary: two `or` -> `and` double guards
+that needed both wrong ways, one `retF` -> `retT` flip asserted with
+`assertIs(..., False)`, and the two `and` -> `or` flips.
+
+| slice | before | after |
+|---|---|---|
+| `lightningzero` | 12/24 | **24/24** |
+
+The module body is unchanged: the survivors were killed by tests, not
+by rewriting the source.
 
 **The gap this section closes.**  A proof that CANNOT fail proves
 nothing.  The recorded proofs came in two shapes, and neither shape

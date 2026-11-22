@@ -849,7 +849,7 @@ Three rows in this table are measured against a suite unittest could
 | slice | suite | unittest collects | this table says | fixed probe (pytest) |
 |---|---|---|---|---|
 | `agent-handoff` | `test_agent_handoff.py` | **0** of 40 | 3/3 | **3/3** (first three), **38/38** whole-file |
-| `lightningzero` | `test_coverage_manifest.py` | **0** of 24 | 3/3 | 3/3 (first three), 12/24 whole-file |
+| `lightningzero` | `test_coverage_manifest.py` | **0** of 24 | 3/3 | 3/3 (first three), **24/24** whole-file |
 | `toolfail` | `test_tool_failure.py` | **0** of 19 | 3/3 | 3/3 (first three), **11/11** whole-file |
 
 Those suites are pytest-style -- standalone module-level `test_*`
@@ -877,6 +877,13 @@ For `lightningzero` and `toolfail` the listed three constructs do die
 under the fixed probe, so their 3/3 stands -- but it now rests on a
 measurement rather than on an exit code, and the whole-file counts
 show the suite does not cover the whole file.
+
+**AMENDED 2026-11-22 (c) -- `lightningzero` is closed too.**  Its
+whole-file count read **12/24**: twelve survivors, nine of them inside
+`stdlib_only()` and `main()`, which a test that merely *imports* the
+module cannot reach.  The killers drive the module as a **script** and
+assert on the module's own output.  The row now reads **24/24** at
+HEAD, with the module body unchanged.
 
 **`toolfail` is now closed as well: 11/11** (was 10/11).  Its
 `from_provider_fault` had **no test at all** -- the suite covered

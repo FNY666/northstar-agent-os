@@ -372,15 +372,16 @@ is a different number:
 | `agent-handoff` | `agent_handoff.py` | **38/38** | 3/3 |
 | `c58` | `bash_parser.py` | **73/115** | 3/3 |
 | `slice3` | `bash_parser.py` | **73/115** (90/90 at its own pin) | 3/3 |
-| `lightningzero` | `coverage_manifest.py` | **12/24** | 3/3 |
+| `lightningzero` | `coverage_manifest.py` | **24/24** | 3/3 |
 | `slice4` | `alert_trigger_registry.py` | **4/4** | 3/3 |
 | `slice5` | `blind_rerunner.py` | **13/13** | 3/3 |
 | `toolfail` | `tool_failure.py` | **11/11** | 3/3 |
 
 **The first three constructs are NOT a sample of the file.**  A slice
 can read 3/3 on its first three constructs while more than half its
-mutants survive -- `c58` and `slice3` read 73/115, and `lightningzero`
-reads 12/24.  The 3/3 is a claim about three constructs; the whole-file
+mutants survive -- `c58` and `slice3` read 73/115.  (`lightningzero`
+read 12/24 at the time of that sweep and has since been closed to
+**24/24**; `c58` and `slice3` are the live examples.)  The 3/3 is a claim about three constructs; the whole-file
 number is a claim about the module.  A census that reports only the
 first three cannot see the difference, which is why the whole-file
 sweep is the number that matters when the question is "is this module
@@ -395,10 +396,11 @@ described in `docs/design/mutant-evidence-closure.md` §9's AMENDED
   killer tests, module body unchanged.
 * `bash_parser.py` -- 42 survivors open at `c58`'s pin and at `slice3`'s
   pin.
-* `coverage_manifest.py` -- 12 survivors open.  Nine of the twelve are
-  inside `stdlib_only()` and `main()`, so they are only reachable by
-  running the module as a **script** -- a test that only imports the
-  module cannot observe them.
+* `coverage_manifest.py` -- **closed**: 24/24 (was 12/24).  The
+  twelve survivors included nine inside `stdlib_only()` and `main()`,
+  which are only reachable by running the module as a **script** --
+  a test that only imports the module cannot observe them, so the
+  killers drive the module as a script.
 * `alert_trigger_registry.py` -- **closed**: 4/4 (was 3/4).
 * `tool_failure.py` -- **closed**: 11/11 (was 10/11).  Its
   `from_provider_fault` had **no test at all**; the suite covered

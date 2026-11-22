@@ -8,13 +8,22 @@ coverage.
 
 from __future__ import annotations
 
+import atexit
+import contextlib
+import importlib.util
 import json
+import os
+import shutil
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import coverage_manifest as _coverage_manifest
 
 from coverage_manifest import (
     AUDIT_SCHEMA_PIN,
@@ -237,5 +246,338 @@ class TestSessionEndReason:
             audit_intake(manifest, "not-a-log")  # type: ignore[arg-type]
         with pytest.raises(AuditInputError):
             audit_intake("not-a-manifest", synthesize_log(manifest))  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# Mutant closure: every test below names the mutant it kills.
+#
+# The probe plants single-token faults in ``coverage_manifest.py`` and asks
+# whether this suite notices.  Twelve sites survived; the tests below are
+# the shapes the design doc (``docs/design/mutant-evidence-closure.md``,
+# section 3) prescribes:
+#
+#   * 3.1 -- a guard written ``A or B`` becomes ``A and B`` under the
+#     probe, and the two differ only when EXACTLY ONE of A, B is true.
+#     So each guard is fed BOTH ways: one input where only the first
+#     half refuses, one where only the second half refuses.
+#   * 3.2 -- a boundary is fed the exact limit and limit +/- 1.
+#   * 3.3 -- a ``return False`` flipped to ``return True`` is caught by
+#     asserting the False path ITSELF with ``assertIs(..., False)``,
+#     plus a control so the test cannot be satisfied by a function that
+#     always answers one way.
+#   * 3.4 -- the name of the test names the mutant.
+# ---------------------------------------------------------------------------
+
+MODULE_PATH = Path(_coverage_manifest.__file__).resolve()
+
+#: The banner the module's script-mode self-check prints.
+SELF_CHECK_BANNER = "coverage-manifest OK"
+
+
+@contextlib.contextmanager
+def _variant_module(tmp_path, suffix, name):
+    """Build an IMPORTED COPY of this module with ``suffix`` appended.
+
+    The copy keeps the module's own ``__file__`` pointing at the copy, so
+    ``stdlib_only()`` -- which parses ``__file__`` -- inspects the copy's
+    source.  The copy is IMPORTED (not merely exec'd) so that it is a
+    real module in ``sys.modules``: the dataclass machinery looks the
+    defining module up there, and a bare namespace would break it.
+
+    The copy is imported rather than executed as ``__main__`` so the
+    appended text may contain constructs (a relative import) that would
+    not resolve in a script context, and so the copy's ``main()`` is not
+    run as a side effect of the import.
+
+    The copy is removed from ``sys.modules`` on exit, so it cannot leak
+    a stale module object into another test file.
+    """
+    source = MODULE_PATH.read_text(encoding="utf-8")
+    text = source + suffix
+    path = tmp_path / f"{name}.py"
+    path.write_text(text, encoding="utf-8")
+    module_name = f"coverage_manifest_variant_{name}"
+    spec = importlib.util.spec_from_file_location(module_name, str(path))
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+        yield module
+    finally:
+        sys.modules.pop(module_name, None)
+
+
+#: A private bytecode-cache root for the subprocesses.  It is EMPTY and
+#: stays empty: ``PYTHONDONTWRITEBYTECODE`` stops the child from writing
+#: into it, so no stale ``.pyc`` can ever be read back from it.
+_PYCACHE_ROOT = tempfile.mkdtemp(prefix="coverage-manifest-pycache-")
+atexit.register(shutil.rmtree, _PYCACHE_ROOT, True)
+
+
+def _subprocess_env():
+    """A subprocess environment that cannot read a stale ``.pyc``.
+
+    ``PYTHONDONTWRITEBYTECODE`` stops the interpreter from WRITING
+    bytecode but not from READING one that is already there.  A stale
+    ``.pyc`` of the module would let a planted mutant look unplanted.
+    ``PYTHONPYCACHEPREFIX`` moves the whole cache tree to a private,
+    always-empty directory, so the child reads nothing from the source
+    tree's cache.
+    """
+    env = dict(os.environ)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["PYTHONPYCACHEPREFIX"] = _PYCACHE_ROOT
+    env["PYTHONPATH"] = str(MODULE_PATH.parent)
+    return env
+
+
+def _run_module_as_script():
+    """Run the module as a SCRIPT (``__name__ == "__main__"``)."""
+    return subprocess.run(
+        [sys.executable, "-B", str(MODULE_PATH)],
+        cwd=str(MODULE_PATH.parent),
+        env=_subprocess_env(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=120,
+    )
+
+
+def _import_module_in_subprocess():
+    """IMPORT the module in a fresh interpreter (``__name__ != "__main__"``)."""
+    return subprocess.run(
+        [sys.executable, "-B", "-c", "import coverage_manifest"],
+        cwd=str(MODULE_PATH.parent),
+        env=_subprocess_env(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=120,
+    )
+
+
+class TestMutantOrGuards:
+    """``or`` -> ``and`` on the four double guards (design doc 3.1)."""
+
+    # -- or@231: the seq guard is a THREE-way chain ----------------------
+    # The probe rewrites only the FIRST `` or ``, so the mutant reads
+    # ``not isinstance(seq, int) and isinstance(seq, bool) or seq < 1``.
+    # The two forms differ when exactly one of the first two halves is
+    # true, so BOTH ways are fed: a bool (only the bool half refuses)
+    # and a float (only the "not an int" half refuses).
+    def test_or_at_231_a_boolean_seq_is_refused(self):
+        """`or@231`: a bool IS an int, so only the explicit bool half refuses."""
+        with pytest.raises(AuditInputError) as excinfo:
+            LogRecord(seq=True, event_id="a")  # type: ignore[arg-type]
+        assert "positive int" in str(excinfo.value)
+
+    def test_or_at_231_a_float_seq_is_refused(self):
+        """`or@231`: the other half -- only the "not an int" half refuses a float."""
+        with pytest.raises(AuditInputError) as excinfo:
+            LogRecord(seq=1.5, event_id="a")  # type: ignore[arg-type]
+        assert "positive int" in str(excinfo.value)
+
+    # -- or@233: the event id guard -------------------------------------
+    def test_or_at_233_an_empty_event_id_is_refused(self):
+        """`or@233`: a str that does not match the id pattern.
+
+        The type half is False (it IS a string), so only the pattern
+        half refuses; under the mutant the guard accepts the empty id.
+        """
+        with pytest.raises(AuditInputError) as excinfo:
+            LogRecord(seq=1, event_id="")
+        assert "malformed record event id" in str(excinfo.value)
+
+    def test_or_at_233_a_non_string_event_id_is_refused(self):
+        """`or@233`: the other half -- a non-string.
+
+        Under the mutant the guard goes on to match the pattern against a
+        non-string, so the refusal is replaced by an error from the
+        wrong place.
+        """
+        with pytest.raises(AuditInputError) as excinfo:
+            LogRecord(seq=1, event_id=123)  # type: ignore[arg-type]
+        assert "malformed record event id" in str(excinfo.value)
+
+    # -- or@256: the session id guard -----------------------------------
+    def test_or_at_256_an_empty_session_id_is_refused(self):
+        """`or@256`: a str that is empty -- only the emptiness half refuses."""
+        with pytest.raises(AuditInputError) as excinfo:
+            SessionLog(session_id="", records=())
+        assert "non-empty string" in str(excinfo.value)
+
+    def test_or_at_256_a_non_string_session_id_is_refused(self):
+        """`or@256`: the other half -- a non-string session id."""
+        with pytest.raises(AuditInputError) as excinfo:
+            SessionLog(session_id=None, records=())  # type: ignore[arg-type]
+        assert "non-empty string" in str(excinfo.value)
+
+    # -- or@264: the end reason guard -----------------------------------
+    def test_or_at_264_a_whitespace_end_reason_is_refused(self):
+        """`or@264`: a str that is blank -- only the emptiness half refuses."""
+        with pytest.raises(AuditInputError) as excinfo:
+            SessionLog(session_id="s", records=(), end_reason="   ")
+        assert "non-empty string when present" in str(excinfo.value)
+
+    def test_or_at_264_a_non_string_end_reason_is_refused(self):
+        """`or@264`: the other half -- a non-string end reason."""
+        with pytest.raises(AuditInputError) as excinfo:
+            SessionLog(session_id="s", records=(), end_reason=123)  # type: ignore[arg-type]
+        assert "non-empty string when present" in str(excinfo.value)
+
+
+class TestMutantStdlibOnly:
+    """The four faults inside ``stdlib_only()`` (design doc 3.1 / 3.3)."""
+
+    # -- retT@579: the final `return True` ------------------------------
+    def test_retT_at_579_a_stdlib_only_module_reports_true(self):
+        """`retT@579`: the module's own answer, asserted as True ITSELF.
+
+        ``assertIs(..., True)`` -- not ``assertTrue`` -- so a falsy or
+        non-boolean answer cannot satisfy it.  The control is the module
+        itself: it imports stdlib modules only.
+        """
+        assert _coverage_manifest.stdlib_only() is True
+
+    # -- and@577: the `node.module and ...` half ------------------------
+    def test_and_at_577_a_relative_import_does_not_break_the_stdlib_check(self, tmp_path):
+        """`and@577`: the half of the guard that skips a relative import.
+
+        The line is ``if node.module and node.module.split(".")[0] not in
+        allowed:``.  A relative import (``from . import x``) has
+        ``node.module is None``: the original short-circuits and skips
+        it, the mutant evaluates ``None.split(...)`` and raises.  The
+        import is placed in a function body so the COPY can be executed
+        without a package context; ``ast.walk`` still sees it.
+        """
+        with _variant_module(
+            tmp_path, "\n\ndef _never_called():\n    from . import x\n", "relimport"
+        ) as module:
+            assert module.stdlib_only() is True
+
+    # -- retF@575: the plain-import arm --------------------------------
+    def test_retF_at_575_a_non_stdlib_import_is_reported(self, tmp_path):
+        """`retF@575`: the ``return False`` on the plain-import arm.
+
+        The module's own imports are all stdlib, so the arm never fires
+        on the module itself.  A COPY carrying one non-stdlib import
+        (``import os`` -- not in the allowed set) does fire it: the
+        original answers False, the mutant answers True.  The control
+        pins the answer as False ITSELF.
+        """
+        with _variant_module(tmp_path, "\n\nimport os\n", "badimport") as module:
+            assert module.stdlib_only() is False
+
+    # -- retF@578: the from-import arm ---------------------------------
+    def test_retF_at_578_a_non_stdlib_from_import_is_reported(self, tmp_path):
+        """`retF@578`: the ``return False`` on the ``from ... import`` arm.
+
+        A COPY carrying ``from os import path`` reaches that arm; the
+        original answers False, the mutant answers True.  The copy
+        carries NO plain non-stdlib import, so the arm under test is the
+        one that is reached.
+        """
+        with _variant_module(tmp_path, "\n\nfrom os import path\n", "badfrom") as module:
+            assert module.stdlib_only() is False
+
+
+class TestMutantMainSelfCheck:
+    """The four faults inside ``main()`` and the script guard.
+
+    ``main()`` is only reachable as a SCRIPT, so the script-side faults
+    are observed by running the module as a subprocess.
+    """
+
+    # -- and@590: the clean-log assertion ------------------------------
+    def test_and_at_590_the_self_check_fails_when_the_log_does_not_cover(self, monkeypatch):
+        """`and@590`: the assertion that the clean log covers the manifest.
+
+        The line is ``assert report.structure_ok and report.coverage_ok
+        and report.covered``.  The mutant makes it ``or``, so it accepts
+        a report that does not cover.  The self-check is fed a log that
+        is internally consistent but missing an event -- the whole point
+        of the module -- so the original refuses and the mutant sails
+        on.  The control: on the unpatched path the self-check passes.
+        """
+        module = _coverage_manifest
+        # -- the control: the pristine self-check passes ----------------
+        module.main()
+
+        manifest = module.build_manifest(
+            "session-1", ["session.start", "tool.read", "tool.write", "session.end"]
+        )
+        gapped = module.synthesize_log_with_gap(manifest, "tool.write", end_reason="task complete")
+        monkeypatch.setattr(module, "synthesize_log", lambda *args, **kwargs: gapped)
+        with pytest.raises(AssertionError):
+            module.main()
+
+    # -- and@594: the gap assertion ------------------------------------
+    def test_and_at_594_the_self_check_fails_when_the_gap_is_not_the_one_it_claims(
+        self, monkeypatch
+    ):
+        """`and@594`: the assertion that the gap is the claimed one.
+
+        The line is ``assert report.structure_ok and not report.coverage_ok``.
+        The mutant makes it ``or``, so a report that is neither
+        structurally sound nor coverage-complete is accepted.  The
+        self-check is given a log with an orphan row AND a missing
+        event: the original refuses, the mutant accepts.
+        """
+        module = _coverage_manifest
+        # -- the control: the pristine self-check passes ----------------
+        module.main()
+
+        broken = module.SessionLog(
+            session_id="session-1",
+            records=(
+                module.LogRecord(seq=1, event_id="session.start"),
+                module.LogRecord(seq=2, event_id="tool.read"),
+                module.LogRecord(seq=4, event_id="session.end"),
+            ),
+            end_reason="task complete",
+        )
+        monkeypatch.setattr(
+            module, "synthesize_log_with_gap", lambda *args, **kwargs: broken
+        )
+        with pytest.raises(AssertionError):
+            module.main()
+
+    # -- eq@595: the missing-event assertion ---------------------------
+    def test_eq_at_595_the_script_self_check_passes(self):
+        """`eq@595`: ``assert report.missing_event_ids == ("tool.write",)``.
+
+        The mutant flips ``==`` to ``!=``, so the script-mode self-check
+        fails and the module exits non-zero.  Running the module as a
+        script is the only way to reach it.
+        """
+        result = _run_module_as_script()
+        assert result.returncode == 0, result.stdout
+        assert SELF_CHECK_BANNER in result.stdout
+
+    # -- eq@605: the `__name__ == "__main__"` guard ---------------------
+    def test_eq_at_605_importing_the_module_does_not_run_the_self_check(self):
+        """`eq@605`: importing the module must NOT run the self-check.
+
+        The mutant flips the guard to ``!=``, so an IMPORT runs
+        ``main()`` and prints the banner.  The module is imported in a
+        fresh interpreter so the observation is not confused with this
+        test process's own import.
+        """
+        result = _import_module_in_subprocess()
+        assert result.returncode == 0, result.stdout
+        assert SELF_CHECK_BANNER not in result.stdout
+
+    def test_eq_at_605_running_the_module_as_a_script_runs_the_self_check(self):
+        """`eq@605`: the other direction -- a SCRIPT does run the self-check.
+
+        This is the control for the test above, and it kills the mutant
+        too: with the guard flipped, a script run prints nothing.
+        """
+        result = _run_module_as_script()
+        assert result.returncode == 0, result.stdout
+        assert SELF_CHECK_BANNER in result.stdout
+
 
 
