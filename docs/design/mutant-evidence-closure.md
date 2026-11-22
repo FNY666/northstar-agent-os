@@ -153,7 +153,7 @@ Measured with the cache-free probe, at the pinned commit and at HEAD.
 | slice | module | test | pinned k/3 | pinned commit | HEAD k/3 | first-3 constructs |
 |---|---|---|---|---|---|---|
 | `actionable-digest` | `actionable_digest.py` | `test_actionable_digest.py` | **3/3** | `6c894ba9` | 3/3 | lt@118 lt@119 or@120 |
-| `agent-handoff` | `agent_handoff.py` | `test_agent_handoff.py` | **0/3** | `249f9a5c` | 0/3 | gt@214 gt@226 gt@236 |
+| `agent-handoff` | `agent_handoff.py` | `test_agent_handoff.py` | **3/3** | `249f9a5c` | 3/3 | gt@214 gt@226 gt@236 |
 | `ageofagents` | `ledger_concurrency.py` | `test_ledger_concurrency.py` | **3/3** | `b970b457` | 3/3 | or@302 eq@390 or@475 |
 | `anthropic-effort-scaling` | `effort_scaling.py` | `test_effort_scaling.py` | **3/3** | `9b00638e` | 3/3 | lt@174 or@174 lt@180 |
 | `asinhhc` | `key_custody.py` | `test_key_custody.py` | **3/3** | `ddbd2c5a` | 3/3 | lt@193 eq@286 or@336 |
@@ -161,7 +161,7 @@ Measured with the cache-free probe, at the pinned commit and at HEAD.
 | `autogen-speaker-selector` | `speaker_selector.py` | `test_speaker_selector.py` | **3/3** | `8a3bfbc5` | 3/3 | gt@125 gt@132 or@141 |
 | `c52` | `grant_pin_ledger.py` | `test_grant_pin_ledger.py` | **3/3** | `0dc81ceb` | 3/3 | eq@139 eq@142 gt@143 |
 | `c54` | `deny_hotpath.py` | `test_deny_hotpath.py` | **3/3** | `a1c7e688` | 3/3 | retF@117 or@247 gt@249 |
-| `c58` | `bash_parser.py` | `test_bash_parser.py` | **0/3** | `37c0a2f3` | 0/3 | gt@127 retT@128 gt@129 |
+| `c58` | `bash_parser.py` | `test_bash_parser.py` | **3/3** | `37c0a2f3` | 3/3 | gt@127 retT@128 gt@129 |
 | `cost-per-delivery` | `cost_per_delivery.py` | `test_cost_per_delivery.py` | **3/3** | `288799f2` | 3/3 | or@208 or@215 lt@220 |
 | `cwl-episode-eviction` | `episode_eviction.py` | `test_episode_eviction.py` | **3/3** | `5e4e66d4` | 3/3 | eq@182 eq@186 eq@219 |
 | `deterministic-gate-score` | `deterministic_gate_score.py` | `test_deterministic_gate_score.py` | **3/3** | `c08a86ad` | 3/3 | or@155 or@159 or@197 |
@@ -198,7 +198,7 @@ Measured with the cache-free probe, at the pinned commit and at HEAD.
 | `silent-failure-detector` | `silent_failure_detector.py` | `test_silent_failure_detector.py` | **3/3** | `8caf8742` | 3/3 | eq@157 and@159 retT@188 |
 | `slice1` | `—` | `—` | **SKIP** | `—` | SKIP | — |
 | `slice2` | `code_task.py` | `test_code_task.py` | **3/3** | `7faa3e43` | 3/3 | or@133 or@142 or@144 |
-| `slice3` | `bash_parser.py` | `test_bash_parser.py` | **0/3** | `986d7892` | 0/3 | gt@117 retT@118 gt@119 |
+| `slice3` | `bash_parser.py` | `test_bash_parser.py` | **3/3** | `986d7892` | 3/3 | gt@117 retT@118 gt@119 |
 | `slice4` | `—` | `—` | **SKIP** | `—` | SKIP | — |
 | `slice5` | `blind_rerunner.py` | `test_blind_rerunner.py` | **3/3** | `9955f1dc` | 3/3 | or@47 or@150 retT@158 |
 | `slice6` | `egress_client.py` | `test_egress_client.py` | **3/3** | `a08c983a` | 3/3 | eq@61 eq@63 eq@66 |
@@ -364,13 +364,13 @@ same format as the surviving manifests.  The module/test pairing that
 | `audit-head` | `audit_head_holder.py` | `test_audit_head_holder.py` | SKIP | **0/3** |
 | `c52` | `grant_pin_ledger.py` | `test_grant_pin_ledger.py` | SKIP | **1/3** |
 | `c54` | `deny_hotpath.py` | `test_deny_hotpath.py` | SKIP | **2/3** |
-| `c58` | `bash_parser.py` | `test_bash_parser.py` | SKIP | **0/3** |
+| `c58` | `bash_parser.py` | `test_bash_parser.py` | SKIP | **3/3** |
 | `diviner` | `scope_qualifier.py` | `test_scope_qualifier.py` | SKIP | **0/3** |
 | `e2b` | `egress_client.py` | `test_egress_client.py` | SKIP | **0/3** |
 | `horizon` | `long_horizon.py` | `test_long_horizon.py` | SKIP | **1/3** |
 | `langgraph` | `durable_resume.py` | `test_durable_resume.py` | SKIP | **2/3** |
 | `slice2` | `code_task.py` | `test_code_task.py` | SKIP | **0/3** |
-| `slice3` | `bash_parser.py` | `test_bash_parser.py` | SKIP | **0/3** |
+| `slice3` | `bash_parser.py` | `test_bash_parser.py` | SKIP | **3/3** |
 | `slice5` | `blind_rerunner.py` | `test_blind_rerunner.py` | SKIP | **3/3** |
 | `slice6` | `egress_client.py` | `test_egress_client.py` | SKIP | **0/3** |
 | `unwind` | `shutdown_unwind.py` | `test_shutdown_unwind.py` | SKIP | **1/3** |
@@ -399,8 +399,14 @@ probe that ran `python -m unittest <module>`, and `test_bash_parser.py`
 is **pytest-style** -- 42 standalone functions, no `TestCase` class --
 so unittest collected **zero** tests from it and every mutant was
 reported killed by the exit code.  Re-measured at each slice's own
-pinned commit with the fixed probe, both measure **0/3**: all three of
+pinned commit with the fixed probe, both measured **0/3**: all three of
 their listed constructs SURVIVE.  See §8's amendment (e).
+
+**AMENDED 2026-11-22 (f) -- and the gap is now CLOSED.**  Nine new test
+methods (three per slice, plus a control each) kill the three surviving
+constructs of each slice, in the shape §3.1-§3.3 prescribes.  Both rows
+now measure **3/3** at their own pinned commits -- `c58` 73/115 and
+`slice3` 90/90.  See §8's amendment (f).
 
 ### 4.2 The four naturally N/A slices
 
@@ -583,7 +589,9 @@ environment), so the numbers in §2 are cache-free by construction.
   `signed_receipt.py`) and the one conditionally-writable module
   (`artifact_authority.py`) all have **zero diff** in this slice's
   commits.  `artifact_authority.py` needed no change either, so the
-  conditional was not used.
+  conditional was not used.  §8's AMENDED (f) keeps that true for the
+  three rows it closes: `agent_handoff.py` and `bash_parser.py` also
+  have **zero diff** -- the new methods are tests only.
 * **No version, tag or release.**  No `main` merge, no push.
 * **The probe scripts were not touched.**  `b173-mutant.py`,
   `b173-mutant.sh` and `b173-accept.sh` are the judges; this slice only
@@ -742,19 +750,21 @@ the mirror image of the stale-bytecode false kill, which looks like
 survival where there is coverage.
 
 **The rows that were false.**  For `agent-handoff`, `c58` and `slice3`
-the three constructs §2 lists **all SURVIVE**:
+the three constructs §2 lists **all SURVIVED**:
 
-| slice | §2's constructs | verdict |
-|---|---|---|
-| `agent-handoff` | `gt@214` `gt@226` `gt@236` | all SURVIVED |
-| `c58` | `gt@127` `retT@128` `gt@129` | all SURVIVED |
-| `slice3` | `gt@117` `retT@118` `gt@119` | all SURVIVED |
+| slice | §2's constructs | verdict | now |
+|---|---|---|---|
+| `agent-handoff` | `gt@214` `gt@226` `gt@236` | all SURVIVED | **all KILLED** (§8's (f)) |
+| `c58` | `gt@127` `retT@128` `gt@129` | all SURVIVED | **all KILLED** (§8's (f)) |
+| `slice3` | `gt@117` `retT@118` `gt@119` | all SURVIVED | **all KILLED** (§8's (f)) |
 
 and for `c58` and `slice3` that is true **at their own pinned commits
 too** (`37c0a2f3` and `986d7892`, re-measured with the fixed probe):
 `slice3` measures 54/90 and `c58` 70/115, with all three listed
 constructs surviving.  So those 3/3 claims were **never true** -- they
-were not stale, they were wrong.
+were not stale, they were wrong.  (`agent-handoff` is the same at its
+pin `249f9a5c`: 22/38, all three surviving.)  §8's AMENDED (f) closes
+all three with real tests.
 
 **The rows that were lucky.**  `toolfail` and `lightningzero` also ran
 against a blind suite, but their three listed constructs genuinely
@@ -817,27 +827,67 @@ heuristic about the file's text.  The two disagree: the loader says
 **815** files, a text heuristic says 811.  The loader is the authority
 the old probe used, so the loader is the authority here.
 
-**The table now carries THREE rows below the 3/3 line**, and the prose
-must say so: `agent-handoff`, `c58` and `slice3`.  They are the three
-rows amendment (e) corrected.  The other twenty-one re-measured rows
-stand at 3/3, and the remaining rows of the table are covered by the
-first-three-scope re-measurement (24 rows) and by the per-construct
-verdicts (7 rows).
+**The table now carries NO rows below the 3/3 line**, and the prose must
+say so.  Amendment (e) found three rows whose 3/3 was false; §8's
+AMENDED (f) below closes them with real tests.  The table has **64
+rows**: **60** carry a scored k/3 and **4** are `SKIP` (no module/test
+pair), and all **60** scored rows now read **3/3**.
 
-**What these three rows mean.**  They are not "work to do" in the sense
+**What these three rows meant.**  They were not "work to do" in the sense
 of amendment (d)'s twenty-four: those twenty-four were *stale* -- the
-lifts had landed and the table did not know.  These three are
+lifts had landed and the table did not know.  These three were
 *wrong*: the measurement that produced their 3/3 could not see the
 suite it was measuring against, so it never measured them at all.  The
-honest question for each of them is **"does the slice's suite catch
-these constructs?"**, and the answer for all three is **no**.
+honest question for each of them was **"does the slice's suite catch
+these constructs?"**, and the answer for all three was **no**.
 
-That is a finding about the *suites*, not about the lifts.  The three
-slices' modules are unchanged by this slice; what is missing is test
-coverage for three constructs each, in the shape §3.1-§3.3 already
-prescribes (both wrong ways, the exact limit and limit +/- 1, the False
-path itself).  Until that exists, the three rows stay below the line
-and the table says so.
+That was a finding about the *suites*, not about the lifts.  The three
+slices' modules were unchanged; what was missing was test coverage for
+three constructs each, in the shape §3.1-§3.3 already prescribes (both
+wrong ways, the exact limit and limit +/- 1, the False path itself).
+§8's AMENDED (f) adds exactly that.
+
+**AMENDED 2026-11-22 (f) -- the three false rows are CLOSED.**
+
+Nine new test methods, three per slice, named for the mutant each one
+kills, each with the control the shape requires.  **Module bodies: zero
+diff** -- the faults are pinned, not applied.
+
+| slice | module | targets | new methods | k/3 at the pinned commit |
+|---|---|---|---|---|
+| `agent-handoff` | `agent_handoff.py` | `gt@214`, `gt@226`, `gt@236` | 9 | **3/3** (`249f9a5c`: 25/38, was 22/38) |
+| `c58` | `bash_parser.py` | `gt@127`, `retT@128`, `gt@129` | 8 | **3/3** (`37c0a2f3`: 73/115, was 70/115) |
+| `slice3` | `bash_parser.py` | `gt@117`, `retT@118`, `gt@119` | 8 | **3/3** (`986d7892`: 90/90, was 54/90) |
+
+`c58` and `slice3` share the same module and the same suite, so the
+eight methods serve both; at `slice3`'s own pin the three constructs sit
+ten lines earlier (`gt@117 retT@118 gt@119`), which is why the whole
+file is now killed rather than the first three.
+
+**Every one of the six mutants was proven to die.**  Planting each
+mutant in turn and re-running the suite fails exactly the intended
+test:
+
+```
+gt@214  ->  test_gt_at_214_agent_name_of_exactly_the_limit_is_accepted
+gt@226  ->  test_gt_at_226_tool_name_of_exactly_the_limit_is_accepted
+gt@236  ->  test_gt_at_236_description_of_exactly_the_limit_is_accepted
+gt@117  ->  test_gt_at_127_a_node_count_of_exactly_the_limit_is_not_exceeded
+retT@118->  test_retT_at_128_an_over_limit_node_count_returns_true
+gt@119  ->  test_gt_at_129_a_deadline_of_exactly_now_is_not_exceeded
+```
+
+(the first three are `agent_handoff.py`'s lines; the last three are
+`bash_parser.py`'s, whose line numbers differ by ten between the two
+pins.)
+
+**The shape of each test.**  Every `gt` test feeds the limit itself --
+where the original ACCEPTS and the mutant (`>=`) REFUSES -- plus limit +
+1 (both refuse, so the bound is still pinned) and limit - 1 (both
+accept, the control).  Every `retT` test asserts the **True** path
+itself with `is True`, and its control asserts the deadline line's
+answer separately, so the test cannot be satisfied by a predicate that
+always returns one value.
 
 ## 9. RESOLVED -- the equivalence records now have non-vacuity controls
 

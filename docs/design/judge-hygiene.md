@@ -722,7 +722,7 @@ crosses zero.
 |---|---|---|---|---|---|---|
 | `acceptance-conformance` | 0/3 | 1/3 | 1/3 | 1/3 | 1/3 | **FAIL -> PASS** |
 | `actionable-digest` | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | - |
-| `agent-handoff` | 3/3 | 3/3 | 3/3 | 3/3 | **0/3** | **AMENDED 2026-11-22 -- the runner saw no tests** |
+| `agent-handoff` | 3/3 | 3/3 | 3/3 | 3/3 | **3/3** | AMENDED 2026-11-22 -- the runner saw no tests; the gap was closed with new tests |
 | `ageofagents` | 1/3 | 1/3 | 1/3 | 1/3 | 1/3 | - |
 | `anthropic-effort-scaling` | 1/3 | 1/3 | 1/3 | 1/3 | 1/3 | - |
 | `artifact-completion` | - | - | - | - | - | - |
@@ -848,7 +848,7 @@ Three rows in this table are measured against a suite unittest could
 
 | slice | suite | unittest collects | this table says | fixed probe (pytest) |
 |---|---|---|---|---|
-| `agent-handoff` | `test_agent_handoff.py` | **0** of 40 | 3/3 | **0/3** (first three) |
+| `agent-handoff` | `test_agent_handoff.py` | **0** of 40 | 3/3 | **3/3** (first three, after the fix) |
 | `lightningzero` | `test_coverage_manifest.py` | **0** of 24 | 3/3 | 3/3 (whole-file 12/24) |
 | `toolfail` | `test_tool_failure.py` | **0** of 19 | 3/3 | 3/3 (whole-file 10/11) |
 
@@ -858,9 +858,11 @@ functions and no `TestCase` class -- so unittest's loader collected
 non-zero exit as "the mutant was KILLED".  The 3/3 in those three rows
 was the exit code, not a measurement.
 
-For `agent-handoff` that is a **total** false kill: all three of its
-listed constructs (`gt@214 gt@226 gt@236`) SURVIVE, both at HEAD and at
-the slice's own pinned commit `249f9a5c`.  Its row above is now 0/3.
+For `agent-handoff` that was a **total** false kill: all three of its
+listed constructs (`gt@214 gt@226 gt@236`) SURVIVED, both at HEAD and at
+the slice's own pinned commit `249f9a5c`.  It measured **0/3**, and the
+gap has since been closed with nine new test methods -- so its row above
+reads **3/3** again, now on a measurement rather than on an exit code.
 For `lightningzero` and `toolfail` the listed three constructs do die
 under the fixed probe, so their 3/3 stands -- but it now rests on a
 measurement rather than on an exit code, and the whole-file counts
@@ -869,15 +871,14 @@ measurement rather than on an exit code, and the whole-file counts
 **Two more rows of the same shape are not in this table at all**,
 because this table's slice set is not the census's: `c58` and
 `slice3` (both `test_bash_parser.py`, 0 of 42) are in
-`docs/design/mutant-evidence-closure.md` §2, where both are now
-recorded as **0/3**.
+`docs/design/mutant-evidence-closure.md` §2.  They also measured 0/3
+and have since been closed the same way; see that doc's §8.
 
 **What this means for the numbers in this table.**  Every row whose
 suite unittest can see is unaffected -- the runner change only moves
 the rows above.  And the direction is fixed: the false kills all
 pointed the *stronger* way, so a corrected number can only be LOWER
-than the one here.  Two of the three do drop below 3/3, and
-`agent-handoff`'s three listed constructs all SURVIVE.
+than the one here.
 
 The suite-blindness is now measured by **unittest's own loader**, and
 the check lives in

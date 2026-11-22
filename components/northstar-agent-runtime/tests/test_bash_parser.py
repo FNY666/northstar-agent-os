@@ -18,6 +18,7 @@ and is deliberately not duplicated here.
 import importlib.util
 import sys
 import time
+from unittest import mock
 from pathlib import Path
 
 import pytest
@@ -711,3 +712,103 @@ def test_caps_are_declared_and_bounded():
 def test_wrapper_table_covers_sudo_family():
     for wrapper in ["sudo", "doas", "env", "nice", "nohup", "stdbuf", "timeout"]:
         assert wrapper in bp.UNWRAP_WRAPPERS, wrapper
+
+
+# ---------------------------------------------------------------------------
+# Mutant evidence: the budget predicate
+#
+# The mutant probe rewrites these three lines:
+#   gt@127   `if budget.nodes > MAX_AST_NODES:`   ->  `>=`
+#   retT@128 `return True`                       ->  `return False`
+#   gt@129   `return time.monotonic() > deadline` ->  `>=`
+#
+# Each differs from the original at EXACTLY ONE value, so each needs a
+# test that feeds that value:
+#
+#   gt@127   nodes == MAX_AST_NODES  -- original: NOT exceeded;
+#                                     mutant:    exceeded.
+#   retT@128 nodes == MAX_AST_NODES + 1 -- original: True (exceeded);
+#                                     mutant:    False, because the
+#                                     `return True` became `return False`
+#                                     and the deadline check then runs.
+#   gt@129   now == deadline        -- original: NOT exceeded;
+#                                     mutant:    exceeded.
+#
+# Each test also carries a CONTROL on the other side of the boundary, so
+# it cannot be satisfied by a predicate that always returns the same
+# answer.
+# ---------------------------------------------------------------------------
+
+
+def _budget(nodes: int, deadline: float):
+    """A parse budget with an explicit node count and deadline."""
+    return bp._ParseBudget(deadline=deadline, nodes=nodes)
+
+
+def test_gt_at_127_a_node_count_of_exactly_the_limit_is_not_exceeded():
+    """gt@127: `budget.nodes > MAX_AST_NODES` -- the limit is NOT over."""
+    limit = bp.MAX_AST_NODES
+    budget = _budget(limit, deadline=time.monotonic() + 60.0)
+    assert bp._budget_exceeded(budget) is False
+
+
+def test_gt_at_127_a_node_count_over_the_limit_is_exceeded():
+    """gt@127: the bound itself is still pinned -- limit + 1 is over."""
+    budget = _budget(bp.MAX_AST_NODES + 1, deadline=time.monotonic() + 60.0)
+    assert bp._budget_exceeded(budget) is True
+
+
+def test_gt_at_127_a_node_count_under_the_limit_is_not_exceeded():
+    """gt@127: the control -- limit - 1 is not over."""
+    budget = _budget(bp.MAX_AST_NODES - 1, deadline=time.monotonic() + 60.0)
+    assert bp._budget_exceeded(budget) is False
+
+
+def test_retT_at_128_an_over_limit_node_count_returns_true():
+    """retT@128: the `return True` IS the answer for an over-limit count.
+
+    Under the mutant it becomes `return False`, and the deadline check
+    then decides -- which is False here, because the deadline is in the
+    future.  So this one input separates the two.
+    """
+    budget = _budget(bp.MAX_AST_NODES + 1, deadline=time.monotonic() + 60.0)
+    assert bp._budget_exceeded(budget) is True
+
+
+def test_retT_at_128_the_deadline_check_still_applies_below_the_node_limit():
+    """retT@128: the control -- under the node limit, the DEADLINE decides.
+
+    This pins that `return True` is reached only because the node count
+    is over: with a past deadline and a node count under the limit, the
+    answer is still True, but it comes from the deadline line.
+    """
+    budget = _budget(0, deadline=time.monotonic() - 1.0)
+    assert bp._budget_exceeded(budget) is True
+
+
+def test_gt_at_129_a_deadline_of_exactly_now_is_not_exceeded():
+    """gt@129: `time.monotonic() > deadline` -- the deadline itself is not over.
+
+    The clock is frozen at exactly the deadline, which is the only value
+    that separates `>` from `>=`.
+
+    The freeze is a `mock.patch.object` on the `time` module the parser
+    imported, and it is scoped to this one call, so the patch cannot
+    outlive the assertion.
+    """
+    frozen = 1_000.0
+    budget = _budget(0, deadline=frozen)
+    with mock.patch.object(bp.time, "monotonic", return_value=frozen):
+        assert bp._budget_exceeded(budget) is False
+
+
+def test_gt_at_129_a_deadline_in_the_past_is_exceeded():
+    """gt@129: the bound itself is still pinned -- past the deadline is over."""
+    budget = _budget(0, deadline=time.monotonic() - 1.0)
+    assert bp._budget_exceeded(budget) is True
+
+
+def test_gt_at_129_a_deadline_in_the_future_is_not_exceeded():
+    """gt@129: the control -- a future deadline is not over."""
+    budget = _budget(0, deadline=time.monotonic() + 60.0)
+    assert bp._budget_exceeded(budget) is False

@@ -599,3 +599,126 @@ def test_views_are_pure_reads():
     assert registry.agents() == ("refund_agent", "triage_agent")
     assert registry.decisions() == ()
     assert registry.errors() == ()
+
+
+# ---------------------------------------------------------------------------
+# Mutant evidence: the three length bounds
+#
+# The mutant probe rewrites `>` to `>=` on these three lines, so the
+# original and the mutant differ at EXACTLY ONE value: the limit
+# itself.  A test that only feeds an over-limit value cannot see the
+# difference -- both refuse it.
+#
+# The three constructs:
+#   gt@214  agent name    `len(value) > 256`
+#   gt@226  tool name     `len(value) > 256`
+#   gt@236  description   `len(value) > 4096`
+#
+# So each test feeds the limit itself (where the original ACCEPTS and the
+# mutant REFUSES), the limit + 1 (where both refuse), and the limit - 1
+# (where both accept, the control that stops the test from being
+# satisfied by a function that refuses everything).
+# ---------------------------------------------------------------------------
+
+#: The limit, read off the module so the test follows the code if the
+#: constant moves.
+_AGENT_NAME_LIMIT = 256
+_TOOL_NAME_LIMIT = 256
+_DESCRIPTION_LIMIT = 4096
+
+
+def test_gt_at_214_agent_name_of_exactly_the_limit_is_accepted():
+    """gt@214: `len(value) > 256` -- the limit itself must be ACCEPTED.
+
+    Under the mutant (`>=`) a name of exactly 256 characters is refused.
+    This is the only input that separates the original from the mutant.
+    """
+    registry = HandoffRegistry()
+    name = "a" * _AGENT_NAME_LIMIT
+    assert len(name) == _AGENT_NAME_LIMIT
+    assert registry.register_agent(name) == name
+    assert registry.agents() == (name,)
+
+
+def test_gt_at_214_agent_name_over_the_limit_is_refused():
+    """gt@214: the bound itself is still pinned -- 257 characters refuse."""
+    registry = HandoffRegistry()
+    with pytest.raises(HandoffConfigError):
+        registry.register_agent("a" * (_AGENT_NAME_LIMIT + 1))
+
+
+def test_gt_at_214_agent_name_under_the_limit_is_accepted():
+    """gt@214: the control -- one below the limit accepts."""
+    registry = HandoffRegistry()
+    name = "a" * (_AGENT_NAME_LIMIT - 1)
+    assert registry.register_agent(name) == name
+
+
+def test_gt_at_226_tool_name_of_exactly_the_limit_is_accepted():
+    """gt@226: `len(value) > 256` -- the limit itself must be ACCEPTED."""
+    registry = _registry_with_agents("triage_agent")
+    tool_name = "t" * _TOOL_NAME_LIMIT
+    record = registry.register(
+        "triage_agent",
+        "triage_agent",
+        tool_name=tool_name,
+    )
+    assert record.tool_name == tool_name
+
+
+def test_gt_at_226_tool_name_over_the_limit_is_refused():
+    """gt@226: the bound itself is still pinned -- 257 characters refuse."""
+    registry = _registry_with_agents("triage_agent")
+    with pytest.raises(HandoffConfigError):
+        registry.register(
+            "triage_agent",
+            "triage_agent",
+            tool_name="t" * (_TOOL_NAME_LIMIT + 1),
+        )
+
+
+def test_gt_at_226_tool_name_under_the_limit_is_accepted():
+    """gt@226: the control -- one below the limit accepts."""
+    registry = _registry_with_agents("triage_agent")
+    tool_name = "t" * (_TOOL_NAME_LIMIT - 1)
+    record = registry.register(
+        "triage_agent",
+        "triage_agent",
+        tool_name=tool_name,
+    )
+    assert record.tool_name == tool_name
+
+
+def test_gt_at_236_description_of_exactly_the_limit_is_accepted():
+    """gt@236: `len(value) > 4096` -- the limit itself must be ACCEPTED."""
+    registry = _registry_with_agents("triage_agent")
+    description = "d" * _DESCRIPTION_LIMIT
+    record = registry.register(
+        "triage_agent",
+        "triage_agent",
+        tool_description=description,
+    )
+    assert record.tool_description == description
+
+
+def test_gt_at_236_description_over_the_limit_is_refused():
+    """gt@236: the bound itself is still pinned -- 4097 characters refuse."""
+    registry = _registry_with_agents("triage_agent")
+    with pytest.raises(HandoffConfigError):
+        registry.register(
+            "triage_agent",
+            "triage_agent",
+            tool_description="d" * (_DESCRIPTION_LIMIT + 1),
+        )
+
+
+def test_gt_at_236_description_under_the_limit_is_accepted():
+    """gt@236: the control -- one below the limit accepts."""
+    registry = _registry_with_agents("triage_agent")
+    description = "d" * (_DESCRIPTION_LIMIT - 1)
+    record = registry.register(
+        "triage_agent",
+        "triage_agent",
+        tool_description=description,
+    )
+    assert record.tool_description == description
