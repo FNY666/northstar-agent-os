@@ -391,7 +391,7 @@ covered".
 
 **What is still open, measured 2026-11-22.**  After the closure work
 described in `docs/design/mutant-evidence-closure.md` §9's AMENDED
-(d)-(g):
+(d)-(j):
 
 * `agent_handoff.py` -- **closed**: 38/38 at HEAD and at the pinned
   commit `249f9a5c` (was 25/38).  Thirteen survivors, thirteen new
