@@ -6,14 +6,15 @@
 
 [English](README.md) · [简体中文](docs/README.zh-CN.md) · [繁體中文](docs/README.zh-TW.md) · [日本語](docs/README.ja.md) · [Español](docs/README.es.md) · [한국어](docs/README.ko.md) · [Français](docs/README.fr.md) · [Deutsch](docs/README.de.md) · [Português (Brasil)](docs/README.pt-BR.md) · [Italiano](docs/README.it.md) · [Türkçe](docs/README.tr.md) · [Tiếng Việt](docs/README.vi.md)
 
-**In one sentence:** Northstar is a small, work-in-progress agent runtime — one entry (`northstar agent`), visible boundaries, auditability, and recoverable execution. The kernel is assembled from explicit subsystems (runtime, contract, host, durable, sidecar, interop). It is **not** a finished multi-agent platform (no hosted cloud, no parallel fleets); what ships today is the useful plumbing for running agents without surprises: a **default-deny sandboxed `Shell`** (bubblewrap when usable, honest process fallback otherwise — see [docs/concepts/threat-model.md](docs/concepts/threat-model.md)), plus the Northstar Codex Sidecar as a restricted local worker adapter.
+**In one sentence:** Northstar is a work-in-progress, governed programming-agent runtime: `northstar code` solves a repository task in an isolated Git worktree and delivers a patch, host-owned verification receipts, and an audit trail. The lower-level `agent` and `run` paths remain available for general governed tasks.
 > English is the canonical project entry. Translations mirror its scope and security claims; update them when this file changes.
 
 ## What it is
 
 Northstar is for people who want to **hand work to an AI coworker** that operates with visible boundaries — not an unconstrained prompt-and-tools loop, and not a pile of libraries you must wire by hand.
 
-- **Product path:** `northstar agent "…"` — session transcript and per-turn checkpoints on by default.
+- **Programming path:** `northstar code "…" --check "…"` — isolated worktree, a host-enforced `SubmitPlan` phase gate, structured repository tools, completion checks, patch and evidence bundle.
+- **General product path:** `northstar agent "…"` — session transcript and per-turn checkpoints on by default.
 - **Kernel path:** `northstar run …` — every default explicit (embedding, CI, advanced operators).
 - **Invariant:** every tool call crosses the permission gate, hooks, budget ceilings, and the audit trail. Policy may only tighten.
 
@@ -25,7 +26,7 @@ Absorb / refuse rules: [docs/next-gen-agent-blueprint.zh-CN.md](docs/next-gen-ag
 
 | Layer | What | Role |
 | --- | --- | --- |
-| **Product entry** | `northstar` / `bin/northstar` | Agent OS CLI (`agent`, `resume`, plus kernel commands) |
+| **Product entry** | `northstar` / `bin/northstar` | Agent OS CLI (`code`, `agent`, `resume`, plus kernel commands) |
 | **Kernel** | `components/northstar-agent-runtime/` | Governed loop: events, lifecycle hooks, three-layer permission gate, turn/tool/USD ceilings, subagents, append-only sessions, safe-boundary compaction, span tracing, MCP, skills, plugins |
 | **Execution adapter** | `components/northstar-codex-sidecar/` | Local Unix-socket worker: validates requests, runs Codex read-only, bounds I/O, redacts errors, cleans up timed-out process groups |
 | **Contract** | `components/northstar-run-contract/` | Versioned Run Request/Receipt, expiring HMAC Run Binding, strict adapter boundary |
@@ -50,6 +51,7 @@ It runs one full governed agent loop (tool call, permission gate, ceilings, even
 ```sh
 bin/northstar --version
 bin/northstar doctor --workspace .
+bin/northstar code "fix the failing test" --workspace . --check "python3 -m unittest" --dry-run
 bin/northstar agent --workspace . --provider scripted --scripted-text "ok" --prompt "hello"
 bin/northstar resume latest --workspace . --prompt "continue" --scripted-text "ok"
 bin/northstar sessions list --workspace .

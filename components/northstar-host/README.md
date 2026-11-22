@@ -5,6 +5,8 @@ between a verified Northstar run and a host-owned private workspace.
 
 ## Concepts, guides and API reference
 
+Current repository scope and verification: [current status](../../docs/current-status.md).
+
 - Concepts: [governance and the permission gate](../../docs/concepts/governance.md) ·
   [handoff and contracts](../../docs/concepts/handoff-and-contracts.md)
 - Guides: [packaging and CI](../../docs/guides/packaging-and-ci.md)
@@ -13,13 +15,13 @@ between a verified Northstar run and a host-owned private workspace.
 ## Install (pip)
 
 ```sh
+cd components/northstar-host           # from the repository root
 pip install ../northstar-run-contract   # declared dependency, from this repository
 pip install .                            # resolves northstar-run-contract
-# or, once published:
-pip install northstar-host
+# Local checkout installation; no index release is assumed.
 ```
 
-The wheel installs `authorization` and `workspace` as top-level modules; the
+The wheel installs `authorization`, `workspace`, `host_policy` and `host_audit` as top-level modules; the
 version (`0.1.0.dev0`, unreleased) is declared in `pyproject.toml`.
 
 ## Boundary order

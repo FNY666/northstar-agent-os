@@ -49,7 +49,7 @@ from typing import Any, Iterable, Sequence
 #: Bumped when a rule is added, removed, or changes meaning. A lockfile records the
 #: rule version it was written under, so "no findings" from an older rule set is
 #: reported as drift rather than trusted.
-RULES_VERSION = "skills-rules/1"
+RULES_VERSION = "skills-rules/3"
 
 #: Lockfile format id (the file is JSON so it diffs cleanly and needs no TOML writer).
 LOCK_SCHEMA = "northstar-skills-lock/1"
@@ -67,6 +67,17 @@ SEVERITY_ORDER: dict[str, int] = {"info": 0, "warn": 1, "error": 2}
 MAX_DESCRIPTION_CHARS = 1024
 MAX_BODY_LINES = 500
 MAX_BODY_CHARS = 20_000
+MAX_SCRIPT_BYTES = 1024 * 1024
+MAX_SCRIPTS_PER_SKILL = 16
+SCRIPT_SUFFIXES = frozenset({".py", ".sh", ".bash", ".js", ".mjs", ".ts", ".rb", ".pl", ".r"})
+RESOURCE_SUFFIXES = frozenset({
+    ".md", ".txt", ".rst", ".yaml", ".yml", ".json", ".toml", ".xml",
+    ".csv", ".ini", ".cfg", ".conf", ".html", ".htm", ".sql", ".graphql", ".gql",
+})
+MAX_SKILL_RESOURCES = 64
+MAX_SKILL_ROOT_ENTRIES = 256
+MAX_SKILL_TREE_ENTRIES = 4096
+MAX_AUDITED_SKILLS = 40
 
 # (rule id, severity, pattern, message). Patterns are matched case-insensitively on
 # the *line*, which keeps the line number honest and the false positives cheap to
@@ -209,6 +220,7 @@ class SkillAudit:
     description_chars: int
     findings: tuple[Finding, ...] = ()
     parse_error: str = ""
+    assets: tuple[dict[str, Any], ...] = ()
 
     @property
     def worst(self) -> str:
@@ -229,6 +241,7 @@ class SkillAudit:
             "description_chars": self.description_chars,
             "worst": self.worst,
             "parse_error": self.parse_error,
+            "assets": list(self.assets),
             "findings": [finding.as_dict() for finding in self.findings],
         }
 
@@ -420,7 +433,16 @@ def skill_files(root: Path | str, *, trees: Sequence[str] = SKILL_TREE_GLOBS) ->
         directory = base / pattern
         if not directory.is_dir():
             continue
-        for entry in sorted(directory.iterdir()):
+        try:
+            with os.scandir(directory) as scan:
+                entries = []
+                for entry in scan:
+                    entries.append(Path(entry.path))
+                    if len(entries) > MAX_SKILL_ROOT_ENTRIES:
+                        raise SkillAuditError(f"skill root {directory} exceeds the {MAX_SKILL_ROOT_ENTRIES}-entry audit limit")
+        except OSError as error:
+            raise SkillAuditError(f"cannot scan skill root {directory}: {error}") from error
+        for entry in sorted(entries):
             candidate = entry / SKILL_FILE_NAME
             if entry.is_symlink():
                 continue
@@ -433,13 +455,165 @@ def skill_files(root: Path | str, *, trees: Sequence[str] = SKILL_TREE_GLOBS) ->
                 continue
             if entry.is_dir() and candidate.is_file():
                 found.append(candidate)
+                if len(found) > MAX_AUDITED_SKILLS:
+                    raise SkillAuditError(f"checkout contains more than {MAX_AUDITED_SKILLS} skills; audit limit reached")
     return tuple(found)
+
+
+def _bounded_children(directory: Path, remaining: int) -> tuple[list[Path], int]:
+    """Read at most the remaining number of directory entries, then sort."""
+    children: list[Path] = []
+    with os.scandir(directory) as scan:
+        for entry in scan:
+            children.append(Path(entry.path))
+            if len(children) > remaining:
+                raise OverflowError
+    return sorted(children, key=lambda item: item.name), len(children)
+
+
+def _read_skill_script(path: Path) -> tuple[str, int, int, str | None]:
+    """Hash one regular script with bounded memory; source is returned only under the scan cap."""
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags)
+    digest = hashlib.sha256()
+    parts: list[bytes] = []
+    total = 0
+    try:
+        metadata = os.fstat(fd)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise OSError("skill script is not a regular file")
+        mode = stat.S_IMODE(metadata.st_mode)
+        with os.fdopen(fd, "rb", closefd=False) as stream:
+            while chunk := stream.read(64 * 1024):
+                total += len(chunk)
+                digest.update(chunk)
+                if total <= MAX_SCRIPT_BYTES:
+                    parts.append(chunk)
+                else:
+                    parts.clear()
+    finally:
+        os.close(fd)
+    source = b"".join(parts).decode("utf-8", errors="replace") if total <= MAX_SCRIPT_BYTES else None
+    return digest.hexdigest(), total, mode, source
 
 
 def audit_tree(root: Path | str, *, trees: Sequence[str] = SKILL_TREE_GLOBS) -> tuple[SkillAudit, ...]:
     """Review a whole checkout, including foreign ``.claude`` / ``.agents`` trees."""
     base = Path(root)
-    return tuple(audit_file(path, root=base) for path in skill_files(base, trees=trees))
+    audits: list[SkillAudit] = []
+    for skill_file in skill_files(base, trees=trees):
+        audit = audit_file(skill_file, root=base)
+        scripts_dir = skill_file.parent / "scripts"
+        findings = list(audit.findings)
+        assets: list[dict[str, Any]] = []
+        if scripts_dir.is_symlink():
+            findings.append(Finding("script.symlink", "error", 0, "scripts/ may not be a symlink; its contents are not bound to this skill review"))
+        elif scripts_dir.is_dir():
+            try:
+                entries, _ = _bounded_children(scripts_dir, MAX_SKILL_TREE_ENTRIES)
+            except OverflowError:
+                findings.append(Finding("script.directory-limit", "error", 0, f"scripts/ exceeds the {MAX_SKILL_TREE_ENTRIES}-entry scan limit; contents were not audited"))
+                entries = []
+            runnable = [item for item in entries if item.suffix.lower() in SCRIPT_SUFFIXES]
+            if len(runnable) > MAX_SCRIPTS_PER_SKILL:
+                findings.append(Finding("script.count-limit", "error", 0, f"scripts/ contains {len(runnable)} runnable files; limit is {MAX_SCRIPTS_PER_SKILL}"))
+            for script in runnable[:MAX_SCRIPTS_PER_SKILL]:
+                if script.is_symlink():
+                    findings.append(Finding("script.symlink", "error", 0, f"script {script.name!r} is a symlink and cannot be safely pinned"))
+                    continue
+                try:
+                    digest, size_bytes, mode, source = _read_skill_script(script)
+                except OSError as error:
+                    findings.append(Finding("script.unreadable", "error", 0, f"cannot read script {script.name!r}: {error}"))
+                    continue
+                relative = _relative(script, base)
+                assets.append({"path": relative, "digest": digest, "size_bytes": size_bytes, "mode": mode})
+                if source is None:
+                    findings.append(Finding("script.too-large", "error", 0, f"script {relative!r} exceeds {MAX_SCRIPT_BYTES} bytes and was not scanned"))
+                    continue
+                # Markdown rules catch dangerous instructions in shell/JS too;
+                # the source scanner adds language-shaped secret/execution rules.
+                findings.extend(
+                    Finding(f"script.{item.rule}", item.severity, item.line, f"{relative}: {item.detail}", item.excerpt)
+                    for item in scan_text(source)
+                )
+                from skill_scanner import RiskLevel, scan_skill
+                source_report = scan_skill(source, relative)
+                findings.extend(
+                    Finding(
+                        f"script.{item.rule_id}",
+                        "error" if item.severity in {RiskLevel.CRITICAL, RiskLevel.HIGH} else "warn",
+                        item.line or 0,
+                        f"{relative}: {item.detail}",
+                    )
+                    for item in source_report.issues
+                )
+        # Skills often disclose more instructions through companion files than
+        # through SKILL.md itself. Pin and scan bounded text resources so a lock
+        # cannot bless the entry point while leaving referenced prompt material
+        # outside review.
+        resource_count = 0
+        pending = [skill_file.parent]
+        visited_entries = 0
+        while pending:
+            current = pending.pop()
+            try:
+                entries, entry_count = _bounded_children(current, MAX_SKILL_TREE_ENTRIES - visited_entries)
+            except OverflowError:
+                findings.append(Finding("resource.tree-limit", "error", 0, f"skill resource tree exceeds the {MAX_SKILL_TREE_ENTRIES}-entry scan limit; remaining contents were not audited"))
+                break
+            except OSError as error:
+                findings.append(Finding("resource.unreadable", "error", 0, f"cannot scan skill resource directory {_relative(current, base)!r}: {error}"))
+                continue
+            visited_entries += entry_count
+            for resource in entries:
+                if resource.is_symlink():
+                    if resource.is_dir():
+                        findings.append(Finding("resource.symlink", "error", 0, f"skill resource directory {_relative(resource, base)!r} is a symlink and cannot be reviewed safely"))
+                    elif resource.suffix.lower() in RESOURCE_SUFFIXES:
+                        findings.append(Finding("resource.symlink", "error", 0, f"skill text resource {_relative(resource, base)!r} is a symlink and cannot be safely pinned"))
+                    continue
+                if resource.is_dir():
+                    if (resource / SKILL_FILE_NAME).is_file():
+                        continue  # nested skill has its own audit and lock identity
+                    pending.append(resource)
+                    continue
+                if resource == skill_file or resource.suffix.lower() not in RESOURCE_SUFFIXES:
+                    continue
+                if resource_count >= MAX_SKILL_RESOURCES:
+                    findings.append(Finding("resource.count-limit", "error", 0, f"skill contains more than {MAX_SKILL_RESOURCES} reviewable text resources"))
+                    break
+                if resource.is_symlink():
+                    findings.append(Finding("resource.symlink", "error", 0, f"skill text resource {_relative(resource, base)!r} is a symlink and cannot be safely pinned"))
+                    continue
+                try:
+                    digest, size_bytes, mode, source = _read_skill_script(resource)
+                except OSError as error:
+                    findings.append(Finding("resource.unreadable", "error", 0, f"cannot read skill resource {_relative(resource, base)!r}: {error}"))
+                    continue
+                relative = _relative(resource, base)
+                assets.append({"path": relative, "digest": digest, "size_bytes": size_bytes, "mode": mode})
+                resource_count += 1
+                if source is None:
+                    findings.append(Finding("resource.too-large", "error", 0, f"skill text resource {relative!r} exceeds {MAX_SCRIPT_BYTES} bytes and was not scanned"))
+                    continue
+                findings.extend(
+                    Finding(item.rule, item.severity, item.line, f"{relative}: {item.detail}", item.excerpt)
+                    for item in scan_text(source)
+                )
+        findings.sort(key=lambda finding: (-SEVERITY_ORDER[finding.severity], finding.line, finding.rule))
+        audits.append(SkillAudit(
+            name=audit.name,
+            relative_path=audit.relative_path,
+            digest=audit.digest,
+            size_bytes=audit.size_bytes,
+            body_lines=audit.body_lines,
+            description_chars=audit.description_chars,
+            findings=tuple(findings),
+            parse_error=audit.parse_error,
+            assets=tuple(assets),
+        ))
+    return tuple(audits)
 
 
 def summarise(audits: Iterable[SkillAudit]) -> dict[str, Any]:
@@ -495,6 +669,10 @@ def lock_payload(audits: Sequence[SkillAudit], *, source: str = "") -> dict[str,
             "size_bytes": audit.size_bytes,
             "findings": len(audit.findings),
             "worst": audit.worst,
+            "assets": {
+                asset["path"]: {"digest": asset["digest"], "size_bytes": asset["size_bytes"], "mode": asset["mode"]}
+                for asset in sorted(audit.assets, key=lambda item: item["path"])
+            },
         }
     payload: dict[str, Any] = {"schema": LOCK_SCHEMA, "rules": RULES_VERSION, "skills": entries}
     if source:
@@ -547,6 +725,12 @@ def load_lock(path: Path | str) -> dict[str, Any]:
         raise SkillAuditError(f"{path}: expected a {LOCK_SCHEMA} lockfile")
     if not isinstance(payload.get("skills"), dict):
         raise SkillAuditError(f"{path}: 'skills' must be an object")
+    for skill_path, entry in payload["skills"].items():
+        if not isinstance(entry, dict):
+            raise SkillAuditError(f"{path}: skill entry {skill_path!r} must be an object")
+        assets = entry.get("assets", {})
+        if not isinstance(assets, dict) or any(not isinstance(item, dict) for item in assets.values()):
+            raise SkillAuditError(f"{path}: skill assets for {skill_path!r} must be an object of records")
     return payload
 
 
@@ -587,7 +771,7 @@ class LockStatus:
             parts.append(f"pinned but missing: {', '.join(sorted(self.removed))}")
         if not self.rules_match:
             parts.append("reviewed under an older rule set")
-        return "; ".join(parts) or "all pinned skills match their reviewed digest"
+        return "; ".join(parts) or "all pinned skills and reviewed assets match their digests"
 
 
 def check_lock(audits: Sequence[SkillAudit], payload: dict[str, Any]) -> LockStatus:
@@ -602,6 +786,21 @@ def check_lock(audits: Sequence[SkillAudit], payload: dict[str, Any]) -> LockSta
             status.removed.append(label)
         elif not expected or current.digest != expected:
             status.stale.append(label)
+        if current is not None:
+            pinned_assets = entry.get("assets", {}) if isinstance(entry, dict) else {}
+            live_assets = {asset["path"]: asset for asset in current.assets}
+            for asset_path, asset_entry in pinned_assets.items():
+                live_asset = live_assets.get(asset_path)
+                if live_asset is None:
+                    status.removed.append(asset_path)
+                elif (
+                    not isinstance(asset_entry, dict)
+                    or live_asset["digest"] != asset_entry.get("digest")
+                    or live_asset["mode"] != asset_entry.get("mode")
+                ):
+                    status.stale.append(asset_path)
+            for asset_path in live_assets.keys() - pinned_assets.keys():
+                status.added.append(asset_path)
     for path, audit in live.items():
         if path not in pinned:
             status.added.append(f"{audit.name} ({path})")
