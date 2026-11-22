@@ -174,7 +174,44 @@ def _runtime_read_paths() -> tuple[str, ...]:
     # O_PATH -- so an unfiltered ``/lib64`` raises FileNotFoundError in the
     # loader and EVERY tool subprocess on the process backend dies.
     system = [path for path in _SYSTEM_READ_PATHS if os.path.isdir(path)]
-    return tuple(dict.fromkeys([*system, *extra]))
+    return tuple(dict.fromkeys([*system, *extra, *_virtualenv_roots()]))
+
+
+def _virtualenv_roots() -> tuple[str, ...]:
+    """The PREFIX ROOT of a virtualenv, if this interpreter runs in one.
+
+    ``site.py`` looks for ``pyvenv.cfg`` one directory above the
+    interpreter's directory -- that is, at the venv PREFIX ROOT, which is
+    neither ``prefix/bin`` nor ``prefix/lib``.  ``_runtime_read_paths()``
+    granted only those subdirectories, so the prefix root was unreadable
+    inside the sandbox and the sandboxed interpreter died in
+    ``init_import_site`` with
+    ``PermissionError: [Errno 13] Permission denied: '.../pyvenv.cfg'``.
+
+    Measured: under a venv the child exited 1 with that error; with the
+    prefix root granted it exits 0.
+
+    The grant is deliberately narrow:
+
+    * it applies ONLY to a prefix that actually holds a ``pyvenv.cfg``,
+      so a system interpreter (whose base prefix is ``/``) never causes
+      ``/`` to be granted -- that would hand the whole filesystem over;
+    * the prefix root is READ-only (a runtime root, never a writable one).
+    """
+    import os
+    import sys
+
+    roots = []
+    for prefix in (sys.prefix, sys.base_prefix):
+        if not prefix:
+            continue
+        root = os.path.realpath(prefix)
+        if root in ("/", "") or not os.path.isdir(root):
+            continue
+        if not os.path.isfile(os.path.join(root, "pyvenv.cfg")):
+            continue
+        roots.append(root)
+    return tuple(dict.fromkeys(roots))
 
 
 class LandlockError(ValueError):

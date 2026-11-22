@@ -869,9 +869,39 @@ def _bwrap_argv(
     # single-user synthetic files (see _minimal_identity_files) so the other
     # host users stay invisible.
     ro_binds = []
+    bound = []
     for host_path in ("/usr", "/bin", "/lib", "/lib64", "/sbin"):
         if Path(host_path).exists():
             ro_binds.extend(["--ro-bind", host_path, host_path])
+            bound.append(host_path)
+    # The interpreter's OWN directory and, when this runtime runs inside a
+    # virtualenv, the venv prefix root.  The five hardcoded system roots
+    # above are not enough: a venv's interpreter lives under
+    # ``<prefix>/bin``, which is not one of them, so bwrap failed with
+    # "execvp /tmp/.../bin/python: No such file or directory" -- the file
+    # existed on the host and was simply absent from the namespace.
+    # The prefix root additionally holds ``pyvenv.cfg``, which ``site.py``
+    # reads to find the base prefix.
+    #
+    # Only paths that are NOT already reachable through an existing bind are
+    # added: a bind of ``/usr`` already covers ``/usr/bin``, and repeating
+    # it would grow the argv for nothing.  ``bound`` lists only the paths
+    # that were ACTUALLY bound -- a system root that does not exist on this
+    # host (``/lib64`` on aarch64) covers nothing.
+    from tools.sandbox import _virtualenv_roots
+
+    def _covered(path: str) -> bool:
+        return any(path == root or path.startswith(root.rstrip("/") + "/") for root in bound)
+
+    extra_ro_binds = [os.path.dirname(os.path.realpath(sys.executable))]
+    extra_ro_binds.extend(_virtualenv_roots())
+    for host_path in extra_ro_binds:
+        if not host_path or host_path == "/":
+            continue
+        if not Path(host_path).is_dir() or _covered(host_path):
+            continue
+        ro_binds.extend(["--ro-bind", host_path, host_path])
+        bound.append(host_path)
     identity_binds: list[str] = []
     if passwd_path is not None:
         identity_binds.extend(["--ro-bind", passwd_path, "/etc/passwd"])

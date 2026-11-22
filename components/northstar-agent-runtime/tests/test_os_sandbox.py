@@ -58,7 +58,22 @@ class BwrapArgvSurfaceTests(unittest.TestCase):
     def test_ro_binds_are_minimal_and_pinned(self):
         sources = self._ro_bind_sources(self._argv())
         expected = [p for p in ("/usr", "/bin", "/lib", "/lib64", "/sbin") if os.path.exists(p)]
-        self.assertEqual(sources, expected)
+        # The five system roots come first, in that order.  After them come
+        # ONLY the interpreter's own directory and the virtualenv prefix
+        # root -- and only when they are not already covered by a system
+        # root.  Any other addition is a deliberate diff and must show up
+        # here.
+        from tools.sandbox import _virtualenv_roots
+
+        self.assertEqual(sources[: len(expected)], expected)
+        allowed = {os.path.dirname(os.path.realpath(sys.executable))}
+        allowed.update(_virtualenv_roots())
+        for extra in sources[len(expected) :]:
+            self.assertIn(
+                extra,
+                allowed,
+                f"unexpected extra ro-bind {extra!r}; the bind surface must stay pinned",
+            )
 
     def test_workspace_governance_is_read_only_and_temp_is_ephemeral(self):
         import tempfile
@@ -420,6 +435,96 @@ class RuntimeReadPathTests(unittest.TestCase):
                 os.path.isdir(rule.path),
                 f"loader would fail to open rule path {rule.path!r}",
             )
+
+
+class VirtualenvPrefixReadTests(unittest.TestCase):
+    """A virtualenv's own files must be readable inside the sandbox.
+
+    ``site.py`` looks for ``pyvenv.cfg`` in the directory ABOVE
+    ``sys.executable``'s directory -- that is, at the venv PREFIX ROOT, not
+    under ``bin/`` or ``lib/``.  ``_runtime_read_paths()`` only ever added
+    ``prefix/bin``, ``prefix/lib`` and ``prefix/lib64``, so the prefix root
+    was never granted and the sandboxed interpreter died in
+    ``init_import_site`` with
+    ``PermissionError: [Errno 13] Permission denied: '/tmp/.../pyvenv.cfg'``.
+
+    Measured: under a venv the child exits 1 with that error; the same
+    child exits 0 once the prefix root is readable.
+    """
+
+    def test_a_virtualenv_prefix_root_is_readable_inside_the_sandbox(self):
+        from tools.sandbox import _runtime_read_paths
+
+        prefix = sys.prefix
+        if prefix == sys.base_prefix:
+            self.skipTest("not running from a virtualenv")
+        self.assertIn(
+            prefix,
+            _runtime_read_paths(),
+            "the venv prefix root must be readable: pyvenv.cfg lives there",
+        )
+
+    def test_the_prefix_root_rule_grants_read_without_write(self):
+        from tools.pledge import filesystem_rules
+        from tools.sandbox import _runtime_read_paths
+
+        prefix = sys.prefix
+        if prefix == sys.base_prefix:
+            self.skipTest("not running from a virtualenv")
+        rules = filesystem_rules(
+            frozenset({"stdio", "rpath", "wpath", "cpath"}),
+            workspace="/tmp",
+            tmpdir="/tmp",
+            runtime_roots=_runtime_read_paths(),
+        )
+        rule = [r for r in rules if r.path == prefix]
+        self.assertEqual(len(rule), 1)
+        # READ_FILE (0x4) but NOT WRITE_FILE (0x2): the prefix is a runtime
+        # root, never a writable one.
+        self.assertTrue(rule[0].access & 0x4)
+        self.assertFalse(rule[0].access & 0x2)
+
+    def test_the_prefix_root_is_granted_even_when_it_is_also_a_rule_root(self):
+        """A prefix that is a system root must not be granted twice."""
+        from tools.sandbox import _runtime_read_paths
+
+        runtime = _runtime_read_paths()
+        self.assertEqual(len(runtime), len(set(runtime)))
+
+
+class BwrapVirtualenvBindTests(unittest.TestCase):
+    """bwrap must be able to reach a virtualenv interpreter too.
+
+    The bwrap argv bound only the five hardcoded system roots, so a venv
+    interpreter was simply absent from the namespace: bwrap failed with
+    ``execvp /tmp/.../bin/python: No such file or directory``.
+    """
+
+    def _argv(self):
+        import tempfile
+        from pathlib import Path
+
+        root = Path(tempfile.mkdtemp(prefix="nsar-bwrap-venv-"))
+        request = SandboxRequest(argv=("true",), cwd=root, workspace=root)
+        return _bwrap_argv(request, bwrap_path="/usr/bin/bwrap")
+
+    def test_the_interpreter_directory_is_reachable_in_the_namespace(self):
+        argv = self._argv()
+        sources = [argv[i + 1] for i, a in enumerate(argv) if a == "--ro-bind"]
+        exe_dir = os.path.dirname(os.path.realpath(sys.executable))
+        # REACHABLE, not necessarily bound verbatim: a bind of "/usr" already
+        # covers "/usr/bin", and repeating it would grow the argv for nothing.
+        self.assertTrue(
+            any(exe_dir == s or exe_dir.startswith(s.rstrip("/") + "/") for s in sources),
+            f"the interpreter's own directory {exe_dir!r} is not reachable; binds={sources!r}",
+        )
+
+    def test_a_virtualenv_prefix_root_is_ro_bound(self):
+        if sys.prefix == sys.base_prefix:
+            self.skipTest("not running from a virtualenv")
+        argv = self._argv()
+        sources = [argv[i + 1] for i, a in enumerate(argv) if a == "--ro-bind"]
+        self.assertIn(sys.prefix, sources, "the venv prefix root holds pyvenv.cfg")
 
 
 class OsSandboxProcessBackendTests(RuntimeTestCase):
