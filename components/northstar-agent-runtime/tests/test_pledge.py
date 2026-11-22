@@ -159,11 +159,33 @@ class FilesystemRulesTest(RuntimeTestCase):
         self.assertFalse([r for r in rules if r.path == "/ws/.northstar/tmp"])
 
     def test_runtime_roots_are_always_read_exec(self):
+        import os
+
+        from tools.sandbox import _SYSTEM_READ_PATHS
+
         rules = filesystem_rules(frozenset({"stdio"}), workspace="/ws", tmpdir="/t")
-        for root in ("/usr", "/bin", "/lib", "/lib64", "/sbin"):
+        # Only the roots that EXIST here get a rule: the Landlock loader
+        # opens every rule path with O_PATH, so a rule for a path that is
+        # absent (/lib64 on aarch64) kills the whole loader. The
+        # conditional is the point of the assertion, not a loosening.
+        for root in _SYSTEM_READ_PATHS:
+            if not os.path.isdir(root):
+                continue
             rule = [r for r in rules if r.path == root]
             self.assertEqual(len(rule), 1)
             self.assertTrue(rule[0].access & 0x1)  # EXECUTE
+
+    def test_a_runtime_root_that_does_not_exist_gets_no_rule(self):
+        import os
+
+        from tools.sandbox import _SYSTEM_READ_PATHS, _runtime_read_paths
+
+        rules = filesystem_rules(frozenset({"stdio"}), workspace="/ws", tmpdir="/t")
+        for root in _SYSTEM_READ_PATHS:
+            if os.path.isdir(root):
+                continue
+            self.assertNotIn(root, _runtime_read_paths())
+            self.assertFalse([r for r in rules if r.path == root])
 
 
 class LandlockProbeTest(RuntimeTestCase):

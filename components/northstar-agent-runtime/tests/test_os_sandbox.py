@@ -284,6 +284,19 @@ class SeccompFilterFdOffsetTests(unittest.TestCase):
         def __exit__(self, *exc):
             return False
 
+    def setUp(self) -> None:
+        super().setUp()
+        reset_capabilities_cache()
+
+    def tearDown(self) -> None:
+        # The capabilities cache is MODULE-level. A test that probes with a
+        # fake bwrap path and does not clear the cache leaves every LATER
+        # test in the process pointed at a binary that does not exist --
+        # and the failure then shows up in an unrelated module, as a
+        # mysterious "Shell failed" instead of as a poisoned cache.
+        reset_capabilities_cache()
+        super().tearDown()
+
     def _filter_bytes(self) -> bytes:
         from tools.seccomp import build_default_filter
 
