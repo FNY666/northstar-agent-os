@@ -483,7 +483,7 @@ were fixed.
 | **A-6** | **open** | the `pyproject.toml` `dependencies` comment still claims "the whole deterministic test suite run on a bare interpreter". **That claim is now true** — the suite is green on a bare interpreter — but the comment is still misleading about *why*, and the `json-schema` extra is not in `requirements.txt`. | documentation only |
 | **A-7** | **open** | `scripts/b173-baseline-check.sh` is not wired into CI. | — |
 | **A-8** | **open, and now stale in the OTHER direction** | the 26-item baseline file is still the authority, but **all 26 of its items are green**. The file now over-reports failures by 26. | — |
-| **A-9** | **open** | the strategy ledger's §5 list is still uncorrected. | — |
+| **A-9** | **done** | the strategy ledger (`b173-strategy-ledger-2026-11-14.md`) now carries a §5.1 correction: its "内核能力缺失" attribution was **wrong** — Landlock *is* available on this host (`landlock_create_ruleset works (ABI v1 flags)`); the 8 bench failures were two code defects (D-1, D-2). Its §1 table carries the re-measured suite line. | the ledger no longer tells the next slice's brief that `161/169` is an environment artifact. It was not. |
 | **A-10** | **already done** | `b173-accept.sh`'s `FULL_SUITE` grep was widened to `Ran [0-9]{4,}` in round 7; the `Ran 19[0-9]{3}` string survives only in the comment that explains the change. | — |
 
 **The baseline after these fixes** — measured on this host, full runtime
@@ -693,8 +693,13 @@ fixes **A-5**'s items, and turns **A-6**'s claim from false to true.
   commit that earned it.  **A baseline file is a claim about a tree**;
   leaving a stale one in place is worse than having none, because a
   reader cannot tell which items are still real.
-* **A-9** — the strategy ledger's §5 list still carries the old
-  attribution.
+* **A-9** — **done**.  The strategy ledger now carries a §5.1
+  correction, and the correction is worth more than the fix: its
+  "内核能力缺失" attribution was **wrong**, and the evidence that
+  disproved it was one line — `landlock_create_ruleset works (ABI v1
+  flags)`.  The ledger had inferred "the kernel cannot do this" from
+  `grep -ci landlock /proc/self/status` = 0, which measures the
+  *shell*, not the kernel.
 
 **And one thing this section did not touch:** the 15 mutant-survivor
 equivalence proofs.  Their census row (`gt@640`) turned out to have
