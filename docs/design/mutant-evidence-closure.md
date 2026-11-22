@@ -899,6 +899,155 @@ file with a proof, and the repository's convention (from
 `tests/test_state_budget.py`'s `gt@304`) is to record such a mutant
 rather than hunt a killer that cannot exist.
 
+**AMENDED 2026-11-22 (d) -- that claim was true only of the census the
+table was built from, and it is now FALSE of the batch as it stands.**
+
+The census this section draws from (`census-parallel.txt`) was measured
+with the **unittest runner**, and its rows for `agent-handoff`, `c58`
+and `slice3` read `38/38`, `63/63` and `63/63` -- perfect scores, with
+no survivors to account for.  Those were the false kills §8's AMENDED
+(e) describes.  Re-measured with a runner that can see the suites, the
+same two modules have **55 surviving mutants**:
+
+| module | survivors | of which |
+|---|---|---|
+| `agent_handoff.py` | 13 | `retT@250` `retF@256` `or@289` `retT@324` `and@336` `and@338` `retF@339` `eq@445` `or@598` `eq@625` `or@981` `or@998` `or@1015` |
+| `bash_parser.py` | 42 | `retF@289` `retT@291` `gt@342` `eq@343` `or@347` `or@357` `or@376` `or@446` `retF@478` `eq@480` `retF@481` `eq@484` `retF@489` `lt@547` `lt@552` `lt@557` `and@564` `or@579` `and@594` `and@599` `lt@613` `lt@620` `eq@632` `or@636` `or@676` `and@677` `eq@677` `lt@686` `lt@690` `lt@709` `or@718` `lt@756` `lt@773` `eq@795` `or@820` `and@822` `or@878` `gt@927` `and@963` `and@973` `retF@1052` `retF@1055` |
+
+**Not one of the 55 has an equivalence proof**, and not one has a row
+in §9.1's table.  So the claim above -- "every surviving mutant in the
+batch's census is an EQUIVALENT mutant ... recorded in its slice's test
+file with a proof" -- was true of the *census that was measured*, and
+that census was wrong about these two modules in the strong direction.
+
+This is the **third** time this section's enumeration has been short,
+and the first time the missing rows were not in a table but in the
+*proofs themselves*.  Two earlier amendments (2026-11-22 (c) and the
+paragraph above) found table rows missing for sites that already had
+proofs.  This one finds the proofs missing too.
+
+**The check that would have caught it** is the one §9.1's own text
+prescribes -- extract the sites from the census, extract them from the
+table, and diff -- run against a census measured with a runner that can
+see the suites.  It is now pinned by
+`components/northstar-agent-runtime/tests/test_equivalence_table_coverage.py`,
+which reads the **slice** census at the scope §9.1's table describes.
+
+**AMENDED 2026-11-22 (e) -- the check itself was four defects, and each
+of them hid a gap.**
+
+The check existed before this amendment, and it did not report the 55.
+It reported **nothing**, for four separate reasons, and every one of
+them is a way of reading a census that does not say what it appears to
+say:
+
+1. **The verdict defect.**  A census line names EVERY mutant it planted
+   -- the survivors AND the kills -- and the word `SURVIVED` appears in
+   the line for either.  The line filter collected the killed sites
+   too.  Measured: a corrected row for `agent-handoff` names 38 sites
+   and 13 SURVIVED; reading the whole line reported all 38, so 25
+   phantom findings crowded out the 13 real ones.
+2. **The proof-lookup defect.**  A site name is relative to its
+   module: `or@45` is a line number in whichever module the row names.
+   The lookup searched EVERY test file for the bare name, so one
+   module's proof satisfied another module's site.
+3. **The scope-filter defect.**  The module census keys its rows by the
+   MODULE's name, and the filter compared it against a dict keyed by
+   module stem -- so the filter matched nothing and the "in scope" set
+   was empty.
+4. **The accounting defect.**  The check demanded that every surviving
+   site be in §9.1's table.  But a surviving mutant has TWO possible
+   proofs -- an equivalence proof (for one that genuinely cannot be
+   killed) or a KILLER TEST (for one that can) -- and the check asked
+   for the first in every case.
+
+The check now reads a site **with its verdict**, scopes the proof
+lookup to the suite the census row names, resolves the module census's
+own row keys, and accepts either kind of proof.  Each branch is proven
+to bite: removing the killer-lookup branch turns 18 covered sites into
+53 findings, and removing one equivalence row turns its site into a
+finding.
+
+**What the check now says.**  Against the corrected census it reports
+exactly the sites that are still open and nothing else -- 42 in
+`bash_parser.py` and 12 in `coverage_manifest.py`.  The other 18 are
+covered, each by an equivalence row in §9.1's table or by a killer
+test.
+
+**AMENDED 2026-11-22 (f) -- the thirteen `agent_handoff.py` survivors
+are closed.**
+
+All thirteen now have a killer test, named for the mutant it kills
+(§3.4), in the shapes §3.1-§3.3 prescribe:
+
+| site | construct | shape |
+|---|---|---|
+| `retT@250` | `return True` in `_is_cancelled` | §3.3, the True path |
+| `retF@256` | `return False` in the `except` fallback | §3.3, the False path |
+| `or@289` | the schema property-name guard | §3.1, both wrong ways |
+| `retT@324` | `_type_ok` with no declared type | §3.3 |
+| `and@336` | the `integer` check | §3.1, a `bool` is an `int` |
+| `and@338` | the `number` check | §3.1, a `bool` is an `int` |
+| `retF@339` | the unknown-type fallback | §3.3, the False path |
+| `eq@445` | `HandoffDecision.handed_off` | §3.3, the False path |
+| `or@598` | `register`'s `run_id` guard | §3.1, both wrong ways |
+| `eq@625` | the arity message | §3.3 |
+| `or@981` | `begin_run`'s `run_id` guard | §3.1, both wrong ways |
+| `or@998` | `set_final_agent`'s `run_id` guard | §3.1, both wrong ways |
+| `or@1015` | `guardrail_scope`'s `run_id` guard | §3.1, both wrong ways |
+
+Every `or` guard is fed BOTH wrong ways -- a blank `str` (type right,
+format wrong) and a non-`str` (format right, type wrong) -- because a
+single input cannot separate `or` from `and`.  Every `return False` is
+asserted with `assertIs(..., False)`, not `assertFalse`, and every one
+has a control, so a function that always returned one value cannot
+satisfy it.
+
+`retF@256` needed a harness note: the line is reachable only when
+`import asyncio` fails, so the test sets `sys.modules["asyncio"]` to
+`None` (CPython raises `ImportError` for a `None` entry) to reach it.
+
+**MEASURED**
+
+| | HEAD | at the pinned commit `249f9a5c` |
+|---|---|---|
+| before | 25/38 | 25/38 |
+| after | **38/38** | **38/38** |
+
+The module body has **ZERO diff** -- the thirteen sites are killed by
+tests, not by changing the source.
+
+**The plant loop has a trap, and it made this look harder than it
+was.**  A length-preserving mutate-then-restore inside one wall-clock
+second can leave a stale `.pyc`; the next interpreter loads the
+MUTANT's bytecode and the suite "kills" a fault that survived.  Four of
+the thirteen reported SURVIVING for exactly this reason.  The plant
+loop must set `PYTHONDONTWRITEBYTECODE=1` **and** remove every
+`__pycache__` under the workdir before each invocation.  With both, all
+thirteen report KILLED.
+
+**AMENDED 2026-11-22 (g) -- two more single-site survivors are closed.**
+
+`slice4`'s `or@45` (`if not trigger.name or not trigger.outcomes:`) is
+a genuine double guard, so it takes BOTH wrong ways: a blank name (only
+the second half refuses) and empty outcomes (only the first half
+refuses).  Both are accepted by the mutant, and both tests fail under
+the planted mutant.
+
+`toolfail`'s `or@340` (`detail = getattr(fault, "detail", "") or ""`)
+is a FALLBACK, not a double guard -- its right-hand side is the
+constant `""`, which is never true -- so under the mutant the detail is
+always dropped, and one input separates them: a fault that carries a
+detail.
+
+`from_provider_fault` had **no test at all** before this: the suite
+covered `provider_retry.fault_to_failure`, which delegates to it.
+
+| slice | before | after |
+|---|---|---|
+| `slice4` | 3/4 | **4/4** |
+| `toolfail` | 10/11 | **11/11** |
+
 **The gap this section closes.**  A proof that CANNOT fail proves
 nothing.  The recorded proofs came in two shapes, and neither shape
 required the proof to be able to fail:
