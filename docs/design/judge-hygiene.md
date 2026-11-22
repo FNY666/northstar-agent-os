@@ -848,9 +848,9 @@ Three rows in this table are measured against a suite unittest could
 
 | slice | suite | unittest collects | this table says | fixed probe (pytest) |
 |---|---|---|---|---|
-| `agent-handoff` | `test_agent_handoff.py` | **0** of 40 | 3/3 | **3/3** (first three, after the fix) |
-| `lightningzero` | `test_coverage_manifest.py` | **0** of 24 | 3/3 | 3/3 (whole-file 12/24) |
-| `toolfail` | `test_tool_failure.py` | **0** of 19 | 3/3 | 3/3 (whole-file 10/11) |
+| `agent-handoff` | `test_agent_handoff.py` | **0** of 40 | 3/3 | **3/3** (first three), **38/38** whole-file |
+| `lightningzero` | `test_coverage_manifest.py` | **0** of 24 | 3/3 | 3/3 (first three), 12/24 whole-file |
+| `toolfail` | `test_tool_failure.py` | **0** of 19 | 3/3 | 3/3 (first three), **11/11** whole-file |
 
 Those suites are pytest-style -- standalone module-level `test_*`
 functions and no `TestCase` class -- so unittest's loader collected
@@ -863,10 +863,28 @@ listed constructs (`gt@214 gt@226 gt@236`) SURVIVED, both at HEAD and at
 the slice's own pinned commit `249f9a5c`.  It measured **0/3**, and the
 gap has since been closed with nine new test methods -- so its row above
 reads **3/3** again, now on a measurement rather than on an exit code.
+
+**AMENDED 2026-11-22 (b) -- the thirteen survivors behind that row are
+now closed too.**  Closing the three *listed* constructs was one step;
+the whole-file measurement then read **25/38**, and the other thirteen
+survivors had neither a killer nor an equivalence proof.  All thirteen
+now have a killer test, named for the mutant it kills, and the module
+reads **38/38** at HEAD **and** at the pinned commit `249f9a5c`.  The
+module body has zero diff -- the survivors were killed by tests, not by
+changing the source.
+
 For `lightningzero` and `toolfail` the listed three constructs do die
 under the fixed probe, so their 3/3 stands -- but it now rests on a
 measurement rather than on an exit code, and the whole-file counts
-(12/24 and 10/11) show the suite does not cover the whole file.
+show the suite does not cover the whole file.
+
+**`toolfail` is now closed as well: 11/11** (was 10/11).  Its
+`from_provider_fault` had **no test at all** -- the suite covered
+`provider_retry.fault_to_failure`, which delegates to it -- and the one
+survivor was `or@340`, the `getattr(fault, "detail", "") or ""`
+fallback, whose mutant silently drops the detail.  `slice4` is closed
+the same way: **4/4** (was 3/4), `or@45` being a genuine double guard
+that needed **both** wrong ways.
 
 **Two more rows of the same shape are not in this table at all**,
 because this table's slice set is not the census's: `c58` and
