@@ -38,6 +38,9 @@ ResultSubtype = Literal[
     # The run never started: another live process holds the session transcript, and
     # appending to a file we do not own is the one thing that would make it unreadable.
     "error_session_busy",
+    # Ordered evidence capture was requested but could not produce a complete,
+    # structurally valid bundle. Existing effects are never replayed or undone.
+    "error_evidence_incomplete",
 ]
 
 RESULT_SUBTYPES: tuple[str, ...] = (
@@ -50,6 +53,7 @@ RESULT_SUBTYPES: tuple[str, ...] = (
     "error_permission_denied",
     "error_postconditions_failed",
     "error_session_busy",
+    "error_evidence_incomplete",
 )
 
 SYSTEM_SUBTYPES: tuple[str, ...] = (
