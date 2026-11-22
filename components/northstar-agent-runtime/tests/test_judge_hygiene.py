@@ -489,6 +489,68 @@ class JudgeHygieneProbeBehaviourTests(unittest.TestCase):
                         "present in this slice's patch")
 
 
+class JudgeHygieneCensusPairingTests(unittest.TestCase):
+    """The census script must pair each module with the suite that tests it.
+
+    The census script (``scripts/b173-census-all.sh``) used to pass
+    ``--test-module test_cancellation_gate`` for EVERY module it was
+    pointed at.  A module that suite does not exercise is therefore
+    measured with the wrong tests, and every mutant in it "survives" --
+    a false accusation of a weak test suite.
+
+    Measured 2026-11-22: with the hardcoded suite a census of
+    ``merged_tree_review.py`` reported "killed 0/8"; with the module's
+    own suite it reports "killed 37/39".
+    """
+
+    CENSUS = REPO_ROOT / "scripts" / "b173-census-all.sh"
+
+    def setUp(self):
+        if not self.CENSUS.exists():
+            self.skipTest(f"census script missing: {self.CENSUS}")
+        self.text = self.CENSUS.read_text(encoding="utf-8")
+
+    def test_the_census_script_is_in_the_repository(self):
+        """The census tooling must be reachable from a fresh clone."""
+        self.assertTrue(self.CENSUS.exists(), str(self.CENSUS))
+
+    def test_the_census_script_pairs_a_module_with_its_own_test_file(self):
+        """No hardcoded test module may be applied to every module."""
+        self.assertNotIn(
+            "--test-module test_cancellation_gate", self.text,
+            "the census still measures every module with the same suite",
+        )
+
+    def test_the_census_script_names_the_module_it_is_censusing(self):
+        """The pairing must be derived from the module's own basename."""
+        self.assertIn("MODBASE=$(basename", self.text)
+        self.assertIn("test_${MODBASE}.py", self.text)
+
+    def test_the_census_script_restores_the_module_after_each_census(self):
+        """An interrupted census must not contaminate the next one."""
+        self.assertIn(
+            'cp "$RUNTIME_DIR/$m" "$MODPATH"', self.text,
+            "the census does not restore the module from the pristine source",
+        )
+
+    def test_the_repo_probe_carries_the_crash_safe_restore(self):
+        """The probe in the repository must restore on a signal.
+
+        The live probe lives outside the repository, so a fresh clone
+        would otherwise get a census script with no probe to run.
+        """
+        probe = REPO_ROOT / "scripts" / "b173-mutant.py"
+        if not probe.exists():
+            self.skipTest(f"probe missing: {probe}")
+        source = probe.read_text(encoding="utf-8")
+        self.assertIn("atexit.register", source,
+                      "the repo probe has no atexit restore")
+        self.assertIn("signal.signal", source,
+                      "the repo probe has no signal handler")
+        self.assertIn("restore_original", source,
+                      "the repo probe has no restore helper")
+
+
 class JudgeHygienePatchTests(unittest.TestCase):
     """Tests on this slice's own patch file (outside the repository)."""
 
