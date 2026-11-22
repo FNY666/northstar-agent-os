@@ -80905,6 +80905,40 @@ Schema for the sidecar-delegated tool (registered only with a socket).
 
 #### `truncate_text(text: str, limit: int=MAX_TOOL_RESULT_CHARS)`
 
+### `tools.canary_rollout`
+
+Source: `components/northstar-agent-runtime/tools/canary_rollout.py`
+
+Bounded multi-worker unquarantine and canary rollout orchestrator.
+
+#### `RolloutError`
+
+#### `now()`
+
+#### `bounded(text: str, limit: int=8192)`
+
+#### `atomic_json(path: Path, value: Any)`
+
+#### `validate_worker(worker: dict[str, Any])`
+
+#### `load_workers(path: Path)`
+
+#### `split_waves(workers: list[dict[str, Any]], wave_size: int)`
+
+#### `run_command(argv: list[str], timeout: int)`
+
+#### `worker_command(worker: dict[str, Any], *, mode: str, apply: bool, start: bool, unquarantine: Path)`
+
+#### `check_regular_executable(path: Path, label: str)`
+
+#### `run_wave(wave: list[dict[str, Any]], *, mode: str, apply: bool, start: bool, unquarantine: Path, timeout: int, concurrency: int)`
+
+#### `canary_command(canary: Path, wave: list[dict[str, Any]], rollout_id: str)`
+
+#### `failure_reason(result: dict[str, Any], *, canary: bool=False)`
+
+#### `main(argv: list[str] | None=None)`
+
 ### `tools.capdrop`
 
 Source: `components/northstar-agent-runtime/tools/capdrop.py`
@@ -80953,6 +80987,45 @@ Wrap ``target_argv`` so capabilities are dropped before exec.
 
 bwrap ``--cap-drop``/``--cap-add`` args for a whitelist.
 
+### `tools.deterministic_kernel`
+
+Source: `components/northstar-agent-runtime/tools/deterministic_kernel.py`
+
+Small, dependency-free prototype for a deterministic AgentOS kernel.
+
+#### `KernelError`
+
+Base class for fail-closed policy, log, and state errors.
+
+#### `PolicyError`
+
+#### `EventIntegrityError`
+
+#### `RecoveryRequired`
+
+An effect began but has no durable completion record.
+
+#### `SandboxPolicy`
+
+Host-verifiable launch constraints; defaults are intentionally narrow.
+
+- `workspace_path` (property)
+- `plan(argv: tuple[str, ...], *, cwd: Path | None=None, env_names: tuple[str, ...]=())`
+#### `SandboxPlan`
+
+- `as_dict()`
+#### `KernelState`
+
+#### `DeterministicKernel`
+
+A caller-clocked, hash-linked execution ledger with deterministic replay.
+
+- `state(run_id: str)`
+- `start_run(run_id: str, input_digest: str)`
+- `plan_step(run_id: str, step_id: str, action_key: str, plan_digest: str)`
+- `run_step(run_id: str, step_id: str, action_key: str, effect: Callable[[], Any], *, plan: SandboxPlan | None=None, evidence: Mapping[str, Any] | None=None)`
+  - Run one effect only after the host sandbox evidence is verified.
+- `replay(run_id: str)`
 ### `tools.effect_envelope`
 
 Source: `components/northstar-agent-runtime/tools/effect_envelope.py`
@@ -81197,6 +81270,38 @@ Network and cross-domain Unix-socket denial without FS confinement.
 #### `landlock_loader_argv(inner_argv: Sequence[str], spec: Mapping[str, object], *, python: str='python3')`
 
 Wrap ``inner_argv`` so the Landlock allowlist is installed before exec.
+
+### `tools.sandbox_evidence`
+
+Source: `components/northstar-agent-runtime/tools/sandbox_evidence.py`
+
+Fail-closed verification of host-reported sandbox evidence.
+
+#### `EvidenceError`
+
+Evidence is missing, inconsistent, or weaker than the requested plan.
+
+#### `SandboxEvidence`
+
+- `from_dict(raw: Mapping[str, Any])`
+- `as_dict()`
+#### `verify_evidence(plan: SandboxPlan, raw: Mapping[str, Any], *, require_os_isolation: bool=False)`
+
+Verify host evidence is at least as restrictive as ``plan``.
+
+### `tools.sandbox_evidence_adapter`
+
+Source: `components/northstar-agent-runtime/tools/sandbox_evidence_adapter.py`
+
+Adapter from ``tools.os_sandbox`` results to the evidence contract.
+
+#### `SandboxEvidenceAdapterError`
+
+The os_sandbox result cannot be converted without inventing facts.
+
+#### `evidence_from_sandbox_result(plan: SandboxPlan, request: SandboxRequest, result: SandboxResult, *, runtime_facts: Mapping[str, Any])`
+
+Convert one real ``run_sandboxed`` result into raw evidence JSON.
 
 ### `tools.seccomp`
 
