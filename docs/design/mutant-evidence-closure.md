@@ -915,6 +915,16 @@ same two modules have **55 surviving mutants**:
 | `agent_handoff.py` | 13 | `retT@250` `retF@256` `or@289` `retT@324` `and@336` `and@338` `retF@339` `eq@445` `or@598` `eq@625` `or@981` `or@998` `or@1015` |
 | `bash_parser.py` | 42 | `retF@289` `retT@291` `gt@342` `eq@343` `or@347` `or@357` `or@376` `or@446` `retF@478` `eq@480` `retF@481` `eq@484` `retF@489` `lt@547` `lt@552` `lt@557` `and@564` `or@579` `and@594` `and@599` `lt@613` `lt@620` `eq@632` `or@636` `or@676` `and@677` `eq@677` `lt@686` `lt@690` `lt@709` `or@718` `lt@756` `lt@773` `eq@795` `or@820` `and@822` `or@878` `gt@927` `and@963` `and@973` `retF@1052` `retF@1055` |
 
+**AMENDED 2026-11-22 (j) -- all 55 are now accounted for.**  The
+table above is the measurement of the moment; it is kept because the
+gap it describes is real.  The 13 `agent_handoff.py` survivors are
+killed by named killer tests (§9's AMENDED (f)), and the 42
+`bash_parser.py` survivors split: **33 are killed by named killer
+tests** and the remaining **9** (`lt@547` `lt@552` `lt@557` `lt@620`
+`lt@686` `lt@690` `lt@709` `lt@756` `lt@773`) carry **equivalence
+proofs with non-vacuity controls** (§9's AMENDED (i)).  Neither module's
+body changed.
+
 **Not one of the 55 has an equivalence proof**, and not one has a row
 in §9.1's table.  So the claim above -- "every surviving mutant in the
 batch's census is an EQUIVALENT mutant ... recorded in its slice's test
