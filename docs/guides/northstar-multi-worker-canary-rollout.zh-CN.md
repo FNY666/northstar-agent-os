@@ -222,4 +222,4 @@ PYTHONDONTWRITEBYTECODE=1  \
 
 完整故障演练方案见：
 
-[Northstar canary rollout 混沌工程与故障演练方案](Northstar-canary-rollout-chaos-drill-plan.zh-CN.md)
+[Northstar canary rollout 混沌工程与故障演练方案](northstar-canary-rollout-chaos-drill-plan.zh-CN.md)
