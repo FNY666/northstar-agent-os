@@ -544,6 +544,68 @@ class JudgeHygieneProbeBehaviourTests(unittest.TestCase):
             "a suite that could not be collected reported a kill: " + out,
         )
 
+    def test_a_mutant_that_breaks_the_module_at_import_is_a_kill(self):
+        """A collection error CAUSED BY the mutant is a catch.
+
+        The mirror of the test above, and the reason the probe takes a
+        pre-flight reading of the suite on the pristine source.
+
+        A mutant that makes the module raise at import makes pytest
+        report "1 error during collection" -- which looks exactly like a
+        suite that was already broken.  The two mean opposite things:
+        the first is the mutant caught, the second is the mutant innocent.
+
+        Measured 2026-11-22 on ``effort_scaling.py``: the mutant
+        ``value < 1`` -> ``value <= 1`` makes the module raise at import,
+        and reading that as "no tests ran" made the round a SKIP.  The
+        slice then measured 2/3 for a mutant the suite does catch.
+        """
+        wd = self._tmp / "importbreak"
+        wd.mkdir(parents=True, exist_ok=True)
+        # A module-level guard whose MUTANT makes it raise at import.
+        #
+        # The guard comes FIRST in the file, because the probe takes the
+        # constructs in source order: the `<` must be the first candidate,
+        # or the round would be spent on `pick`'s connective instead.
+        #
+        # With the original `<` the guard is false and the module imports;
+        # with the mutant `<=` it is true, the module raises at import,
+        # and pytest reports a COLLECTION error -- which is what a suite
+        # that was already broken also looks like.
+        (wd / "probe_mod.py").write_text(
+            "_LIMIT = 1\n"
+            "if _LIMIT < 1:\n"
+            "    raise RuntimeError('boom')\n"
+            "\n"
+            "\n"
+            "def pick(flag, other):\n"
+            "    if flag or other:\n"
+            "        return 'first'\n"
+            "    return 'second'\n"
+            "\n"
+            "\n"
+            "def pick_other(flag, other):\n"
+            "    if flag or other:\n"
+            "        return 'alpha'\n"
+            "    return 'beta'\n",
+            encoding="utf-8",
+        )
+        (wd / "test_probe_mod.py").write_text(
+            FIXTURE_STANDALONE_TEST, encoding="utf-8")
+        rc, out = _run_probe(self.probe, wd, no_early_stop=True)
+        self.assertIn("MUTANT RESULT:", out, out)
+        verdicts = [ln.split(" ")[2] for ln in _mutant_lines(out)]
+        self.assertNotIn(
+            "SKIP", verdicts,
+            "a mutant that broke the module at import was skipped rather "
+            "than counted as a catch: " + out,
+        )
+        self.assertIn(
+            "KILLED", verdicts,
+            "a mutant that broke the module at import was not counted as "
+            "a catch: " + out,
+        )
+
     def test_the_probe_runs_the_suite_it_was_given(self):
         """The probe must use a runner that can SEE the suite's tests.
 

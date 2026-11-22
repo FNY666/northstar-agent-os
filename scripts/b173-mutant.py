@@ -120,8 +120,25 @@ def run_tests(workdir, test_modules, timeout=180):
 
     "NO TESTS RAN" is ALSO not a kill, even under pytest: a collection
     error must not be reported as a caught mutant.  The probe therefore
-    checks the output for a collected-test count and treats "collected
-    nothing" as a SKIP.
+    takes a PRE-FLIGHT reading of the suite on the PRISTINE source, and
+    compares each round's reading against it.
+
+    The pre-flight matters because a collection error has two causes that
+    mean opposite things:
+
+      * the suite was already broken -- the mutant is innocent, and the
+        round must be a SKIP;
+      * the MUTANT broke the suite -- the mutant broke the module at
+        import time, and the round is a genuine KILL.
+
+    Measured 2026-11-22 on ``effort_scaling.py``: the mutant
+    ``value < 1`` -> ``value <= 1`` makes the module raise at import, so
+    pytest reports "1 error during collection".  Reading that as "no
+    tests ran" made the round a SKIP, and the slice measured 2/3 when
+    the mutant IS caught.  The pre-flight run collects the suite on the
+    pristine source; if THAT collected nothing, the round is a SKIP, and
+    if it collected fine, a collection error in the round is the
+    mutant's doing and the round is a KILL.
     """
     env = dict(os.environ)
     env["PYTHONPATH"] = ".:tests"
@@ -172,6 +189,18 @@ def collected_nothing(output):
         return True
     return False
 
+
+def collection_failed(output):
+    """True when the suite could not be COLLECTED at all.
+
+    This is the signal that has two opposite causes, so it is only
+    meaningful against the pre-flight reading of the pristine source.
+    """
+    lowered = output.lower()
+    return ("error during collection" in lowered
+            or "no tests ran" in lowered
+            or "collected 0 items" in lowered)
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--file", required=True)
@@ -198,6 +227,31 @@ def main():
         print("MUTANT SKIP: no mutable construct found in module")
         return 2
     killed = 0; applied = 0; results = []
+
+    test_modules = [m.strip() for m in a.test_module.split(",") if m.strip()]
+    if not test_modules:
+        print("MUTANT SKIP: no test module given")
+        return 2
+
+    # The PRE-FLIGHT reading of the suite, on the PRISTINE source.
+    #
+    # It answers one question that no per-round reading can: was the
+    # suite already broken before this probe touched anything?  A
+    # collection error in a round then means the MUTANT broke the suite
+    # (a kill), not that the suite was broken to begin with (a skip).
+    #
+    # Measured 2026-11-22 on `effort_scaling.py`: the mutant
+    # `value < 1` -> `value <= 1` makes the module raise at import, so
+    # pytest reports "1 error during collection".  Without the pre-flight
+    # that reads as "no tests ran", and the round becomes a SKIP -- the
+    # slice measures 2/3 for a mutant the suite does catch.
+    _pf_rc, _pf_out = run_tests(a.workdir, test_modules)
+    preflight_collected_nothing = collected_nothing(_pf_out)
+    preflight_collection_failed = collection_failed(_pf_out)
+    if preflight_collected_nothing:
+        print("MUTANT SKIP: the suite collected no tests on the pristine "
+              "source; no mutant can be measured against it", flush=True)
+        return 2
     # Crash-safe restore.  The probe writes a mutant into the file under
     # test, runs the suite, then restores the original.  If the process is
     # KILLED between the write and the restore -- a wall-clock timeout, a
@@ -280,19 +334,15 @@ def main():
         # Round 5: drop the cached bytecode of the module under mutation so
         # the freshly written source is actually compiled and executed.
         drop_cached_bytecode(a.file)
-        test_modules = [m.strip() for m in a.test_module.split(",")
-                         if m.strip()]
-        if not test_modules:
-            print("MUTANT SKIP: no test module given")
-            return 2
         rc, out = run_tests(a.workdir, test_modules)
         applied += 1
         if rc is None:
             results.append(f"MUTANT {kind}@{lineno} SKIP (test timeout: {desc})")
-        elif collected_nothing(out):
-            # A suite that collected NO tests cannot have caught anything.
-            # Reporting this as KILLED is a false kill: it looks like
-            # evidence where there is none.
+        elif collected_nothing(out) and preflight_collected_nothing:
+            # The suite collected no tests in this round, AND it collected
+            # no tests on the pristine source either.  So nothing ran and
+            # nothing could have been caught.  Reporting this as KILLED is
+            # a false kill: it looks like evidence where there is none.
             results.append(
                 f"MUTANT {kind}@{lineno} SKIP (no tests collected: {desc})")
         elif rc != 0:
