@@ -64,6 +64,10 @@ Host state directory used when the caller did not choose an evidence path.
 The host-owned task contract for one programming run.
 
 - `as_dict()`
+#### `validate_check_inputs(inputs: Iterable[str])`
+
+Return a stable, validated tuple of repository-relative check inputs.
+
 #### `IsolatedCodeWorkspace`
 
 Lifecycle of a detached task worktree and its durable evidence directory.
@@ -192,6 +196,43 @@ Check a decoded JSON tree and return ``(estimated_bytes, expanded_nodes)``.
 
 Count JSON value occurrences and nesting before decoding the input.
 
+### `runtime_evidence`
+
+Source: `components/northstar-agent-runtime/runtime_evidence.py`
+
+Optional, digest-first evidence capture for one governed runtime run.
+
+#### `RuntimeEvidenceError`
+
+The bundle could not be created or updated safely.
+
+#### `EvidenceCaptureReport`
+
+Machine-readable result of evidence capture for one run.
+
+- `as_dict()`
+#### `RuntimeEvidenceSink`
+
+Best-effort-by-default sink for runtime events and subject digests.
+
+- `available` (property)
+- `last_error` (property)
+- `start_run(*, provider: str, model: str, permission_mode: str, policy_revision: str | None, tools: Sequence[str], workspace: str, max_turns: int, max_tool_calls: int | None, max_budget_usd: float | None)`
+  - Record run identity and governance configuration without prompt text.
+- `append_event(*, source: str, kind: str, sequence: str, subject: Mapping[str, Any], ref_ids: Sequence[str]=())`
+  - Append a compact event under a stable source-qualified id.
+- `append_subject(*, kind: str, source_id: str, subject: Mapping[str, Any] | bytes, ref_ids: Sequence[str]=())`
+  - Append a caller-built message-specific subject with a stable id.
+- `result_refs()`
+  - Stable prior source ids the terminal record can reference.
+- `seal(*, completion: Mapping[str, Any])`
+  - Write a digest manifest and close the capture session.
+- `verify()`
+  - Re-open the ledger and report its current structural integrity.
+- `inspect()`
+  - Read-only bundle summary; corruption is reported, never hidden.
+- `record_remote_grant(*, capability_count: int, expires_at: int, delegation_depth: int, target_agent: str, grant_digest: str, receipt_digest: str | None=None)`
+  - Bind a verified remote handoff without retaining its token or prompt.
 ### `providers.http_response_limits`
 
 Source: `components/northstar-agent-runtime/providers/http_response_limits.py`
@@ -24509,6 +24550,28 @@ Shape an ``audit.ndjson/1`` record for a barcode-scanner event.
 
 #### `main()`
 
+### `bash_parser`
+
+Source: `components/northstar-agent-runtime/bash_parser.py`
+
+Hand-written recursive-descent Bash AST parser for security checks.
+
+#### `VerdictKind`
+
+Outcome of a bash command check.
+
+#### `Verdict`
+
+Structured verdict for a shell command.
+
+#### `check_command(text: str)`
+
+Check a shell command and return a verdict. Never raises.
+
+#### `stdlib_only()`
+
+Return True when this module imports only the standard library.
+
 ### `batch_processing`
 
 Source: `components/northstar-agent-runtime/batch_processing.py`
@@ -28948,6 +29011,10 @@ One validated ``[[hooks]]`` entry, ready to be registered.
 
 - `as_dict()`
   - Display form only: the resolved absolute script path is never printed.
+#### `sealed_snapshot_supported()`
+
+Report whether this host can seal a script snapshot for real.
+
 #### `parse_hooks(raw: Sequence[Any], *, workspace: str | Path, known_tools: Sequence[str]=(), reviewed_digests: Mapping[str, str] | None=None)`
 
 Validate a raw ``hooks`` list from the policy file. Raises on anything suspect.
@@ -36253,6 +36320,35 @@ Quantified "meaningful command" over an autonomous swarm.
 #### `check_swarm_config(cfg: SwarmConfig | None)`
 
 Unquantified command and silent threshold drift fail closed.
+
+### `defensive_agent`
+
+Source: `components/northstar-agent-runtime/defensive_agent.py`
+
+Deterministic blue-team assessment for agent inputs and tool targets.
+
+#### `Decision`
+
+#### `DefensiveFinding`
+
+A safe-to-log finding; raw input and URLs never appear here.
+
+#### `DefensiveAssessment`
+
+The complete deterministic result of one local assessment.
+
+- `as_dict()`
+#### `assess(text: str='', *, tool_name: str | None=None, url: str | None=None)`
+
+Assess untrusted content and an optional tool target.
+
+#### `sanitize_for_model(text: str, *, preserve_length: bool=False)`
+
+Remove known instruction-forgery spans before model consumption.
+
+#### `stdlib_only()`
+
+The orchestrator itself uses only stdlib plus local sibling modules.
 
 ### `delay_queue`
 
@@ -43906,6 +44002,72 @@ Goal-misgeneralization detection/correction bookkeeping ledger.
 
 Self-check: declare, observe, detect, correct, test.
 
+### `gossip_announcer`
+
+Source: `components/northstar-agent-runtime/gossip_announcer.py`
+
+Gossip announcer: host-side wiring for the gossip dissemination plane.
+
+#### `GossipAnnouncerError`
+
+Configuration or usage error (fail-closed).
+
+#### `LocalGossipTransport`
+
+In-process loopback transport: node id -> receiver registry.
+
+- `register(node_id: str, receiver: Callable[[Rumor], Any])`
+  - Register a receiver for ``node_id``. Duplicates are refused.
+- `unregister(node_id: str)`
+  - Drop a receiver. Returns True if one was registered.
+- `deliver(target_id: str, rumor: Rumor)`
+  - Deliver ``rumor`` to ``target_id``. False when unknown.
+- `members()`
+  - Registered node ids, sorted.
+#### `GossipAnnouncer`
+
+Host-side gossip announcer: ledger head -> rumors -> peers.
+
+- `announce_head(ledger: Any)`
+  - Announce the sealed ledger's head if it advanced.
+- `announce_alert(kind: str, detail: Optional[Mapping]=None)`
+  - Originate an immediate alert rumor (kill-switch / config-drift).
+- `tick()`
+  - One anti-entropy round: re-disseminate live rumors.
+- `receive(rumor: Rumor)`
+  - Accept a rumor from the transport; True on first sight.
+- `join_peer(peer_id: str)`
+  - Admit a peer into the membership ledger (host-called).
+- `mark_suspect(peer_id: str)`
+  - Mark a live peer suspect (missed probes; host-called).
+- `confirm_dead(peer_id: str)`
+  - Confirm a suspect peer dead (terminal; host-called).
+- `mark_alive(peer_id: str)`
+  - Refute a suspicion: suspect -> alive, incarnation bumps.
+- `peers` (property)
+  - Peer node ids named at construction.
+- `last_head_seq` (property)
+  - Ledger seq of the last announced head (0 = none yet).
+- `has_seen(rumor_id: str)`
+  - True when this host has seen ``rumor_id`` (origin or relay).
+- `seen_ids()`
+  - Rumor ids seen, in first-sight order.
+- `reports()`
+  - Dissemination decisions booked by the membership ledger.
+- `audit_log()`
+  - Announcer audit events (received / spread), in order.
+- `membership_audit_log()`
+  - Membership-plane audit events (join / suspect / confirm / ...).
+- `alive_members()`
+  - Members currently alive, sorted.
+- `stats()`
+  - Counters and current head position (pure view).
+- `as_dict()`
+  - State snapshot (pure view).
+#### `main()`
+
+Self-check: line topology proves multi-hop relay over loopback.
+
 ### `gossip_protocol`
 
 Source: `components/northstar-agent-runtime/gossip_protocol.py`
@@ -44419,6 +44581,10 @@ Temp workspaces + scripted providers for one suite run.
 - `workspace(files: dict[str, str] | None=None)`
 - `provider(turns: Sequence[Any], **kwargs: Any)`
 - `runtime(*, workspace: Path, turns: Sequence[Any], tools: Any=None, config_kwargs: dict[str, Any] | None=None, tool_limits: ToolLimits | None=None, can_use_tool: Any=None, hooks: HookRegistry | None=None, sessions: Any=None)`
+#### `seccomp_filter_loadable()`
+
+Report whether this host can actually install the seccomp denylist.
+
 #### `run_offline_bundle()`
 
 Signed offline policy bundles (ninety-seventh batch).
@@ -53020,6 +53186,8 @@ Everything a caller gets back from :meth:`AgentRuntime.run_collect`.
 
 One configured governed loop.
 
+- `announce_alert(kind: str, detail: Mapping[str, Any] | None=None)`
+  - Announce a kill-switch / config-drift alert immediately.
 - `provider_name` (property)
 - `durable` (property)
 - `last_report` (property)
@@ -80629,6 +80797,10 @@ Tool registry, uniform handler signature, and the sandbox every path crosses.
 
 Raised by the sandbox; converted into an errored tool_result, never a crash.
 
+#### `ToolWriteDenied`
+
+A write target was refused during path preflight, before mutation began.
+
 #### `ToolInputError`
 
 Raised for a malformed tool payload; reported to the model as an error.
@@ -80733,6 +80905,40 @@ Schema for the sidecar-delegated tool (registered only with a socket).
 
 #### `truncate_text(text: str, limit: int=MAX_TOOL_RESULT_CHARS)`
 
+### `tools.canary_rollout`
+
+Source: `components/northstar-agent-runtime/tools/canary_rollout.py`
+
+Bounded multi-worker unquarantine and canary rollout orchestrator.
+
+#### `RolloutError`
+
+#### `now()`
+
+#### `bounded(text: str, limit: int=8192)`
+
+#### `atomic_json(path: Path, value: Any)`
+
+#### `validate_worker(worker: dict[str, Any])`
+
+#### `load_workers(path: Path)`
+
+#### `split_waves(workers: list[dict[str, Any]], wave_size: int)`
+
+#### `run_command(argv: list[str], timeout: int)`
+
+#### `worker_command(worker: dict[str, Any], *, mode: str, apply: bool, start: bool, unquarantine: Path)`
+
+#### `check_regular_executable(path: Path, label: str)`
+
+#### `run_wave(wave: list[dict[str, Any]], *, mode: str, apply: bool, start: bool, unquarantine: Path, timeout: int, concurrency: int)`
+
+#### `canary_command(canary: Path, wave: list[dict[str, Any]], rollout_id: str)`
+
+#### `failure_reason(result: dict[str, Any], *, canary: bool=False)`
+
+#### `main(argv: list[str] | None=None)`
+
 ### `tools.capdrop`
 
 Source: `components/northstar-agent-runtime/tools/capdrop.py`
@@ -80781,6 +80987,45 @@ Wrap ``target_argv`` so capabilities are dropped before exec.
 
 bwrap ``--cap-drop``/``--cap-add`` args for a whitelist.
 
+### `tools.deterministic_kernel`
+
+Source: `components/northstar-agent-runtime/tools/deterministic_kernel.py`
+
+Small, dependency-free prototype for a deterministic AgentOS kernel.
+
+#### `KernelError`
+
+Base class for fail-closed policy, log, and state errors.
+
+#### `PolicyError`
+
+#### `EventIntegrityError`
+
+#### `RecoveryRequired`
+
+An effect began but has no durable completion record.
+
+#### `SandboxPolicy`
+
+Host-verifiable launch constraints; defaults are intentionally narrow.
+
+- `workspace_path` (property)
+- `plan(argv: tuple[str, ...], *, cwd: Path | None=None, env_names: tuple[str, ...]=())`
+#### `SandboxPlan`
+
+- `as_dict()`
+#### `KernelState`
+
+#### `DeterministicKernel`
+
+A caller-clocked, hash-linked execution ledger with deterministic replay.
+
+- `state(run_id: str)`
+- `start_run(run_id: str, input_digest: str)`
+- `plan_step(run_id: str, step_id: str, action_key: str, plan_digest: str)`
+- `run_step(run_id: str, step_id: str, action_key: str, effect: Callable[[], Any], *, plan: SandboxPlan | None=None, evidence: Mapping[str, Any] | None=None)`
+  - Run one effect only after the host sandbox evidence is verified.
+- `replay(run_id: str)`
 ### `tools.effect_envelope`
 
 Source: `components/northstar-agent-runtime/tools/effect_envelope.py`
@@ -80839,6 +81084,10 @@ Tests only: drop the cached probe so a fixture can re-run discovery.
 #### `probe_capabilities(*, force: bool=False, bwrap_bin: str | None=None)`
 
 Discover what isolation this host can provide (cached after first call).
+
+#### `resolve_effective_backend(requested: str, *, capabilities: SandboxCapabilities | None=None, seccomp: str='auto', capdrop_whitelist: Sequence[str] | None=None)`
+
+Resolve the backend a request will actually use, and say what changed.
 
 #### `resolve_backend(requested: str, *, capabilities: SandboxCapabilities | None=None)`
 
@@ -81021,6 +81270,38 @@ Network and cross-domain Unix-socket denial without FS confinement.
 #### `landlock_loader_argv(inner_argv: Sequence[str], spec: Mapping[str, object], *, python: str='python3')`
 
 Wrap ``inner_argv`` so the Landlock allowlist is installed before exec.
+
+### `tools.sandbox_evidence`
+
+Source: `components/northstar-agent-runtime/tools/sandbox_evidence.py`
+
+Fail-closed verification of host-reported sandbox evidence.
+
+#### `EvidenceError`
+
+Evidence is missing, inconsistent, or weaker than the requested plan.
+
+#### `SandboxEvidence`
+
+- `from_dict(raw: Mapping[str, Any])`
+- `as_dict()`
+#### `verify_evidence(plan: SandboxPlan, raw: Mapping[str, Any], *, require_os_isolation: bool=False)`
+
+Verify host evidence is at least as restrictive as ``plan``.
+
+### `tools.sandbox_evidence_adapter`
+
+Source: `components/northstar-agent-runtime/tools/sandbox_evidence_adapter.py`
+
+Adapter from ``tools.os_sandbox`` results to the evidence contract.
+
+#### `SandboxEvidenceAdapterError`
+
+The os_sandbox result cannot be converted without inventing facts.
+
+#### `evidence_from_sandbox_result(plan: SandboxPlan, request: SandboxRequest, result: SandboxResult, *, runtime_facts: Mapping[str, Any])`
+
+Convert one real ``run_sandboxed`` result into raw evidence JSON.
 
 ### `tools.seccomp`
 

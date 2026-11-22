@@ -213,6 +213,17 @@ class PersistenceTests(unittest.TestCase):
         self.assertTrue(ks.is_triggered)
         self.assertEqual(ks.check(), (False, BASIS_TRIGGERED))
 
+    def test_ambiguous_state_file_fails_closed(self):
+        tmp = tempfile.mkdtemp()
+        path = os.path.join(tmp, "kill-switch.json")
+        with open(path, "w") as fh:
+            fh.write('{"schema":"northstar.kill-switch.v1","schema":"forged"}')
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            ks = KillSwitch(path)
+        self.assertTrue(any("corrupt" in str(w.message) for w in caught))
+        self.assertTrue(ks.is_triggered)
+
     def test_tampered_state_file_fails_closed(self):
         ks, tmp = make_switch()
         path = os.path.join(tmp, "kill-switch.json")
