@@ -54019,7 +54019,7 @@ MCP transport, protocol, or configuration error. Operator-facing.
 
 #### `RemoteTool`
 
-#### `tool_definition_digest(server: str, name: str, description: str, input_schema: Mapping[str, Any], output_schema: Mapping[str, Any] | None=None)`
+#### `tool_definition_digest(server: str, name: str, description: str, input_schema: Mapping[str, Any], output_schema: Mapping[str, Any] | None=None, annotations: Mapping[str, Any] | None=None)`
 
 Canonical digest pinning one MCP tool's definition.
 
