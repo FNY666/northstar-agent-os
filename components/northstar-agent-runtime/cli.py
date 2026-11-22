@@ -182,6 +182,19 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     code_group.add_argument(
+        "--check-input",
+        dest="check_inputs",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help=(
+            "repository-relative file a host-declared check reads (check script, "
+            "helper, fixture); repeatable. Each input is content-addressed at the "
+            "starting commit and sealed; a delivery patch touching a pinned input "
+            "fails verification"
+        ),
+    )
+    code_group.add_argument(
         "--plan-only",
         action="store_true",
         help="understand and plan without allowing file edits or Shell execution",
@@ -847,7 +860,7 @@ def _run_code(args: argparse.Namespace) -> int:
     The generic runtime remains the only agent loop. This wrapper owns the
     repository lifecycle and evidence artifacts, then delegates to :func:`_run`.
     """
-    from code_task import CodePhaseMachine, CodeTask, IsolatedCodeWorkspace
+    from code_task import CodePhaseMachine, CodeTask, IsolatedCodeWorkspace, validate_check_inputs
     from verification import validate_commands
 
     task_text = _read_prompt(args)
@@ -858,12 +871,14 @@ def _run_code(args: argparse.Namespace) -> int:
         )
         return USAGE_ERROR
     checks = validate_commands(tuple(getattr(args, "checks", ()) or ()))
+    check_inputs = validate_check_inputs(tuple(getattr(args, "check_inputs", ()) or ()))
     task = CodeTask(
         goal=task_text.strip(),
         workspace=args.workspace,
         checks=checks,
         plan_only=bool(getattr(args, "plan_only", False)),
         network_targets=tuple(getattr(args, "egress_targets", ()) or ()),
+        check_inputs=check_inputs,
     )
 
     # Dry-run is intentionally read-only: validate the generic configuration
@@ -894,6 +909,7 @@ def _run_code(args: argparse.Namespace) -> int:
         plan_only=task.plan_only,
         worktree=workspace.worktree,
         start_commit=workspace.start_commit,
+        check_inputs=task.check_inputs,
     )
     phases.start()
 

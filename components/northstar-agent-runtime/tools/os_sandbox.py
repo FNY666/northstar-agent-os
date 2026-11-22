@@ -165,6 +165,10 @@ class SandboxResult:
     capdrop: dict[str, Any] | None = None
     aggregate_setup_failed: bool = False
     aggregate_cleanup_failed: bool = False
+    #: Loud, human-readable notices about decisions the runtime took on the
+    #: operator behalf (e.g. auto backend fallback). Empty when nothing had
+    #: to be decided for the operator.
+    warnings: tuple[str, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -190,6 +194,7 @@ class SandboxResult:
             "capdrop": self.capdrop,
             "aggregate_cleanup_failed": self.aggregate_cleanup_failed,
             "aggregate_setup_failed": self.aggregate_setup_failed,
+            "warnings": list(self.warnings),
         }
 
     def render(self) -> str:
@@ -201,6 +206,8 @@ class SandboxResult:
         ]
         if self.detail:
             lines.append(f"note: {self.detail}")
+        for warning in self.warnings:
+            lines.append(f"warning: {warning}")
         if self.stdout:
             lines.append("--- stdout ---")
             lines.append(self.stdout if not self.stdout.endswith("\n") else self.stdout.rstrip("\n"))
@@ -384,6 +391,56 @@ def probe_capabilities(*, force: bool = False, bwrap_bin: str | None = None) -> 
     )
     _CAP_CACHE = caps
     return caps
+
+
+def resolve_effective_backend(
+    requested: str,
+    *,
+    capabilities: SandboxCapabilities | None = None,
+    seccomp: str = "auto",
+    capdrop_whitelist: Sequence[str] | None = None,
+) -> tuple[str, tuple[str, ...]]:
+    """Resolve the backend a request will actually use, and say what changed.
+
+    ``resolve_backend`` answers "which backend does *auto* prefer"; it does
+    not know whether that backend can enforce the controls the request asks
+    for. On a host where bubblewrap is present but its own BPF filter is
+    rejected by the kernel, auto picks bwrap and every shell request is
+    refused. The process backend applies the same denylist through its own
+    prctl wrapper, so auto falls back to it — and says so.
+
+    An operator who names a backend explicitly never gets a fallback: they
+    asked for it by name, and a refusal is the honest answer.
+
+    Returns the backend that will run plus the warnings that must be shown.
+    """
+    caps = capabilities or probe_capabilities()
+    choice = (requested or "auto").strip().lower()
+    if choice not in BACKENDS:
+        raise SandboxError(
+            f"unknown sandbox backend {requested!r}; choose one of {', '.join(BACKENDS)}"
+        )
+    chosen = resolve_backend(choice, capabilities=caps)
+    if choice != "auto" or chosen != "bwrap":
+        return chosen, ()
+    seccomp_mode = (seccomp or "auto").strip().lower()
+    if seccomp_mode != "off" and not caps.bwrap_seccomp:
+        return "process", (
+            "auto backend fell back from bwrap to process: bwrap could not enforce "
+            f"the seccomp denylist on this host ({caps.bwrap_seccomp_detail}); "
+            "the process backend applies the same denylist through its own prctl "
+            "wrapper, but the host filesystem stays reachable (process isolation, "
+            "not OS isolation)",
+        )
+    if capdrop_whitelist is not None and not caps.bwrap_cap_drop:
+        return "process", (
+            "auto backend fell back from bwrap to process: bwrap could not enforce "
+            f"the capability drop on this host ({caps.bwrap_detail}); "
+            "the process backend applies the same capability drop through its own "
+            "launcher, but the host filesystem stays reachable (process isolation, "
+            "not OS isolation)",
+        )
+    return chosen, ()
 
 
 def resolve_backend(requested: str, *, capabilities: SandboxCapabilities | None = None) -> str:
@@ -985,6 +1042,13 @@ def run_sandboxed(
         except (PledgeError, PledgeViolation) as error:
             raise SandboxError(f"pledge refused: {error}") from error
 
+    chosen, fallback_warnings = resolve_effective_backend(
+        backend,
+        capabilities=caps,
+        seccomp=seccomp_mode,
+        capdrop_whitelist=request.capdrop_whitelist,
+    )
+
     if chosen == "bwrap":
         assert caps.bwrap_path  # resolve_backend guaranteed usable
         if request.capdrop_whitelist is not None and not caps.bwrap_cap_drop:
@@ -1304,7 +1368,13 @@ def run_sandboxed(
     else:
         final_detail = result.detail
     # The audit trail records what the caller asked for, not the wrapper.
-    return replace(result, argv=request.argv, capdrop=capdrop_report, detail=final_detail)
+    return replace(
+        result,
+        argv=request.argv,
+        capdrop=capdrop_report,
+        detail=final_detail,
+        warnings=tuple(fallback_warnings),
+    )
 
 
 __all__ = [
@@ -1322,5 +1392,6 @@ __all__ = [
     "probe_capabilities",
     "reset_capabilities_cache",
     "resolve_backend",
+    "resolve_effective_backend",
     "run_sandboxed",
 ]

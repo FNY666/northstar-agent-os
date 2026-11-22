@@ -234,6 +234,15 @@ class RuntimeConfig:
     #: Optional host-owned per-run subset of the egress sidecar policy. None
     #: leaves the sidecar's global exact-host allowlist as the only target gate.
     egress_target_scope: tuple[str, ...] | None = None
+    #: Gossip announce plane (see gossip_announcer). Off by default:
+    #: announcing the audit head changes observable behavior, so a host
+    #: opts in. ``gossip_node_id`` names this host on the plane (default:
+    #: the agent name); ``gossip_peers`` lists peer node ids;
+    #: ``gossip_fanout`` caps targets per spread.
+    gossip_enabled: bool = False
+    gossip_node_id: str = ""
+    gossip_peers: tuple[str, ...] = ()
+    gossip_fanout: int = 3
     #: Backend for the Shell tool (``auto`` | ``bwrap`` | ``process``). Does not
     #: grant Shell — the permission gate still denies it under ``default`` until
     #: ``--allow-tool Shell``. ``bwrap`` is refused at construction if unusable.
@@ -427,6 +436,21 @@ class RuntimeConfig:
                 object.__setattr__(self, "egress_target_scope", validate_egress_target_scope(self.egress_target_scope))
             except ValueError as error:
                 fail(str(error))
+        if not isinstance(self.gossip_enabled, bool):
+            fail("gossip_enabled must be a boolean")
+        if not isinstance(self.gossip_node_id, str):
+            fail("gossip_node_id must be a string")
+        if isinstance(self.gossip_peers, str) or not isinstance(self.gossip_peers, (tuple, list)):
+            fail("gossip_peers must be a tuple or list of node ids")
+        object.__setattr__(self, "gossip_peers", tuple(self.gossip_peers))
+        if not all(isinstance(p, str) and p for p in self.gossip_peers):
+            fail("gossip_peers must be non-empty strings")
+        if len(set(self.gossip_peers)) != len(self.gossip_peers):
+            fail("gossip_peers must not contain duplicates")
+        if isinstance(self.gossip_fanout, bool) or not isinstance(self.gossip_fanout, int):
+            fail("gossip_fanout must be an integer")
+        if self.gossip_fanout < 1:
+            fail("gossip_fanout must be >= 1")
     @property
     def budget_enabled(self) -> bool:
         return self.max_budget_usd is not None
@@ -462,6 +486,10 @@ class RuntimeConfig:
             "lock_session": self.lock_session,
             "sidecar": bool(self.sidecar_socket),
             "egress_target_scope": list(self.egress_target_scope) if self.egress_target_scope is not None else None,
+            "gossip_enabled": self.gossip_enabled,
+            "gossip_node_id": self.gossip_node_id,
+            "gossip_peers": list(self.gossip_peers),
+            "gossip_fanout": self.gossip_fanout,
             "evidence_dir": self.evidence_dir,
             "evidence_required": self.evidence_required,
         }
@@ -809,6 +837,7 @@ class AgentRuntime:
         budget: Budget | None = None,
         summarizer: Callable[[Sequence[Any]], str] | None = None,
         dataflow: SessionDataflow | None = None,
+        gossip_transport: Any = None,
     ) -> None:
         if provider is None:
             raise RuntimeConfigurationError("a provider is required")
@@ -942,6 +971,41 @@ class AgentRuntime:
             observer=ObserverVerdictLedger(),
             ledger=self.sealed_ledger,
         )
+        # Gossip announce plane (see gossip_announcer): off unless the host
+        # opts in via config. The announcer owns a GossipNode (seen-set)
+        # and a GossipProtocol (membership + target selection) and
+        # announces the sealed ledger's head at turn boundaries and at run
+        # close. The transport is in-process loopback unless the host
+        # supplies its own register()/deliver() implementation; a future
+        # network transport plugs in here without touching the loop.
+        self.gossip_announcer: Any = None
+        self.gossip_transport: Any = None
+        self._gossip_announce_error: str | None = None
+        if self.config.gossip_enabled:
+            try:
+                from gossip_announcer import GossipAnnouncer, LocalGossipTransport
+
+                if gossip_transport is None:
+                    transport: Any = LocalGossipTransport()
+                elif callable(getattr(gossip_transport, "register", None)) and callable(
+                    getattr(gossip_transport, "deliver", None)
+                ):
+                    transport = gossip_transport
+                else:
+                    raise RuntimeConfigurationError(
+                        "gossip_transport must provide register() and deliver()"
+                    )
+                self.gossip_transport = transport
+                self.gossip_announcer = GossipAnnouncer(
+                    node_id=self.config.gossip_node_id or self.config.agent,
+                    peers=self.config.gossip_peers,
+                    fanout=self.config.gossip_fanout,
+                    transport=transport,
+                )
+            except RuntimeConfigurationError:
+                raise
+            except Exception as error:
+                raise RuntimeConfigurationError(f"gossip: {error}") from error
         self.session_id = resolve_session_id(self.config.session_id, self.sessions if self.sessions.enabled else None)
         if self.sessions.session_id != self.session_id:
             self.sessions = replace(self.sessions, session_id=self.session_id)
@@ -970,6 +1034,39 @@ class AgentRuntime:
                 import zlib
 
                 self.retry = _replace(self.retry, seed=zlib.crc32(self.session_id.encode("utf-8")))
+
+    def _announce_audit_head(self) -> None:
+        """Announce the sealed ledger's head if it advanced, then tick.
+
+        Best-effort by design: gossip is dissemination, not delivery
+        proof, and a failed announcement must never fail a run. The
+        failure (if any) is recorded on ``_gossip_announce_error`` and
+        the run continues; the sealed ledger is unaffected. Called at
+        turn boundaries and at run close -- at most one head rumor per
+        turn, plus one anti-entropy round per call.
+        """
+        announcer = self.gossip_announcer
+        if announcer is None:
+            return
+        try:
+            announcer.announce_head(self.sealed_ledger)
+            announcer.tick()
+            self._gossip_announce_error = None
+        except Exception as error:  # noqa: BLE001 - announcement is best-effort
+            self._gossip_announce_error = f"{type(error).__name__}: {error}"
+
+    def announce_alert(self, kind: str, detail: Mapping[str, Any] | None = None) -> Any:
+        """Announce a kill-switch / config-drift alert immediately.
+
+        Host-called (a future kill-switch trigger or config-drift
+        detector calls this); returns the originated rumor, or None
+        when gossip is disabled. Unlike the automatic head announcement,
+        an explicit host call is fail-closed: an unknown kind raises.
+        """
+        announcer = self.gossip_announcer
+        if announcer is None:
+            return None
+        return announcer.announce_alert(kind, detail)
 
     # -- capability views --------------------------------------------------
     @property
@@ -1813,6 +1910,7 @@ class AgentRuntime:
                 if not calls:
                     if (yield from self._finish_without_tools(state, turn_index, assistant)):
                         return
+                    self._announce_audit_head()
                     continue
 
                 results, halted = self._run_tool_batch(calls, state, turn_index=turn_index, span=turn_span)
@@ -1823,6 +1921,7 @@ class AgentRuntime:
                 self._record_tool_message(tool_message)
                 yield tool_message
                 self._checkpoint(state, boundary="after_tools")
+                self._announce_audit_head()
                 if halted is not None:
                     yield self._finish(state, halted)
                     return
@@ -4590,6 +4689,9 @@ class AgentRuntime:
         return result
 
     def _close_run(self, state: _RunState, run_span: Any) -> None:
+        # Announce the final audit head before anything is torn down: a run
+        # that ends without completing a turn still has a head worth pinning.
+        self._announce_audit_head()
         # Apply the evidence policy before the terminal record is persisted: a
         # required-capture failure must make the event stream, RunReport, and
         # session transcript agree on the final subtype.
