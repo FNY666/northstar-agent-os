@@ -113,14 +113,14 @@ def test_parse_json_object():
     assert not bad.success and bad.error_code == "bad-json"
     assert bad.value_json == "null"
     assert bad.verify()
-    duplicate = op.parse("cfg", '{"name":"svc","name":"evil"}', 5)
+    duplicate = op.parse("cfg", '{"name":"svc","name":"evil"}', 6)
     assert not duplicate.success and duplicate.error_code == "bad-json"
-    arr = op.parse("cfg", "[1, 2]", 6)
+    arr = op.parse("cfg", "[1, 2]", 7)
     assert not arr.success and arr.error_code == "not-an-object"
     with pytest.raises(UnknownParserError):
-        op.parse("ghost", "{}", 7)
+        op.parse("ghost", "{}", 8)
     with pytest.raises(BadTextError):
-        op.parse("cfg", 123, 8)
+        op.parse("cfg", 123, 9)
 
 
 def test_parse_other_types():
