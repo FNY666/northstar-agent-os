@@ -9,6 +9,7 @@ These tests pin the *scorecard's quality*, not the components:
   of those work items lands, its probe turns True and this test forces the
   maintainer to move it out of the gap list on purpose.
 """
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -57,7 +58,60 @@ class ScorecardCoverageTests(unittest.TestCase):
 
     def test_profile_a_transport_is_present(self):
         result = rw.score()
-        self.assertEqual(result["ops"][:2], (5, 6))
+        self.assertEqual(result["ops"][:2], (6, 6))
+
+    def test_canary_evidence_requires_pass_line_and_worker_host(self):
+        # The check must not be flippable by a stub: evidence files need the
+        # verbatim phase-1 PASS line plus a real worker-host marker (user@host).
+        self.assertTrue(rw._canary_evidence())
+        runs = rw.REPO / "examples" / "remote-canary" / "runs"
+        texts = [
+            path.read_text(encoding="utf-8")
+            for path in sorted(runs.glob("*.md"))
+        ]
+        # Evidence requires PASS line plus a real worker-host marker, not a bare email.
+        self.assertTrue(
+            any(
+                "PASS: remote-worker channel canary succeeded" in t
+                and re.search(r"[\w.-]+@(?:\d{1,3}\.){3}\d{1,3}|[\w.-]+@[A-Za-z0-9.-]+\.[A-Za-z0-9.-]+\.[A-Za-z]{2,}", t)
+                for t in texts
+            )
+        )
+
+        # Temporarily move real evidence files aside to test stub rejection.
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            real_files = list(runs.glob("*.md"))
+            saved = {}
+            for path in real_files:
+                saved[path.name] = path.read_bytes()
+                path.unlink()
+            try:
+                def assert_stub_rejected(stub_text: str) -> None:
+                    stub = runs / "stub-proof.md"
+                    stub.write_text(stub_text, encoding="utf-8")
+                    try:
+                        self.assertFalse(rw._canary_evidence(), "bare email mention must not flip the score")
+                    finally:
+                        stub.unlink()
+
+                assert_stub_rejected("PASS: remote-worker channel canary succeeded\nsomeone@example.com\n")
+                assert_stub_rejected("PASS: remote-worker channel canary succeeded\ncontact@northstar.example\n")
+
+                # A real user@host marker together with the PASS line MUST flip the score.
+                marker = runs / "marker-proof.md"
+                marker.write_text(
+                    "PASS: remote-worker channel canary succeeded\nmuse-newapi@140.245.125.82\n",
+                    encoding="utf-8",
+                )
+                try:
+                    self.assertTrue(rw._canary_evidence(), "real user@host marker must flip the score")
+                finally:
+                    marker.unlink()
+            finally:
+                # Restore real evidence files.
+                for name, content in saved.items():
+                    (runs / name).write_bytes(content)
 
 
 class CliSmokeTests(unittest.TestCase):
