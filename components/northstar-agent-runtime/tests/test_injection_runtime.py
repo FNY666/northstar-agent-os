@@ -96,7 +96,13 @@ class InjectionRuntimeRegressionTests(RuntimeTestCase):
         report, reads, effects = self.run_fixture(ATTACK, attacker_attempts_email=True)
 
         self.assertEqual(reads, [ATTACK.probe_id])
-        self.assertIn(ATTACK.poisoned_output, self.tool_result_text(report))
+        # The runtime redacts the injected instruction before it can reach the
+        # model, so what the agent sees is the neutralised form, not the raw
+        # text.  The regression this test guards is that the payload still
+        # arrives at the runtime yet cannot trigger the outbound effect.
+        tool_text = self.tool_result_text(report)
+        self.assertIn("[redacted defensive rule]", tool_text)
+        self.assertNotIn("Ignore previous instructions", tool_text)
         self.assertEqual(effects, [], "the in-memory egress handler must not run")
         self.assertEqual(report.subtype, "success")
         self.assertEqual([call.name for call in report.tool_calls], ["ReadDocument", "SendEmail"])
