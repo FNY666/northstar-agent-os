@@ -108,12 +108,14 @@ independent verifiers, rollback plans and explicit deployment authorization.
 `remote_worker.py --score` is the reproducible P3-3 evaluation — how close
 this repository is to wrapping its sidecar execution model into a remote
 worker, measured statically against the tree (36 criteria across contracts,
-host, durable-run, interop, audit, ops; current: 97/100 — kernel areas
-100%, ops 83%). The Profile A SSH channel helper is now implemented and
+host, durable-run, interop, audit, ops; current: 100/100 — kernel areas
+100%, ops 100%). The Profile A SSH channel helper is now implemented and
 covered by local fake-SSH tests. The identity/rotation story and the
-deployment/monitoring guide are also present; the remaining
-gap is a real-host canary run and stays MISSING by design. Protocol map and
-decision record:
+deployment/monitoring guide are also present. The phase-1 canary passed on
+`muse-newapi@140.245.125.82` on 2026-11-06 (evidence recorded in
+`examples/remote-canary/runs/2026-11-06-140.md`); the phase-2 real-run leg
+remains open/inconclusive from that same run (worker-side `codex` present but
+no service-account credentials, none added). Protocol map and decision record:
 `docs/concepts/northstar-remote-worker.md`; full assessment:
 `docs/dx-remote-worker-assessment.zh-CN.md`. Run it in CI with
 `python3 -m remote_worker --score` from this component's source directory.
