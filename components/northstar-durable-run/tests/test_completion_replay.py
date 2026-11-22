@@ -22,6 +22,19 @@ ARCHIVE = Path(os.environ.get("NORTHSTAR_LIVE_RUNS", "/var/minis/shared/northsta
 
 
 class CompletionReplayTests(unittest.TestCase):
+    def setUp(self):
+        # The archived live run is a local artifact, not part of the repository.
+        # Skip rather than error where it is unavailable.
+        required = (
+            ARCHIVE / "report.json",
+            ARCHIVE / "deliverables" / "report.md",
+            ARCHIVE / "fixtures" / "01-column-report.json",
+            ARCHIVE / "evidence" / "live-column-report-v2" / "round-2.evidence.jsonl",
+        )
+        missing = [str(path) for path in required if not path.exists()]
+        if missing:
+            self.skipTest("archived live run not available: " + ", ".join(missing))
+
     def provenance(self, fixture_path):
         digest = "sha256:" + hashlib.sha256(fixture_path.read_bytes()).hexdigest()
         return Provenance.from_dict(
