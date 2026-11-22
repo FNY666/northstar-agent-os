@@ -1,0 +1,49 @@
+# Baseline failure set for the runtime component.
+#
+# ONE failing item per line, in the normalised form the checker uses:
+#
+#     <KIND>|<item>
+#
+# where KIND is FAIL or ERROR and <item> names the failing test.  The
+# two suite runners print failures differently, and this script
+# normalises both to this shape:
+#
+#     unittest:  "FAIL: test_x (test_mod.TestClass)"   -> FAIL|test_mod.TestClass
+#     pytest:    "FAILED tests/test_mod.py::Class::test_x" -> FAIL|Class.test_x
+#
+# A baseline file is a CLAIM ABOUT A TREE.  This one is the claim that
+# the tree at the commit named below has NO failing items.
+#
+# Provenance
+# ----------
+# commit:  dc257cf94918dc1d4130fe3d46e8d4b9310bc7a7
+# branch:  submission-window/b173-refusal-gate-landing
+# runner:  pytest (the runner CI uses: `pytest -q tests`)
+# measured: 2026-11-22
+#
+# Measured, same tree:
+#
+#     Ran 23171 tests in 373.162s
+#     OK (skipped=20)
+#
+# The full-suite failure set is EMPTY.  The 30-item baseline the
+# coordinator holds (`/home/muse-newapi/b173-baseline-failures-2026-11-14.txt`)
+# is STALE in the other direction: every one of its 30 items is now
+# green.  `scripts/b173-baseline-check.sh` against that file reports
+#
+#     BASELINE DRIFT: expected 30 item(s), found 0 item(s)
+#
+# which is the expected reading of a baseline that has been fully
+# retired, not a regression.
+#
+# RE-TAKING a baseline is the COORDINATOR's decision
+# (`docs/design/r6-baseline-unify.md` §5.1): "The baseline is re-taken
+# when main advances, and it is re-taken by the coordinator."  A slice
+# that legitimately fixes a pre-existing failure shows "fewer items
+# than the baseline", which is "a real finding to report, not a reason
+# to re-take the baseline".  This file is therefore NOT a re-take: it
+# is the same measurement, recorded so that a checkout on any machine
+# has something to compare against.  The coordinator's file remains the
+# authority, and the script prefers it when it exists.
+#
+# No failing items.

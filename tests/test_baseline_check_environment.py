@@ -134,6 +134,76 @@ class BaselineCheckEnvironmentalFailuresTests(unittest.TestCase):
         self.assertNotEqual(rc_full, rc_roomy)
 
 
+class BaselineCheckRunnerTests(unittest.TestCase):
+    """The check must watch the SAME suite CI watches.
+
+    CI runs the component suite with ``pytest -q tests``.  The check ran
+    it with ``python -m unittest <modules>``, and unittest's discovery
+    finds only test METHODS inside TestCase classes -- it does not see
+    the suite's 9,815 standalone module-level ``test_*`` functions.
+
+    Measured 2026-11-22: unittest discovery collects 23,171 tests and
+    pytest collects 33,295.  The check was watching 70% of the suite,
+    and the two runners disagreed about what "the suite" is.
+
+    The runner is now selectable and defaults to pytest.
+    """
+
+    def setUp(self):
+        if not SCRIPT.exists():
+            self.skipTest(f"baseline check script missing: {SCRIPT}")
+        self.text = SCRIPT.read_text(encoding="utf-8")
+
+    def test_the_default_runner_is_the_one_ci_uses(self):
+        self.assertIn(
+            'RUNNER="${B173_BASELINE_RUNNER:-pytest}"', self.text,
+            "the check does not default to the runner CI uses",
+        )
+
+    def test_both_runners_are_available(self):
+        self.assertIn("B173_BASELINE_RUNNER=unittest", self.text,
+                      "the legacy unittest runner was dropped")
+        self.assertIn("python3 -m pytest -q tests", self.text,
+                      "the pytest runner is not wired")
+
+    def test_the_runners_failures_are_normalised_to_one_shape(self):
+        """A baseline file is comparable against either runner.
+
+        unittest prints "FAIL: test_x (test_mod.TestClass)"; pytest
+        prints "FAILED tests/test_mod.py::Class::test_x".  Both must
+        reduce to one "<KIND>|<item>" line, or a baseline taken with one
+        runner can never be compared against the other.
+        """
+        self.assertIn('sed -E \'s/^(FAIL|ERROR): [^ ]+ \\(([^)]*)\\)$/\\1|\\2/\'', self.text)
+        self.assertIn("\\1|\\2.\\3/", self.text)
+
+    def test_the_check_finds_a_baseline_in_the_repository(self):
+        """A CI runner has no /home/muse-newapi.
+
+        The authority file lives outside the repository, so without a
+        checkout-local copy the check cannot run off this machine at
+        all -- which is most of why A-7 was never wired up.
+        """
+        self.assertIn("docs/baseline/current.failures.txt", self.text)
+        local = REPO_ROOT / "docs" / "baseline" / "current.failures.txt"
+        self.assertTrue(local.exists(), f"missing checkout-local baseline: {local}")
+
+    def test_the_check_still_prefers_the_coordinators_file(self):
+        """The in-repo copy must not become the authority.
+
+        Re-taking a baseline is the coordinator's decision
+        (r6-baseline-unify §5.1), so the coordinator's file must win
+        when it exists.
+        """
+        authority = "/home/muse-newapi/b173-baseline-failures-2026-11-14.txt"
+        self.assertIn(authority, self.text)
+        self.assertLess(
+            self.text.index(authority),
+            self.text.index("docs/baseline/current.failures.txt"),
+            "the checkout-local baseline must be a FALLBACK, not the authority",
+        )
+
+
 class BaselineCheckQuotaDetectionTests(unittest.TestCase):
     """The script's own log must be scanned for the quota failure."""
 
