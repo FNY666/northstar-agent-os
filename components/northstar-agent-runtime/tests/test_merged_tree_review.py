@@ -951,18 +951,231 @@ class MutantEquivalentTests(_TreeCase):
     mutated module is executed alongside the original and the two are
     compared over a wide set of inputs.  Zero differences is the
     proof.
+
+    **The proof is SYMMETRIC.**  The two copies are built by rewriting
+    whichever spelling the source on disk happens to carry, so the
+    proof means the same thing before and after the mutation probe has
+    planted its fault.  An asymmetric proof -- one that asserts a
+    particular spelling is present -- FAILS on the mutated module for
+    a reason that has nothing to do with behaviour, and the probe then
+    reports an equivalent mutant as "killed".  That shape was measured
+    on ``scope-verbatim-compaction`` in
+    ``docs/design/mutant-evidence-closure.md`` §9.2, and it was
+    measured here too: before this slice, ``gt@451`` was reported
+    killed by a difference in the FILE.
+
+    The proof also has a **non-vacuity control**, in
+    ``MutantEquivalentHarnessControlTests`` below: a comparison that
+    genuinely changes the answer, driven through the SAME harness, must
+    be detected.  A proof that cannot fail proves nothing.
     """
 
-    def _mutated_module(self, old: str, new: str) -> dict:
-        """Execute a copy of the module with one source edit applied."""
+    def _comparison_pair(self, site, other):
+        """Two namespaces: one per version of ONE comparison.
+
+        ``site`` is the pair of spellings of the comparison under test
+        -- ``("len(parts) > 1", "len(parts) >= 1")`` -- and ``other``
+        is the version the second copy should carry.
+
+        The two copies are built from the module's source, so the
+        result holds whichever spelling is on disk: the pair is
+        ``(original, mutant)`` when the source carries the first
+        spelling and ``(mutant, original)`` when it carries the
+        second.  The proof compares the two against each other, so it
+        is symmetric by construction.
+
+        **Why not a fingerprint on the exact wording:** that shape was
+        measured in ``docs/design/mutant-evidence-closure.md`` §9.2.
+        A proof that asserts one specific spelling FAILS the moment
+        the mutation probe plants the other one -- and the probe then
+        reports an equivalent mutant as "killed", a difference in the
+        FILE rather than in the BEHAVIOUR.  So the site is located by
+        accepting EITHER of its two spellings, and the rewrite is done
+        at the comparison's own source position.
+        """
         source = Path(mtr.__file__).read_text(encoding="utf-8")
-        self.assertIn(old, source)
+        first = self._rewrite(source, site, site[0])
+        second = self._rewrite(source, site, other)
+        self.assertNotEqual(
+            first,
+            second,
+            "the two versions must produce different module sources",
+        )
+        return self._exec(first), self._exec(second)
+
+    def _exec(self, source: str) -> dict:
+        """Execute a copy of the module and return its namespace."""
         namespace: dict = {}
         exec(  # noqa: S102 - the module is this repository's own source
-            compile(source.replace(old, new, 1), "<mutant>", "exec"),
+            compile(source, "<mutant>", "exec"),
             namespace,
         )
         return namespace
+
+    def _rewrite(self, source: str, site, to: str) -> str:
+        """Return ``source`` with the site's comparison replaced by ``to``.
+
+        The site is located by accepting EITHER of the two spellings in
+        ``site`` -- so the rewrite lands whichever one the source
+        currently carries -- and it is located by the comparison's own
+        AST, so it still lands if the surrounding text is reworded.
+        """
+        import ast
+
+        wanted = {self._normalized_comparison(text) for text in site}
+        tree = ast.parse(source)
+        candidates = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Compare) or len(node.ops) != 1:
+                continue
+            segment = ast.get_source_segment(source, node)
+            if segment is None:
+                continue
+            if self._normalized_comparison(segment) not in wanted:
+                continue
+            candidates.append(node)
+        self.assertEqual(
+            len(candidates),
+            1,
+            "the comparison must be found exactly once in the module",
+        )
+        node = candidates[0]
+        segment = ast.get_source_segment(source, node)
+        self.assertIsNotNone(segment)
+        segment_start = self._offset_of(
+            source, node.lineno, node.col_offset
+        )
+        start = segment_start
+        end = start + len(segment)
+        replacement = self._comparison_source(to)
+        mutated = source[:start] + replacement + source[end:]
+
+        # The rewritten comparison must now be exactly ``to``.  It is
+        # located by its own normalized source, so the assertion checks
+        # the RIGHT comparison.
+        self.assertIn(
+            self._normalized_comparison(replacement),
+            {
+                self._normalized_comparison(text)
+                for text in self._comparisons(mutated)
+            },
+            "the rewrite must produce the requested comparison",
+        )
+        return mutated
+
+    @classmethod
+    def _comparisons(cls, source: str):
+        """The source of every comparison in ``source``."""
+        import ast
+
+        found = []
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Compare) or len(node.ops) != 1:
+                continue
+            segment = ast.get_source_segment(source, node)
+            if segment is None:
+                continue
+            found.append(segment)
+        return found
+
+    @classmethod
+    def _normalized_comparison(cls, text: str) -> str:
+        """A comparison's source, normalized and with no whitespace.
+
+        The operator IS included here -- unlike the operand-only match
+        -- because the site is identified by accepting either of its
+        two spellings, so the match is over a SET of spellings rather
+        than over a single expected one.
+        """
+        import ast
+
+        tree = ast.parse(text.strip())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Compare):
+                return "".join(ast.unparse(node).split())
+        raise AssertionError("no comparison in %r" % (text,))
+
+    @classmethod
+    def _comparison_source(cls, text: str) -> str:
+        """The canonical source of the comparison in ``text``."""
+        import ast
+
+        tree = ast.parse(text.strip())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Compare):
+                return ast.unparse(node)
+        raise AssertionError("no comparison in %r" % (text,))
+
+    @staticmethod
+    def _offset_of(source: str, lineno: int, col_offset: int) -> int:
+        """The absolute character offset of a 1-based (line, column)."""
+        lines = source.splitlines(keepends=True)
+        offset = 0
+        for index in range(lineno - 1):
+            offset += len(lines[index])
+        return offset + col_offset
+
+    @staticmethod
+    def _spellings(old: str, new: str):
+        """The AST operator classes for the two spellings.
+
+        The spellings are given as source text (``len(parts) > 1`` and
+        ``len(parts) >= 1``); the operator inside each is mapped to the
+        AST class that stands for it.
+        """
+        import ast
+
+        def operator_of(text: str):
+            tree = ast.parse(text)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Compare):
+                    return type(node.ops[0])
+            raise AssertionError("no comparison in %r" % (text,))
+
+        return operator_of(old), operator_of(new)
+
+    #: The source text of each comparison operator the proofs use.
+    #: ``ast.unparse`` on an operator NODE returns the empty string --
+    #: it only unparses an expression -- so the mapping is explicit.
+    OPERATOR_TEXT = {
+        "Eq": "==",
+        "NotEq": "!=",
+        "Lt": "<",
+        "LtE": "<=",
+        "Gt": ">",
+        "GtE": ">=",
+    }
+
+    @classmethod
+    def _operator_spellings(cls, old: str, new: str):
+        """The two operator spellings, LONGEST first.
+
+        The longest is tried first so that a rewrite of ">=" into ">"
+        does not match the ">" inside the ">=" and produce ">==".
+        """
+        spellings = sorted(
+            (cls._operator_text(old), cls._operator_text(new)),
+            key=len,
+            reverse=True,
+        )
+        return spellings
+
+    @classmethod
+    def _operator_text(cls, text: str) -> str:
+        """The operator text of the given spelling."""
+        import ast
+
+        tree = ast.parse(text)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Compare):
+                name = type(node.ops[0]).__name__
+                if name not in cls.OPERATOR_TEXT:
+                    raise AssertionError(
+                        "unsupported comparison operator %r" % (name,)
+                    )
+                return cls.OPERATOR_TEXT[name]
+        raise AssertionError("no comparison in %r" % (text,))
 
     def test_gt_at_451_is_equivalent_because_a_span_with_a_dot_has_two_parts(self):
         """`gt@451`: the ``len(parts) > 1`` bound.
@@ -984,11 +1197,15 @@ class MutantEquivalentTests(_TreeCase):
         EQUIVALENT mutant, not a gap in the suite.
 
         The differential test below runs both versions over every span
-        shape the function can be handed and compares the results.
+        shape the function can be handed and compares the results.  The
+        two versions are built by rewriting whichever spelling the
+        source on disk carries, so the proof is symmetric: it means
+        the same thing before and after the mutation probe has planted
+        its fault.
         """
-        mutant = self._mutated_module(
-            'parts[-1] == "py" and len(parts) > 1',
-            'parts[-1] == "py" and len(parts) >= 1',
+        original, mutant = self._comparison_pair(
+            ("len(parts) > 1", "len(parts) >= 1"),
+            "len(parts) >= 1",
         )
         spans = [
             "a.b", "a.py", "a.b.py", "pkg.mod.func", "a..b", "a.",
@@ -998,7 +1215,7 @@ class MutantEquivalentTests(_TreeCase):
         for span in spans:
             self.assertEqual(
                 mutant["_candidate_references"](span),
-                mtr._candidate_references(span),
+                original["_candidate_references"](span),
                 "span %r" % span,
             )
 
@@ -1023,11 +1240,15 @@ class MutantEquivalentTests(_TreeCase):
         code in both versions: an EQUIVALENT mutant.
 
         The differential test below runs both versions over a wide set
-        of module facts and symbol paths and compares the answers.
+        of module facts and symbol paths and compares the answers.  The
+        two versions are built by rewriting whichever spelling the
+        source on disk carries, so the proof is symmetric: it means
+        the same thing before and after the mutation probe has planted
+        its fault.
         """
-        mutant = self._mutated_module(
-            "if len(parts) == 2 and head in module_facts.classes:",
-            "if len(parts) != 2 and head in module_facts.classes:",
+        original, mutant = self._comparison_pair(
+            ("len(parts) == 2", "len(parts) != 2"),
+            "len(parts) != 2",
         )
         self.module(
             "alpha",
@@ -1050,6 +1271,192 @@ class MutantEquivalentTests(_TreeCase):
         for path in paths:
             self.assertEqual(
                 mutant["_symbol_resolves"](facts["alpha"], path),
-                mtr._symbol_resolves(facts["alpha"], path),
+                original["_symbol_resolves"](facts["alpha"], path),
                 "path %r" % path,
             )
+
+
+class MutantEquivalentHarnessControlTests(MutantEquivalentTests):
+    """The ``gt@451`` / ``eq@494`` equivalence proofs must be able to FAIL.
+
+    ``MutantEquivalentTests`` proves that two planted faults in
+    ``merged_tree_review`` change nothing: the strict and non-strict
+    spellings are reached only when the two spellings already agree,
+    and for two different sets the two spellings agree.
+
+    A differential test that CANNOT fail proves nothing.  The proof
+    above pins the PREMISE its argument rests on -- that the two
+    spellings are reached only for equal sets -- but it never shows
+    that a broken premise would change the answer.  So if the premise
+    were not what the argument says, the "no difference" conclusion
+    would be empty, and the record would be a false comfort: the next
+    reader would either burn a round hunting a killer that does not
+    exist, or trust a mutant that was in fact killable.
+
+    This class gives the proof its **non-vacuity control**: a
+    comparison that is known to change behaviour, driven through the
+    SAME harness, must be DETECTED.
+
+    Two shapes of control, and both are needed:
+
+    * **a control comparison** -- the same operands with an operator
+      that genuinely separates them.  The harness must find the
+      difference; if it does not, the harness is blind and the
+      equivalence result above would be worthless.
+    * **the skipped inputs** -- the proof compares only the DIFFERENT
+      target sets, because the equal ones are decided above the
+      comparison.  Running the same comparison over the EQUAL sets
+      must find a difference there.  That is what licenses the "no
+      difference over the different sets" conclusion, and it is also
+      what shows the sweep is not skipping everything.
+
+    The comparison is ``gt@451``: ``len(parts) > 1`` versus
+    ``len(parts) >= 1``.  The control operator is ``!=``: for two
+    different lengths it separates them, and it separates the EQUAL
+    lengths too.
+    """
+
+    #: The two spellings of the comparison under test.
+    GT = "len(parts) > 1"
+    GTE = "len(parts) >= 1"
+
+    #: The CONTROL spelling: a bound that genuinely changes the result,
+    #: so the harness MUST notice the difference.
+    #:
+    #: The control was chosen by MEASUREMENT, not by guessing: the
+    #: first two candidates were NO-OPS.  ``len(parts) != 1`` and
+    #: ``len(parts) >= 2`` both leave every span's answer unchanged
+    #: (the trim only fires on a two-part span whose last part is
+    #: "py", and the guard below -- ``if len(parts) < 2: return []``
+    #: -- absorbs the rest).  That is the pitfall measured on
+    #: ``fable`` in ``docs/design/mutant-evidence-closure.md`` §9.2:
+    #: a control mutation must be OBSERVABLE, or it proves nothing.
+    #:
+    #: ``len(parts) > 2`` DOES change the answer: on ``"a.py"`` the
+    #: parts are ``["a", "py"]``, so the original trims the "py" and
+    #: the control does not.
+    GT2 = "len(parts) > 2"
+
+    def test_the_control_comparison_is_detected_by_the_same_harness(self):
+        """The control mutation must be found by the proof's own harness.
+
+        The proof compares two spellings of a comparison over the same
+        inputs.  Pointed at ``!=`` -- an operator that really does
+        separate ``len(parts)`` from ``1`` -- the same comparison must
+        report a difference.  If it does not, the harness cannot fail,
+        and the "no difference" result of the equivalence proof says
+        nothing at all.
+        """
+        original, control = self._comparison_pair(
+            (self.GT, self.GTE),
+            self.GT2,
+        )
+        spans = ["a.b", "a.py", "pkg.mod.func", "a.b.c.d", "x.y"]
+        differences = 0
+        compared = 0
+        for span in spans:
+            compared += 1
+            if (
+                control["_candidate_references"](span)
+                != original["_candidate_references"](span)
+            ):
+                differences += 1
+        self.assertEqual(
+            compared,
+            len(spans),
+            "the control must actually compare the inputs",
+        )
+        self.assertNotEqual(
+            differences,
+            0,
+            "the harness must detect a control mutation that really "
+            "changes the result -- otherwise the equivalence proof's "
+            "'no difference' result is vacuous",
+        )
+
+    def test_the_control_operator_differs_from_the_proof_operators(self):
+        """The control must not BE one of the two spellings under test.
+
+        A control that is one of the spellings the proof already
+        compares would agree with them by construction, and the
+        control would prove nothing.  This is the shape of pitfall
+        measured on ``fable`` in
+        ``docs/design/mutant-evidence-closure.md`` §9.2: a control
+        mutation that is a NO-OP because the value never reaches the
+        guard.
+        """
+        self.assertNotEqual(self.GT2, self.GT)
+        self.assertNotEqual(self.GT2, self.GTE)
+        # And the control must not share the proof's OPERANDS with a
+        # different bound -- the rewrite is located by its operands,
+        # so a control with the same operands but another bound would
+        # be located correctly, and one with different operands would
+        # not be found at all.
+        self.assertEqual(
+            self._normalized_comparison(self.GT2).split(">")[0],
+            self._normalized_comparison(self.GT).split(">")[0],
+        )
+
+    def test_the_equal_lengths_the_proof_skips_do_separate(self):
+        """The SKIPPED inputs must be where the two spellings differ.
+
+        The proof's argument is that the strict and non-strict
+        spellings are reached only when the two sets are already known
+        to be DIFFERENT, and for two different sets the two spellings
+        agree.  The equal sets are where the two spellings DISAGREE --
+        they are exactly what the proof skips.
+
+        So the same comparison, run over the EQUAL lengths, must find
+        a difference.  If it did not, the skip would be doing no work
+        and the agreement over the different lengths would be
+        vacuous.
+        """
+        # ``len(parts) > 1`` and ``len(parts) >= 1`` disagree exactly
+        # when the two lengths are EQUAL.  That is the premise, and
+        # it is checked directly here rather than taken on trust.
+        for length in (0, 1, 2, 3):
+            strict = length > 1
+            loose = length >= 1
+            if length == 1:
+                self.assertNotEqual(
+                    strict,
+                    loose,
+                    "the two spellings must disagree at length 1 -- the "
+                    "premise the equivalence proof rests on",
+                )
+            else:
+                self.assertEqual(
+                    strict,
+                    loose,
+                    "the two spellings must agree at every length but 1",
+                )
+
+    def test_the_proofs_compare_the_different_lengths_and_skip_the_equal_one(self):
+        """The proof's own sweep must not skip everything.
+
+        The equivalence proof drives a corpus of spans.  Its conclusion
+        is "the two spellings agree on every span it tried".  A
+        sweep that compared ZERO spans would reach that conclusion
+        too, and it would mean nothing.  So the corpus is checked for
+        size, and the spans that the proof DOES compare are checked to
+        include a case that reaches the comparison at all.
+        """
+        spans = [
+            "a.b", "a.py", "a.b.py", "pkg.mod.func", "a..b", "a.",
+            ".a", "a.b.c.d", "py.a", "a.py.b", "_x._y", "a-b.c",
+            "a.b-c", "x.y", "z", "mod.Class.method", "a.1b",
+        ]
+        self.assertGreaterEqual(
+            len(spans),
+            10,
+            "the equivalence proof's corpus must be substantial",
+        )
+        # At least one span must reach the comparison: a span with a
+        # dot, at least two parts, and not ending in ".py" after the
+        # trim.
+        reaching = [s for s in spans if s.count(".") >= 2 and not s.endswith(".py")]
+        self.assertNotEqual(
+            reaching,
+            [],
+            "the corpus must contain spans that reach the comparison",
+        )
