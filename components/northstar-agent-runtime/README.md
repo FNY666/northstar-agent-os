@@ -1481,6 +1481,9 @@ A passing verdict is an assertion the runtime can audit, not a vibe.
   audit feed `audit.ndjson/1` — denials, failed tool results and `error_*`
   results carry `"level":"error"`; see
   [audit trail concept](../../docs/concepts/audit-trail.md).
+  Successful screened reads of SHA-256-pinned root `SKILL.md` files also add
+  `skill_loaded` informational records with path and digest only; instruction
+  text is not copied.
 - **Fork points are verifiable without spending a run**: `session_replay.py` rebuilds the
   transcript from a session's own records, recomputes every checkpoint's prefix digest, and
   reports each boundary as `verified`, `digest-mismatch`, `prefix-short` or `malformed`.
