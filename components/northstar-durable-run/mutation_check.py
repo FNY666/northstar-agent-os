@@ -154,7 +154,11 @@ def apply_mutation(mutation: Mutation, component_root: Path) -> None:
 def run_guard(component_root: Path, guard: str, timeout: int = 900) -> bool:
     """Return True when the named guard tests pass."""
     environment = dict(os.environ)
-    paths = [component_root] + [component_root.parent / name for name in SIBLINGS]
+    # The guard modules live under tests/, so that directory has to be importable
+    # for "-m unittest <guard>" to find them from the component root.
+    paths = [component_root, component_root / "tests"] + [
+        component_root.parent / name for name in SIBLINGS
+    ]
     environment["PYTHONPATH"] = os.pathsep.join(str(item) for item in paths)
     completed = subprocess.run(
         [sys.executable, "-m", "unittest", guard],
