@@ -90444,6 +90444,8 @@ The queue-side gate: one refusal registry, two queue namespaces.
   - Raise :class:`RefusalRefusedError` when the job may not re-dispatch.
 - `require_task_allowed(task_id: str, action: str, *, now: Optional[float]=None)`
   - Raise :class:`RefusalRefusedError` when the task may not re-dispatch.
+- `task_allowed(task_id: str, action: str, *, now: Optional[float]=None)`
+  - True when the task MAY be re-dispatched.
 - `record_queue(job_id: str, action: str, *, row: Optional[RefusalRow]=None, now: Optional[float]=None)`
   - Record a refusal against one queue-side identity.
 - `record_task(task_id: str, action: str, *, row: Optional[RefusalRow]=None, now: Optional[float]=None)`

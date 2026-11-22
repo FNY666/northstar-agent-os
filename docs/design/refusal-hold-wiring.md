@@ -482,11 +482,11 @@ format is unchanged — this is a new *namespace*, not a new key shape.
   check and the re-dispatch are serialized against the queue's own
   critical section.
 * `LeasedTaskClaim` gains an optional, **duck-typed** refusal gate
-  (`refusal_gate=` / `set_refusal_gate()`), and `fail()` consults it
-  **inside the transaction**, immediately before the `UPDATE` that
-  flips the task back to `ready`. A refusal raises, the transaction
-  rolls back, and the task keeps its state, its failure count and its
-  delay.
+  (`refusal_gate=` / `set_refusal_gate()`), and **all three** of the
+  paths that put a task back to `ready` consult it **inside the
+  transaction**, immediately before the `UPDATE`. A refusal raises, the
+  transaction rolls back, and the task keeps its state, its failure
+  count and its delay.
 
 The gate is duck-typed on purpose: `leased_task_claim.py` does not
 import `refusal_hold_wiring` (the wiring imports the hold, and the
@@ -495,9 +495,49 @@ for `require_task_allowed(task_id, action, now=...)`, and a gate that
 does not offer it is a `TypeError` at the call site rather than a
 silent pass-through.
 
-### 7.4 Measured
+### 7.4 The three re-dispatch paths, not one
 
-`tests/test_refusal_hold_queue_wiring.py` — 40 tests. Among them:
+Guarding `fail()` alone is **not** enough, and the reason is worth
+recording: `LeasedTaskClaim` has **three** paths that put a task back
+to `ready`, and a refusal that covers only one of them can be walked
+around.
+
+| path | how the task goes back to `ready` | what it costs the worker |
+|---|---|---|
+| `fail()` | the worker reports a failure | a failure record, a backoff, the failure budget |
+| `reap()` | the lease **expires** and the reaper sweeps it | nothing -- a crash eats no backoff |
+| `release()` | the worker **gives up** its lease voluntarily | nothing -- releasing is not a failure |
+
+The second and third are the cheap routes, and a guard that only
+covers the first is a guard with a door next to it.  Both were found
+by asking the uncomfortable question -- *can a refused task be
+laundered back into the queue?* -- and both answered yes until the
+gate was installed on them.
+
+`reap()` and `release()` differ in how they answer it, and the
+difference is deliberate:
+
+* **`release()`** reports ONE lease for ONE task, so it uses the
+  raising form (`require_task_allowed`).  The transaction rolls back
+  and the worker keeps its lease.
+* **`reap()`** sweeps a **batch** of expired leases.  A raise there
+  would abandon the whole sweep -- one refused task would stop every
+  other expired lease from being requeued, which is a denial of
+  service the refusal never asked for.  So `reap()` asks the
+  **boolean** form (`task_allowed`) and **skips** the refused task.
+  The refused task keeps its state, its crash count and its lease; its
+  lease keeps expiring and the next sweep asks again.
+
+Both refuse a gate that cannot answer: an unreadable store or a
+tampered row blocks, because the hold fails closed.
+
+`complete()` is the fourth `UPDATE`, and it is **not** a re-dispatch
+-- it writes the terminal state and the outbox row.  It is out of
+scope for the hold.
+
+### 7.5 Measured
+
+`tests/test_refusal_hold_queue_wiring.py` — 55 tests. Among them:
 
 * a refused `fail()` leaves `state='leased'`, `failures=0` and
   `delay_until=0.0`, and the queue-mirror job stays `reserved`;
@@ -505,14 +545,20 @@ silent pass-through.
   **different** keys (the collision above), and the ledger-side and
   lease-side keys are different too;
 * the gate is bound under the queue's own lock, so a refusal recorded
-  concurrently with a re-dispatch cannot interleave.
+  concurrently with a re-dispatch cannot interleave;
+* a refused `release()` leaves `state='leased'` and the mirror job
+  `reserved`;
+* a refused `reap()` sweeps **nothing** for that task, its crash count
+  stays 0, and the mirror job stays `reserved`;
+* one refused task does **not** stop the other expired leases from
+  being swept -- the refusal is scoped to one task.
 
 The targeted suites (`test_leased_task_claim`, `test_refusal_hold`,
 `test_refusal_hold_wiring`, `test_refusal_hold_queue_wiring`,
 `test_job_queue`) are green, and the repo-level suite is green (452
 tests) after the regenerated `docs/api` page.
 
-### 7.5 What is still open
+### 7.6 What is still open
 
 Open items 2 (the subject layer), 3 (no lift path) and 4 (the ledger
 file itself) are unchanged by this section — item 4 was closed by §6.

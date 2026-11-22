@@ -1002,6 +1002,19 @@ class RefusalHoldQueueGate:
                 reason=result.reason,
             )
 
+    def task_allowed(
+        self, task_id: str, action: str, *, now: Optional[float] = None
+    ) -> bool:
+        """True when the task MAY be re-dispatched.
+
+        The boolean form of :meth:`require_task_allowed`, for the caller
+        that sweeps a **batch** of work items: a refusal there must skip
+        one item, not abandon the whole sweep.  A blocked answer is
+        ``False`` -- never an exception -- and a gate that cannot answer
+        at all is ``False`` too, because the hold fails closed.
+        """
+        return not self.check_task(task_id, action, now=now).blocked
+
     # -- recording --------------------------------------------------------
 
     def record_queue(

@@ -450,6 +450,179 @@ class LeaseFailWiringTests(unittest.TestCase):
         self.assertEqual(record.state, "ready")
 
 
+class LeaseReapWiringTests(unittest.TestCase):
+    """The crash path: ``LeasedTaskClaim.reap()``.
+
+    ``fail()`` is not the only way a task goes back to ``ready``.  A
+    lease that EXPIRES is swept back to ``ready`` by ``reap()``, with no
+    backoff and no failure budget consumed -- and with no refusal
+    check.  That is a second re-dispatch path, and a refusal that only
+    guards ``fail()`` does not guard it.
+
+    So the question this class asks is the uncomfortable one: can a
+    refused task be laundered back into the queue by letting its lease
+    expire?  It must not be.
+    """
+
+    def setUp(self):
+        self.registry = RefusalHoldRegistry()
+        self.gate = RefusalHoldQueueGate(self.registry)
+        self.manager = LeasedTaskClaim(
+            max_failures=3,
+            base_backoff_seconds=2.0,
+            refusal_gate=self.gate,
+        )
+        self.manager.enqueue_task("t1", "demo-task", payload="hello")
+
+    def tearDown(self):
+        self.manager.close()
+
+    def test_a_refused_task_is_not_reaped(self):
+        """The observable proof: the expired lease is NOT swept."""
+        self.manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+        self.gate.record_task("t1", "demo-task", row=make_row())
+        swept = self.manager.reap(now=200.0)
+        self.assertEqual(swept, ())
+        self.assertEqual(self.manager.task("t1").state, "leased")
+
+    def test_a_refused_task_keeps_its_crash_count(self):
+        """The crash budget is not consumed by a refused re-dispatch."""
+        self.manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+        self.gate.record_task("t1", "demo-task", row=make_row())
+        self.manager.reap(now=200.0)
+        self.assertEqual(self.manager.task("t1").crashes, 0)
+
+    def test_a_refused_task_stays_out_of_the_queue_mirror(self):
+        """The mirror job stays ``reserved`` -- the work is not re-queued."""
+        self.manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+        self.gate.record_task("t1", "demo-task", row=make_row())
+        self.manager.reap(now=200.0)
+        self.assertEqual(self.manager._queue.job("t1").state, "reserved")
+
+    def test_an_allowed_expired_lease_is_reaped(self):
+        """The control: no refusal, the sweep happens as before."""
+        self.manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+        swept = self.manager.reap(now=200.0)
+        self.assertEqual(len(swept), 1)
+        self.assertEqual(self.manager.task("t1").state, "ready")
+
+    def test_a_refusal_against_a_different_action_does_not_block_the_sweep(self):
+        """The refusal covers one action, not the whole task."""
+        self.manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+        self.gate.record_task("t1", "other-task", row=make_row())
+        swept = self.manager.reap(now=200.0)
+        self.assertEqual(len(swept), 1)
+        self.assertEqual(self.manager.task("t1").state, "ready")
+
+    def test_a_broken_gate_does_not_sweep(self):
+        """An unusable gate refuses the re-dispatch; it never allows."""
+        self.manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+        self.registry.store.break_reads()
+        swept = self.manager.reap(now=200.0)
+        self.assertEqual(swept, ())
+        self.assertEqual(self.manager.task("t1").state, "leased")
+
+    def test_no_gate_leaves_the_sweep_unchanged(self):
+        """The default behaviour is untouched."""
+        self.manager.set_refusal_gate(None)
+        self.manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+        swept = self.manager.reap(now=200.0)
+        self.assertEqual(len(swept), 1)
+
+    def test_one_refused_task_does_not_stop_the_others_from_being_swept(self):
+        """A refusal is scoped to one task; the sweep is not all-or-nothing."""
+        self.manager.enqueue_task("t2", "demo-task", payload="hello")
+        self.manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+        self.manager.claim("t2", "worker-B", ttl=10.0, now=100.0)
+        self.gate.record_task("t1", "demo-task", row=make_row())
+        swept = self.manager.reap(now=200.0)
+        self.assertEqual([s.task_id for s in swept], ["t2"])
+        self.assertEqual(self.manager.task("t1").state, "leased")
+        self.assertEqual(self.manager.task("t2").state, "ready")
+
+
+class LeaseReleaseWiringTests(unittest.TestCase):
+    """The voluntary give-up: ``LeasedTaskClaim.release()``.
+
+    ``release()`` is the THIRD path that puts a task back to ``ready``.
+    It is the cheapest one to reach: a worker that gives up its lease
+    needs no failure record, no crash and no backoff -- it just returns
+    the lease.  So a gate that guards ``fail()`` and ``reap()`` but not
+    ``release()`` is a gate with a door next to it.
+
+    The refusal here is **not** about the work item failing.  It is
+    about the work item being *offered again*: a task that a refusal
+    covers must not be handed to another worker, by any route.
+    """
+
+    def setUp(self):
+        self.registry = RefusalHoldRegistry()
+        self.gate = RefusalHoldQueueGate(self.registry)
+        self.manager = LeasedTaskClaim(
+            max_failures=3,
+            base_backoff_seconds=2.0,
+            refusal_gate=self.gate,
+        )
+        self.manager.enqueue_task("t1", "demo-task", payload="hello")
+
+    def tearDown(self):
+        self.manager.close()
+
+    def _lease(self):
+        return self.manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+
+    def test_a_refused_release_leaves_the_task_leased(self):
+        """The observable proof: the task does not go back to ``ready``."""
+        lease = self._lease()
+        self.gate.record_task("t1", "demo-task", row=make_row())
+        with self.assertRaises(RefusalRefusedError):
+            self.manager.release("t1", lease.token, now=101.0)
+        self.assertEqual(self.manager.task("t1").state, "leased")
+
+    def test_a_refused_release_keeps_the_lease_token(self):
+        """The worker keeps the lease: it can still complete or fail."""
+        lease = self._lease()
+        self.gate.record_task("t1", "demo-task", row=make_row())
+        with self.assertRaises(RefusalRefusedError):
+            self.manager.release("t1", lease.token, now=101.0)
+        self.assertEqual(int(self.manager.task("t1").token), int(lease.token))
+
+    def test_a_refused_release_stays_out_of_the_queue_mirror(self):
+        """The mirror job stays ``reserved`` -- the work is not re-queued."""
+        lease = self._lease()
+        self.gate.record_task("t1", "demo-task", row=make_row())
+        with self.assertRaises(RefusalRefusedError):
+            self.manager.release("t1", lease.token, now=101.0)
+        self.assertEqual(self.manager._queue.job("t1").state, "reserved")
+
+    def test_an_allowed_release_puts_the_task_back_to_ready(self):
+        """The control: no refusal, the release happens as before."""
+        lease = self._lease()
+        record = self.manager.release("t1", lease.token, now=101.0)
+        self.assertEqual(self.manager.task("t1").state, "ready")
+
+    def test_a_refusal_against_a_different_action_does_not_block(self):
+        lease = self._lease()
+        self.gate.record_task("t1", "other-task", row=make_row())
+        record = self.manager.release("t1", lease.token, now=101.0)
+        self.assertEqual(self.manager.task("t1").state, "ready")
+
+    def test_a_broken_gate_refuses_the_release(self):
+        """An unusable gate refuses -- it never allows."""
+        lease = self._lease()
+        self.registry.store.break_reads()
+        with self.assertRaises(RefusalRefusedError):
+            self.manager.release("t1", lease.token, now=101.0)
+        self.assertEqual(self.manager.task("t1").state, "leased")
+
+    def test_no_gate_leaves_the_release_path_unchanged(self):
+        """The default behaviour is untouched."""
+        self.manager.set_refusal_gate(None)
+        lease = self._lease()
+        record = self.manager.release("t1", lease.token, now=101.0)
+        self.assertEqual(self.manager.task("t1").state, "ready")
+
+
 class LeaseNamespaceTests(unittest.TestCase):
     """The lease side's namespace, and what it must not collide with."""
 

@@ -593,6 +593,51 @@ class LeasedTaskClaim:
             )
         require(task_id, action, now=now)
 
+    def _refusal_allows_reap(self, task_id: str, action: str,
+                              now: float) -> bool:
+        """True when the refusal gate allows this task to be re-dispatched.
+
+        The crash path asks a **boolean** question, not the raising one
+        that :meth:`fail` asks.  The difference is deliberate:
+
+        * ``fail()`` reports ONE failure for ONE task, so a refusal can
+          raise -- the caller asked about that task and nothing else.
+        * ``reap()`` sweeps a **batch** of expired leases.  A raise here
+          would abandon the whole sweep: one refused task would stop
+          every other expired lease from being requeued, which is a
+          denial of service the refusal never asked for.
+
+        So the refusal is caught and turned into "not allowed".  A gate
+        that cannot answer at all -- an unreadable store, a tampered row
+        -- is also "not allowed", because the hold fails closed.
+
+        The gate is duck-typed, as in :meth:`_require_refusal_allows`,
+        and a gate that does not offer the boolean method falls back to
+        the raising one: a raise is treated as "not allowed".
+        """
+        gate = self._refusal_gate
+        if gate is None:
+            return True
+        allows = getattr(gate, "task_allowed", None)
+        if callable(allows):
+            try:
+                return bool(allows(task_id, action, now=now))
+            except Exception:
+                # Fail closed: a gate that cannot answer blocks.
+                return False
+        require = getattr(gate, "require_task_allowed", None)
+        if not callable(require):
+            raise TypeError(
+                "the refusal gate must offer task_allowed(task_id, action, "
+                f"now=...) or require_task_allowed(task_id, action, now=...), "
+                f"got {type(gate).__name__}"
+            )
+        try:
+            require(task_id, action, now=now)
+        except Exception:
+            return False
+        return True
+
     # -- helpers ---------------------------------------------------------
 
     def _next_seq(self) -> int:
@@ -1120,11 +1165,22 @@ class LeasedTaskClaim:
 
         The task returns to ``ready`` with no backoff: releasing is not a
         failure.  A stale token is refused with ``StaleLeaseError``.
+
+        **A recorded refusal blocks the re-dispatch here too.**  This is
+        the third path that puts a task back to ``ready``, and the
+        cheapest one to reach -- a worker gives up its lease without a
+        failure record, a crash or a backoff.  The question is not
+        whether the work item failed; it is whether the work item may be
+        **offered again**, and a refusal says no by any route.
+
+        The check runs inside the transaction, immediately before the
+        ``UPDATE``, so a refusal and the release cannot interleave.
         """
         task_id = _check_text(task_id, "task_id")
         now = self._clock() if now is None else float(now)
         with self._store.transaction() as conn:
             row = self._check_token(conn, task_id, token, now)
+            self._require_refusal_allows(task_id, str(row["task"]), now)
             conn.execute(
                 "UPDATE ltc_task SET state = ?, worker = '', expires_at = ? "
                 "WHERE task_id = ?",
@@ -1150,6 +1206,19 @@ class LeasedTaskClaim:
         newest one instead of redoing the work.
 
         Returns the leases that were swept.
+
+        **A recorded refusal blocks the re-dispatch here too.**  This is
+        the SECOND path that puts a task back to ``ready`` -- ``fail()``
+        is the first -- and a gate that guards only ``fail()`` can be
+        walked around: let the lease expire instead of reporting the
+        failure, and the task is laundered back into the queue anyway.
+        The crash path is the *cheaper* way around the guard, so it is
+        the one a refusal has to close.
+
+        A refused task is **skipped**, not raised: one refused task does
+        not stop the other expired leases from being swept.  The refusal
+        leaves the task leased, so its lease keeps expiring and the next
+        sweep asks again -- and the refusal stays on the record.
         """
         now = self._clock() if now is None else float(now)
         swept = []
@@ -1166,6 +1235,11 @@ class LeasedTaskClaim:
                 if current is None or current["state"] != STATE_LEASED:
                     continue
                 if float(current["expires_at"]) >= float(now):
+                    continue
+                if not self._refusal_allows_reap(task_id, str(current["task"]), now):
+                    # Refused: the task keeps its state, its crash count
+                    # and its lease.  The transaction ends without the
+                    # UPDATE, so nothing is written.
                     continue
                 conn.execute(
                     "UPDATE ltc_task SET state = ?, worker = '', "
