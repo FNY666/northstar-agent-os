@@ -309,3 +309,67 @@ def test_a_provider_fault_classifies_and_normalizes_end_to_end():
     assert payload["toolResultRemedy"]["kind"] == "auth_expired"
     assert payload["toolResultRemedy"]["provider"] == "anthropic"
     assert payload["content"].startswith("<tool_use_error>auth")
+
+
+# ---------------------------------------------------------------------------
+# Mutant evidence: or@340
+#
+# `detail = getattr(fault, "detail", "") or ""` -- the `or` is a
+# FALLBACK, not a double guard: its right-hand side is the constant
+# `""`, so the right-hand side is never true.  Under the mutant
+# (`or` -> `and`) the expression is ALWAYS `""` -- `A and ""` is `A`
+# when `A` is falsy (the default) and `""` when `A` is truthy -- so the
+# mutant DROPS the detail entirely.  One input separates them: a fault
+# that carries a detail.
+# ---------------------------------------------------------------------------
+
+
+class _FaultWithDetail:
+    """A provider fault that carries a detail and a status code."""
+
+    kind = "auth"
+    detail = "invalid api key"
+    status_code = 401
+    retry_after_ms = None
+    retryable_by_default = False
+
+
+class _FaultWithoutDetail:
+    """A provider fault with no detail at all."""
+
+    kind = "auth"
+    status_code = None
+    retry_after_ms = None
+    retryable_by_default = False
+
+
+def test_or_at_340_a_fault_detail_reaches_the_summary():
+    """or@340: the detail must survive into the summary.
+
+    Under the mutant (`or` -> `and`) the detail is always dropped, so
+    the summary is just the kind.
+    """
+    failure = tf.from_provider_fault(_FaultWithDetail())
+    assert failure.summary == "auth: invalid api key"
+
+
+def test_or_at_340_a_fault_detail_reaches_the_detail_fields():
+    """or@340: the same discrimination, read off the detail field.
+
+    This is the second observation of the same difference, so the test
+    does not depend on the summary's exact wording.
+    """
+    failure = tf.from_provider_fault(_FaultWithDetail())
+    assert failure.detail["fault"] == "auth"
+    assert failure.detail["status_code"] == 401
+
+
+def test_or_at_340_a_fault_without_a_detail_is_not_changed():
+    """or@340: the control -- no detail, so nothing is dropped.
+
+    Both the original and the mutant produce the kind alone here, so
+    this input cannot tell them apart; it pins that the fallback still
+    works.
+    """
+    failure = tf.from_provider_fault(_FaultWithoutDetail())
+    assert failure.summary == "auth"

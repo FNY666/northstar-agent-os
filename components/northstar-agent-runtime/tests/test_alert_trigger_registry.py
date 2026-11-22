@@ -112,3 +112,47 @@ def test_duplicate_denial_is_idempotent():
     _append(r, subject="Shell"); _append(r, subject="Shell")
     r._scan_alert_sink()
     assert len(a.calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# Mutant evidence: or@45
+#
+# `if not trigger.name or not trigger.outcomes:` is a genuine double
+# guard, and `or` -> `and` differs only when EXACTLY ONE half is true.
+# So it takes TWO inputs to kill the mutant:
+#
+#   * the name is blank, the outcomes are present -- only the SECOND
+#     half refuses, so the mutant (`and`) ACCEPTS the trigger;
+#   * the name is present, the outcomes are empty -- only the FIRST
+#     half refuses, so the mutant ACCEPTS the trigger too.
+# ---------------------------------------------------------------------------
+
+
+def test_or_at_45_a_blank_trigger_name_is_refused():
+    """or@45: type right, format wrong -- the name is blank.
+
+    Only the second half of the guard refuses this one, so it is one of
+    the two inputs that separate `or` from `and`.
+    """
+    with pytest.raises(AlertTriggerRegistryError) as excinfo:
+        AlertTriggerRegistry((AlertTrigger("", "kill-switch", ("permission.deny",)),))
+    assert "trigger requires name and outcomes" in str(excinfo.value)
+
+
+def test_or_at_45_empty_trigger_outcomes_are_refused():
+    """or@45: format right, type wrong -- the outcomes are empty.
+
+    Only the first half of the guard refuses this one, so it is the
+    other of the two inputs that separate `or` from `and`.
+    """
+    with pytest.raises(AlertTriggerRegistryError) as excinfo:
+        AlertTriggerRegistry((AlertTrigger("named", "kill-switch", ()),))
+    assert "trigger requires name and outcomes" in str(excinfo.value)
+
+
+def test_or_at_45_a_complete_trigger_is_accepted():
+    """or@45: the control -- a named trigger with outcomes passes."""
+    registry = AlertTriggerRegistry(
+        (AlertTrigger("named", "kill-switch", ("permission.deny",)),)
+    )
+    assert registry.triggers[0].name == "named"
