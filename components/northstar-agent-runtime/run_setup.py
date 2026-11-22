@@ -20,7 +20,10 @@ from __future__ import annotations
 import argparse
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Sequence
+
+from egress_scope import intersect_egress_target_scopes
 
 
 class RunConfigurationError(ValueError):
@@ -130,6 +133,17 @@ def load_policy(args: argparse.Namespace, registry: Any, agents: Any) -> Any:
     try:
         return load_policy_file(args.workspace, known_tools=registry.names(), known_agents=agents.names())
     except PolicyFileError as error:
+        raise RunConfigurationError(str(error)) from error
+
+
+def resolve_egress_target_scope(cli_targets: Any, policy: Any) -> tuple[str, ...] | None:
+    """Intersect CLI and workspace host scopes; neither source can widen the other."""
+    try:
+        return intersect_egress_target_scopes(
+            tuple(cli_targets or ()),
+            getattr(policy, "egress_targets", None) if policy is not None else None,
+        )
+    except ValueError as error:
         raise RunConfigurationError(str(error)) from error
 
 
@@ -336,7 +350,9 @@ class PromptSetup:
     system_prompt: str | None
     context: Any
     skills: tuple[Any, ...]
+    skill_digests: dict[str, str]
     memory_note: str
+    memory_audience: tuple[str, ...] = ()
 
 
 def compose_system_prompt(args: argparse.Namespace, definition: Any, policy: Any, plugins: Any) -> PromptSetup:
@@ -349,7 +365,7 @@ def compose_system_prompt(args: argparse.Namespace, definition: Any, policy: Any
     """
     from loop import DEFAULT_SYSTEM_PROMPT
     from policy_file import append_project_context, discover_project_context
-    from skills import SkillError, discover_skills, skill_listing
+    from skills import SkillError, discover_skill_resource_digests, discover_skills, skill_listing
 
     system_prompt: str | None = None
     if args.system_prompt:
@@ -391,6 +407,14 @@ def compose_system_prompt(args: argparse.Namespace, definition: Any, policy: Any
             )
         except SkillError as error:
             raise RunConfigurationError(str(error)) from error
+    skill_digests = {
+        Path(skill.path).relative_to(Path(args.workspace).resolve()).as_posix(): skill.digest
+        for skill in skills
+    }
+    try:
+        skill_digests.update(discover_skill_resource_digests(args.workspace, skills))
+    except SkillError as error:
+        raise RunConfigurationError(str(error)) from error
     if skills:
         base_prompt = system_prompt if system_prompt is not None else DEFAULT_SYSTEM_PROMPT
         system_prompt = base_prompt + skill_listing(skills, args.workspace)
@@ -403,12 +427,15 @@ def compose_system_prompt(args: argparse.Namespace, definition: Any, policy: Any
         except SkillError as error:
             raise RunConfigurationError(str(error)) from error
         if skill_scripts:
+            for script in skill_scripts:
+                skill_digests[script.relative] = script.digest
             base_prompt = system_prompt if system_prompt is not None else DEFAULT_SYSTEM_PROMPT
             system_prompt = base_prompt + skill_scripts_listing(skill_scripts)
 
     # Workspace memory (P4): workspace-scoped only, digest-labelled, opt-out.
     # Never a user-home / global MEMORY store (blueprint C7).
     memory = None
+    memory_audience: tuple[str, ...] = ()
     memory_note = "none (.northstar/memory/MEMORY.md absent)"
     try:
         from memory import MemoryError, append_memory, discover_memory
@@ -421,14 +448,24 @@ def compose_system_prompt(args: argparse.Namespace, definition: Any, policy: Any
                 args.workspace,
                 configured=False if getattr(args, "no_memory", False) else None,
                 explicit=(getattr(args, "memory_file", "") or None) or None,
+                viewers=getattr(args, "memory_viewer", None),
             )
             if memory is not None:
+                memory_audience = memory.audience
                 base_prompt = system_prompt if system_prompt is not None else DEFAULT_SYSTEM_PROMPT
                 system_prompt = append_memory(base_prompt, memory)
                 memory_note = (
-                    f"{memory.relative} digest={memory.digest[:12]}"
+                    f"{memory.relative} digest={memory.digest[:12]} integrity={memory.integrity}"
                     + (" [truncated]" if memory.truncated else "")
                 )
+            elif not getattr(args, "no_memory", False):
+                candidate = (
+                    Path(args.workspace) / getattr(args, "memory_file")
+                    if getattr(args, "memory_file", "")
+                    else Path(args.workspace) / ".northstar" / "memory" / "MEMORY.md"
+                )
+                if candidate.is_file():
+                    memory_note = "withheld (no matching memory audience; missing viewer identity is public-only)"
     except MemoryError as error:
         raise RunConfigurationError(str(error)) from error
 
@@ -441,7 +478,14 @@ def compose_system_prompt(args: argparse.Namespace, definition: Any, policy: Any
         system_prompt = (
             base_prompt + "\n\n== Plugin context (developer-authored, from installed bundles) ==\n" + blocks + "\n== End of plugin context =="
         )
-    return PromptSetup(system_prompt=system_prompt, context=context, skills=skills, memory_note=memory_note)
+    return PromptSetup(
+        system_prompt=system_prompt,
+        context=context,
+        skills=skills,
+        skill_digests=skill_digests,
+        memory_note=memory_note,
+        memory_audience=memory_audience,
+    )
 
 
 def validate_session_flags(args: argparse.Namespace, ceilings: Ceilings) -> None:

@@ -13,15 +13,20 @@ Policy shape: a default-deny allowlist is unworkable for a general Shell tool
 aimed at privilege-escalation and sandbox-escape primitives that no legitimate
 workspace command needs: kernel module loading, kexec, BPF program loading,
 perf, userfaultfd, keyrings, ptrace, cross-process memory access, and
-filesystem super-operations (mount/pivot_root/...). The namespaces already
-blunt most of these; seccomp is defense in depth, which is exactly what the
-threat model calls "a later hardening step".
+filesystem super-operations (mount/pivot_root/...). Since Shell networking is
+not offered, socket creation, socketpair, and ``io_uring_setup`` are also
+denied; this gives the process backend a kernel-level network creation barrier
+when seccomp is active, even without Landlock. The namespaces already blunt
+many other escape primitives; seccomp is defense in depth. ``setpgid`` and
+``setsid`` are also denied so a Shell descendant cannot escape the process
+group used for timeout/output/leader-exit cleanup.
 
 Syscall numbers are per-architecture and were verified against the sources,
-not memory: x86_64 against ``/usr/include/x86_64-linux-gnu/asm/unistd_64.h``,
-aarch64 against upstream ``include/uapi/asm-generic/unistd.h`` (torvalds/linux).
-An unknown arch falls through to ALLOW — documented, and the honest choice
-over applying the wrong table.
+not memory: x86_64 against upstream ``arch/x86/entry/syscalls/syscall_64.tbl``
+and aarch64 against ``include/uapi/asm-generic/unistd.h`` (torvalds/linux).
+An unknown audit architecture is denied with EPERM rather than receiving a
+filter built from the wrong syscall table. x32 syscall numbers are rejected
+before the x86_64 denylist is evaluated.
 
 Denied calls fail with EPERM, not SIGSYS: a blocked call surfaces as an
 ordinary error in the tool result instead of killing the child, which keeps
@@ -49,10 +54,12 @@ _ARCH_OFFSET = 4
 
 _AUDIT_ARCH_X86_64 = 0xC000003E
 _AUDIT_ARCH_AARCH64 = 0xC00000B7
+_X32_SYSCALL_BIT = 0x40000000
 
 # Classic BPF opcodes.
 _BPF_LD_W_ABS = 0x20
 _BPF_JMP_JEQ_K = 0x15
+_BPF_JMP_JGE_K = 0x35
 _BPF_JMP_JA = 0x05
 _BPF_RET_K = 0x06
 
@@ -91,6 +98,11 @@ _DENY_X86_64: dict[str, int] = {
     "open_by_handle_at": 304,
     "name_to_handle_at": 303,
     "fanotify_init": 300,
+    "setpgid": 109,
+    "setsid": 112,
+    "socket": 41,
+    "socketpair": 53,
+    "io_uring_setup": 425,
 }
 
 _DENY_AARCH64: dict[str, int] = {
@@ -120,6 +132,11 @@ _DENY_AARCH64: dict[str, int] = {
     "open_by_handle_at": 265,
     "name_to_handle_at": 264,
     "fanotify_init": 262,
+    "setpgid": 154,
+    "setsid": 157,
+    "socket": 198,
+    "socketpair": 199,
+    "io_uring_setup": 425,
 }
 
 
@@ -163,6 +180,10 @@ def _jump_eq(k: int, jt: int, jf: int) -> bytes:
     return struct.pack("<HBBI", _BPF_JMP_JEQ_K, jt, jf, k)
 
 
+def _jump_ge(k: int, jt: int, jf: int) -> bytes:
+    return struct.pack("<HBBI", _BPF_JMP_JGE_K, jt, jf, k)
+
+
 def _jump_always(offset: int) -> bytes:
     return struct.pack("<HBBI", _BPF_JMP_JA, 0, 0, offset)
 
@@ -174,9 +195,10 @@ def build_default_filter() -> bytes:
 
         ld [arch]
         jeq X86_64 -> x86_chain
-        jeq AARCH64 -> arm_chain else ALLOW
+        jeq AARCH64 -> arm_chain else DENY
       x86_chain:
         ld [nr]
+        jge X32_SYSCALL_BIT -> DENY
         jeq n1 -> DENY ... jeq nN -> DENY
         ja ALLOW
       arm_chain:
@@ -191,7 +213,7 @@ def build_default_filter() -> bytes:
 
     # Index plan (each entry is one 8-byte instruction).
     x86_start = 3
-    x86_end = x86_start + 1 + len(x86_numbers)  # ld + N jeq
+    x86_end = x86_start + 2 + len(x86_numbers)  # ld + x32 guard + N jeq + ja
     arm_start = x86_end + 1  # + ja ALLOW
     arm_end = arm_start + 1 + len(arm_numbers)
     allow_idx = arm_end + 1  # + ja ALLOW
@@ -200,11 +222,12 @@ def build_default_filter() -> bytes:
     prog = b""
     prog += _stmt(_BPF_LD_W_ABS, _ARCH_OFFSET)  # 0: A = arch
     prog += _jump_eq(_AUDIT_ARCH_X86_64, x86_start - 2, 0)  # 1
-    prog += _jump_eq(_AUDIT_ARCH_AARCH64, arm_start - 3, allow_idx - 3)  # 2
+    prog += _jump_eq(_AUDIT_ARCH_AARCH64, arm_start - 3, deny_idx - 3)  # 2: unknown arch -> deny
     # x86_64 chain.
     prog += _stmt(_BPF_LD_W_ABS, _NR_OFFSET)  # x86_start: A = nr
+    prog += _jump_ge(_X32_SYSCALL_BIT, deny_idx - (x86_start + 2), 0)
     for i, nr in enumerate(x86_numbers):
-        prog += _jump_eq(nr, deny_idx - (x86_start + 2 + i), 0)
+        prog += _jump_eq(nr, deny_idx - (x86_start + 3 + i), 0)
     prog += _jump_always(allow_idx - (x86_end + 1))
     # aarch64 chain.
     prog += _stmt(_BPF_LD_W_ABS, _NR_OFFSET)  # arm_start: A = nr

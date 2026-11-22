@@ -32,6 +32,10 @@ class SidecarProtocolTests(unittest.TestCase):
         self.assertEqual(parse_codex_event(line), {"type": "text", "text": "OK"})
         self.assertIsNone(parse_codex_event(json.dumps({"type": "turn.started"})))
 
+    def test_rejects_ambiguous_codex_events(self):
+        self.assertIsNone(parse_codex_event('{"type":"item.completed","type":"turn.started"}'))
+        self.assertIsNone(parse_codex_event('{"type":"item.completed","item":{"text":NaN}}'))
+
     def test_classifies_codex_failures_without_leaking_secrets(self):
         result = redact_error("Authorization: Bearer secret-token failed with status 401")
         self.assertNotIn("secret-token", result)
@@ -99,6 +103,11 @@ class UnixTransportTests(unittest.TestCase):
         from transport import encode_response, decode_request
         payload = encode_response({"request_id": "r1", "status": "ok", "text": "OK"})
         self.assertEqual(decode_request(payload), {"request_id": "r1", "status": "ok", "text": "OK"})
+
+    def test_transport_rejects_ambiguous_json(self):
+        from transport import decode_request
+        self.assertIsNone(decode_request('{"request_id":"r","request_id":"other","prompt":"OK","timeout_ms":1000}'))
+        self.assertIsNone(decode_request('{"request_id":"r","prompt":"OK","timeout_ms":NaN}'))
 
     def test_transport_rejects_oversized_line(self):
         from transport import decode_request
