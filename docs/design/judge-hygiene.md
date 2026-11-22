@@ -899,6 +899,17 @@ because this table's slice set is not the census's: `c58` and
 `docs/design/mutant-evidence-closure.md` §2.  They also measured 0/3
 and have since been closed the same way; see that doc's §8.
 
+**AMENDED 2026-11-22 (d) -- `c58` and `slice3` are closed to 106/115.**
+Their whole-file count read 73/115, i.e. **42 survivors**.  33 of those
+are now killed by named killer tests, one per site; the remaining **9**
+are the `lt` sites, and they are **equivalent** rather than untested --
+each is a "did I find the closing delimiter?" comparison written
+`< 0`, and the value it compares can never be 0 at those call sites, so
+the `<= 0` mutant is indistinguishable.  Each of the nine carries a
+differential proof with a **non-vacuity control** (the same bound turned
+the other way, which IS observable).  So the row reads **106/115**, with
+the module body unchanged.
+
 **What this means for the numbers in this table.**  Every row whose
 suite unittest can see is unaffected -- the runner change only moves
 the rows above.  And the direction is fixed: the false kills all

@@ -370,8 +370,8 @@ is a different number:
 | slice | module | whole-file | first three |
 |---|---|---|---|
 | `agent-handoff` | `agent_handoff.py` | **38/38** | 3/3 |
-| `c58` | `bash_parser.py` | **73/115** | 3/3 |
-| `slice3` | `bash_parser.py` | **73/115** (90/90 at its own pin) | 3/3 |
+| `c58` | `bash_parser.py` | **106/115** (was 73/115) | 3/3 |
+| `slice3` | `bash_parser.py` | **106/115** (was 73/115; 90/90 at its own pin) | 3/3 |
 | `lightningzero` | `coverage_manifest.py` | **24/24** | 3/3 |
 | `slice4` | `alert_trigger_registry.py` | **4/4** | 3/3 |
 | `slice5` | `blind_rerunner.py` | **13/13** | 3/3 |
@@ -379,9 +379,11 @@ is a different number:
 
 **The first three constructs are NOT a sample of the file.**  A slice
 can read 3/3 on its first three constructs while more than half its
-mutants survive -- `c58` and `slice3` read 73/115.  (`lightningzero`
-read 12/24 at the time of that sweep and has since been closed to
-**24/24**; `c58` and `slice3` are the live examples.)  The 3/3 is a claim about three constructs; the whole-file
+mutants survive -- `c58` and `slice3` read 73/115 at the time of
+that sweep, and `lightningzero` read 12/24.  All three have since
+been closed: `lightningzero` to **24/24**, `c58` and `slice3` to
+**106/115** (33 killer tests; the remaining 9 are the equivalent
+`lt` sites).  The 3/3 is a claim about three constructs; the whole-file
 number is a claim about the module.  A census that reports only the
 first three cannot see the difference, which is why the whole-file
 sweep is the number that matters when the question is "is this module
@@ -394,8 +396,14 @@ described in `docs/design/mutant-evidence-closure.md` §9's AMENDED
 * `agent_handoff.py` -- **closed**: 38/38 at HEAD and at the pinned
   commit `249f9a5c` (was 25/38).  Thirteen survivors, thirteen new
   killer tests, module body unchanged.
-* `bash_parser.py` -- 42 survivors open at `c58`'s pin and at `slice3`'s
-  pin.
+* `bash_parser.py` -- **closed to 106/115**: 42 survivors at `c58`'s
+  pin and at `slice3`'s pin, of which 33 are now killed by named killer
+  tests.  The remaining **9** are the `lt` sites, and they are
+  **equivalent**, not untested: each is a "did I find the closing
+  delimiter?" comparison written `< 0`, and the value it compares can
+  never be 0 at those call sites.  Each carries a differential proof
+  with a non-vacuity control (the bound turned the other way, which IS
+  observable).  The module body is unchanged.
 * `coverage_manifest.py` -- **closed**: 24/24 (was 12/24).  The
   twelve survivors included nine inside `stdlib_only()` and `main()`,
   which are only reachable by running the module as a **script** --
