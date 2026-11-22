@@ -1,0 +1,17 @@
+# The `json-schema` extra, as a requirements file.
+#
+# These two are OPTIONAL at runtime: without them the runtime REFUSES the
+# JSON Schema pattern keywords rather than guessing at them, and the
+# pattern tests SKIP rather than fail. The suite is green without them.
+#
+# Install them to exercise the MCP 2020-12 schema surface:
+#   pip install -r requirements-schema.txt
+#
+# The jsonschema floor is NOT cosmetic. 4.19.2's `enum` keyword compares
+# nested containers with `==`, so `{'flag': 1}` satisfies
+# `enum: [{'flag': True}]` -- a boolean schema accepting a number. The
+# runtime overrides that keyword with its own JSON-equality comparison, so
+# the check holds on any version; the floor is still declared so the
+# installed library matches what the extra documents.
+jsonschema>=4.26,<5
+regex>=2025.7.31,<2027

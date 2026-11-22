@@ -25,6 +25,13 @@ classifiers = [
 # scripted provider and the whole deterministic test suite run on a bare
 # interpreter. Install an extra to talk to a live model or export traces:
 #   pip install northstar-agent-runtime[anthropic,tracing]
+#
+# The `json-schema` extra is OPTIONAL in the same sense: without it the
+# JSON Schema pattern keywords are refused rather than guessed at (the
+# runtime fails closed with "pattern validation requires the regex
+# extra"), and the tests that exercise them SKIP rather than fail. Install
+# it to run the MCP 2020-12 schema surface:
+#   pip install northstar-agent-runtime[json-schema]
 dependencies = []
 
 [project.optional-dependencies]

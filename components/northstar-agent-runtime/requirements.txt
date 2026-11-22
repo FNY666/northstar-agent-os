@@ -3,5 +3,13 @@
 # Both are lazy imports: every other module in this component is importable with
 # nothing installed, so the offline test suite (and the scripted provider) runs on a
 # bare interpreter. Continuous integration uses Python 3.12.
+#
+# One caveat, measured: the suite is green on a bare interpreter, but four
+# JSON Schema PATTERN tests SKIP without the `json-schema` extra, because
+# the timeout-capable `regex` engine it needs is not installed. The runtime
+# fails closed there ("pattern validation requires the regex extra"), which
+# is the right posture for an untrusted pattern -- but the coverage is not
+# exercised. Install it to run those four:
+#   pip install -r requirements-schema.txt
 anthropic>=1.0
 opentelemetry-api>=1.20
