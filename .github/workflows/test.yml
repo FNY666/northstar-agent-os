@@ -164,11 +164,13 @@ jobs:
   agent-runtime:
     name: Agent runtime (offline unit tests)
     runs-on: ubuntu-latest
-    # The slowest job: a 21,352-test pytest suite (measured 6m52s) plus
-    # the 13-guard invariant verification (measured 5m06s) -- about 13
-    # minutes in total on this host.  The limit is set well above that,
-    # so a slower runner cannot produce a false failure, and well below
-    # GitHub's 360-minute default, so a hang is bounded.
+    # The slowest job: a 33,275-test pytest suite (measured 8m43s), the
+    # baseline drift check, which runs the SAME suite a second time
+    # (measured 8m43s), plus the 13-guard invariant verification
+    # (measured 5m06s) -- about 22 minutes in total on this host.  The
+    # limit is set well above that, so a slower runner cannot produce a
+    # false failure, and well below GitHub's 360-minute default, so a
+    # hang is bounded.
     timeout-minutes: 45
     defaults:
       run:
@@ -202,6 +204,24 @@ jobs:
         # Pytest is required because this suite contains both unittest.TestCase
         # classes and standalone pytest tests.
         run: python -m pytest -q tests
+      - name: Baseline drift check
+        # The failure set must be identical to the recorded baseline.
+        #
+        # The baseline drifted twice in one day (27 -> 26 -> 30 items), and
+        # four slices' reports were wrong about it, because nothing
+        # machine-checked it.  This step is that check.
+        #
+        # The script runs the SAME suite this job just ran (pytest, the
+        # default runner) and compares the normalised failure set against
+        # the baseline.  It only ever COMPARES: re-taking a baseline is
+        # the coordinator's decision (docs/design/r6-baseline-unify.md
+        # section 5.1).
+        #
+        # Exit codes: 0 = match, 1 = drift, 2 = could not measure (a
+        # missing baseline, or a full /tmp).  Exit 2 is deliberately
+        # distinct, so a run that could not measure is never read as a
+        # clean tree.
+        run: bash ../../scripts/b173-baseline-check.sh
       - name: Setup Node (TypeScript face)
         # The face is source-only and its suite spawns this component's CLI, so node is a test
         # runner here, not a build tool: no `npm install`, no lockfile, no registry contact.
