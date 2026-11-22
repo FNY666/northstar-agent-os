@@ -74,11 +74,29 @@ RULES_VERSION = "mcp-admission-rules/1"
 #: can say which rules produced it.
 ADMISSION_VERSION = "northstar.mcp-admission.v1"
 
+
+def _strict_json_loads(text: str) -> Any:
+    """Parse admission policy/ledger JSON without duplicate-key ambiguity."""
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON key {key!r}")
+            result[key] = value
+        return result
+
+    def reject_constant(value: str):
+        raise ValueError(f"non-standard JSON constant {value}")
+
+    return json.loads(text, object_pairs_hook=unique_object, parse_constant=reject_constant)
+
 #: Where the admission policy and its ledger live, next to the workspace policy
 #: file. Both are JSON so they diff cleanly.
 POLICY_DIRECTORY = ".northstar"
 POLICY_FILE_NAME = "mcp-admission.json"
 LEDGER_FILE_NAME = "mcp-admission-ledger.jsonl"
+_MAX_POLICY_BYTES = 1 << 20
+_MAX_LEDGER_BYTES = 4 << 20
 LEDGER_SCHEMA = "northstar-mcp-admission-ledger/1"
 
 
@@ -467,7 +485,9 @@ def scan_document(path: Path) -> tuple[AdmissionFinding, ...]:
     ``mcp_config`` already refuses it loudly; the scanner does not double as a
     parser."""
     try:
-        document = json.loads(path.read_text(encoding="utf-8"))
+        from mcp_config import _load_json
+
+        document = _load_json(path)
     except (OSError, ValueError):
         return ()
     if not isinstance(document, Mapping):
@@ -502,7 +522,9 @@ def scan_workspace(
         file_findings = scan_document(path)
         findings.extend(file_findings)
         try:
-            document = json.loads(path.read_text(encoding="utf-8"))
+            from mcp_config import _load_json
+
+            document = _load_json(path)
             table = document.get("mcpServers", document.get("servers")) if isinstance(document, dict) else None
             if isinstance(table, dict):
                 servers += len(table)
@@ -648,12 +670,15 @@ def _digest_row_with_prev(row: Mapping[str, Any], prev_digest: str) -> str:
 def _read_ledger(path: Path) -> list[dict[str, Any]]:
     if not path.is_file():
         return []
+    raw = path.read_bytes()
+    if len(raw) > _MAX_LEDGER_BYTES:
+        raise ValueError(f"{LEDGER_FILE_NAME} exceeds {_MAX_LEDGER_BYTES}-byte limit")
     rows: list[dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in raw.decode("utf-8").splitlines():
         line = line.strip()
         if not line:
             continue
-        rows.append(json.loads(line))
+        rows.append(_strict_json_loads(line))
     return rows
 
 
@@ -747,8 +772,11 @@ def load_policy(workspace: str | Path) -> AdmissionPolicy:
     if not path.is_file():
         return AdmissionPolicy()
     try:
-        document = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        raw = path.read_bytes()
+        if len(raw) > _MAX_POLICY_BYTES:
+            raise ValueError(f"{POLICY_FILE_NAME} exceeds {_MAX_POLICY_BYTES}-byte limit")
+        document = _strict_json_loads(raw.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError):
         return AdmissionPolicy(notes=[f"{POLICY_FILE_NAME} unreadable; treating as empty (deny-default)"])
     levels = document.get("levels")
     if not isinstance(levels, Mapping):

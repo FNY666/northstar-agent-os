@@ -117,11 +117,57 @@ class ParallelDispatchTests(RuntimeTestCase):
         )
         elapsed = time.monotonic() - t0
         results = report.transcript[2].tool_results
-        self.assertEqual([r.text() for r in results], ["done-a", "done-b", "done-c"])
+        self.assertEqual([r.text().splitlines()[-1] for r in results], ["done-a", "done-b", "done-c"])
         self.assertEqual([r.is_error for r in results], [False, False, False])
         # If the three handlers truly overlapped, wall time is well under 3 serial sleeps.
         self.assertLess(elapsed, 0.5, f"handlers did not overlap (elapsed={elapsed:.3f}s)")
         self.assertEqual(sorted(started), ["a", "b", "c"])
+
+    def test_parallel_batch_reserves_tool_call_ceiling_in_provider_order(self):
+        executed: list[str] = []
+        registry = ToolRegistry()
+
+        def read(payload: dict, ctx: ToolContext) -> ToolResult:
+            name = str(payload.get("tag"))
+            executed.append(name)
+            return ToolResult.ok(name)
+
+        registry.register(
+            ToolSpec(
+                name="ReadProbe",
+                description="",
+                input_schema={"type": "object", "properties": {"tag": {"type": "string"}}},
+                handler=read,
+                kind="read",
+                is_mutating=False,
+            )
+        )
+        provider = self.provider(
+            [
+                {
+                    "tools": [
+                        {"name": "ReadProbe", "input": {"tag": "first"}},
+                        {"name": "ReadProbe", "input": {"tag": "over-limit"}},
+                    ]
+                },
+                text_turn("done"),
+            ]
+        )
+        report = self.drive(
+            self.runtime(
+                provider=provider,
+                tools=registry,
+                parallel_tools=2,
+                max_tool_calls=1,
+                max_turns=4,
+            )
+        )
+        results = report.transcript[2].tool_results
+        self.assertEqual(executed, ["first"])
+        self.assertEqual(len(report.tool_calls), 2)
+        self.assertEqual(report.tool_calls[0].execution_status, "completed")
+        self.assertEqual(report.tool_calls[1].permission_source, "limit:max_tool_calls")
+        self.assertTrue(results[1].is_error)
 
     def test_mixed_batch_stays_serial_even_when_parallel_tools_set(self):
         order: list[str] = []
@@ -174,7 +220,7 @@ class ParallelDispatchTests(RuntimeTestCase):
             )
         )
         results = report.transcript[2].tool_results
-        self.assertEqual([r.text() for r in results], ["r1", "w1", "r2"])
+        self.assertEqual([r.text().splitlines()[-1] for r in results], ["r1", "w1", "r2"])
         # Serial order of start == finish order for a mixed batch.
         self.assertEqual(order, ["r1", "w1", "r2"])
 
@@ -203,12 +249,25 @@ class ParallelDispatchTests(RuntimeTestCase):
         )
         # Default mode + no allow-list: read tools are permitted; still two independent
         # evaluations (two reports). Parallelism must not collapse them into one gate hit.
-        report = self.drive(
-            self.runtime(provider=provider, tools=registry, parallel_tools=2, max_turns=4)
-        )
+        runtime = self.runtime(provider=provider, tools=registry, parallel_tools=2, max_turns=4)
+        report = self.drive(runtime)
         self.assertEqual(len(report.tool_calls), 2)
         self.assertEqual([c.name for c in report.tool_calls], ["Peek", "Peek"])
         self.assertFalse(any(c.denied for c in report.tool_calls))
+        self.assertEqual([c.execution_status for c in report.tool_calls], ["completed", "completed"])
+        self.assertEqual([c.execution_gate for c in report.tool_calls], ["executed", "executed"])
+        report_pins = {c.governance_input_digest for c in report.tool_calls}
+        ledger_pins = {
+            record.input_fingerprint
+            for record in (
+                runtime.sealed_ledger.record(index)
+                for index in range(1, len(runtime.sealed_ledger) + 1)
+            )
+            if dict(record.event).get("intent") == "governed-action"
+            and dict(record.event).get("action") == "Peek"
+        }
+        self.assertEqual(len(report_pins), 2, "identical args remain distinct by provider call id")
+        self.assertEqual(report_pins, ledger_pins)
 
     def test_batch_verdicts_are_per_call_approving_one_says_nothing_about_the_other(self):
         """Batch per-call adjudication (approval-gate ``guardAll`` absorption).
@@ -253,6 +312,7 @@ class ParallelDispatchTests(RuntimeTestCase):
         self.assertTrue((workspace / "yes.txt").exists())
         self.assertFalse((workspace / "no.txt").exists())
         self.assertEqual(len(report.denials), 1)
+        self.assertEqual([call.execution_status for call in report.tool_calls], ["completed", "not_started"])
         self.assertEqual(report.denials[0].source, "host_callback")
         refusal = report.transcript[2].tool_results[1]
         self.assertTrue(refusal.is_error)

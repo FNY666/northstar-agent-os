@@ -8,6 +8,7 @@ This is the production governance loop.
 import importlib.util
 import os
 import sys
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -81,6 +82,33 @@ def test_full_governed_run_executes():
     assert report["forward_secure"] is True
 
 
+def test_executor_receives_detached_snapshot_after_assess():
+    runner, _, _, observer, executed, *_ = _build_runner()
+    original = {"nested": {"value": "authorized"}}
+    authorized_digest = gar.GovernedActionRunner.pin({"tool": "read_file", "args": original})
+    verdict = observer.verdict
+
+    def mutate_after_assessment(*args, **kwargs):
+        result = verdict(*args, **kwargs)
+        original["nested"]["value"] = "tampered after assess"
+        return result
+
+    observer.verdict = mutate_after_assessment
+    outcome = runner.run(
+        intent="read",
+        action="read-file",
+        subject="agent",
+        tool="read_file",
+        tool_args=original,
+        decision=SimpleNamespace(allowed=True, reason="approved"),
+        authorized_inputs_digest=authorized_digest,
+    )
+
+    assert outcome.executed is True
+    assert executed[0][1] == {"nested": {"value": "authorized"}}
+    assert original["nested"]["value"] == "tampered after assess"
+
+
 def test_deny_at_authorize_blocks():
     runner, ledger, checkpoint, observer, executed, ik, ck = _build_runner()
     # delete_db with mutating=True is denied by the default gate.
@@ -109,6 +137,24 @@ def test_runner_fail_closed_on_bad_input():
         runner.run(intent="x", action="y", subject="z", tool="")
 
 
+def test_bash_parser_gate_blocks_denied_command():
+    runner, ledger, checkpoint, observer, executed, ik, ck = _build_runner()
+    outcome = runner.run(
+        intent="run shell",
+        action="shell",
+        subject="workspace",
+        tool="shell",
+        tool_args={"command": "echo $(id)"},
+        mutating=False,
+    )
+    assert outcome.executed is False
+    assert outcome.gate == "bash_parser"
+    assert outcome.decision == "blocked"
+    assert "command_substitution" in outcome.reason
+    assert executed == []  # the executor never saw the command
+    assert len(ledger) >= 1  # the denial was sealed
+
+
 def test_runner_module_self_check():
     assert gar.stdlib_only() is True
-    assert gar.GOVERNED_RUNNER_VERSION == "governed-action-runner.v1"
+    assert gar.GOVERNED_RUNNER_VERSION == "governed-action-runner.v2"

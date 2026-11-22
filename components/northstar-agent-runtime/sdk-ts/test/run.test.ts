@@ -20,9 +20,9 @@ import { ConfigurationError } from "../src/options.ts";
 
 const INIT = '{"type":"system","subtype":"init","content":"runtime ready: fake/fake","data":{"limits":{"max_turns":2}}}';
 const RESULT_OK =
-  '{"type":"result","subtype":"success","is_error":false,"num_turns":1,"duration_ms":3,"total_cost_usd":0,"total_usage":{"input_tokens":4,"output_tokens":2,"cache_read_input_tokens":0,"cache_creation_input_tokens":0},"session_id":"s-1","pricing_estimated":false,"errors":[],"permission_denials":[]}';
+  '{"type":"result","subtype":"success","is_error":false,"num_turns":1,"duration_ms":3,"total_cost_usd":0,"total_usage":{"input_tokens":4,"output_tokens":2,"cache_read_input_tokens":0,"cache_creation_input_tokens":0},"session_id":"s-1","pricing_estimated":false,"errors":[],"permission_denials":[],"tool_call_reports":[],"subagents":[]}';
 const RESULT_DENIED =
-  '{"type":"result","subtype":"error_permission_denied","is_error":true,"num_turns":1,"duration_ms":2,"total_cost_usd":0,"total_usage":{},"session_id":"s-2","pricing_estimated":false,"errors":["Write refused by the permission gate"],"permission_denials":[{"tool":"Write","source":"policy:deny","reason":"Write refused by the permission gate","agent":"main","turn_index":0,"kind":"tool"}]}';
+  '{"type":"result","subtype":"error_permission_denied","is_error":true,"num_turns":1,"duration_ms":2,"total_cost_usd":0,"total_usage":{},"session_id":"s-2","pricing_estimated":false,"errors":["Write refused by the permission gate"],"permission_denials":[{"tool":"Write","source":"policy:deny","reason":"Write refused by the permission gate","agent":"main","turn_index":0,"kind":"tool"}],"tool_call_reports":[{"name":"Write","call_id":"w1","is_error":true,"denied":true,"permission_source":"policy:deny","duration_ms":0,"result_chars":0,"truncated":false,"input_rewritten":false,"result_source":"","result_trust":"","result_detail":"","execution_status":"not_started","execution_gate":"","governance_input_digest":"sha256:x","turn_index":0,"agent":"main"}],"subagents":[]}';
 const TWO_TOOL_CALLS =
   '{"type":"assistant","content":[{"type":"tool_use","id":"t1","name":"Read","input":{}},{"type":"tool_use","id":"t2","name":"Write","input":{}},{"type":"text","text":"two calls"}],"model":"fake","usage":{},"stop_reason":"tool_use"}';
 
@@ -83,6 +83,8 @@ test("a scripted run comes back as a report, with the CLI's exit code", async (t
   assert.ok(report.durationMs >= 0);
   assert.deepEqual(report.errors, []);
   assert.deepEqual(report.permissionDenials, []);
+  assert.deepEqual(report.toolCallReports, []);
+  assert.deepEqual(report.subagents, []);
   assert.equal(report.toolCalls, 0);
   assert.equal(report.totalUsage.input_tokens >= 0, true);
   assert.equal(report.pricingEstimated, true);
@@ -102,6 +104,7 @@ test("a denied tool call is a report, not a thrown error, with the denial fields
   assert.equal(report.isError, true);
   assert.equal(report.permissionDenials.length, 1);
   assert.equal(report.permissionDenials[0].source, "policy:deny");
+  assert.equal(report.toolCallReports[0].execution_status, "not_started");
   assert.deepEqual(report.errors, ["Write refused by the permission gate"]);
 });
 
@@ -114,7 +117,7 @@ test("the child's stderr is kept out of the event stream and inside the report",
   assert.match(report.stderr, /legacy protocol/);
 });
 
-test("tool calls are counted from the stream, not from a field the result does not carry", async () => {
+test("tool calls are counted from the stream, alongside separate execution reports", async () => {
   const report = await run({ prompt: "p" }, { binary: fakeCli([INIT, TWO_TOOL_CALLS, RESULT_OK], 0) });
   assert.equal(report.toolCalls, 2);
   assert.equal(report.subtype, "success");

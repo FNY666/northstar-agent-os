@@ -31,7 +31,7 @@ from checkpoints import (
     select,
 )
 from providers.base import AssistantMessage, TextBlock, UserMessage
-from sessions import SessionStore
+from sessions import SessionIntegrityError, SessionStore
 
 
 def _checkpoint_dict(**overrides) -> dict:
@@ -81,6 +81,33 @@ class CheckpointRecordTests(unittest.TestCase):
         self.assertEqual(payload["transcript_digest"], digest_transcript(messages))
         self.assertEqual(payload["cost_usd"], 0.125)
         self.assertEqual(json.loads(json.dumps(payload))["turns"], 1)
+
+    def test_composition_policy_and_history_round_trip_with_checkpoint(self):
+        payload = build(
+            session_id="s-1",
+            record_index=0,
+            transcript=[UserMessage.text_block("go")],
+            turns=1,
+            tool_calls=1,
+            cost_usd=0,
+            usage=object(),
+            model="m",
+            provider="scripted",
+            permission_mode="default",
+            composition_history=("read_sensitive", "reviewed"),
+            composition_policy_digest="a" * 64,
+        )
+
+        checkpoint = from_record({"type": CHECKPOINT_TYPE, "index": 0, "session_id": "s-1", **payload})
+
+        self.assertEqual(checkpoint.composition_history, ("read_sensitive", "reviewed"))
+        self.assertEqual(checkpoint.composition_policy_digest, "a" * 64)
+
+    def test_malformed_composition_state_is_rejected(self):
+        with self.assertRaisesRegex(CheckpointError, "composition_history"):
+            from_record(_checkpoint_dict(composition_history=["ok"] * 33))
+        with self.assertRaisesRegex(CheckpointError, "composition_policy_digest"):
+            from_record(_checkpoint_dict(composition_policy_digest="not-a-digest"))
 
     def test_non_checkpoint_records_are_skipped_not_fatal(self):
         self.assertIsNone(from_record({"type": "assistant", "index": 1}))
@@ -153,6 +180,86 @@ class LoopCheckpointTests(RuntimeTestCase):
 
     def _records(self, store: SessionStore) -> list[dict]:
         return store.read(store.session_id)[0]
+
+    @staticmethod
+    def _composition_engine():
+        from permissions import CompositionRule, PermissionConfig, PermissionEngine
+
+        return PermissionEngine(
+            PermissionConfig(
+                mode="default",
+                allowed_tools=("Read", "Shell"),
+                can_use_tool=lambda _name, _args, _context: True,
+            ),
+            tool_kinds={"Read": "read", "Shell": "exec"},
+            composition_rules=(CompositionRule(sequence=("read_sensitive", "external_send")),),
+            tool_categories={"Read": "read_sensitive", "Shell": "external_send"},
+        )
+
+    def test_resume_restores_composition_history_and_blocks_later_action(self):
+        from budget import Budget
+        from loop import AgentRuntime, RuntimeConfigurationError
+
+        root = self.workspace({"secret.txt": "classified"})
+        parent_store = self.session_store()
+        first = AgentRuntime(
+            provider=self._scripted([tool_turn("Read", {"path": "secret.txt"}), {"text": "read"}]),
+            config=__import__("loop").RuntimeConfig(
+                workspace=str(root), allowed_tools=("Read", "Shell"), checkpoint_turns=1,
+            ),
+            permissions=self._composition_engine(),
+            sessions=parent_store,
+        )
+        self.drive(first)
+        checkpoint = select(self._records(parent_store))
+        self.assertEqual(checkpoint.composition_history, ("read_sensitive",))
+        transcript = parent_store.transcript(parent_store.session_id)
+
+        # A legacy checkpoint cannot prove the composition state; active rules
+        # must refuse it instead of silently restarting from an empty history.
+        import dataclasses
+
+        legacy = dataclasses.replace(
+            checkpoint, composition_history=None, composition_policy_digest=None,
+        )
+        with self.assertRaisesRegex(RuntimeConfigurationError, "predates composition-state"):
+            AgentRuntime(
+                provider=self._scripted([]),
+                config=__import__("loop").RuntimeConfig(workspace=str(root), resume_from=legacy),
+                permissions=self._composition_engine(),
+            ).run_collect("continue", resume=transcript)
+
+        changed_policy_checkpoint = dataclasses.replace(
+            checkpoint, composition_policy_digest="b" * 64,
+        )
+        with self.assertRaisesRegex(RuntimeConfigurationError, "composition policy differs"):
+            AgentRuntime(
+                provider=self._scripted([]),
+                config=__import__("loop").RuntimeConfig(
+                    workspace=str(root), resume_from=changed_policy_checkpoint,
+                ),
+                permissions=self._composition_engine(),
+            ).run_collect("continue", resume=transcript)
+
+        child_store = self.session_store()
+        resumed = AgentRuntime(
+            provider=self._scripted([tool_turn("Shell", {"command": "touch resumed-marker"}), {"text": "done"}]),
+            config=__import__("loop").RuntimeConfig(
+                workspace=str(root),
+                allowed_tools=("Read", "Shell"),
+                resume_from=checkpoint,
+                parent_session=parent_store.session_id,
+                max_turns=checkpoint.turns + 2,
+            ),
+            permissions=self._composition_engine(),
+            sessions=child_store,
+            budget=Budget(max_budget_usd=None, total_cost_usd=checkpoint.cost_usd),
+        )
+        report = resumed.run_collect("continue", resume=transcript)
+
+        self.assertTrue(report.tool_calls[0].denied)
+        self.assertEqual(report.tool_calls[0].permission_source, "composition")
+        self.assertFalse((root / "resumed-marker").exists())
 
     def test_no_checkpoint_records_by_default(self):
         store = self.session_store()
@@ -285,8 +392,8 @@ class LoopCheckpointTests(RuntimeTestCase):
         records, _ = store.read(store.session_id)
         checkpoint = select(records)
         lines = store.path.read_text(encoding="utf-8").splitlines()
-        # Rewrite one assistant message body inside the checkpointed prefix: the
-        # digest is the only thing that can notice.
+        # Rewrite one assistant message body inside the checkpointed prefix:
+        # the session chain must reject it before transcript reconstruction.
         for position, line in enumerate(lines):
             record = json.loads(line)
             if record.get("type") == "assistant":
@@ -294,20 +401,10 @@ class LoopCheckpointTests(RuntimeTestCase):
                 lines[position] = json.dumps(record)
                 break
         store.path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        replayed = store.transcript(store.session_id)
         # Reopen the *same* store directory: a second store pointed at a different
         # directory would read a different (empty) history and prove nothing.
-        tampered = SessionStore(store.directory, session_id=store.session_id)
-        replayed = tampered.transcript(store.session_id)
-        with self.assertRaises(Exception) as caught:
-            tampered_runtime = self.runtime(
-                [{"text": "x"}],
-                workspace=root,
-                resume_from=select(tampered.read(store.session_id)[0]),
-                max_turns=5,
-            )
-            tampered_runtime.run_collect("again", resume=tampered.transcript(store.session_id))
-        self.assertIn("does not match the checkpoint digest", str(caught.exception))
+        with self.assertRaisesRegex(SessionIntegrityError, "chain verification failed"):
+            SessionStore(store.directory, session_id=store.session_id)
 
 
 class CliCheckpointTests(RuntimeTestCase):

@@ -290,6 +290,59 @@ class DelegationChainTests(unittest.TestCase):
         self.assertFalse(verdict.allowed)
         self.assertEqual(verdict.failed_rule, "delegation_expired")
 
+    def test_expiry_compares_instants_across_timezone_offsets(self):
+        iss = _issuer()
+        worker, _ = iss.issue("worker-1", issued_at=NOW)
+        hop = iss.delegate(
+            iss._root_secret,
+            iss.root_did,
+            worker.did,
+            ("read:files",),
+            depth=1,
+            # Exactly equal to NOW, despite a different UTC offset. String
+            # ordering would incorrectly treat this expiry as still in future.
+            expires_at="2026-10-04T03:00:00+02:00",
+        )
+        verdict = verify_delegation_chain(
+            [hop], iss.root_did, ("read:files",), time_iso=NOW
+        )
+        self.assertFalse(verdict.allowed)
+        self.assertEqual(verdict.failed_rule, "delegation_expired")
+
+    def test_expiry_without_timezone_fails_closed(self):
+        iss = _issuer()
+        worker, _ = iss.issue("worker-1", issued_at=NOW)
+        hop = iss.delegate(
+            iss._root_secret,
+            iss.root_did,
+            worker.did,
+            ("read:files",),
+            depth=1,
+            expires_at="2026-10-04T03:00:00",
+        )
+        verdict = verify_delegation_chain(
+            [hop], iss.root_did, ("read:files",), time_iso=NOW
+        )
+        self.assertFalse(verdict.allowed)
+        self.assertEqual(verdict.failed_rule, "expiry_malformed")
+
+    def test_expiry_outside_utc_datetime_range_fails_closed(self):
+        iss = _issuer()
+        worker, _ = iss.issue("worker-1", issued_at=NOW)
+        hop = iss.delegate(
+            iss._root_secret,
+            iss.root_did,
+            worker.did,
+            ("read:files",),
+            depth=1,
+            expires_at="0001-01-01T00:00:00+23:59",
+        )
+        verdict = verify_delegation_chain(
+            [hop], iss.root_did, ("read:files",), time_iso=NOW
+        )
+        self.assertFalse(verdict.allowed)
+        self.assertEqual(verdict.failed_rule, "expiry_malformed")
+
     def test_expiry_without_reference_time_fails_closed(self):
         iss = _issuer()
         worker, _ = iss.issue("worker-1", issued_at=NOW)
