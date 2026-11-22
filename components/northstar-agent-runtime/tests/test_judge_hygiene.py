@@ -378,6 +378,81 @@ class JudgeHygieneProbeBehaviourTests(unittest.TestCase):
         _run_probe(self.probe, wd)
         self.assertEqual(module.read_bytes(), before)
 
+    def test_probe_restores_the_original_source_when_it_is_killed(self):
+        """A probe that is KILLED mid-round must still restore the module.
+
+        This is the D-24 defect.  The probe writes a mutant into the
+        module, runs the suite, then restores the original.  If the
+        process dies between the write and the restore -- a wall-clock
+        timeout, a SIGTERM from a batch runner -- the module is left
+        MUTATED, and the NEXT run measures a contaminated tree.
+
+        The contamination is not a harmless leftover.  Measured
+        2026-11-22: a census run killed mid-flight left two mutations in
+        ``merged_tree_review.py``; the next run then reported "killed
+        37/37" with zero survivors, because those two leftover mutants
+        broke four UNRELATED tests.  The committed record said
+        "killed 37/39" with two genuine survivors.  So the leftover
+        produced a FALSE KILL in the opposite direction from the one the
+        stale-bytecode defect produced -- and a census that reads "no
+        survivors" off a contaminated tree is exactly as untrustworthy as
+        one that reads "all survived" off a stale one.
+
+        The restore must therefore survive a signal, not just a normal
+        return.  The fixture below has a deliberately SLOW test, so the
+        probe is provably still inside a round when the signal lands;
+        otherwise the test could pass without ever exercising the defect.
+        """
+        wd = self._tmp / "slow"
+        wd.mkdir(parents=True, exist_ok=True)
+        (wd / "probe_mod.py").write_text(FIXTURE_MODULE, encoding="utf-8")
+        (wd / "test_probe_mod.py").write_text(
+            "import time\n"
+            "import unittest\n\n"
+            "from probe_mod import pick\n\n\n"
+            "class ProbeTests(unittest.TestCase):\n"
+            "    def test_slow(self):\n"
+            "        time.sleep(20)\n"
+            "        self.assertEqual(pick(True, False), 'first')\n\n\n"
+            "if __name__ == '__main__':\n"
+            "    unittest.main()\n",
+            encoding="utf-8",
+        )
+        module = wd / "probe_mod.py"
+        before = module.read_bytes()
+        env = dict(os.environ)
+        env["PYTHONPATH"] = ".:tests"
+        env.pop("PYTHONDONTWRITEBYTECODE", None)
+        proc = subprocess.Popen(
+            [sys.executable, str(self.probe),
+             "--file", str(module),
+             "--test-module", "test_probe_mod",
+             "--workdir", str(wd),
+             "--tries", "64", "--no-early-stop"],
+            cwd=str(wd), env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        )
+        try:
+            # The probe must still be running: the fixture's suite sleeps
+            # for 20 seconds, so a probe that has already exited did not
+            # exercise the defect.
+            proc.wait(timeout=5.0)
+        except subprocess.TimeoutExpired:
+            pass
+        else:
+            proc.communicate()
+            self.skipTest("the probe finished before it could be killed")
+        proc.terminate()
+        try:
+            proc.communicate(timeout=30)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.communicate()
+        self.assertEqual(
+            module.read_bytes(), before,
+            "the probe was killed mid-round and left the module mutated",
+        )
+
     def test_probe_reports_skips_with_exit_code_two_when_nothing_is_mutable(self):
         """2 = the probe could not run (no mutable construct found)."""
         wd = self._tmp / "empty"

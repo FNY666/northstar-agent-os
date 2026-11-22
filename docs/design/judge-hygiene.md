@@ -249,8 +249,123 @@ file of the slice stays invisible.  That case is out of scope for a
 mutant probe (a fix that changes neither the code nor the test cannot
 change a mutant's verdict).
 
-## 5. What is deliberately **not** changed
+## 4b. Defect D-24: a killed probe left the module mutated
 
+Found 2026-11-22, while re-verifying the `merged_tree_review` census.
+
+### 4b.1 Mechanism
+
+The probe's round is: **write a mutant into the module → run the suite →
+restore the original**.  The restore is an ordinary statement at the end
+of the loop body, so it runs on a normal return — and on **nothing else**.
+If the process dies inside that window (a wall-clock timeout, a SIGTERM
+from a batch runner, an OOM kill), the module is left holding the
+mutant.
+
+The next run then measures a tree that is already broken, and every
+verdict after that point is about the leftover, not about the mutant
+under test.
+
+### 4b.2 What it produced
+
+A census run against `merged_tree_review.py` was killed mid-flight.  It
+left two mutations behind:
+
+```diff
+-            if len(holders[word]) < 2:
++            if len(holders[word]) <= 2:
+...
+-                if left_module == right_module:
++                if left_module != right_module:
+```
+
+The **next** run reported:
+
+```
+MUTANT RESULT: killed 37/37
+```
+
+with **zero survivors**.  The committed record said `killed 37/39`, with
+`gt@451` and `eq@494` surviving — and both of those are *provably*
+equivalent mutants (`span.split(".")` always yields at least two parts
+when `"." in span`, which is checked two lines above, so `len(parts) > 1`
+and `len(parts) >= 1` cannot disagree; and `len(parts) == 2` is
+reachable only after `len(parts) < 2` has already returned).
+
+The two leftover mutants broke four **unrelated** tests, so the suite
+failed for reasons that had nothing to do with the mutant being
+measured:
+
+```
+FAIL: test_positive_two_modules_mint_the_same_verdict_word
+FAIL: test_positive_enum_members_are_part_of_the_vocabulary
+FAIL: test_positive_records_with_unjoinable_fields_conflict
+FAIL: test_and_at_850_a_record_that_is_a_superset_still_conflicts
+```
+
+A clean re-run measured on a pristine tree confirms the committed
+number: `killed 37/39`, with exactly `gt@451` and `eq@494` surviving.
+
+### 4b.3 Why this is a false kill, not a dirty tree
+
+D-22 is a false kill in one direction: the probe reported a mutant as
+**surviving** when the tests had actually noticed it.  D-24 is a false
+kill in the other: the probe reported a mutant as **killed** when the
+tests had failed for a reason unrelated to it.  Both make the census
+number mean something other than what it says.
+
+The asymmetry matters for how the record is read.  A census that
+over-reports kills looks *stronger* than it is, so it invites belief
+rather than scrutiny; and it does so on the exact slice the record
+already claimed had two honest survivors.  A survivor that was
+documented as a genuine equivalent mutant is evidence; a kill that was
+manufactured by a leftover is not.
+
+### 4b.4 The fix
+
+The restore is registered three ways, so it survives any exit:
+
+* `atexit` — covers a normal return **and** an unhandled exception;
+* a `SIGTERM` / `SIGINT` / `SIGHUP` handler — a signal raises
+  `SystemExit`, which `atexit` then sees, and the handler re-raises
+  with the default disposition so the process still dies the way it was
+  asked to;
+* a pre-flight check that the file under test still reads as the
+  original it was read as, so a probe that starts against a tree another
+  process is mutating refuses to run rather than report nonsense.
+
+Measured 2026-11-22, both directions:
+
+| probe | after `SIGTERM` mid-round | module |
+|---|---|---|
+| before the fix | left mutated | `flag or other` → `flag and other` |
+| after the fix | restored byte-identical | unchanged |
+
+### 4b.5 The census script had a second, independent defect
+
+`b173-census-all.sh` passed `--test-module test_cancellation_gate` for
+**every** module it was pointed at.  A module that suite does not
+exercise is therefore measured with the wrong tests, and every mutant in
+it "survives":
+
+```
+=== MODULE merged_tree_review.py ===
+MUTANT and@156 SURVIVED (and -> or)
+...
+MUTANT RESULT: killed 0/8
+```
+
+That is a false accusation of a weak test suite, and it is the *same*
+shape of error as D-23 in a different place: the probe was pointed at
+the wrong tests.  The script now pairs each module with the test file
+that actually mentions it, the same rule `b173-mutant.sh` already used.
+With the pairing fixed, the same census reports `killed 37/39` and names
+`test_merged_tree_review` as the suite it ran.
+
+The script also restores the module from the pristine source after each
+module's census, so one interrupted census cannot contaminate the next.
+
+## 5. What is deliberately **not** changed
 * `b173-accept.sh` is **not modified by a single character** — it is the
   referee for the twelve acceptance items; changing it changes the
   standard.
@@ -631,6 +746,12 @@ tool source text:
 * the output format and the exit-code semantics are unchanged
   (`0` = >=1 killed, `1` = all survived, `2` = the probe could not run),
   and the probe restores the original source after every round;
+* the probe **also** restores the original source when it is **killed**
+  mid-round (D-24) — a SIGTERM is sent while the fixture's deliberately
+  slow suite is running, and the module must be byte-identical
+  afterwards.  The fixture's suite sleeps for 20 seconds so the probe is
+  provably still inside a round when the signal lands; a test that could
+  only pass by racing would prove nothing;
 * this slice's patch applies cleanly to the installed probe and touches
   **only** `b173-mutant.py` and `b173-mutant.sh`.
 
