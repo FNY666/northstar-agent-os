@@ -71,6 +71,14 @@ Per-call authorization and approval gateway for the durable-run slice.
 
 #### `sign_approval(approval: dict[str, Any], secret: bytes)`
 
+#### `ToolRefused`
+
+The call was refused before the tool could run.
+
+#### `ToolExecutionFailed`
+
+The tool ran and raised.
+
 #### `ApprovalDeniedError`
 
 A signed approval whose decision is ``denied``.
@@ -106,6 +114,8 @@ Recompute the output digest and compare with the recorded receipt.
 Authorize and dispatch one exact registered tool call at a time.
 
 - `register(spec: ToolSpec)`
+- `spec_for(tool_name: str)`
+  - Read-only lookup so a caller can prepare, e.g. request approval.
 - `enforcement_trace` (property)
   - Append-only enforcement events (OCSF action/disposition analogue).
 - `receipt_for(idempotency_key: str)`
@@ -437,3 +447,268 @@ Content-addressed memory where reads verify write receipts.
   - Append-only write history, optionally filtered by key.
 - `receipt_for(key: str)`
   - Return the current write receipt for ``key``, if any.
+### `agent_loop`
+
+Source: `components/northstar-durable-run/agent_loop.py`
+
+Governed local Agent Loop contracts and admission boundary.
+
+#### `ActionNotExecuted`
+
+Contract: the action certainly did not run.
+
+#### `ActionAwaitingApproval`
+
+Contract: the action is waiting for an external condition (e.g. approval).
+
+#### `PlanStep`
+
+- `from_dict(value: Any)`
+- `to_dict()`
+#### `AgentPlan`
+
+- `from_dict(value: Any)`
+- `to_dict()`
+#### `PostconditionResult`
+
+#### `LoopEvent`
+
+- `create(*, sequence: int, prev_event_digest: str | None, plan_digest: str, event_type: str, step_id: str, execution_id: str | None, attempt_id: str | None, attempt: int, status: str, reason_code: str | None, observed_digest: str | None, output_digest: str | None, plan_step_manifest: tuple[dict[str, Any], ...] | None=None, idempotency_key: str, recorded_at: int, detail: str | None=None)`
+- `from_dict(value: Any)`
+- `to_dict()`
+#### `LoopState`
+
+- `to_dict()`
+#### `AgentLoop`
+
+Governed local loop: admit, attempt, observe, checkpoint, and resume.
+
+- `admit(planner_output: AgentPlan | dict[str, Any], *, current_policy_revision: str)`
+- `run(plan: AgentPlan, *, owner_id: str, now: int, current_policy_revision: str)`
+- `resume(plan: AgentPlan, *, owner_id: str, now: int, current_policy_revision: str)`
+- `state(plan_digest: str)`
+### `agent_entry`
+
+Source: `components/northstar-durable-run/agent_entry.py`
+
+One goal in, one independently verified deliverable out.
+
+#### `build_run(task_id: str, *, clock: Callable[[], int] | None=None, deadline_seconds: int=600, thread_id: str | None=None, scope: tuple[str, ...]=(READ_CAPABILITY, WRITE_CAPABILITY))`
+
+Host-owned run identity; the model never supplies these fields.
+
+#### `ExpectedArtifact`
+
+Host-owned definition of a deliverable; the plan cannot redefine it.
+
+#### `DeliverableVerification`
+
+- `as_dict()`
+#### `StepOutcome`
+
+- `as_dict()`
+#### `TaskOutcome`
+
+- `ok` (property)
+  - A task is done only when the loop finished and a host check verified it.
+- `as_dict()`
+#### `AgentHarness`
+
+Bind one run, one workspace root, two real tools, and one observer.
+
+- `now()`
+- `register(plan)`
+  - Bind plan steps to the gateway, tolerating an already-bound plan.
+- `observe(step, attempt_id: str)`
+- `verify_expectations(artifacts: tuple[ExpectedArtifact, ...] | list[ExpectedArtifact]=())`
+  - Host-owned final check; the plan and the loop state are not evidence.
+- `plan_format()`
+  - The exact envelope the model must echo, with host-owned identity.
+- `workspace_inventory(*, limit: int=64, max_depth: int=4)`
+  - Bounded host-side inventory of the agent's own sandbox.
+- `planner_context(*, extra: dict[str, Any] | None=None)`
+  - Everything the planner legitimately needs: identity, budget, tools.
+- `admitted_steps()`
+  - Steps this harness admitted, in plan order (read-only for the driver).
+- `inspect_listing(prefix: str, *, max_depth: int, max_entries: int)`
+- `inspect(path: str, *, limit: int=2048)`
+  - Bounded host-side view of one workspace path, independent of tools.
+- `evidence_events()`
+- `run_goal(goal: str, planner, *, expectations: tuple[ExpectedArtifact, ...] | list[ExpectedArtifact]=(), context: dict[str, Any] | None=None)`
+  - Plan, execute, recover within bound, then verify the deliverable.
+#### `main(argv=None)`
+
+Run one goal from a host-supplied step file. No model call is made.
+
+### `agent_driver`
+
+Source: `components/northstar-durable-run/agent_driver.py`
+
+Bounded plan → execute → observe → re-plan driver.
+
+#### `DriverBudget`
+
+#### `RoundRecord`
+
+- `as_dict()`
+#### `DriverOutcome`
+
+- `ok` (property)
+  - Only a host-verified deliverable counts, and only after a finished round.
+- `model_calls` (property)
+- `resumes` (property)
+- `as_dict()`
+#### `AgentDriver`
+
+Run one goal across bounded rounds until the host check passes.
+
+- `run(task_id: str, goal: str, planner)`
+  - Rounds are bounded; only proven-absent rounds may be re-planned.
+#### `main(argv=None)`
+
+### `governed_dispatch`
+
+Source: `components/northstar-durable-run/governed_dispatch.py`
+
+Route AgentLoop actions through the ActionGateway authorization chain.
+
+#### `UnboundAction`
+
+The dispatcher has no admitted plan step behind this call.
+
+#### `GovernanceDenied`
+
+The action was refused before it could run.
+
+#### `ActionExecutionFailed`
+
+The tool ran and raised: not a refusal, and not a pending approval.
+
+#### `ApprovalPending`
+
+A high-risk tool is waiting for approval, not failing.
+
+#### `GovernedActionDispatcher`
+
+Bind admitted plan steps to gateway-authorized tool execution.
+
+- `register_plan(plan: AgentPlan)`
+- `bind(tool_name: str)`
+### `planner_adapter`
+
+Source: `components/northstar-durable-run/planner_adapter.py`
+
+Provider-neutral, fail-closed boundary for model-generated plans.
+
+#### `PlannerModelCallFailed`
+
+A planner transport/provider call failed with safe bounded detail.
+
+#### `PlannerModelResponse`
+
+#### `PlannerCandidate`
+
+- `from_value(value: Any, *, max_bytes: int=_MAX_OUTPUT_BYTES)`
+#### `PlannerResult`
+
+#### `bounded_error_detail(error: BaseException)`
+
+Preserve a short, host-sanitized reason for a ValueError-shaped failure.
+
+#### `TypedPlannerAdapter`
+
+Turn untrusted model output into an admitted, non-executing plan.
+
+- `generate(goal: str, *, context: dict[str, Any], loop: AgentLoop, current_policy_revision: str, owner_id: str, now: int)`
+### `openai_compatible_planner`
+
+Source: `components/northstar-durable-run/openai_compatible_planner.py`
+
+Default-disabled OpenAI-compatible planner transport.
+
+#### `OpenAICompatiblePlannerConfig`
+
+#### `OpenAICompatiblePlannerCaller`
+
+Call one configured endpoint; transport failures are never retried.
+
+### `repo_read`
+
+Source: `components/northstar-durable-run/repo_read.py`
+
+Bounded local reads; not an OS sandbox or a secret classifier.
+
+#### `RepoReadResult`
+
+#### `RepoReadTool`
+
+### `workspace_list`
+
+Source: `components/northstar-durable-run/workspace_list.py`
+
+Bounded metadata-only workspace listings; not an OS sandbox.
+
+#### `WorkspaceListResult`
+
+- `as_output()`
+#### `WorkspaceListTool`
+
+List a bounded, symlink-free part of one host-owned workspace root.
+
+### `workspace_write`
+
+Source: `components/northstar-durable-run/workspace_write.py`
+
+Bounded local writes inside a host-owned root; not an OS sandbox.
+
+#### `WorkspaceWriteResult`
+
+- `as_output()`
+  - Structured, content-free result for tool-call output envelopes.
+#### `WorkspaceWriteTool`
+
+### `completion_contract_v2`
+
+Source: `components/northstar-durable-run/completion_contract_v2.py`
+
+Test-only completion contract for stateful agent evaluation.
+
+#### `SemanticField`
+
+A host-owned semantic requirement with explicit parsing flexibility.
+
+- `canonical_name` (property)
+- `canonical_labels` (property)
+#### `ArtifactExpectation`
+
+- `expected_digest` (property)
+#### `Provenance`
+
+- `from_dict(value: Mapping[str, Any])`
+- `as_dict()`
+#### `WorkspaceSnapshot`
+
+- `from_files(files: Mapping[str, str])`
+- `as_dict()`
+#### `CompletionResult`
+
+- `as_dict()`
+#### `CompletionContractV2`
+
+- `evaluate(*, before: WorkspaceSnapshot, after: WorkspaceSnapshot, milestones: tuple[str, ...] | None, provenance: Provenance | None, run_status: str, workspace_root: str | None=None)`
+### `completion_replay`
+
+Source: `components/northstar-durable-run/completion_replay.py`
+
+Test-only adapter from Northstar reports/evidence to Completion Contract v2.
+
+#### `ReplayConfig`
+
+- `provenance()`
+#### `verify_evidence_chain(events: Sequence[Any])`
+
+Return None when the journal is intact, otherwise a reason code.
+
+#### `replay_task_report(report_path: str | Path, evidence_path: str | Path, *, task_id: str, contract: CompletionContractV2, before: WorkspaceSnapshot, after: WorkspaceSnapshot, milestones: tuple[str, ...] | None, provenance: Provenance | None=None)`
+
+Replay one task through the test-only contract.
