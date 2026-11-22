@@ -680,6 +680,24 @@ non-vacuity control.**  All eleven now have one.  The two that already
 did -- `cancellation-gate`'s `or@504` and `durable-resume`'s `lt@701` --
 are the model the other eleven now follow.
 
+**AMENDED 2026-11-21.**  The count of **13** was itself short.  The
+whole-batch census reports **fifteen** distinct survivor sites, and two
+more proofs existed -- `merged-tree-review`'s `gt@451` and `eq@494` --
+that had **neither** a control nor a symmetric rewrite.  They are
+missing from the list above for a reason worth recording: their slice's
+census row read `ERROR` rather than a count, so the sites never
+reached the census the count was drawn from.  **A slice with no census
+number contributes no site, so it contributes no row.**  The two
+proofs are now symmetric and have a control; see
+`docs/design/merged-tree-review-equivalence-controls.md`.  The
+enumeration is now **15 sites, 15 proofs, 15 controls**.
+
+**A count is a claim too.**  This section's own "13" was locally
+correct -- thirteen proofs had been *written* -- and it was still wrong,
+because the enumeration behind it was drawn from memory of the proofs
+rather than from the census.  The order matters: **measure the census
+first, then enumerate the records against it.**
+
 ### 9.1 The two shapes of control
 
 **A control mutation.**  The same harness -- same loader, same sweep,
@@ -692,7 +710,7 @@ the planted fault.
 |---|---|---|
 | `audit-head` | `or@527` | the two spellings of the monotonicity guard, over inputs that violate `seq == records_sealed` |
 | `audit-head` | `lt@928` | the strict and non-strict row comparisons, over the EQUAL counts the guard never reaches |
-| `cwl-episode-eviction` | `eq@370` | the validation call driven directly with an invalid dependency |
+| `cwl-episode-eviction` | `eq@387` | the validation call driven directly with an invalid dependency |
 | `diviner` / `scope-verb-canonical` | `lt@667`, `gt@669` | the same comparison, over the EQUAL target sets the sweep skips |
 | `fable` | `lt@579` | the cap computation widened by one byte |
 | `horizon` | `gt@741` | the truncation keeping one character fewer |
@@ -701,6 +719,8 @@ the planted fault.
 | `scope-verbatim-compaction` | `lt@390` | the end-marker guard moved to a bound that never fires |
 | `scorer-disagreement` | `gt@533` | the threshold comparison widened instead of the scorer-count one |
 | `step-reliability-budget` | `lt@152` | the final formula of `max_steps` shifted by one |
+| `merged-tree-review` | `gt@451` | the trim bound moved one step further -- `len(parts) > 2` -- which the harness must detect |
+| `merged-tree-review` | `eq@494` | the same harness, over the class-membership half the equivalence rests on |
 
 **The skipped inputs.**  A sweep that SKIPS a class of pairs -- the
 equal target sets, the equal row counts -- is skipping exactly where

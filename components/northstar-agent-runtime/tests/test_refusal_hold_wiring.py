@@ -681,7 +681,7 @@ class WiringGuardTests(unittest.TestCase):
 
     Nine planted faults survived the suite that drives the *wiring*:
 
-    * ``gt@628`` -- the audit trail's trim bound.  This one is
+    * ``gt@640`` -- the audit trail's trim bound.  This one is
       **EQUIVALENT**, and is proved so differentially rather than
       asserted (see
       ``test_the_trim_rule_is_equivalent_under_the_planted_fault``);
@@ -698,10 +698,10 @@ class WiringGuardTests(unittest.TestCase):
     collaborator the guard reads.
     """
 
-    # -- gt@628: the audit trail's trim bound ----------------------------
+    # -- gt@640: the audit trail's trim bound ----------------------------
 
     def test_the_trim_rule_is_equivalent_under_the_planted_fault(self):
-        """`gt@628`: a DIFFERENTIAL proof that the fault is EQUIVALENT.
+        """`gt@640`: a DIFFERENTIAL proof that the fault is EQUIVALENT.
 
         ``_record_event`` keeps the trail bounded::
 
@@ -852,7 +852,7 @@ class WiringGuardTests(unittest.TestCase):
         return registry.events()
 
     def test_the_differential_harness_would_catch_an_observable_mutation(self):
-        """`gt@628`: the negative control for the equivalence proof.
+        """`gt@640`: the negative control for the equivalence proof.
 
         An equivalence claim is only worth as much as the harness that
         produced it.  This test plants a mutation of the same trim rule
@@ -938,7 +938,7 @@ class WiringGuardTests(unittest.TestCase):
         return "".join(mutated)
 
     def test_the_audit_trail_is_trimmed_at_the_bound(self):
-        """`gt@628`: the boundary, and why the fault is equivalent.
+        """`gt@640`: the boundary, and why the fault is equivalent.
 
         ``_record_event`` keeps the trail bounded::
 
@@ -978,7 +978,7 @@ class WiringGuardTests(unittest.TestCase):
         self.assertEqual(len(registry.events()), cap)
 
     def test_the_audit_trail_holds_every_event_up_to_the_bound(self):
-        """`gt@628`: the other side of the boundary.
+        """`gt@640`: the other side of the boundary.
 
         Below the cap nothing is trimmed: every recorded event is still
         in the trail.  The mutant would not change this either (the two
