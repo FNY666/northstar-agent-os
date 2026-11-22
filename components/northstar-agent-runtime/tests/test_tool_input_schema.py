@@ -6,6 +6,17 @@ from unittest.mock import patch
 import tool_input_schema
 from tool_input_schema import ToolInputSchemaError, validate_tool_input, validate_tool_schema
 
+#: The ``json-schema`` extra is TWO packages: ``jsonschema`` and ``regex``.
+#: The pattern keywords are served by the timeout-capable ``regex`` engine,
+#: so a host with only ``jsonschema`` installed cannot exercise them.  A
+#: guard that checked only ``_jsonschema`` reported three failures on such a
+#: host -- which reads as a runtime defect and is not one: the runtime
+#: fails CLOSED ("pattern validation requires the regex extra"), which is
+#: the correct posture for an untrusted pattern.
+_HAS_JSON_SCHEMA_EXTRA = (
+    tool_input_schema._jsonschema is not None and tool_input_schema._safe_regex is not None
+)
+
 
 class ToolInputSchemaTests(unittest.TestCase):
     def test_provider_input_is_bounded_before_schema_validation(self):
@@ -127,7 +138,44 @@ class ToolInputSchemaTests(unittest.TestCase):
         with self.assertRaises(ToolInputSchemaError):
             validate_tool_input({"value": {"flag": 1}}, schema)
 
-    @unittest.skipIf(tool_input_schema._jsonschema is None, "install the json-schema extra")
+    def test_the_enum_keyword_uses_json_equality_not_python_equality(self):
+        """A nested enum must not accept ``1`` where the schema says ``True``.
+
+        jsonschema 4.19.2's ``enum`` keyword compares with ``==`` for
+        NESTED containers, so ``{'flag': 1} in [{'flag': True}]`` is True
+        and the value is accepted.  4.26 compares with the ``equal()``
+        helper, which keeps booleans and numbers distinct.
+
+        The runtime already has the correct comparison — ``_json_equal`` —
+        so the enum keyword is overridden with it.  The override must hold
+        whichever jsonschema happens to be installed, because the extra
+        declares ``>=4.26`` but a host may have an older one.
+        """
+        schema = {"properties": {"value": {"enum": [{"flag": True}]}}}
+        validate_tool_input({"value": {"flag": True}}, schema)
+        with self.assertRaises(ToolInputSchemaError):
+            validate_tool_input({"value": {"flag": 1}}, schema)
+        # And the reverse direction: a schema demanding 1 must not accept True.
+        schema = {"properties": {"value": {"enum": [{"flag": 1}]}}}
+        validate_tool_input({"value": {"flag": 1}}, schema)
+        with self.assertRaises(ToolInputSchemaError):
+            validate_tool_input({"value": {"flag": True}}, schema)
+
+    def test_the_enum_override_is_installed_when_jsonschema_is_present(self):
+        """The override must be part of the validator this runtime builds."""
+        if tool_input_schema._jsonschema is None:
+            self.skipTest("jsonschema is not installed")
+        validator_type = tool_input_schema._jsonschema_validator_for(
+            {"properties": {"value": {"enum": [{"flag": True}]}}}
+        )
+        self.assertIsNotNone(validator_type)
+        self.assertIn(
+            "enum",
+            getattr(validator_type, "VALIDATORS", {}),
+            "the enum keyword must be overridden, not inherited from jsonschema",
+        )
+
+    @unittest.skipUnless(_HAS_JSON_SCHEMA_EXTRA, "install the json-schema extra (jsonschema + regex)")
     def test_draft_2020_local_refs_and_regex_are_supported(self):
         schema = {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -149,7 +197,7 @@ class ToolInputSchemaTests(unittest.TestCase):
         with self.assertRaisesRegex(ToolInputSchemaError, "remote JSON Schema references are disabled"):
             validate_tool_input({}, schema)
 
-    @unittest.skipIf(tool_input_schema._jsonschema is None, "install the json-schema extra")
+    @unittest.skipUnless(_HAS_JSON_SCHEMA_EXTRA, "install the json-schema extra (jsonschema + regex)")
     def test_regex_backtracking_is_bounded(self):
         schema = {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -159,7 +207,7 @@ class ToolInputSchemaTests(unittest.TestCase):
         with self.assertRaises(ToolInputSchemaError):
             validate_tool_input({"value": "a" * 5000 + "!"}, schema)
 
-    @unittest.skipIf(tool_input_schema._jsonschema is None, "install the json-schema extra")
+    @unittest.skipUnless(_HAS_JSON_SCHEMA_EXTRA, "install the json-schema extra (jsonschema + regex)")
     def test_regex_timeout_cannot_be_treated_as_a_failed_one_of_branch(self):
         schema = {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -176,7 +224,7 @@ class ToolInputSchemaTests(unittest.TestCase):
         with self.assertRaisesRegex(ToolInputSchemaError, "timed out|time budget"):
             validate_tool_input({"value": "a" * 5000 + "!"}, schema)
 
-    @unittest.skipIf(tool_input_schema._jsonschema is None, "install the json-schema extra")
+    @unittest.skipUnless(_HAS_JSON_SCHEMA_EXTRA, "install the json-schema extra (jsonschema + regex)")
     def test_pattern_properties_validate_matched_keys(self):
         schema = {
             "$schema": "https://json-schema.org/draft/2020-12/schema",

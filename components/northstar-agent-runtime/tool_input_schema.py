@@ -108,6 +108,29 @@ def _bounded_pattern_properties(validator: Any, patterns: dict[str, Any], instan
                 yield from validator.descend(value, subschema, path=key, schema_path=pattern)
 
 
+def _json_equal_enum(validator: Any, enums: Any, instance: Any, schema: dict[str, Any]):
+    """The ``enum`` keyword, compared with JSON equality.
+
+    jsonschema 4.19.2's own ``enum`` compares NESTED containers with
+    ``==``, so ``{'flag': 1} in [{'flag': True}]`` is True and a value
+    whose boolean flag carries the number 1 is accepted for a schema
+    that demands a boolean.  4.26 compares with the ``equal()`` helper,
+    which keeps booleans and numbers distinct.
+
+    The runtime already has the correct comparison in ``_json_equal`` --
+    the same one its internal fallback uses for ``enum`` and ``const`` --
+    so the keyword is overridden with it.  The override holds whichever
+    jsonschema happens to be installed: the extra declares ``>=4.26``,
+    but a host with an older one must not silently lose the check.
+    """
+    if not isinstance(enums, list):
+        return
+    if not any(_json_equal(instance, item) for item in enums):
+        yield _jsonschema.exceptions.ValidationError(
+            "value is not one of the allowed enum values"
+        )
+
+
 def _jsonschema_validator_for(schema: dict[str, Any]):
     dialect = schema.get("$schema", "https://json-schema.org/draft/2020-12/schema")
     if not isinstance(dialect, str):
@@ -123,7 +146,11 @@ def _jsonschema_validator_for(schema: dict[str, Any]):
     base = classes[dialect]
     return _jsonschema_validators.extend(
         base,
-        {"pattern": _bounded_pattern, "patternProperties": _bounded_pattern_properties},
+        {
+            "pattern": _bounded_pattern,
+            "patternProperties": _bounded_pattern_properties,
+            "enum": _json_equal_enum,
+        },
     )
 
 
