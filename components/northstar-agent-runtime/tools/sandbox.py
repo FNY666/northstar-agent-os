@@ -168,7 +168,13 @@ def _runtime_read_paths() -> tuple[str, ...]:
         candidates.extend(os.path.join(prefix, part) for part in ("bin", "lib", "lib64"))
     candidates.extend(sysconfig.get_path(key) for key in ("stdlib", "platstdlib"))
     extra = [os.path.realpath(path) for path in candidates if path and os.path.isdir(path)]
-    return tuple(dict.fromkeys([*_SYSTEM_READ_PATHS, *extra]))
+    # The system paths are filtered to the ones that exist HERE, exactly as
+    # the candidates above are.  ``/lib64`` is x86-only: on an aarch64 host
+    # it does not exist, and the Landlock loader opens every rule path with
+    # O_PATH -- so an unfiltered ``/lib64`` raises FileNotFoundError in the
+    # loader and EVERY tool subprocess on the process backend dies.
+    system = [path for path in _SYSTEM_READ_PATHS if os.path.isdir(path)]
+    return tuple(dict.fromkeys([*system, *extra]))
 
 
 class LandlockError(ValueError):
