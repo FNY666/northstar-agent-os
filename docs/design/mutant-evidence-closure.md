@@ -886,6 +886,58 @@ skipped pairs and requiring a difference there shows the skip is doing
 the work the argument claims, and it is what makes the agreement over
 the non-skipped pairs mean something.
 
+### 9.1a There are TWO censuses, and the diff needs both at the same scope
+
+Every count above is a count of the **slice** census -- one row per
+*slice*, the batch's own deliveries.  There is a second census, taken
+over every *module* in the component at HEAD, and the two are not
+interchangeable.
+
+| | slice census | module census |
+|---|---|---|
+| one row per | slice (64 rows in §2's table) | module (330+ rows) |
+| the module is | the slice's module | the module itself |
+| the suite is | the slice's suite | the module's own suite |
+| reaches | the batch's deliveries | every module, most of which no slice ever touched |
+
+A **module** census therefore reports far more survivor sites, and
+those extra sites are **not** findings against §9.1's table.  The table
+is scoped to the batch's deliveries; the module census reaches modules
+no slice ever touched.  Diffing the two is a diff between different
+scopes, and it fails in a way that looks exactly like a finding.
+
+**Measured 2026-11-22.**  The coverage test
+(`tests/test_equivalence_table_coverage.py`) read whichever census
+artifact it found first, and the candidate list put the **module**
+census first.  With a module census in place, the diff reported
+**1,483** sites "with no row in §9.1's table" -- every one of them a
+false positive produced by the scope difference, and every one of them
+in a module the batch never delivered.
+
+The fix is not "the table needs 1,483 more rows".  It is:
+
+* the census candidates now carry their **scope** with them, and the
+  **slice** census is read first, so "the census" means the scope the
+  table describes;
+* a module-scope census is **filtered** down to the batch's scope
+  before the diff, by module -- the filter's authority is §2's table
+  unioned with the modules the slice census names, because neither
+  source alone is complete (§2's table has a row with no module,
+  `fable`, and the census names modules §2's table does not).
+
+**The filter is proven, not assumed.**  The check that a *genuinely*
+missing row is still caught was run with a module census in place:
+deleting §9.1's `durable-resume` / `lt@701` row made the test fail
+with exactly `['lt@701']` -- the one site that was really missing.  So
+the filter removes the scope difference and **nothing else**.
+
+**A site name is relative to its module.**  `or@527` is a line number
+in whichever module the row names, so the same bare name can occur in
+two modules and mean two different sites.  The scope filter's sets are
+therefore compared **module-qualified**; comparing bare names across
+the scope boundary reports a false overlap (measured: 13 names in both
+halves of the filter, all of them different sites).
+
 ### 9.2 Two pitfalls, both measured
 
 **A control that asserts the SOURCE TEXT is a false kill.**  The first
