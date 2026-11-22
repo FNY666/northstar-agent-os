@@ -22,6 +22,7 @@ from completion_coverage import (  # noqa: E402
     main,
     summarize,
 )
+from _archive_guard import archive_unavailable_reason  # noqa: E402
 
 
 def _context(archive_root):
@@ -36,6 +37,12 @@ CONTEXT = _context(Path(os.environ.get("NORTHSTAR_LIVE_RUNS", "/var/minis/shared
 
 
 class CompletionCoverageTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        reason = archive_unavailable_reason()
+        if reason is not None:
+            raise unittest.SkipTest(reason)
+
     def test_fixture_requirements_come_from_the_fixture_not_the_spec(self):
         for run in load_spec(SPEC):
             for spec in run.tasks:

@@ -13,6 +13,7 @@ from pathlib import Path
 import completion_batch_replay as batch
 from completion_batch_replay import default_context, load_spec
 from completion_replay import _evidence_status, verify_evidence_chain
+from _archive_guard import archive_unavailable_reason
 
 ROOT = Path(__file__).resolve().parent.parent
 RUN = "2026-09-11-action-failure-recovery"
@@ -37,6 +38,12 @@ def _archived_journals():
 
 
 class EvidenceChainTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        reason = archive_unavailable_reason()
+        if reason is not None:
+            raise unittest.SkipTest(reason)
+
     def test_every_archived_journal_verifies_intact(self):
         journals = _archived_journals()
         self.assertGreaterEqual(len(journals), 10)
@@ -118,6 +125,12 @@ RECOVERY_TASK = "live-transient-write-recovery-v1"
 
 
 class EvidenceFaultInjectionTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        reason = archive_unavailable_reason()
+        if reason is not None:
+            raise unittest.SkipTest(reason)
+
     def _outcome_for(self, root, task_id=RECOVERY_TASK):
         context = replace(default_context(root, EVALUATOR), archive_root=root)
         for outcome in batch.replay_archive(context, load_spec(SPEC), modes=("digest",)):

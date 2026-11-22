@@ -32,6 +32,7 @@ from durable_contract import EventContract, RunContract  # noqa: E402
 from event_store import EventStore  # noqa: E402
 from runner import DurableRunner, StepPlan  # noqa: E402
 from verifier import verify_run_completion  # noqa: E402
+from _archive_guard import archive_root, archive_unavailable_reason  # noqa: E402
 
 RUN = RunContract.from_dict(
     {
@@ -177,8 +178,11 @@ class GateCompositionTest(unittest.TestCase):
         self.assertEqual(contract_result.verdict, "failed")
 
     def test_the_two_gates_consume_different_artifacts(self):
+        reason = archive_unavailable_reason("2026-09-11-action-failure-recovery")
+        if reason is not None:
+            self.skipTest(reason)
         archive = (
-            Path(os.environ.get("NORTHSTAR_LIVE_RUNS", "/var/minis/shared/northstar-live-runs"), "2026-09-11-action-failure-recovery")
+            archive_root() / "2026-09-11-action-failure-recovery"
             / "evidence"
             / "round-2.evidence.jsonl"
         )
