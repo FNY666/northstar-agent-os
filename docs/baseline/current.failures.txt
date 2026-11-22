@@ -16,20 +16,26 @@
 #
 # Provenance
 # ----------
-# commit:  dc257cf94918dc1d4130fe3d46e8d4b9310bc7a7
+# commit:  497970cd
 # branch:  submission-window/b173-refusal-gate-landing
 # runner:  pytest (the runner CI uses: `pytest -q tests`)
 # measured: 2026-11-22
 #
 # Measured, same tree:
 #
+#     33275 passed, 20 skipped, 6 warnings, 1501 subtests passed
+#     in 496.92s (0:08:16)
+#
+# and, under the legacy unittest runner:
+#
 #     Ran 23171 tests in 373.162s
 #     OK (skipped=20)
 #
-# The full-suite failure set is EMPTY.  The 30-item baseline the
-# coordinator holds (`/home/muse-newapi/b173-baseline-failures-2026-11-14.txt`)
-# is STALE in the other direction: every one of its 30 items is now
-# green.  `scripts/b173-baseline-check.sh` against that file reports
+# Both runners agree the failure set is EMPTY.  The 30-item baseline
+# the coordinator holds
+# (`/home/muse-newapi/b173-baseline-failures-2026-11-14.txt`) is STALE
+# in the other direction: every one of its 30 items is now green.
+# `scripts/b173-baseline-check.sh` against that file reports
 #
 #     BASELINE DRIFT: expected 30 item(s), found 0 item(s)
 #
