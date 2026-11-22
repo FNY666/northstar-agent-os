@@ -365,6 +365,46 @@ With the pairing fixed, the same census reports `killed 37/39` and names
 The script also restores the module from the pristine source after each
 module's census, so one interrupted census cannot contaminate the next.
 
+### 4b.6 The first-mention rule still lost to a file that only mentioned the module
+
+§4b.5 fixed the *hardcoded* suite.  The rule it left behind -- take the
+first test file that **mentions** the module -- is still wrong, and it is
+wrong at scale.
+
+A test file that merely **imports one constant** from a module satisfies
+the "mentions it" test.  Because the scan is alphabetical, such a file
+often wins the race against the module's *own* suite:
+
+```
+$ grep -l 'a2a_gates' tests/test_*.py
+tests/test_a2a_budget_combo.py     # imports three constants
+tests/test_a2a_gates.py            # the module's own suite
+```
+
+Measured 2026-11-22, the same module censused with each suite:
+
+| suite | verdict |
+|---|---|
+| `test_a2a_budget_combo.py` (first mention) | `killed 10/43` |
+| `test_a2a_gates.py` (its own) | `killed 37/43` |
+
+The first number is a **false accusation of a weak test suite** -- the
+same shape as §4b.5, one level down: the probe was pointed at the wrong
+tests, and the wrong tests reported "the mutant survived".
+
+**Scale.**  A scan of the runtime component's 320+ modules against
+their own `tests/test_<module>.py` found **144 modules** whose
+first-mention file is not their own file.  Every one of them was a
+candidate for the same false accusation.
+
+**The fix.**  The module's **own** test file wins outright; the
+first-mention scan is only the fallback for a module that has no file of
+its own.  The rule is now: *the module's own suite, if it has one*.
+
+**What this does NOT change.**  Nothing about the probe, the mutants,
+or the accept thresholds.  It changes only **which suite is asked**, so
+the census measures the module rather than a bystander.
+
 ## 5. What is deliberately **not** changed
 * `b173-accept.sh` is **not modified by a single character** — it is the
   referee for the twelve acceptance items; changing it changes the

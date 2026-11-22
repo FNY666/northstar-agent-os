@@ -526,6 +526,35 @@ class JudgeHygieneCensusPairingTests(unittest.TestCase):
         self.assertIn("MODBASE=$(basename", self.text)
         self.assertIn("test_${MODBASE}.py", self.text)
 
+    def test_the_census_prefers_the_modules_own_test_file(self):
+        """A file that merely MENTIONS the module must not win the race.
+
+        The first-mention rule loses to a test file that imports one
+        constant from the module.  Measured 2026-11-22, 144 of the
+        component's modules were paired that way, and for ``a2a_gates``
+        the same census reported:
+
+            first-mention  test_a2a_budget_combo.py   killed 10/43
+            its own file   test_a2a_gates.py          killed 37/43
+
+        The lower number is a false accusation of a weak test suite --
+        the mirror image of the stale-bytecode false kill, in which a
+        mutant looked SURVIVING when the tests had actually caught it.
+        """
+        own = 'tests/test_${MODBASE}.py"'
+        self.assertIn(own, self.text,
+                      "the census does not look for the module's own test file")
+        # The own-file lookup must come BEFORE the first-mention scan.
+        own_at = self.text.find(own)
+        scan_at = self.text.find("for cand in")
+        self.assertNotEqual(own_at, -1, "no own-test-file lookup in the census")
+        self.assertNotEqual(scan_at, -1, "no first-mention scan in the census")
+        self.assertLess(
+            own_at, scan_at,
+            "the module's own test file must be tried BEFORE the "
+            "first-mention scan, or the scan still wins the race",
+        )
+
     def test_the_census_script_restores_the_module_after_each_census(self):
         """An interrupted census must not contaminate the next one."""
         self.assertIn(

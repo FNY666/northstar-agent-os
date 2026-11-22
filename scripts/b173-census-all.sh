@@ -75,16 +75,31 @@ for m in "$@"; do
     continue
   fi
   # Pair the module with the test file that actually EXERCISES it.
+  #
+  # The module's OWN test file wins outright.  The old rule -- take the
+  # first test file that MENTIONS the module -- loses that race to a file
+  # that merely imports a constant, and the module is then measured with
+  # a suite that barely touches it.  Measured 2026-11-22, 144 of the
+  # component's modules were paired that way.  For `a2a_gates`:
+  #
+  #   first-mention  test_a2a_budget_combo.py   killed 10/43
+  #   its own file   test_a2a_gates.py          killed 37/43
+  #
+  # The first number is a FALSE accusation of a weak test suite -- the
+  # mirror image of the stale-bytecode false kill, in which a mutant
+  # looked SURVIVING when the tests had actually caught it.
   MODBASE=$(basename "$m" .py)
   TESTF=""
-  for cand in "$WT"/components/northstar-agent-runtime/tests/test_[^/]*\.py; do
-    [ -f "$cand" ] || continue
-    if grep -qE "(^|[^A-Za-z0-9_])${MODBASE}([^A-Za-z0-9_]|$)|from ${MODBASE} import|import ${MODBASE}" "$cand" 2>/dev/null; then
-      TESTF="$cand"; break
-    fi
-  done
-  if [ -z "$TESTF" ] && [ -f "$WT/components/northstar-agent-runtime/tests/test_${MODBASE}.py" ]; then
+  if [ -f "$WT/components/northstar-agent-runtime/tests/test_${MODBASE}.py" ]; then
     TESTF="$WT/components/northstar-agent-runtime/tests/test_${MODBASE}.py"
+  fi
+  if [ -z "$TESTF" ]; then
+    for cand in "$WT"/components/northstar-agent-runtime/tests/test_[^/]*\.py; do
+      [ -f "$cand" ] || continue
+      if grep -qE "(^|[^A-Za-z0-9_])${MODBASE}([^A-Za-z0-9_]|$)|from ${MODBASE} import|import ${MODBASE}" "$cand" 2>/dev/null; then
+        TESTF="$cand"; break
+      fi
+    done
   fi
   if [ -z "$TESTF" ]; then
     echo "MUTANT SKIP: no test file exercises ${MODBASE}"
