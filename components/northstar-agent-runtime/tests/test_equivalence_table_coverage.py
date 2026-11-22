@@ -51,7 +51,23 @@ CLOSURE_DOC = REPO_ROOT / "docs" / "design" / "mutant-evidence-closure.md"
 #: The census artifact.  It lives outside the repository -- it is the
 #: referee's run over every slice -- so this test skips when it is
 #: absent rather than failing.
-CENSUS = Path("/home/muse-newapi/census-parallel.txt")
+#:
+#: Several are accepted, newest first.  ``census-parallel.txt`` was the
+#: run over the SLICES (one row per slice); ``census-v3.txt`` is the run
+#: over every MODULE at HEAD, taken with the fixed probe (the pytest
+#: runner, and "collected nothing" reported as a skip rather than a
+#: kill).
+CENSUS_CANDIDATES = (
+    Path("/home/muse-newapi/census-v3.txt"),
+    Path("/home/muse-newapi/census-parallel.txt"),
+)
+
+
+def _census_path() -> Path | None:
+    for candidate in CENSUS_CANDIDATES:
+        if candidate.exists():
+            return candidate
+    return None
 
 #: A site name: ``eq@387``, ``gt@451`` and so on.
 SITE_RE = re.compile(r"\b(eq|gt|lt|retT|retF|and|or)@(\d+)\b")
@@ -118,9 +134,13 @@ class EquivalenceTableCoverageTests(unittest.TestCase):
         not allowed: a census site with no row is a site whose proof is
         not recorded.
         """
-        if not CENSUS.exists():
-            self.skipTest(f"census artifact not available: {CENSUS}")
-        census_text = CENSUS.read_text(encoding="utf-8")
+        census_path = _census_path()
+        if census_path is None:
+            self.skipTest(
+                "census artifact not available: "
+                + ", ".join(str(c) for c in CENSUS_CANDIDATES)
+            )
+        census_text = census_path.read_text(encoding="utf-8")
         census = {
             f"{m}@{n}"
             for line in census_text.splitlines()
