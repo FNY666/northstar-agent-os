@@ -123,6 +123,8 @@ class RunReportTests(unittest.TestCase):
                     checks=("test -f result.txt",),
                 ),
                 options=RunOptions(
+                    shell_backend="process",
+                    shell_seccomp="off",
                     scripted_turns=[
                         {
                             "tool": {

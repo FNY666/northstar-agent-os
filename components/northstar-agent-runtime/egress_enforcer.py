@@ -629,18 +629,30 @@ class EgressBudgetLedger:
             return True
 
 
+_NAT64_WELL_KNOWN_PREFIX = ipaddress.IPv6Network("64:ff9b::/96")
+_NAT64_LOCAL_USE_PREFIX = ipaddress.IPv6Network("64:ff9b:1::/48")
+
+
 def _ip_permitted(ip_text: str, rule: DestinationRule) -> bool:
-    """SSRF guard: require an IANA globally reachable address by default."""
+    """SSRF guard: require a globally reachable destination by default."""
     try:
         ip = ipaddress.ip_address(ip_text)
     except ValueError:
         return False
     if rule.allow_private_ips:
         return True
-    # Negative flags are not exhaustive: e.g. 100.64.0.0/10 is neither
-    # private nor reserved in ipaddress, but is shared carrier space and not
-    # globally reachable. Positive classification closes that gap and also
-    # handles IPv4-mapped IPv6 consistently.
+    # A global-looking NAT64 address can carry a private IPv4 destination.
+    # Judge the well-known /96 by its embedded address before authorizing the
+    # address the sidecar will dial. The local-use NAT64 prefix is never public.
+    if isinstance(ip, ipaddress.IPv6Address):
+        if ip in _NAT64_LOCAL_USE_PREFIX:
+            return False
+        if ip.ipv4_mapped is not None:
+            ip = ip.ipv4_mapped
+        elif ip in _NAT64_WELL_KNOWN_PREFIX:
+            ip = ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
+    # Positive classification also rejects ranges such as 100.64.0.0/10,
+    # which is neither private nor reserved in some Python ipaddress versions.
     return ip.is_global
 
 

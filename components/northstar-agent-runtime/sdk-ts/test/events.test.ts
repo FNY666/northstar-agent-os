@@ -37,10 +37,12 @@ test("the exit-code table is the runtime's table, nine subtypes and 64", () => {
     error_permission_denied: 5,
     error_postconditions_failed: 6,
     error_session_busy: 7,
+    error_evidence_incomplete: 8,
   });
   assert.equal(USAGE_ERROR, 64);
   assert.equal(exitCodeFor("success"), 0);
   assert.equal(exitCodeFor("error_session_busy"), 7);
+  assert.equal(exitCodeFor("error_evidence_incomplete"), 8);
   // A subtype this build has never seen must not read as success: it gets the generic failure
   // code, which is the same fallback the shell uses for `error_during_execution`.
   assert.equal(exitCodeFor("error_something_new"), 1);
