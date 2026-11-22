@@ -80,6 +80,7 @@ silently: it reports what it skipped.
 
 from __future__ import annotations
 
+import ast
 import re
 import unittest
 from pathlib import Path
@@ -130,6 +131,56 @@ SLICE_MODULE_RE = re.compile(
     r"^\| `(?P<slug>[^`]+)` \| `(?P<module>[^`]+)` \|"
 )
 
+#: The backticked names inside a table cell.  A cell may name several
+#: entities -- `` `c58` / `slice3` `` -- and the cell's own outer
+#: backticks do not wrap the whole cell, so the names must be extracted
+#: rather than the cell de-quoted and split.
+_SLUG_CELL_RE = re.compile(r"`([^`]+)`")
+
+#: The stripped source of each file already parsed, keyed by its text.
+_STRIPPED_CACHE: dict[str, str] = {}
+
+
+def _strip_comments(source: str) -> str:
+    """The source with its **comments** removed.
+
+    A proof is code that names the site.  A **comment** that names the
+    site is a note about the site -- it is not attached to any test, so
+    it is not evidence that the site is covered.  A **docstring** is
+    kept: a docstring is the documentation of the test it documents, so
+    a test that says "``lt@701``: the boundary, and why the mutant is
+    equivalent" does name its site in the place where the proof lives.
+
+    The strip is done by **re-parsing and unparsing**: the AST holds no
+    comments, so unparsing drops them while keeping everything else --
+    including docstrings, which are ordinary string statements in the
+    tree.  A line filter would instead remove a comment that trails a
+    code line's tail, or leave a docstring's body behind.
+
+    If the file does not parse, the source is returned **unchanged** --
+    and the caller sees the comments, which is the old (lax) behaviour.
+    That fallback is deliberate and is not silent: :func:`_suite_text`
+    is only ever handed a file the suite itself ran.
+
+    The result is **cached by source text**: the caller searches one
+    stripped file for every site, and re-parsing per site made the
+    check quadratic in the number of test files.
+    """
+    cached = _STRIPPED_CACHE.get(source)
+    if cached is not None:
+        return cached
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        result = source
+    else:
+        try:
+            result = ast.unparse(tree)
+        except Exception:
+            result = source
+    _STRIPPED_CACHE[source] = result
+    return result
+
 #: A census row's module/test pair: ``(a/b/mod.py / a/b/tests/test_x.py)``.
 CENSUS_PAIR_RE = re.compile(r"\(([^()]*\.py)\s*/\s*([^()]*\.py)\)")
 
@@ -177,14 +228,24 @@ def _table_rows(doc_text: str) -> dict[str, set[str]]:
         cells = [c.strip() for c in row.strip().strip("|").split("|")]
         if len(cells) < 2:
             continue
-        slug = cells[0].strip("`")
         # One row may name TWO slugs (`diviner` / `scope-verb-canonical`
         # -- the same module, censused under two names).  The row's
         # sites belong to BOTH, and the census rows for the two are two
         # rows naming the same sites, so the lookup must find the row
         # under either name.
-        slugs = [s.strip("`") for s in slug.split("/")]
-        slugs = [s for part in slugs for s in part.split("` / `")]
+        #
+        # The cell is parsed by EXTRACTING its backticked names, not by
+        # splitting it on a separator.  The cell reads
+        # `` `c58` / `slice3` ``, so the outer backticks are around the
+        # FIRST name and the LAST: stripping them from the whole cell
+        # leaves ``c58` / `slice3`` and splitting that on " / " leaves
+        # ``c58` `` and ``` ``slice3`` -- keys no census slug ever
+        # matches.  The equivalence row for those nine sites was
+        # therefore unreachable, and the check passed only because the
+        # sites happened to be satisfied by its second branch.
+        slugs = _SLUG_CELL_RE.findall(cells[0])
+        if not slugs:
+            continue
         sites = {f"{m}@{n}" for m, n in SITE_RE.findall(cells[1])}
         if sites:
             for s in slugs:
@@ -332,20 +393,31 @@ class EquivalenceTableCoverageTests(unittest.TestCase):
         return census_path[1].read_text(encoding="utf-8")
 
     def _suite_text(self, name: str) -> str:
-        """The text of a suite named by a census row.
+        """The **code** of a suite named by a census row.
 
         The lookup is **row-scoped**: the proof for a site must be in the
         suite the census row itself names.  A bare search across every
         test file would let one module's proof satisfy another module's
         site -- and a site name is relative to its module, so that is a
         false proof, not a lax one.
+
+        The text is returned with its **comments stripped**.  A proof is
+        code that names the site; a comment that names the site is a note
+        about the site, and matching it proves nothing.  Measured: the
+        nine bash_parser ``lt`` sites appear in ``test_bash_parser.py``
+        only inside comments (the proof itself is the parametrized
+        ``EQUIVALENT_LT_SITES`` table, whose ids are ``lt_at_{line}``),
+        so nine of the table's twenty-six sites had a comment-only
+        proof.  The check read them as proven.
         """
         for candidate in (
             RUNTIME_DIR / "tests" / name,
             REPO_ROOT / "tests" / name,
         ):
             if candidate.exists():
-                return candidate.read_text(encoding="utf-8", errors="replace")
+                return _strip_comments(
+                    candidate.read_text(encoding="utf-8", errors="replace")
+                )
         return ""
 
     # -- the checks -----------------------------------------------------
@@ -353,16 +425,121 @@ class EquivalenceTableCoverageTests(unittest.TestCase):
     def test_the_table_is_not_empty(self):
         self.assertTrue(self.table, "§9.1's table parsed to no sites")
 
+    def test_every_census_slug_has_a_reachable_table_row(self):
+        """A row nobody can look up is not a row.
+
+        §9.1's table spells a multi-slug row's cell as
+        `` `c58` / `slice3` `` -- the outer backticks are around the
+        FIRST name and the LAST, not around the cell.  Parsing that cell
+        by stripping its outer backticks and splitting it on ``" / "``
+        leaves the keys ``c58` `` and ``` ``slice3``: a trailing
+        backtick, and a leading backtick-space.  No census slug ever
+        matches those, so the equivalence row for those nine sites was
+        **unreachable** -- and the coverage check still passed, because
+        the sites happened to be satisfied by its second branch (a
+        killer test) rather than its first (the equivalence row).
+
+        So the keys are checked against the slugs the census actually
+        uses.  A row whose key is not a census slug is a row nobody can
+        reach.
+        """
+        census_text = self._census_text()
+        rows = _census_rows(census_text)
+        self.assertTrue(rows, "the census artifact carries no rows at all")
+        unreachable = []
+        for row in rows:
+            slug = str(row["slug"])
+            if slug not in self.rows:
+                unreachable.append(slug)
+        self.assertEqual(
+            sorted(set(unreachable)), [],
+            "census slugs with no reachable §9.1 table row: "
+            f"{sorted(set(unreachable))}",
+        )
+
+    def test_the_table_row_for_a_multi_slug_cell_names_every_slug(self):
+        """The multi-slug rows must land under BOTH of their names.
+
+        This is the row-level restatement of the check above: the
+        ``c58`` / ``slice3`` row carries nine sites, and the census has
+        two rows (one per name) that both report those nine as
+        survivors.  If only one of the names resolved, one of the two
+        census rows would fall back to the killer-test branch and the
+        equivalence proof would be invisible for it.
+        """
+        for slug, expected in (
+            ("c58", {"lt@547", "lt@552", "lt@557", "lt@620", "lt@686",
+                     "lt@690", "lt@709", "lt@756", "lt@773"}),
+            ("slice3", {"lt@547", "lt@552", "lt@557", "lt@620", "lt@686",
+                        "lt@690", "lt@709", "lt@756", "lt@773"}),
+        ):
+            self.assertEqual(
+                self.rows.get(slug, set()), expected,
+                f"§9.1's table row for {slug} does not resolve to its "
+                f"nine `lt` sites",
+            )
+
+    def test_a_comment_is_not_a_proof(self):
+        """The proof must be code, and this check says so.
+
+        ``_strip_comments`` removes the comments from a suite before the
+        site is searched for.  Without it, a note in a comment that
+        names a site counts as a proof of that site: the nine
+        bash_parser ``lt`` sites were named only in
+        ``test_bash_parser.py``'s comments, and the check read them as
+        proven.
+
+        So the strip has to actually strip, and the stripped text has
+        to lose a site that only a comment mentioned.
+        """
+        commented = (
+            "def test_x():\n"
+            "    # lt@999 -- a note about the site\n"
+            "    assert True\n"
+        )
+        stripped = _strip_comments(commented)
+        self.assertNotIn(
+            "lt@999", stripped,
+            "a site named only in a comment survived the strip",
+        )
+        self.assertIn(
+            "assert True", stripped,
+            "the strip removed the code along with the comment",
+        )
+        # A docstring is the documentation of the test it documents, so
+        # a site named in one IS named by that test's code.
+        documented = (
+            "def test_y():\n"
+            '    """`lt@998`: the boundary."""\n'
+            "    assert True\n"
+        )
+        self.assertIn(
+            "lt@998", _strip_comments(documented),
+            "the strip removed a docstring, which is a test's own text",
+        )
+
     def test_every_table_site_has_a_proof_in_a_test_file(self):
-        """A row without a proof is a claim; a claim needs evidence."""
+        """A row without a proof is a claim; a claim needs evidence.
+
+        The search is over the files' **code**, with comments and
+        docstrings stripped.  A comment that names a site is a note
+        about the site, not a test of it: the nine bash_parser ``lt``
+        sites were named only in ``test_bash_parser.py``'s comments,
+        and this check read them as proven.
+
+        The name may be spelled either way -- ``lt@547`` or
+        ``lt_at_547`` -- because §3.4 prescribes the underscore
+        spelling for a test method's name.
+        """
         missing = []
         for site in sorted(self.table):
             found = False
             for test_file in list(RUNTIME_DIR.glob("tests/test_*.py")) + \
                     list(REPO_ROOT.glob("tests/test_*.py")):
-                if _site_regex(site).search(
+                code = _strip_comments(
                     test_file.read_text(encoding="utf-8", errors="replace")
-                ):
+                )
+                if _site_regex(site).search(code):
                     found = True
                     break
             if not found:

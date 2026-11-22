@@ -1186,13 +1186,13 @@ the planted fault.
 | `cancellation-gate` | `or@504` | the same differential harness pointed at the resume file-size bound, a mutation that IS observable |
 | `cwl-episode-eviction` | `eq@387` | the validation call driven directly with an invalid dependency |
 | `diviner` / `scope-verb-canonical` | `lt@667`, `gt@669` | the same comparison, over the EQUAL target sets the sweep skips |
-| `durable-resume` | `lt@701` | the differential harness with the server-error branch emptied -- the two predicates must then DIFFER at status 500 |
+| `langgraph` | `lt@701` | the differential harness with the server-error branch emptied -- the two predicates must then DIFFER at status 500 |
 | `fable` | `lt@579` | the cap computation widened by one byte |
 | `horizon` | `gt@741` | the truncation keeping one character fewer |
 | `jido-statebudget` | `gt@304` | a deliberately wrong expression -- the original with the bound one step further |
 | `openhands-stuck-detector` | `gt@681` | the source-index line with a ONE-element message key |
 | `refusal-hold-wiring` | `gt@640` | the differential harness planted with a mutation that IS observable -- the delete removes one event too many at the boundary |
-| `scope-verbatim-compaction` | `lt@390` | the end-marker guard moved to a bound that never fires |
+| `orphan-adoption` / `scope-verbatim-compaction` | `lt@390` | the end-marker guard moved to a bound that never fires |
 | `scorer-disagreement` | `gt@533` | the threshold comparison widened instead of the scorer-count one |
 | `step-reliability-budget` | `lt@152` | the final formula of `max_steps` shifted by one |
 | `merged-tree-review` | `gt@451` | the trim bound moved one step further -- `len(parts) > 2` -- which the harness must detect |
@@ -1342,6 +1342,74 @@ two modules and mean two different sites.  The scope filter's sets are
 therefore compared **module-qualified**; comparing bare names across
 the scope boundary reports a false overlap (measured: 13 names in both
 halves of the filter, all of them different sites).
+
+### 9.1b AMENDED 2026-11-22 (k) -- the guard had two holes, and the table had two unreachable rows
+
+The coverage guard `tests/test_equivalence_table_coverage.py` was
+supposed to keep this table honest.  It did not, for two independent
+reasons, and each of them is a way of *satisfying* a check without
+proving anything.
+
+**1. A comment is not a proof.**  The guard searched a test file's
+**raw text** for a site name.  The nine bash_parser `lt` sites
+(`lt@547` ... `lt@773`) appear in `test_bash_parser.py` **only inside
+comments** -- the proof itself is the parametrized `EQUIVALENT_LT_SITES`
+table, whose ids were built by an f-string from the line number, so
+neither `lt@547` nor `lt_at_547` was in the file as code.  Measured:
+**9 of the table's 26 sites had a comment-only proof**, and the guard
+read every one of them as proven.
+
+The strip is now done by **re-parsing and un-parsing** the file (the
+AST holds no comments, so `ast.unparse` drops them), and the
+bash_parser site names are **literals** in `EQUIVALENT_LT_SITES` rather
+than f-strings.  A **docstring** is kept, deliberately: a docstring is
+the documentation of the test it documents, so a test whose docstring
+says `` `lt@701`: the boundary `` does name its site in the place where
+the proof lives.  A free-floating comment names a site without any test
+attached to it.
+
+**2. A multi-slug cell parsed into keys nobody looks up.**  This
+table spells a two-slug row's cell as `` `c58` / `slice3` `` -- the
+outer backticks are around the FIRST name and the LAST, not around the
+cell.  The guard stripped the cell's outer backticks and split it on
+`" / "`, which left the keys `'c58` '` and `` ' `slice3' ``: a trailing
+backtick, and a leading backtick-space.  **No census slug ever matches
+those**, so the equivalence row for those nine sites was
+**unreachable**.  The guard still passed, because the sites happened to
+be satisfied by its *second* branch (a killer test) instead of its
+first (the equivalence row) -- so the hole was invisible from the
+outside.  The same held for `diviner` / `scope-verb-canonical`.
+
+The cell is now parsed by **extracting its backticked names**, and a
+new check asserts that **every census slug resolves to a table row** --
+so a row whose key no consumer looks up cannot come back.
+
+**3. Two census slugs had no row at all.**  With the keys fixed, the
+new check reported `langgraph` and `orphan-adoption` as census slugs
+with no reachable row.  The rows were keyed `durable-resume` and
+`scope-verbatim-compaction`, but the census names those modules
+`langgraph` and `orphan-adoption` / `scope-verbatim-compaction`.  The
+rows are now keyed by the census's names, which is the authority the
+lookup uses.
+
+**What changed in the artefacts.**  `bash_parser.py` has **zero diff**;
+the change is in the test that proves the mutants are equivalent, and in
+the guard that requires the proof.  The table now has **17 rows for
+26 sites**, with two rows keyed by two names each.
+
+**Both fixes are pinned by tests that fail when the defect is
+reintroduced** -- measured by planting each defect in the file and
+re-running: the old slug parse fails
+`test_every_census_slug_has_a_reachable_table_row` and
+`test_the_table_row_for_a_multi_slug_cell_names_every_slug`; removing
+the comment strip fails `test_a_comment_is_not_a_proof`.
+
+**The shape is the one this section keeps finding.**  A check that
+proves a weaker thing than its docstring claims: the guard said "a row
+without a proof is a claim; a claim needs evidence", and it accepted a
+comment as evidence and a key nobody could look up as a row.  The
+lesson is the same as AMENDED (e)'s: **read how the check resolves a
+proof, not only that it resolves one.**
 
 ### 9.2 Two pitfalls, both measured
 

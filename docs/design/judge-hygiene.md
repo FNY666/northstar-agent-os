@@ -910,6 +910,28 @@ differential proof with a **non-vacuity control** (the same bound turned
 the other way, which IS observable).  So the row reads **106/115**, with
 the module body unchanged.
 
+**AMENDED 2026-11-22 (e) -- the nine equivalence proofs were real, but
+the guard that required them was not looking.**  The nine `lt` sites do
+carry differential proofs with non-vacuity controls -- that was measured
+by planting the fault in the live module and re-running.  But the
+coverage guard that requires a proof for every surviving census site
+was reading the test files' **raw text**, and the nine site names
+(`lt@547` ... `lt@773`) appeared in `test_bash_parser.py` **only in
+comments**; the proof's own parametrization built its ids by an
+f-string, so no literal site name was in the file as code.  So the
+guard read nine comments as nine proofs.
+
+Two further holes were in the same guard: the multi-slug cell
+`` `c58` / `slice3` `` parsed into keys no census slug matches, so that
+equivalence row was **unreachable**; and two census slugs (`langgraph`,
+`orphan-adoption`) had no row at all, because the rows were keyed by
+different names.  All three are fixed, and each fix is pinned by a test
+that fails when the defect is planted back in.  The module body did not
+change -- `bash_parser.py` has zero diff -- so the **106/115** above is
+unchanged by this amendment; what changed is that the guard can now
+tell whether it is true.  See `docs/design/mutant-evidence-closure.md`
+§9.1b.
+
 **What this means for the numbers in this table.**  Every row whose
 suite unittest can see is unaffected -- the runner change only moves
 the rows above.  And the direction is fixed: the false kills all

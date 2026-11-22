@@ -391,7 +391,7 @@ covered".
 
 **What is still open, measured 2026-11-22.**  After the closure work
 described in `docs/design/mutant-evidence-closure.md` §9's AMENDED
-(d)-(j):
+(d)-(k):
 
 * `agent_handoff.py` -- **closed**: 38/38 at HEAD and at the pinned
   commit `249f9a5c` (was 25/38).  Thirteen survivors, thirteen new
@@ -419,6 +419,18 @@ The check that now keeps this honest is
 which reads the **slice** census and requires every surviving site to
 carry either an equivalence row in §9.1's table or a killer test in the
 suite the census row names.
+
+**That check had three holes of its own, and they are closed** (AMENDED
+2026-11-22 (k); see `docs/design/mutant-evidence-closure.md` §9.1b).
+It searched the test files' **raw text**, so a site named only in a
+**comment** counted as proven -- and the nine bash_parser `lt` sites were
+named only in comments.  It parsed the multi-slug cell
+`` `c58` / `slice3` `` into keys no census slug matches, so that
+equivalence row was unreachable.  And two census slugs (`langgraph`,
+`orphan-adoption`) had no row at all, because the rows were keyed by
+other names.  Each fix is pinned by a test that fails when the defect is
+planted back in.  The numbers above are unchanged -- `bash_parser.py`
+has zero diff -- but the guard can now tell whether they are true.
 
 The task book also says the mutant survivors are the `mutant-evidence-closure`
 slice's job: *"探针打中什么、要不要修，是 mutant-evidence-closure 片的活。

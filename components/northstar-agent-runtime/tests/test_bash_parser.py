@@ -2016,25 +2016,34 @@ EQUIVALENCE_CORPUS = [
     "eval x",
 ]
 
-#: (site, the strict line, the mutant line) for the nine equivalent sites.
+#: (site, line, the strict line, the mutant line) for the nine
+#: equivalent sites.
+#:
+#: The site name is a **literal** here, not derived from the line
+#: number.  It has to be: the coverage guard that checks this suite
+#: names a site by searching the suite's *code* for ``lt@547`` (or the
+#: §3.4 spelling ``lt_at_547``), and an f-string built from the line
+#: number puts neither spelling in the file.  The nine sites were then
+#: named only in this file's COMMENTS -- a note about the site, not a
+#: proof of it -- and the guard read the comments as evidence.
 EQUIVALENT_LT_SITES = [
-    (547, 'if _find_matching(text, i + 1) < 0:',
+    ("lt@547", 547, 'if _find_matching(text, i + 1) < 0:',
      'if _find_matching(text, i + 1) <= 0:'),
-    (552, 'if text.find(")", i + 2) < 0:',
+    ("lt@552", 552, 'if text.find(")", i + 2) < 0:',
      'if text.find(")", i + 2) <= 0:'),
-    (557, 'if close < 0:',
+    ("lt@557", 557, 'if close < 0:',
      'if close <= 0:'),
-    (620, 'if text.find("`", j + 1) < 0:',
+    ("lt@620", 620, 'if text.find("`", j + 1) < 0:',
      'if text.find("`", j + 1) <= 0:'),
-    (686, 'if text.find("`", i + 1) < 0:',
+    ("lt@686", 686, 'if text.find("`", i + 1) < 0:',
      'if text.find("`", i + 1) <= 0:'),
-    (690, 'if _find_matching(text, i + 1) < 0:',
+    ("lt@690", 690, 'if _find_matching(text, i + 1) < 0:',
      'if _find_matching(text, i + 1) <= 0:'),
-    (709, 'if ch == ")" or _find_matching(text, i) < 0:',
+    ("lt@709", 709, 'if ch == ")" or _find_matching(text, i) < 0:',
      'if ch == ")" or _find_matching(text, i) <= 0:'),
-    (756, 'if text.find("`", i + 1) < 0:',
+    ("lt@756", 756, 'if text.find("`", i + 1) < 0:',
      'if text.find("`", i + 1) <= 0:'),
-    (773, 'if close < 0:',
+    ("lt@773", 773, 'if close < 0:',
      'if close <= 0:'),
 ]
 
@@ -2046,11 +2055,11 @@ def _verdict_triple(module, text):
 
 
 @pytest.mark.parametrize(
-    "line,strict_text,mutated_text",
+    "site,line,strict_text,mutated_text",
     EQUIVALENT_LT_SITES,
-    ids=[f"lt_at_{line}" for line, _, _ in EQUIVALENT_LT_SITES],
+    ids=[f"lt_at_{line}" for _site, line, _s, _m in EQUIVALENT_LT_SITES],
 )
-def test_lt_sites_are_equivalent_mutants(line, strict_text, mutated_text):
+def test_lt_sites_are_equivalent_mutants(site, line, strict_text, mutated_text):
     """The nine ``lt`` sites: the differential proof and its control.
 
     For each site the module is built twice from its OWN source -- once
@@ -2084,7 +2093,7 @@ def test_lt_sites_are_equivalent_mutants(line, strict_text, mutated_text):
     assert strict is not None and mutated is not None
     for text in EQUIVALENCE_CORPUS:
         assert _verdict_triple(strict, text) == _verdict_triple(mutated, text), (
-            f"lt@{line}: the mutant changes the verdict for {text!r}"
+            f"{site}: the mutant changes the verdict for {text!r}"
         )
 
     # -- the non-vacuity control: the harness CAN find a difference ---
@@ -2094,18 +2103,18 @@ def test_lt_sites_are_equivalent_mutants(line, strict_text, mutated_text):
         if _verdict_triple(strict, text) != _verdict_triple(control, text)
     ]
     assert differences, (
-        f"lt@{line}: the control found no difference, so the comparison "
+        f"{site}: the control found no difference, so the comparison "
         f"above was between two identical functions"
     )
 
 
 @pytest.mark.parametrize(
-    "line,strict_text,mutated_text",
+    "site,line,strict_text,mutated_text",
     EQUIVALENT_LT_SITES,
-    ids=[f"lt_at_{line}" for line, _, _ in EQUIVALENT_LT_SITES],
+    ids=[f"lt_at_{line}" for _site, line, _s, _m in EQUIVALENT_LT_SITES],
 )
 def test_lt_sites_the_shipped_parser_agrees_with_the_strict_variant(
-    line, strict_text, mutated_text
+    site, line, strict_text, mutated_text
 ):
     """The nine ``lt`` sites: the shipped parser, pinned.
 
@@ -2119,6 +2128,6 @@ def test_lt_sites_the_shipped_parser_agrees_with_the_strict_variant(
     )
     for text in EQUIVALENCE_CORPUS:
         assert _verdict_triple(bp, text) == _verdict_triple(strict, text), (
-            f"lt@{line}: the shipped parser differs from the strict variant "
+            f"{site}: the shipped parser differs from the strict variant "
             f"for {text!r}"
         )
