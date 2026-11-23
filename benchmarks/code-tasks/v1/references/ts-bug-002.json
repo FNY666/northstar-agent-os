@@ -1,0 +1,3 @@
+{
+  "options.ts": "export interface ClientOptions {\n  timeoutMs?: number;\n}\n\nexport interface ResolvedClientOptions {\n  timeoutMs: number;\n}\n\nexport function resolveOptions(input: ClientOptions = {}): ResolvedClientOptions {\n  const timeoutMs = input.timeoutMs ?? 5_000;\n  if (timeoutMs < 0) throw new RangeError(\"timeoutMs must be non-negative\");\n  return {timeoutMs};\n}\n"
+}

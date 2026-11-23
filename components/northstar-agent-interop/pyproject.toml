@@ -26,10 +26,20 @@ dependencies = ["northstar-run-contract", "northstar-host"]
 
 [tool.setuptools]
 py-modules = [
+    "backend_router",
     "canary",
+    "causal_store",
+    "experience_layering",
+    "experience_middleware",
+    "graph_store",
     "handoff",
     "interop_adapter",
     "interop_contract",
     "process_adapter",
     "process_backend",
+    "remote_transport",
+    "route_causality",
+    "route_ledger",
+    "route_lineage",
+    "route_state",
 ]

@@ -16,11 +16,6 @@ trust_chain = ["public", "internal", "confidential", "restricted"]
 
 [[policy.source]]
 tool = "Read"
-match_args = { path = "/etc/*" }
-delta = { trust = "confidential" }
-
-[[policy.source]]
-tool = "Read"
 match_args = { path = "*.pem" }
 delta = { trust = "restricted" }
 
@@ -28,6 +23,11 @@ delta = { trust = "restricted" }
 tool = "Read"
 match_args = { path = "*credentials*" }
 delta = { trust = "restricted" }
+
+[[policy.source]]
+tool = "Read"
+match_args = { path = "/etc/*" }
+delta = { trust = "confidential" }
 
 [[policy.source]]
 tool = "Read"
@@ -55,6 +55,14 @@ requires = { trust = "internal" }
 
 [[policy.sink]]
 tool = "http_post"
+requires = { trust = "public" }
+
+[[policy.sink]]
+tool = "Fetch"
+requires = { trust = "public" }
+
+[[policy.sink]]
+tool = "Task"
 requires = { trust = "public" }
 
 [[policy.sink]]

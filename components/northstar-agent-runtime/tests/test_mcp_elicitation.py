@@ -305,6 +305,9 @@ class MrtrRoundTripTests(unittest.TestCase):
         saved = dict(os.environ)
         os.environ.update({"MRTR_SERVER_MODE": mode, "MRTR_SERVER_WIRE": str(wire)})
         try:
+            # This local stdio fixture never uses sockets; opt out of host-kernel
+            # Landlock requirements so protocol tests run on older CI kernels.
+            kwargs.setdefault("network", "allowed")
             client = McpStdioClient("demo", [sys.executable, str(FIXTURE)], timeout_ms=8_000, **kwargs)  # type: ignore[arg-type]
             client.connect()
         finally:
@@ -419,10 +422,12 @@ class MrtrRoundTripTests(unittest.TestCase):
         client = self.connect(audit=seen.append)
         try:
             client.call_tool("needs_input", {})
-            self.assertEqual([record["method"] for record in seen], [SAMPLING_METHOD, ELICITATION_METHOD])
-            self.assertTrue(all(record["kind"] == "mcp-elicitation" for record in seen))
-            self.assertTrue(all(record["action"] == DECLINE for record in seen))
-            self.assertEqual(client.elicitation_log, seen, "the log and the audit sink are the same records")
+            verdicts = [record for record in seen if record.get("kind") == "mcp-elicitation"]
+            self.assertEqual([record["method"] for record in verdicts], [SAMPLING_METHOD, ELICITATION_METHOD])
+            self.assertTrue(all(record["action"] == DECLINE for record in verdicts))
+            self.assertEqual(client.elicitation_log, verdicts, "the elicitation log contains only verdict records")
+            isolation = next(record for record in seen if record.get("type") == "mcp.server_isolation")
+            self.assertEqual(isolation["filesystem_scope"], client.filesystem)
         finally:
             client.close()
 

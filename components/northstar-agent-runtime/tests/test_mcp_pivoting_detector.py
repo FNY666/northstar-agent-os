@@ -58,6 +58,14 @@ class TestLoopback(unittest.TestCase):
         # 2130706433 == 127.0.0.1
         self.assertTrue(detect_pivoting(call(url="http://2130706433/")))
 
+    def test_ipv4_mapped_ipv6_loopback_blocked(self):
+        self.assertTrue(detect_pivoting(call(url="http://[::ffff:127.0.0.1]/")))
+
+    def test_hex_and_octal_loopback_spellings_blocked(self):
+        for host in ("0x7f000001", "017700000001", "0x7f.1"):
+            with self.subTest(host=host):
+                self.assertTrue(detect_pivoting(call(url=f"http://{host}/")))
+
 
 class TestPrivateRanges(unittest.TestCase):
     def test_rfc1918_10_blocked(self):
@@ -73,6 +81,20 @@ class TestPrivateRanges(unittest.TestCase):
         rec = inspect_tool_call(call(url="http://10.1.2.3/"))
         self.assertEqual(rec.reason, "internal-ip")
 
+    def test_ipv4_mapped_ipv6_metadata_blocked(self):
+        self.assertTrue(detect_pivoting(call(url="http://[::ffff:169.254.169.254]/")))
+
+    def test_shared_and_special_use_ipv4_ranges_blocked(self):
+        for host in ("100.64.0.1", "192.0.0.1", "198.18.0.1", "224.0.0.1", "240.0.0.1"):
+            with self.subTest(host=host):
+                self.assertTrue(detect_pivoting(call(url=f"http://{host}/")))
+
+    def test_ipv6_multicast_blocked(self):
+        self.assertTrue(detect_pivoting(call(url="http://[ff02::1]/")))
+
+    def test_ipv6_zone_id_does_not_hide_link_local_target(self):
+        self.assertTrue(detect_pivoting(call(url="http://[fe80::1%25eth0]/")))
+
 
 class TestEvasionResistance(unittest.TestCase):
     def test_percent_encoded_metadata_blocked(self):
@@ -81,6 +103,21 @@ class TestEvasionResistance(unittest.TestCase):
 
     def test_case_insensitive_localhost(self):
         self.assertTrue(detect_pivoting(call(url="http://LOCALHOST/")))
+
+    def test_nfkc_host_spellings_are_blocked(self):
+        for host in ("１２７．０．０．１", "ｌｏｃａｌｈｏｓｔ", "127．0．0．1"):
+            with self.subTest(host=host):
+                self.assertTrue(detect_pivoting(call(url=f"http://{host}/")))
+
+    def test_control_and_format_characters_fail_closed(self):
+        for host in ("local\u200bhost", "127.0.0.\u202e1"):
+            with self.subTest(host=host):
+                self.assertTrue(detect_pivoting(call(url=f"http://{host}/")))
+
+    def test_encoded_authority_delimiters_fail_closed(self):
+        for suffix in ("%2f.evil", "%5cevil", "%40evil", "%3fevil", "%23evil"):
+            with self.subTest(suffix=suffix):
+                self.assertTrue(detect_pivoting(call(url=f"http://127.0.0.1{suffix}/")))
 
     def test_internal_suffix_blocked(self):
         self.assertTrue(detect_pivoting(call(url="http://db.internal/query")))
