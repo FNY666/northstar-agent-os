@@ -22,6 +22,8 @@ that ships a policy file is declaring that policy for every run inside it.
 """
 from __future__ import annotations
 
+import os
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -53,6 +55,10 @@ MAX_REVISION_CHARS = 128
 # Project instructions are developer-authored content appended to the system
 # prompt. Cap it so a workspace file cannot grow a run's context without bound.
 CONTEXT_MAX_CHARS = 64_000
+# UTF-8 uses at most four bytes per code point. Read one byte beyond the
+# character budget's maximum encoding so truncation is detectable without
+# materializing an arbitrarily large repository-controlled context file.
+CONTEXT_MAX_BYTES = CONTEXT_MAX_CHARS * 4
 
 # Tighten-only ceilings, mirrored from loop.py's built-in defaults. The test
 # suite asserts these stay in sync with loop.DEFAULT_*.
@@ -80,6 +86,9 @@ _ALLOWED_KEYS = frozenset({
     "agent",
     "compaction_threshold_tokens",
     "project_context",
+    # Exact Fetch hosts for runs in this workspace. A project policy can only
+    # narrow the operator's target list, never add egress authority.
+    "egress_targets",
     # Declared lifecycle hooks. The shape is checked against the real guardrails
     # in command_hooks.parse_hooks; here it must only be a list of tables.
     "hooks",
@@ -126,6 +135,7 @@ class PolicyFile:
     agent: str | None = None                    # a known built-in agent name
     compaction_threshold_tokens: int | None = None  # <= DEFAULT_COMPACTION_THRESHOLD_TOKENS
     project_context: str | bool | None = None   # file name, False to disable, None = default
+    egress_targets: tuple[str, ...] | None = None  # exact Fetch hosts; empty explicitly denies Fetch targets
     #: Raw ``[[hooks]]`` tables, validated by :mod:`command_hooks` before use.
     hooks: tuple[Mapping[str, Any], ...] = ()
     #: ``[[verify]]`` tables: workspace claims the runtime checks after the run,
@@ -158,6 +168,7 @@ class PolicyFile:
             "agent": self.agent,
             "compaction_threshold_tokens": self.compaction_threshold_tokens,
             "project_context": self.project_context_setting,
+            "egress_targets": list(self.egress_targets) if self.egress_targets is not None else None,
             "hooks": [dict(entry) for entry in self.hooks],
             "verify": [dict(entry) for entry in self.verify],
             "retry": dict(self.retry) if self.retry else None,
@@ -316,6 +327,18 @@ def load_policy_file(
     else:
         fail("project_context must be a file name string or a boolean")
 
+    egress_targets_raw = raw.get("egress_targets")
+    egress_targets = None
+    if egress_targets_raw is not None:
+        if not isinstance(egress_targets_raw, list):
+            fail("egress_targets must be an array of exact hostnames")
+        from egress_scope import validate_egress_target_scope
+
+        try:
+            egress_targets = validate_egress_target_scope(egress_targets_raw, field_name="egress_targets")
+        except ValueError as error:
+            fail(str(error))
+
     # Declared lifecycle hooks: only the TOML shape is checked here (a list of
     # tables). Whether each entry is *governable* - veto-only event, script inside
     # the workspace, allowlisted interpreter - is command_hooks.parse_hooks' job,
@@ -376,6 +399,7 @@ def load_policy_file(
         agent=agent,
         compaction_threshold_tokens=compaction,
         project_context=context if context is not DEFAULT_PROJECT_CONTEXT_FILE or "project_context" in raw else None,
+        egress_targets=egress_targets,
         hooks=hooks,
         verify=verify,
     )
@@ -436,11 +460,26 @@ def discover_project_context(
 
 def _read_context(path: Path, name: str) -> ProjectContext:
     try:
-        raw = path.read_bytes()
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(path, flags)
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise OSError("project context is not a regular file")
+            chunks: list[bytes] = []
+            remaining = CONTEXT_MAX_BYTES + 1
+            while remaining:
+                chunk = os.read(fd, min(64 * 1024, remaining))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            raw = b"".join(chunks)
+        finally:
+            os.close(fd)
     except OSError as error:
         raise PolicyFileError(f"{path}: cannot read project context: {error}") from error
     text = raw.decode("utf-8", errors="replace")
-    truncated = len(text) > CONTEXT_MAX_CHARS
+    truncated = len(raw) > CONTEXT_MAX_BYTES or len(text) > CONTEXT_MAX_CHARS
     if truncated:
         text = text[:CONTEXT_MAX_CHARS]
     return ProjectContext(name=name, text=text, path=path, truncated=truncated)

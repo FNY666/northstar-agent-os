@@ -12,6 +12,10 @@ Public API:
 
 - ``FeatureStore`` -- mutable registry + store:
   ``register(definition)`` -> frozen ``FeatureDefinition``;
+  ``entity(entity_id, description="")`` -> frozen ``EntityRecord``:
+  books an entity declaration; duplicates fail closed;
+  ``feature(name)`` -> frozen ``FeatureDefinition``: alias of
+  ``definition()`` with the Feast-shaped name;
   ``ingest(entity_id, feature_name, value, event_seq, seq)`` records a
   feature value at a logical event time;
   ``serve(entity_id, feature_names, as_of_seq, seq)`` -> frozen
@@ -84,6 +88,14 @@ class UnknownFeatureError(FeatureStoreError):
 
 class DuplicateFeatureError(FeatureStoreError):
     """Raised when registering a feature name that already exists."""
+
+
+class UnknownEntityError(FeatureStoreError):
+    """Raised when an entity id was never booked."""
+
+
+class DuplicateEntityError(FeatureStoreError):
+    """Raised when booking an entity id that already exists."""
 
 
 def _check_seq(seq: object) -> int:
@@ -186,6 +198,39 @@ class FeatureDefinition:
             "owner": self.owner,
             "value_type": self.value_type,
             "freshness_sla_seqs": self.freshness_sla_seqs,
+            "description": self.description,
+            "digest": self.digest,
+        }
+
+
+@dataclass(frozen=True)
+class EntityRecord:
+    """A booked entity: the subject a feature value attaches to.
+
+    Feast-shaped entity declaration: an ``entity_id`` names one
+    training/serving subject (a user, a device, a loan application).
+    Booking is a declaration only -- values still arrive through
+    ``ingest()``, which does not require the entity to be booked first,
+    so existing behavior is unchanged.
+    """
+
+    entity_id: str
+    description: str = ""
+    digest: str = field(default="")
+
+    def __post_init__(self) -> None:
+        _check_name(self.entity_id, "entity_id")
+        if not isinstance(self.description, str):
+            raise TypeError("description must be str")
+        if len(self.description) > _MAX_DESC_LEN:
+            raise ValueError("description exceeds bound")
+        body = "|".join(["entity", self.entity_id, self.description])
+        object.__setattr__(self, "digest", _digest_pin(body))
+
+    def as_dict(self) -> dict:
+        return {
+            "schema": SCHEMA_PIN,
+            "entity_id": self.entity_id,
             "description": self.description,
             "digest": self.digest,
         }
@@ -297,8 +342,37 @@ class FeatureStore:
 
     def __init__(self) -> None:
         self._definitions: Dict[str, FeatureDefinition] = {}
+        self._entities: Dict[str, EntityRecord] = {}
         self._log: List[FeatureValue] = []
         self._online: Dict[Tuple[str, str], FeatureValue] = {}
+
+    # -- entities ------------------------------------------------------
+
+    def entity(self, entity_id: str, description: str = "") -> EntityRecord:
+        """Book an entity declaration; duplicates fail closed.
+
+        This is the Feast-shaped ``entity()`` entry point: it pins that
+        ``entity_id`` is a known serving subject. Ingest does not require
+        it, so existing ingestion/serving behavior is unchanged.
+        """
+        _check_name(entity_id, "entity_id")
+        if entity_id in self._entities:
+            raise DuplicateEntityError(
+                f"entity {entity_id!r} already booked"
+            )
+        record = EntityRecord(entity_id=entity_id, description=description)
+        self._entities[entity_id] = record
+        return record
+
+    def entity_record(self, entity_id: str) -> EntityRecord:
+        _check_name(entity_id, "entity_id")
+        try:
+            return self._entities[entity_id]
+        except KeyError:
+            raise UnknownEntityError(f"entity {entity_id!r} not booked")
+
+    def entity_ids(self) -> Tuple[str, ...]:
+        return tuple(sorted(self._entities))
 
     # -- registry ------------------------------------------------------
 
@@ -333,6 +407,14 @@ class FeatureStore:
 
     def feature_names(self) -> Tuple[str, ...]:
         return tuple(sorted(self._definitions))
+
+    def feature(self, name: str) -> FeatureDefinition:
+        """Return the feature definition for ``name``.
+
+        The spec's ``feature()`` entry point: a thin alias of
+        ``definition()`` with the Feast-shaped name.
+        """
+        return self.definition(name)
 
     # -- ingestion / serving -------------------------------------------
 
@@ -519,6 +601,10 @@ def main() -> None:
     assert vec2.get("churn_score") == 0.9
     report = store.backfill("churn_score", event_seq=25, seq=6)
     assert isinstance(report, BackfillReport)
+    ent = store.entity("user-1", "churn experiment cohort")
+    assert store.entity_record("user-1") is ent
+    assert store.feature("churn_score").name == "churn_score"
+    assert store.entity_ids() == ("user-1",)
     print("audit:", feature_store_audit_event("served", seq=4)["kind"])
     print("feature-store OK: register, ingest, point-in-time serve, backfill")
 

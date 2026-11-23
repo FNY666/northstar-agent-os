@@ -19,6 +19,7 @@ from distributed_lock import (
     EVENT_REFUSED,
     EVENT_RELEASED,
     EVENT_RELEASE_REFUSED,
+    EVENT_RENEWED,
 )
 
 
@@ -225,6 +226,76 @@ class TestEventsAndAudit(unittest.TestCase):
     def test_audit_event_validation(self):
         with self.assertRaises(ValueError):
             distributed_lock_audit_event("bogus", "ledger", "host-a", seq=0)
+
+
+class TestRenew(unittest.TestCase):
+    def setUp(self):
+        self.mgr = DistributedLock()
+
+    def test_renew_happy_path_extends_expiry(self):
+        lease = self.mgr.acquire("ledger", "host-a", ttl_seqs=10, current_seq=0)
+        renewed = self.mgr.renew("ledger", "host-a", 1, ttl_seqs=20, current_seq=5)
+        self.assertIsNotNone(renewed)
+        self.assertEqual(renewed.expiry_seq, 25)
+        self.assertEqual(renewed.acquired_seq, 0)
+
+    def test_renew_keeps_fencing_token(self):
+        lease = self.mgr.acquire("ledger", "host-a", ttl_seqs=10, current_seq=0)
+        renewed = self.mgr.renew("ledger", "host-a", 1, ttl_seqs=10, current_seq=3)
+        self.assertEqual(renewed.fencing_token.token, 1)
+        self.assertEqual(self.mgr.current_token("ledger"), 1)
+        self.assertTrue(renewed.digest())
+
+    def test_renew_by_non_holder_refused(self):
+        self.mgr.acquire("ledger", "host-a", ttl_seqs=10, current_seq=0)
+        self.assertIsNone(self.mgr.renew("ledger", "host-b", 1, 10, 1))
+        kinds = [e.kind for e in self.mgr.events()]
+        self.assertIn(EVENT_REFUSED, kinds)
+
+    def test_renew_stale_token_refused(self):
+        self.mgr.acquire("ledger", "host-a", ttl_seqs=10, current_seq=0)
+        self.mgr.release("ledger", "host-a", 1, current_seq=1)
+        self.mgr.acquire("ledger", "host-b", ttl_seqs=10, current_seq=2)
+        # old token 1 is stale now; renew with it is refused
+        self.assertIsNone(self.mgr.renew("ledger", "host-a", 1, 10, 3))
+        self.assertTrue(self.mgr.is_locked("ledger", 3))
+
+    def test_renew_expired_lease_refused(self):
+        self.mgr.acquire("ledger", "host-a", ttl_seqs=5, current_seq=0)
+        # lease valid through seq 5; renew at seq 6 is too late
+        self.assertIsNone(self.mgr.renew("ledger", "host-a", 1, 10, 6))
+        self.assertFalse(self.mgr.is_locked("ledger", 6))
+        # stale holder must re-acquire and takes a fresh token
+        lease = self.mgr.acquire("ledger", "host-a", ttl_seqs=10, current_seq=7)
+        self.assertEqual(lease.fencing_token.token, 2)
+
+    def test_renew_unknown_lock_refused(self):
+        self.assertIsNone(self.mgr.renew("ghost", "host-a", 1, 10, 0))
+
+    def test_renew_bad_ttl(self):
+        self.mgr.acquire("ledger", "host-a", ttl_seqs=10, current_seq=0)
+        with self.assertRaises(ValueError):
+            self.mgr.renew("ledger", "host-a", 1, 0, 1)
+        with self.assertRaises(TypeError):
+            self.mgr.renew("ledger", "host-a", 1, True, 1)
+
+    def test_renew_bad_seq(self):
+        self.mgr.acquire("ledger", "host-a", ttl_seqs=10, current_seq=0)
+        with self.assertRaises(ValueError):
+            self.mgr.renew("ledger", "host-a", 1, 10, -1)
+
+    def test_renew_event_recorded(self):
+        self.mgr.acquire("ledger", "host-a", ttl_seqs=10, current_seq=0)
+        self.mgr.renew("ledger", "host-a", 1, ttl_seqs=10, current_seq=4)
+        kinds = [e.kind for e in self.mgr.events()]
+        self.assertEqual(kinds, [EVENT_ACQUIRED, EVENT_RENEWED])
+
+    def test_renew_audit_event_shape(self):
+        event = distributed_lock_audit_event(
+            EVENT_RENEWED, "ledger", "host-a", seq=9, token=2
+        )
+        self.assertEqual(event["type"], "audit.ndjson/1")
+        self.assertEqual(event["event"], EVENT_RENEWED)
 
 
 class TestMain(unittest.TestCase):

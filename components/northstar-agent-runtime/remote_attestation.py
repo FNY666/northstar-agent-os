@@ -34,14 +34,21 @@ Public API:
 - ``Attester(label)`` -- the measured host; ``measure(component,
   digest)`` extends PCRs; ``quote(nonce, seq)`` mints a frozen
   ``Quote``; ``pcrs()`` snapshot view.
+- ``Attester.endorse(endorsement_id, issuer_label, seq, ...)`` --
+  books one issuer endorsement of this attester's attestation key
+  (the privacy-CA / EK-certificate analogue); returns a frozen
+  ``EndorsementRecord`` pinned by a deterministic digest; duplicate
+  endorsement ids are refused fail-closed.
+- ``RemoteAttestation`` -- spec-named facade over ``Attester``
+  exposing the spec API ``quote()`` / ``verify()`` / ``endorse()``.
 - ``verify(quote, expected_label, expected_nonce, expected_pcrs)`` -- verifier-side
   check; ``True`` / ``False`` (policy outcome, raises only on
   malformed caller input).
 - ``expected_pcrs(attester)`` -- convenience: snapshot this
   attester's PCRs as golden values (for tests).
 - ``remote_attestation_audit_event(kind, seq)`` -- ``audit.ndjson/1``
-  records; kinds ``"measured"`` / ``"quoted"`` / ``"verified"`` /
-  ``"rejected"``.
+  records; kinds ``"measured"`` / ``"quoted"`` / ``"endorsed"`` /
+  ``"verified"`` / ``"rejected"``.
 - ``RemoteAttestationError``.
 
 Measurement model:
@@ -72,7 +79,9 @@ __all__ = [
     "PCR_COMPONENTS",
     "RemoteAttestationError",
     "Quote",
+    "EndorsementRecord",
     "Attester",
+    "RemoteAttestation",
     "verify",
     "expected_pcrs",
     "remote_attestation_audit_event",
@@ -156,6 +165,38 @@ def _quote_tag(
     return h.digest()
 
 
+def _check_pin(pin: str) -> str:
+    """An optional endorsement digest pin: '' or 'sha256:<64 hex>."""
+    if not isinstance(pin, str):
+        raise RemoteAttestationError(
+            "endorsement_digest must be a 'sha256:<64hex>' pin or ''"
+        )
+    if pin and not (
+        pin.startswith("sha256:")
+        and len(pin) == 7 + 64
+        and all(c in "0123456789abcdef" for c in pin[7:])
+    ):
+        raise RemoteAttestationError(
+            "endorsement_digest must be a 'sha256:<64hex>' pin or ''"
+        )
+    return pin
+
+
+def _endorsement_pin(
+    endorsement_id: str,
+    attester_label: str,
+    issuer_label: str,
+    endorsement_digest: str,
+) -> bytes:
+    """Deterministic pin binding one endorsement's declared fields."""
+    h = hashlib.sha256(_DOMAIN + b"/endorsement")
+    h.update(endorsement_id.encode("utf-8"))
+    h.update(attester_label.encode("utf-8"))
+    h.update(issuer_label.encode("utf-8"))
+    h.update(endorsement_digest.encode("utf-8"))
+    return h.digest()
+
+
 @dataclass(frozen=True)
 class Quote:
     """A signed PCR snapshot bound to a verifier nonce."""
@@ -182,6 +223,45 @@ class Quote:
         return dict(self.pcrs)
 
 
+@dataclass(frozen=True)
+class EndorsementRecord:
+    """One issuer endorsement of an attester's attestation key.
+
+    The privacy-CA / EK-certificate analogue: a third-party issuer
+    declares that this attester's AK is trustworthy. The issuer's raw
+    material never enters the record -- only the optional
+    ``endorsement_digest`` pin. Integrity is self-contained:
+    ``verify()`` recomputes the pin deterministically.
+    """
+
+    endorsement_id: str
+    attester_label: str
+    issuer_label: str
+    endorsement_digest: str
+    pin: bytes
+    version: str = REMOTE_ATTESTATION_VERSION
+
+    def as_dict(self) -> dict:
+        return {
+            "schema": SCHEMA_PIN,
+            "version": self.version,
+            "endorsement_id": self.endorsement_id,
+            "attester_label": self.attester_label,
+            "issuer_label": self.issuer_label,
+            "endorsement_digest": self.endorsement_digest,
+            "pin": self.pin.hex(),
+        }
+
+    def verify(self) -> bool:
+        recomputed = _endorsement_pin(
+            self.endorsement_id,
+            self.attester_label,
+            self.issuer_label,
+            self.endorsement_digest,
+        )
+        return hmac.compare_digest(recomputed, self.pin)
+
+
 class Attester:
     """The measured host: extends PCRs and mints quotes.
 
@@ -195,6 +275,7 @@ class Attester:
             i: _GENESIS_PCR for i in PCR_COMPONENTS.values()
         }
         self._quote_count = 0
+        self._endorsements: Dict[str, EndorsementRecord] = {}
 
     @property
     def label(self) -> str:
@@ -229,6 +310,57 @@ class Attester:
 
     def quote_count(self) -> int:
         return self._quote_count
+
+    def endorse(
+        self,
+        endorsement_id: str,
+        issuer_label: str,
+        seq: int,
+        endorsement_digest: str = "",
+    ) -> EndorsementRecord:
+        """Book one issuer endorsement of this attester's AK.
+
+        A declaration that ``issuer_label`` vouches for this attester's
+        attestation key; the issuer's raw material never enters the
+        ledger, only the optional ``endorsement_digest`` pin. Duplicate
+        endorsement ids are refused fail-closed; ids are never
+        recycled. Does not affect PCRs or quotes.
+        """
+        if not isinstance(endorsement_id, str) or not endorsement_id:
+            raise RemoteAttestationError(
+                "endorsement_id must be a non-empty str"
+            )
+        _check_label(issuer_label)
+        _check_seq(seq)
+        _check_pin(endorsement_digest)
+        if endorsement_id in self._endorsements:
+            raise RemoteAttestationError(
+                f"duplicate endorsement {endorsement_id!r}"
+            )
+        record = EndorsementRecord(
+            endorsement_id=endorsement_id,
+            attester_label=self._label,
+            issuer_label=issuer_label,
+            endorsement_digest=endorsement_digest,
+            pin=_endorsement_pin(
+                endorsement_id, self._label, issuer_label, endorsement_digest
+            ),
+        )
+        self._endorsements[endorsement_id] = record
+        return record
+
+    def endorsement_record(self, endorsement_id: str) -> EndorsementRecord:
+        """Return one booked endorsement (raises on unknown id)."""
+        try:
+            return self._endorsements[endorsement_id]
+        except (KeyError, TypeError):
+            raise RemoteAttestationError(
+                f"unknown endorsement {endorsement_id!r}"
+            )
+
+    def endorsement_ids(self) -> Tuple[str, ...]:
+        """Sorted ids of every booked endorsement."""
+        return tuple(sorted(self._endorsements))
 
 
 def expected_pcrs(attester: Attester) -> Dict[int, bytes]:
@@ -278,7 +410,7 @@ def verify(
 
 def remote_attestation_audit_event(kind: str, seq: int) -> dict:
     """Shape an attestation lifecycle event as an ``audit.ndjson/1`` record."""
-    valid = ("measured", "quoted", "verified", "rejected")
+    valid = ("measured", "quoted", "endorsed", "verified", "rejected")
     if kind not in valid:
         raise RemoteAttestationError(f"unknown audit kind {kind!r}")
     _check_seq(seq)
@@ -289,6 +421,24 @@ def remote_attestation_audit_event(kind: str, seq: int) -> dict:
         "version": REMOTE_ATTESTATION_VERSION,
         "seq": seq,
     }
+
+
+class RemoteAttestation(Attester):
+    """Spec-named facade over :class:`Attester`.
+
+    Exposes the spec API ``quote()`` / ``verify()`` / ``endorse()``.
+    ``quote()`` and ``endorse()`` are inherited unchanged; ``verify()``
+    delegates to the module-level verifier-side check of the same name.
+    """
+
+    @staticmethod
+    def verify(
+        quote: Quote,
+        expected_label: str,
+        expected_nonce: bytes,
+        expected_pcrs: Mapping[int, bytes],
+    ) -> bool:
+        return verify(quote, expected_label, expected_nonce, expected_pcrs)
 
 
 def main() -> None:
@@ -312,4 +462,16 @@ def main() -> None:
     q2 = other.quote(b"verifier-nonce-42", seq=7)
     assert verify(q2, "edge-node-1", b"verifier-nonce-42", golden) is False
     assert verify(q2, "edge-node-2", b"verifier-nonce-42", expected_pcrs(other)) is True
+    # Spec facade + endorsements.
+    host3 = RemoteAttestation("edge-node-3")
+    host3.measure("bootloader", b"B" * 32)
+    rec = host3.endorse("end-1", "privacy-ca-1", seq=0)
+    assert rec.verify() is True
+    assert rec.as_dict()["attester_label"] == "edge-node-3"
+    q3 = host3.quote(b"n3", seq=1)
+    assert RemoteAttestation.verify(
+        q3, "edge-node-3", b"n3", expected_pcrs(host3)
+    ) is True
+    ev = remote_attestation_audit_event("endorsed", seq=4)
+    assert ev["kind"] == "remote-attestation.endorsed"
     print("remote-attestation OK: measure, quote, verify, nonce freshness, tamper detection")

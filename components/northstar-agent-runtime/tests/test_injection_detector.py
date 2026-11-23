@@ -72,6 +72,9 @@ class TestIndirectPatterns(unittest.TestCase):
         # Too short to be a payload carrier.
         self.assertFalse(detect_injection("token abc123"))
 
+    def test_repetitive_filler_is_not_treated_as_base64_payload(self):
+        self.assertFalse(detect_injection("q" * 4000))
+
     def test_benign_markdown_two_hashes(self):
         self.assertFalse(detect_injection("Use ## headers for sections."))
 
