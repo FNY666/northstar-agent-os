@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 from typing import Any, Sequence
 
 from providers.base import (
@@ -173,9 +174,11 @@ class OpenAICompatProvider(Provider):
             self._client_kwargs["base_url"] = base_url
         if api_key is not None:
             self._client_kwargs["api_key"] = api_key
-        elif base_url is not None:
+        elif base_url is not None and not os.environ.get("OPENAI_API_KEY"):
             # Local servers (vLLM, Ollama, LM Studio) usually ignore a key but the
-            # SDK still requires one, so a base_url alone must be enough to work.
+            # SDK still requires one, so a keyless base_url alone must work.
+            # When an environment key exists, leave it to the SDK rather than
+            # replacing a credentialed gateway's key with this placeholder.
             self._client_kwargs["api_key"] = "not-needed"
         if timeout is not None:
             self._client_kwargs["timeout"] = timeout

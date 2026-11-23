@@ -214,6 +214,11 @@ def shell_handler(payload: dict[str, Any], ctx: "ToolContext") -> Any:
         cwd_path = ctx.resolve(raw_cwd, must_exist=True)
         if not cwd_path.is_dir():
             raise SandboxError(f"cwd is not a directory: {raw_cwd}")
+        # Backend selection is operator authority, not a model-controlled
+        # tool argument. An extra/unadvertised `backend=process` must never
+        # downgrade an operator-selected bwrap OS sandbox, so the model's
+        # field is dropped and the operator's choice is used.
+        payload.pop("backend", None)
         # A skill script is reviewed at setup, then executed only through this
         # governed Shell path. Re-check direct argv references immediately before
         # spawn so post-setup edits cannot silently replace reviewed script bytes.
@@ -225,6 +230,13 @@ def shell_handler(payload: dict[str, Any], ctx: "ToolContext") -> Any:
                     candidates.extend(shlex.split(argv[2]))
                 except ValueError:
                     pass  # the shell itself will report the malformed command
+            # Nested shell -c arguments remain opaque after one shlex pass.
+            # Also match exact pinned paths in the original argv text so a
+            # wrapper cannot hide a changed script one quoting level deeper.
+            raw_arguments = "\0".join(token for token in argv if isinstance(token, str))
+            for relative in pins:
+                if isinstance(relative, str) and relative and relative in raw_arguments:
+                    candidates.append(str(ctx.sandbox.root_real / relative))
             for token in candidates:
                 if not isinstance(token, str) or not token or token.startswith("-"):
                     continue
@@ -473,6 +485,7 @@ def shell_tool_spec():
                     ),
                 },
             },
+            "additionalProperties": False,
         },
         handler=shell_handler,
         kind=SHELL_KIND,  # type: ignore[arg-type]

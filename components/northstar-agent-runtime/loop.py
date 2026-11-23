@@ -22,6 +22,7 @@ tool, which is registered only when a socket path is supplied.
 """
 from __future__ import annotations
 
+import math
 import os
 import math
 import time
@@ -39,7 +40,13 @@ from hooks import HookInput, HookRegistry
 from observer_verdict_ledger import ObserverVerdictLedger
 from safr_checkpoint import SafrCheckpoint
 from sealed_audit_sink import SealedAuditSink
-from checkpoints import CheckpointError, build as build_checkpoint, digest_transcript, prepare_resume
+from checkpoints import (
+    CheckpointError,
+    build as build_checkpoint,
+    digest_transcript,
+    _post_checkpoint_tool_call_count,
+    prepare_resume,
+)
 from dataflow_policy import DataflowPolicy, SessionDataflow
 from egress_scope import canonical_egress_host, validate_egress_target_scope
 from postconditions import (
@@ -110,6 +117,7 @@ from tools import (
     ToolSandbox,
     build_default_registry,
     codex_tool_spec,
+    read_file,
 )
 from tracing import Tracer
 
@@ -201,6 +209,8 @@ class RuntimeConfig:
     #: The boundary a resumed run continues from (checkpoints.Checkpoint). Setting
     #: this without carrying the parent's cost over is refused, not forgiven.
     resume_from: Any = None
+    #: Explicitly acknowledge that tools recorded after the selected checkpoint may be called again.
+    allow_checkpoint_tool_replay: bool = False
     #: Session id this run was forked from, recorded for the audit only.
     parent_session: str = ""
     max_output_tokens: int = 4096
@@ -318,9 +328,14 @@ class RuntimeConfig:
                 fail("max_tool_calls must be a non-negative integer or None")
         if self.max_budget_usd is not None:
             if isinstance(self.max_budget_usd, bool) or not isinstance(self.max_budget_usd, (int, float)):
-                fail("max_budget_usd must be a number or None")
-            elif not math.isfinite(float(self.max_budget_usd)) or self.max_budget_usd <= 0:
-                fail("max_budget_usd must be finite and positive when set; use None for no ceiling")
+                fail("max_budget_usd must be a positive finite number or None")
+            try:
+                budget_usd = float(self.max_budget_usd)
+            except OverflowError:
+                fail("max_budget_usd must be a positive finite number or None")
+            if not math.isfinite(budget_usd) or budget_usd <= 0:
+                fail("max_budget_usd must be a positive finite number or None")
+            object.__setattr__(self, "max_budget_usd", budget_usd)
         if self.compaction_threshold_tokens is not None:
             if isinstance(self.compaction_threshold_tokens, bool) or not isinstance(self.compaction_threshold_tokens, int):
                 fail("compaction_threshold_tokens must be an integer or None")
@@ -1654,6 +1669,14 @@ class AgentRuntime:
                     "resume_from needs the parent transcript as run(resume=...): the checkpoint says where to cut, "
                     "but the messages to cut come from the session store"
                 )
+            post_checkpoint_tool_calls = _post_checkpoint_tool_call_count(checkpoint, state.transcript)
+            if post_checkpoint_tool_calls and not self.config.allow_checkpoint_tool_replay:
+                raise RuntimeConfigurationError(
+                    f"resume refused: checkpoint at turn {checkpoint.turns} would discard "
+                    f"{post_checkpoint_tool_calls} post-checkpoint tool call(s); their effects may already "
+                    "have run. Inspect the parent session and pass "
+                    "--allow-checkpoint-tool-replay only when replay is intentional"
+                )
             try:
                 state.transcript = prepare_resume(
                     checkpoint, state.transcript, expected_session_id=self.config.parent_session or None
@@ -1698,6 +1721,9 @@ class AgentRuntime:
                 "transcript_digest": checkpoint.transcript_digest[:12],
                 "forked": bool(self.config.parent_session),
             }
+            if post_checkpoint_tool_calls:
+                state.resumed_from["post_checkpoint_tool_calls"] = post_checkpoint_tool_calls
+                state.resumed_from["replay_acknowledged"] = True
         self._pending_state = state
         self._last_report = None
         # A subagent's run hangs off the span its parent opened for it, so the
@@ -1722,7 +1748,43 @@ class AgentRuntime:
         finished = False
         # Claimed here, before the first record: the whole point is that not one byte of
         # a transcript is appended by a run that does not own the file.
-        busy = self._claim_session()
+        try:
+            busy = self._claim_session()
+        except Exception as claim_error:
+            # A claim that cannot even be attempted is a configuration or platform fault,
+            # not a run outcome: it never reached the try below, so the span and report
+            # would leak otherwise. Marking the run refused reuses the existing no-write
+            # guard in _close_run (no result record, no SessionEnd), and the original
+            # exception is re-raised bare - only an ordinary cleanup fault below is
+            # attached to it as a diagnostic.
+            state.refused_session = True
+            state.errors.append(f"pre-try claim failure: {type(claim_error).__name__}: {claim_error}")
+            try:
+                self._close_run(state, run_span)
+            except Exception as close_error:
+                diagnostic = f"pre-try close failure: {type(close_error).__name__}: {close_error}"
+                state.errors.append(diagnostic)
+                add_note = getattr(claim_error, "add_note", None)
+                if callable(add_note):
+                    try:
+                        add_note(diagnostic)
+                    except Exception as note_error:
+                        state.errors.append(
+                            f"pre-try close diagnostic not attachable: {type(note_error).__name__}: {note_error}"
+                        )
+                else:
+                    # Python < 3.11: link the cleanup fault as context only. It was
+                    # raised while handling the claim fault, so its context already
+                    # points back at the claim fault; sever it before linking forward
+                    # or the pair would form a cycle. __cause__ is never touched -
+                    # it carries the real lease failure.
+                    # A self-link would cycle: when the cleanup fault IS the claim
+                    # fault (same object re-raised), skip the fallback link and rely
+                    # on the diagnostic already recorded in state.errors.
+                    if close_error is not claim_error:
+                        close_error.__context__ = None
+                        claim_error.__context__ = close_error
+            raise
         try:
             if busy is not None:
                 # Not an execution failure and not the operator's typo: a retryable
@@ -1747,6 +1809,13 @@ class AgentRuntime:
                 finished = True
                 state.events.append(state.result)
                 yield state.result
+        except GeneratorExit:
+            if state.result is None:
+                state.errors.append("stream closed before terminal result")
+                run_span.record_error("GeneratorExit: stream closed before terminal result")
+                state.result = self._result(state, "error_during_execution")
+                state.events.append(state.result)
+            raise
         except Exception as error:  # noqa: BLE001 - every expected failure is an event
             from defensive_agent import sanitize_for_model
 
@@ -2765,6 +2834,15 @@ class AgentRuntime:
             # refuses is_delegation specs), so the outcome is authorized or refused.
             assert not isinstance(outcome, _Delegate), "a delegation call reached a parallel batch"
             if isinstance(outcome, _Authorized):
+                self._record_authorized_tool_evidence(
+                    state,
+                    call,
+                    turn_index,
+                    outcome.spec,
+                    outcome.payload,
+                    outcome.decision,
+                    outcome.governed_inputs_digest,
+                )
                 prepared.append((call, outcome.spec, outcome.payload, outcome.decision, outcome.rewritten, outcome.governed_inputs_digest))
                 early.append(None)
                 state.tool_calls += 1
@@ -3569,6 +3647,37 @@ class AgentRuntime:
         governance_seal_error: str = "",
     ) -> tuple[ToolResultBlock, ToolCallReport]:
         """Post-hooks + ToolCallReport after a handler (or parallel handler) returns."""
+        skill_activation: dict[str, Any] | None = None
+        if (
+            spec.name == "Read"
+            and spec.handler is read_file
+            and not result.is_error
+            and isinstance(result.data, Mapping)
+        ):
+            skill_path = result.data.get("skill_path")
+            skill_digest = result.data.get("skill_digest")
+            expected_digest = (
+                self.config.skill_digests.get(skill_path)
+                if isinstance(skill_path, str)
+                else None
+            )
+            if (
+                isinstance(skill_path, str)
+                and "/" in skill_path
+                and skill_path.rsplit("/", 1)[-1] == "SKILL.md"
+                and isinstance(skill_digest, str)
+                and len(skill_digest) == 64
+                and all(char in "0123456789abcdef" for char in skill_digest)
+                and expected_digest == skill_digest
+            ):
+                skill_name = skill_path.rsplit("/", 1)[0].rsplit("/", 1)[-1]
+                if skill_name:
+                    skill_activation = {
+                        "skill_name": skill_name,
+                        "skill_path": skill_path,
+                        "skill_digest": f"sha256:{skill_digest}",
+                        "source_truncated": bool(result.data.get("truncated")),
+                    }
         # Give every handler result an origin before it crosses the provider
         # boundary. MCP adapters provide a more specific server/tool source;
         # ordinary built-ins inherit their registered runtime tool name.
@@ -3613,14 +3722,17 @@ class AgentRuntime:
         block, result_truncated = result.as_block_with_status(
             call.id, max_chars=self.limits.max_result_chars
         )
+        initial_result_truncated = result_truncated
         # Tool output is an input boundary too.  Run the local defensive
         # assessment on the already-bounded representation, then fail closed
         # for high-confidence findings before the provider sees the content.
         # This is deliberately after the result cap: an attacker-sized object
         # cannot force an unbounded stringify just to be inspected.
+        original_display_text = block.display_text()
         sanitized_text, defensive = sanitize_for_model(
-            block.display_text(), preserve_length=True
+            original_display_text, preserve_length=True
         )
+        defensive_sanitized = sanitized_text != original_display_text
         defensive_blocked = defensive.decision.value == "block"
         if defensive.findings:
             self.sessions.append(
@@ -3639,7 +3751,7 @@ class AgentRuntime:
                     ],
                 },
             )
-        if defensive_blocked or sanitized_text != block.display_text():
+        if defensive_blocked or defensive_sanitized:
             rule_ids = ",".join(f.rule_id for f in defensive.findings[:8]) or "unknown"
             if defensive_blocked:
                 result = ToolResult.error(
@@ -3653,6 +3765,23 @@ class AgentRuntime:
                 )
             block, result_truncated = result.as_block_with_status(
                 call.id, max_chars=self.limits.max_result_chars
+            )
+        if skill_activation is not None and not result.is_error:
+            self.sessions.append(
+                "informational",
+                {
+                    "subtype": "skill_loaded",
+                    "agent": self.config.agent,
+                    "tool_use_id": call.id,
+                    "turn_index": turn_index,
+                    **skill_activation,
+                    "truncated": bool(
+                        skill_activation["source_truncated"]
+                        or initial_result_truncated
+                        or result_truncated
+                    ),
+                    "sanitized": defensive_sanitized,
+                },
             )
         provenance_data = result.provenance.as_dict()
         if governance_seal_error:
@@ -3817,6 +3946,77 @@ class AgentRuntime:
         )
         return block, report
 
+    def _record_authorized_tool_evidence(
+        self,
+        state: _RunState,
+        call: ToolUseBlock,
+        turn_index: int,
+        spec: Any,
+        payload: dict[str, Any],
+        decision: Any,
+        authorized_inputs_digest: str,
+    ) -> None:
+        """Record permission and governance authorization for every dispatch path."""
+        sink = state.evidence_sink
+        if sink is None:
+            return
+        sequence = f"{self.config.agent}-{turn_index}-{call.id}"
+        egress_subject: dict[str, Any] | None = None
+        if spec.name == "Fetch":
+            from egress_scope import canonical_egress_host
+
+            egress_subject = {
+                "agent": self.config.agent,
+                "turn_index": turn_index,
+                "call_id": call.id,
+                "host": canonical_egress_host(payload.get("host")),
+                "port": payload.get("port", 443),
+                "method": str(payload.get("method") or "GET").upper(),
+                "path_length": len(str(payload.get("path") or "")),
+                "permission_source": decision.source,
+                "target_scope": (
+                    list(self.config.egress_target_scope)
+                    if self.config.egress_target_scope is not None
+                    else None
+                ),
+            }
+        sink.append_event(
+            source="permission",
+            kind="runtime.permission.allowed",
+            sequence=sequence,
+            subject={
+                "agent": self.config.agent,
+                "turn_index": turn_index,
+                "call_id": call.id,
+                "tool": spec.name,
+                "tool_kind": spec.kind,
+                "source": decision.source,
+                "rule": getattr(decision, "rule", "") or "",
+                "permission_mode": str(getattr(self.permissions.mode, "value", self.permissions.mode)),
+                "arguments_digest": digest_arguments(payload),
+            },
+        )
+        if egress_subject is not None:
+            sink.append_event(
+                source="egress",
+                kind="runtime.egress.allowed",
+                sequence=sequence,
+                subject=egress_subject,
+            )
+        sink.append_event(
+            source="governance",
+            kind="runtime.governance.authorized",
+            sequence=sequence,
+            subject={
+                "agent": self.config.agent,
+                "turn_index": turn_index,
+                "call_id": call.id,
+                "tool": spec.name,
+                "permission_source": decision.source,
+                "authorized_inputs_digest": authorized_inputs_digest,
+            },
+        )
+
     def _dispatch(
         self,
         call: ToolUseBlock,
@@ -3847,49 +4047,9 @@ class AgentRuntime:
             return outcome.block, outcome.report, outcome.fatal
 
         spec, payload, decision, rewritten = outcome.spec, outcome.payload, outcome.decision, outcome.rewritten
-        if state.evidence_sink is not None:
-            egress_subject: dict[str, Any] | None = None
-            if spec.name == "Fetch":
-                from egress_scope import canonical_egress_host
-
-                egress_subject = {
-                    "agent": self.config.agent,
-                    "turn_index": turn_index,
-                    "call_id": call.id,
-                    "host": canonical_egress_host(payload.get("host")),
-                    "port": payload.get("port", 443),
-                    "method": str(payload.get("method") or "GET").upper(),
-                    "path_length": len(str(payload.get("path") or "")),
-                    "permission_source": decision.source,
-                    "target_scope": (
-                        list(self.config.egress_target_scope)
-                        if self.config.egress_target_scope is not None
-                        else None
-                    ),
-                }
-            state.evidence_sink.append_event(
-                source="permission",
-                kind="runtime.permission.allowed",
-                sequence=f"{self.config.agent}-{turn_index}-{call.id}",
-                subject={
-                    "agent": self.config.agent,
-                    "turn_index": turn_index,
-                    "call_id": call.id,
-                    "tool": spec.name,
-                    "tool_kind": spec.kind,
-                    "source": decision.source,
-                    "rule": getattr(decision, "rule", "") or "",
-                    "permission_mode": str(getattr(self.permissions.mode, "value", self.permissions.mode)),
-                    "arguments_digest": digest_arguments(payload),
-                },
-            )
-            if egress_subject is not None:
-                state.evidence_sink.append_event(
-                    source="egress",
-                    kind="runtime.egress.allowed",
-                    sequence=f"{self.config.agent}-{turn_index}-{call.id}",
-                    subject=egress_subject,
-                )
+        self._record_authorized_tool_evidence(
+            state, call, turn_index, spec, payload, decision, outcome.governed_inputs_digest
+        )
         context = ToolContext(
             session_id=state.session_id,
             agent=self.config.agent,
@@ -4689,6 +4849,8 @@ class AgentRuntime:
         return result
 
     def _close_run(self, state: _RunState, run_span: Any) -> None:
+        primary: Exception | None = None
+        close_records = not state.session_end_fired
         # Announce the final audit head before anything is torn down: a run
         # that ends without completing a turn still has a head worth pinning.
         self._announce_audit_head()
@@ -4698,55 +4860,126 @@ class AgentRuntime:
         self._seal_evidence(state)
         if not state.session_end_fired:
             state.session_end_fired = True
-            if state.refused_session:
-                # A refused claim is the one outcome that writes nothing at all: a result
-                # record appended here would land in a file another process is holding,
-                # which is the exact corruption the claim exists to prevent. That stream
-                # stays authoritative in the event feed and the trace, not the transcript.
-                pass
+
+        def remember_failure(label: str, error: Exception) -> None:
+            nonlocal primary
+            diagnostic = f"{label} failed: {type(error).__name__}: {error}"
+            state.errors.append(diagnostic)
+            if primary is None:
+                primary = error
             else:
-                subtype = state.result.subtype if state.result is not None else "error_during_execution"
-                if state.result is not None and not self.config.depth:
-                    self.sessions.record_result(state.result)
-                elif state.result is not None:
-                    self.sessions.append("result", {"subtype": subtype, "agent": self.config.agent, "inherited_by_parent": True})
-                self._fire(
-                    state,
-                    "SessionEnd",
-                    HookInput(
-                        event="SessionEnd",
-                        session_id=state.session_id,
-                        agent=self.config.agent,
-                        depth=self.config.depth,
-                        turn_index=state.turns,
-                        data={"subtype": subtype, "total_cost_usd": self.budget.total_cost_usd},
-                    ),
+                add_note = getattr(primary, "add_note", None)
+                if callable(add_note):
+                    try:
+                        add_note(diagnostic)
+                    except Exception as note_error:
+                        state.errors.append(
+                            f"{label} diagnostic attachment failed: {type(note_error).__name__}: {note_error}"
+                        )
+                else:
+                    # Python 3.10 has no add_note. Preserve identity and link the later
+                    # exception as context only when doing so cannot create a cycle.
+                    cursor = error
+                    seen: set[int] = set()
+                    cyclic = error is primary
+                    while cursor is not None and id(cursor) not in seen:
+                        if cursor is primary:
+                            cyclic = True
+                            break
+                        seen.add(id(cursor))
+                        cursor = cursor.__context__
+                    if not cyclic:
+                        primary.__context__ = error
+            try:
+                self.tracer.start_span(
+                    "session.close-step-failed",
+                    attributes={"step": label, "error": f"{type(error).__name__}: {error}"[:200]},
+                ).end()
+            except Exception as trace_error:  # noqa: BLE001 - trace failure cannot block cleanup.
+                state.errors.append(
+                    f"{label} failure trace failed: {type(trace_error).__name__}: {trace_error}"
                 )
-        # Everything the trace needs is written before the span closes, because a
-        # post-end set_attribute is discarded in silence.
-        run_span.set_attributes(
-            {
-                "result.subtype": state.result.subtype if state.result else "error_during_execution",
-                "turn.count": state.turns,
-                "tool.call_count": state.tool_calls,
-                "cost.usd": round(self.budget.total_cost_usd, 10),
-                "usage.total_tokens": self.budget.total_usage.total_tokens,
-                "pricing.estimated": self.budget.pricing_estimated,
-                "denial.count": len(state.denials),
-                "compaction.count": len([item for item in state.compactions if item.get("performed")]),
-                "stop.block_count": state.stop_blocks,
-                "duration_ms": int((time.monotonic() - state.started) * 1000),
-            }
-        )
-        usage_attrs = {f"usage.{key}": value for key, value in self.budget.total_usage.as_dict().items()}
-        for key, value in usage_attrs.items():
-            run_span.set_attribute(key, value)
-        run_span.end()
-        self._last_report = self._report(state.events, state=state)
-        # Released at the very end, after the result record and the SessionEnd hook are on
-        # disk: releasing before the last write is how a "protected" transcript gets a torn
-        # tail that the next writer then appends to.
-        self._release_session()
+
+        def attempt(label: str, operation: Callable[[], None]) -> None:
+            try:
+                operation()
+            except Exception as error:  # noqa: BLE001 - continue cleanup, then re-raise first.
+                remember_failure(label, error)
+
+        def persist_result() -> None:
+            if not close_records or state.refused_session:
+                return
+            subtype = state.result.subtype if state.result is not None else "error_during_execution"
+            if state.result is not None and not self.config.depth:
+                self.sessions.record_result(state.result)
+            elif state.result is not None:
+                self.sessions.append("result", {"subtype": subtype, "agent": self.config.agent, "inherited_by_parent": True})
+
+        def fire_session_end() -> None:
+            if not close_records or state.refused_session:
+                return
+            subtype = state.result.subtype if state.result is not None else "error_during_execution"
+            self._fire(
+                state,
+                "SessionEnd",
+                HookInput(
+                    event="SessionEnd",
+                    session_id=state.session_id,
+                    agent=self.config.agent,
+                    depth=self.config.depth,
+                    turn_index=state.turns,
+                    data={"subtype": subtype, "total_cost_usd": self.budget.total_cost_usd},
+                ),
+            )
+
+        def record_span_attributes() -> None:
+            # Everything the trace needs is written before the span closes, because a
+            # post-end set_attribute is discarded in silence.
+            run_span.set_attributes(
+                {
+                    "result.subtype": state.result.subtype if state.result else "error_during_execution",
+                    "turn.count": state.turns,
+                    "tool.call_count": state.tool_calls,
+                    "cost.usd": round(self.budget.total_cost_usd, 10),
+                    "usage.total_tokens": self.budget.total_usage.total_tokens,
+                    "pricing.estimated": self.budget.pricing_estimated,
+                    "denial.count": len(state.denials),
+                    "compaction.count": len([item for item in state.compactions if item.get("performed")]),
+                    "stop.block_count": state.stop_blocks,
+                    "duration_ms": int((time.monotonic() - state.started) * 1000),
+                }
+            )
+            usage_attrs = {f"usage.{key}": value for key, value in self.budget.total_usage.as_dict().items()}
+            for key, value in usage_attrs.items():
+                run_span.set_attribute(key, value)
+
+        def refresh_report() -> None:
+            self._last_report = self._report(state.events, state=state)
+
+        try:
+            # Preserve the established successful-path order, but isolate each action.
+            attempt("result", persist_result)
+            attempt("SessionEnd", fire_session_end)
+            attempt("span_attributes", record_span_attributes)
+            attempt("span_end", run_span.end)
+            attempt("last_report", refresh_report)
+        finally:
+            # Always make one final release attempt, including when KeyboardInterrupt or
+            # SystemExit bypasses the ordinary-Exception handlers above. Never fake local
+            # release state: _release_session owns the lease reference and release protocol.
+            try:
+                self._release_session()
+            except Exception as error:  # noqa: BLE001 - retain reference and surface failure.
+                remember_failure("lease_release", error)
+            if primary is not None:
+                try:
+                    refresh_report()
+                except Exception as report_error:  # noqa: BLE001 - preserve original failure.
+                    remember_failure("last_report_after_failure", report_error)
+
+        if primary is not None:
+            raise primary
+
 
     def _seal_evidence(self, state: _RunState) -> None:
         """Seal opt-in evidence and apply the required-capture policy."""
