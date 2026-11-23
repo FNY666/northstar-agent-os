@@ -2435,7 +2435,14 @@ class AgentRuntime:
             return False
         state.final_text = assistant.text
         self._checkpoint(state, boundary="after_text")
+
+        # R2552: an empty or whitespace-only final text is a protocol error only when the
+        # whole run has made no tool call. After any tool call, a silent finish is a
+        # legitimate completion (the transcript already holds the work product).
+        has_content = bool(assistant.text and assistant.text.strip())
         subtype = "success"
+        if not has_content and state.tool_calls == 0:
+            subtype = "error_during_execution"
         if config.code_phase_machine is not None and config.depth == 0:
             try:
                 config.code_phase_machine.begin_verification()
@@ -2508,7 +2515,7 @@ class AgentRuntime:
             yield verification_record
             if not verification_summary["ok"]:
                 subtype = "error_postconditions_failed"
-        if self.postconditions:
+        if self.postconditions and subtype == "success":
             summary = summarise_postconditions(self.postconditions.evaluate())
             if state.evidence_sink is not None:
                 state.evidence_sink.append_event(
