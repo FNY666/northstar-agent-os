@@ -220,6 +220,27 @@ class DecisionTests(unittest.TestCase):
             self.assertFalse(v.allowed, ip)
             self.assertEqual(v.deny_code, DENY_DESTINATION_DENIED, ip)
 
+    def test_ssrf_ipv6_transition_addresses_denied(self):
+        # These ranges can route to internal destinations (some embed IPv4),
+        # while Python's ipaddress.is_global classification varies by version.
+        for ip in (
+            "64:ff9b::a9fe:a9fe",       # NAT64 -> 169.254.169.254
+            "64:ff9b::a00:1",           # NAT64 -> 10.0.0.1
+            "64:ff9b:1::a9fe:a9fe",     # local-use NAT64
+            "2002:a9fe:a9fe::",         # 6to4 -> 169.254.169.254
+            "2002:a00:1::",             # 6to4 -> 10.0.0.1
+            "fec0::1",                  # deprecated site-local
+        ):
+            with self.subTest(ip=ip):
+                verdict = decide(resolve=lambda host, ip=ip: [ip])
+                self.assertFalse(verdict.allowed, ip)
+                self.assertEqual(verdict.deny_code, DENY_DESTINATION_DENIED, ip)
+                self.assertEqual(verdict.receipt["resolved_destination"]["ips"], [ip])
+
+    def test_globally_routable_ipv6_remains_allowed(self):
+        verdict = decide(resolve=lambda host: ["2606:4700:4700::1111"])
+        self.assertTrue(verdict.allowed)
+        self.assertEqual(verdict.dial_ips, ("2606:4700:4700::1111",))
     def test_special_use_ranges_are_not_dialable(self):
         # R2538: Python marks 100.64.0.0/10 (shared address space, incl. the Alibaba
         # metadata endpoint 100.100.100.200) as neither private nor global, so the

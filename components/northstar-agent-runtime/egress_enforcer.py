@@ -632,6 +632,20 @@ class EgressBudgetLedger:
 _NAT64_WELL_KNOWN_PREFIX = ipaddress.IPv6Network("64:ff9b::/96")
 _NAT64_LOCAL_USE_PREFIX = ipaddress.IPv6Network("64:ff9b:1::/48")
 
+#: IPv6 ranges that can conceal or route to internal destinations while
+#: Python still classifies the address as global. The guard stays stable across
+#: the Python versions Northstar supports; on 3.12 the deprecated site-local
+#: range below reports is_global=True and is_private=False.
+_NON_GLOBAL_IPV6_SPECIAL_NETWORKS = tuple(
+    ipaddress.ip_network(prefix)
+    for prefix in (
+        "64:ff9b::/96",       # RFC 6052 well-known NAT64
+        "64:ff9b:1::/48",     # RFC 8215 local-use NAT64
+        "2002::/16",          # RFC 3056 6to4 (classification varies by Python)
+        "fec0::/10",          # RFC 3879 deprecated site-local
+    )
+)
+
 
 def _ip_permitted(ip_text: str, rule: DestinationRule) -> bool:
     """SSRF guard: require a globally reachable destination by default."""
@@ -651,6 +665,10 @@ def _ip_permitted(ip_text: str, rule: DestinationRule) -> bool:
             ip = ip.ipv4_mapped
         elif ip in _NAT64_WELL_KNOWN_PREFIX:
             ip = ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
+        elif any(ip in network for network in _NON_GLOBAL_IPV6_SPECIAL_NETWORKS):
+            # 6to4 and the deprecated site-local range report is_global=True
+            # on the interpreter Northstar ships, so name them explicitly.
+            return False
     # Positive classification also rejects ranges such as 100.64.0.0/10,
     # which is neither private nor reserved in some Python ipaddress versions.
     return ip.is_global
