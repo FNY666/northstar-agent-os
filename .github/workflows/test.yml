@@ -107,7 +107,7 @@ jobs:
         run: python -m pip install --quiet ../northstar-run-contract ../northstar-host
       - name: Compile agent interop component
         working-directory: components/northstar-agent-interop
-        run: python -m py_compile interop_contract.py handoff.py interop_adapter.py canary.py process_adapter.py process_backend.py remote_worker.py tests/test_*.py
+        run: python -m py_compile interop_contract.py handoff.py interop_adapter.py canary.py process_adapter.py process_backend.py remote_worker.py remote_transport.py tests/test_*.py
       - name: Agent interop component tests
         working-directory: components/northstar-agent-interop
         run: python -m unittest discover -s tests -p 'test_*.py' -v
@@ -116,7 +116,7 @@ jobs:
         run: |
           python -m pip install --quiet .
           cd /tmp
-          python -c "import interop_contract, handoff, interop_adapter, canary, process_adapter, process_backend; print('northstar-agent-interop imports OK')"
+          python -c "import interop_contract, handoff, interop_adapter, canary, process_adapter, process_backend, remote_transport; print('northstar-agent-interop imports OK')"
       - name: Shell syntax
         working-directory: components/northstar-codex-sidecar
         run: sh -n install.sh rollback.sh
@@ -135,7 +135,7 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt -r requirements-tracing.txt
+          pip install -r requirements.txt -r requirements-tracing.txt -r requirements-test.txt
       - name: Compile
         run: |
           # Every module the component ships, by glob rather than by hand: a curated list
@@ -143,10 +143,14 @@ jobs:
           # opposite of what a compile step is for.
           python -m py_compile *.py providers/*.py tools/*.py \
             tests/support.py tests/fixtures/*.py tests/test_*.py
+      - name: Targeted MCP network warning regression
+        run: python -m pytest -q tests/test_cli.py -k doctor_warns_about_server_supplied_oauth_discovery_with_mcp_network_allowed
       - name: Unit tests
         # No API key and no network: the scripted provider is the only model, and
         # the sidecar integration test starts a real listener on a Unix socket.
-        run: python -m unittest discover -s tests -p 'test_*.py' -v
+        # Pytest is required because this suite contains both unittest.TestCase
+        # classes and standalone pytest tests.
+        run: python -m pytest -q tests
       - name: Setup Node (TypeScript face)
         # The face is source-only and its suite spawns this component's CLI, so node is a test
         # runner here, not a build tool: no `npm install`, no lockfile, no registry contact.
@@ -161,9 +165,12 @@ jobs:
         # The public entry points must work from the installed layout: version,
         # environment self-check, dry-run (no request), the offline demo, and the
         # public governance bench (denial / injection / budget — offline, no key).
+        # GitHub runners may lack Landlock ABI 10; exercise doctor without MCP
+        # networking here. Default-deny MCP refusal on unsupported hosts remains
+        # enforced by the runtime tests and the dedicated network benchmark.
         run: |
           python -m cli --version
-          python -m cli doctor --workspace . | grep -q "ready to run"
+          python -m cli doctor --workspace . --mcp-network allowed | grep -q "ready to run"
           python -m cli run --workspace . --prompt smoke --scripted-text ok --dry-run | grep -q "no request was sent"
           python -m cli bench --json | python -c 'import json,sys; r=json.load(sys.stdin); assert r["ok"] and r["failed"]==0, r'
           sh ../../examples/demo/run_offline.sh >/dev/null
@@ -175,7 +182,8 @@ jobs:
           cd /tmp
           northstar-agent-runtime --version
           northstar --version
-          northstar-agent-runtime doctor --workspace /tmp | grep -q "ready to run"
+          # No MCP server is launched here; CI kernels may lack Landlock ABI 10.
+          northstar-agent-runtime doctor --workspace /tmp --mcp-network allowed | grep -q "ready to run"
           python -c "import cli, loop, tools, tools.verify_invariants, governance_bench, memory, product_path; print('northstar-agent-runtime core imports OK')"
       - name: Installed full benchmark smoke
         # The optional bench includes durable/host/contract tracks. Resolve their
@@ -215,20 +223,30 @@ jobs:
         run: python ../../scripts/run_runtime_pytest.py
 
   documentation:
-    name: Repository documentation (structure + build + links)
+    name: Repository checks (documentation + offline code tasks)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Setup Node for offline TypeScript fixtures
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
       - name: Structure tests
         # Component README "Concepts, guides and API reference" link targets,
         # examples index coverage, API page headers/module lists, plus the
-        # pre-existing documentation structure tests.
+        # pre-existing documentation structure tests, offline task-pack checks,
+        # and conservative runtime module inventory tests. Fixtures need no npm install.
         run: python -m unittest discover -s tests -p 'test_*.py' -v
       - name: Build and link check
         # Docstring API pages must be byte-fresh against the committed ones,
         # and every internal markdown link must resolve. Pure standard library,
         # so this runs offline with no dependency install.
         run: python3 tests/docbuild.py verify
+      - name: Offline task fixture controls
+        # Reject all 24 untouched fixtures, then replay every reference patch on
+        # a clean initial commit. This proves fixtures, not real-model accuracy.
+        run: python3 scripts/check-code-task-pack.py --write /tmp/northstar-code-task-controls.json

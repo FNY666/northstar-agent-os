@@ -1,0 +1,2 @@
+# Test runner used by pytest-based test modules; keep out of runtime dependencies.
+pytest>=8,<10
