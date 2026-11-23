@@ -30,6 +30,28 @@ class ReviewedSkillPromptTests(RuntimeTestCase):
     def test_replacing_lock_after_check_cannot_change_trusted_pins(self):
         self._check_replacement(repin=True)
 
+    def test_prompt_setup_captures_exact_skill_bytes_for_later_read(self):
+        root = self.workspace()
+        skill = root / '.northstar/skills/demo/SKILL.md'
+        skill.parent.mkdir(parents=True)
+        raw = b'---\nname: demo\ndescription: SAFE_DESCRIPTION\n---\nSafe body\n'
+        skill.write_bytes(raw)
+        guide = skill.parent / 'guide.md'
+        guide.write_text('Reviewed companion instructions.\n')
+        args = cli.build_parser().parse_args([
+            'run', '--workspace', str(root), '--prompt', 'x', '--no-project-context',
+            '--no-memory', '--no-plugins', '--no-workspace-agents',
+        ])
+        setup = cli.compose_system_prompt(args, None, None, None)
+        self.assertEqual(
+            setup.skill_digests['.northstar/skills/demo/SKILL.md'],
+            hashlib.sha256(raw).hexdigest(),
+        )
+        self.assertEqual(
+            setup.skill_digests['.northstar/skills/demo/guide.md'],
+            hashlib.sha256(guide.read_bytes()).hexdigest(),
+        )
+
     def _check_replacement(self, *, repin):
         root = self.workspace()
         skill = root / '.northstar/skills/demo/SKILL.md'
@@ -63,8 +85,6 @@ class ReviewedSkillPromptTests(RuntimeTestCase):
         self.assertNotIn('INJECTED_DESCRIPTION', observed.get('prompt', ''))
 
 
-
-
 class VerifiedSkillReadTests(RuntimeTestCase):
     def test_cli_binds_skill_read_to_discovered_bytes(self):
         root = self.workspace()
@@ -92,7 +112,9 @@ class VerifiedSkillReadTests(RuntimeTestCase):
         self.assertEqual(code, 0)
         runtime = captured['runtime']
         expected = hashlib.sha256(original).hexdigest()
-        self.assertEqual(runtime.skill_digests[str(skill_file.resolve())], expected)
+        self.assertEqual(
+            runtime.config.skill_digests['.northstar/skills/demo/SKILL.md'], expected
+        )
         context = ToolContext(
             session_id=runtime.config.session_id,
             sandbox=runtime.sandbox,
@@ -107,32 +129,36 @@ class VerifiedSkillReadTests(RuntimeTestCase):
         skill_file.write_bytes(original.replace(b'Trusted body', b'INJECTED body'))
         changed = read({'path': '.northstar/skills/demo/SKILL.md'}, context)
         self.assertTrue(changed.is_error)
-        self.assertIn('changed since discovery', changed.text())
+        self.assertIn('changed after run setup', changed.text())
         self.assertNotIn('INJECTED body', changed.text())
 
-    def test_verified_skill_read_fails_closed_above_read_cap(self):
+    def test_verified_skill_read_respects_the_requested_byte_cap(self):
         root = self.workspace()
         skill_file = root / '.northstar/skills/demo/SKILL.md'
         skill_file.parent.mkdir(parents=True)
-        raw = b'x' * 65
+        raw = b'Trusted body ' * 16
         skill_file.write_bytes(raw)
-        limits = ToolLimits(max_read_bytes=64)
+        limits = ToolLimits(max_read_bytes=1024)
         context = ToolContext(
             sandbox=ToolSandbox(root, limits=limits),
             limits=limits,
-            services={'skill_digests': {str(skill_file.resolve()): hashlib.sha256(raw).hexdigest()}},
+            services={
+                'skill_digests': {
+                    '.northstar/skills/demo/SKILL.md': hashlib.sha256(raw).hexdigest()
+                }
+            },
         )
-
-        result = build_default_registry().require('Read').handler(
-            {'path': '.northstar/skills/demo/SKILL.md'}, context
-        )
-        self.assertTrue(result.is_error)
-        self.assertIn('64-byte Read verification limit', result.text())
-        smaller = build_default_registry().require('Read').handler(
+        read = build_default_registry().require('Read').handler
+        whole = read({'path': '.northstar/skills/demo/SKILL.md'}, context)
+        self.assertFalse(whole.is_error)
+        self.assertIn('Trusted body', whole.text())
+        capped = read(
             {'path': '.northstar/skills/demo/SKILL.md', 'max_bytes': 16}, context
         )
-        self.assertTrue(smaller.is_error)
-        self.assertIn('16-byte Read verification limit', smaller.text())
+        self.assertFalse(capped.is_error)
+        # The returned text carries the truncation markers around the capped body.
+        self.assertIn('first 16 of', capped.text())
+        self.assertEqual(capped.data['bytes'], 16)
 
 
 class VerifiedPluginContextTests(BundleTestCase):

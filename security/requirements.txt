@@ -1,0 +1,4 @@
+# 已在Python 3.12验证；不包含扫描器、模型SDK或私钥。
+-r cicd-evidence-integration/security-evidence-contract/requirements.txt
+cryptography==50.0.1
+packaging==26.3

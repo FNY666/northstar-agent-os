@@ -110,6 +110,58 @@ class TestSpec(RuntimeTestCase):
                 self.assertIn(str(prefix / 'lib'), pledge_paths)
                 self.assertNotIn(str(prefix.parent), pledge_paths)
 
+    def test_venv_root_is_readable_but_never_writable_or_widened(self):
+        # R2525: a venv interpreter reads <venv>/pyvenv.cfg at start-up (site.py).
+        # Only <venv>/bin and <venv>/lib were allowed, so every venv-hosted
+        # process-backend command died with PermissionError. Allow the venv root
+        # itself read-only; never its parent, and never write.
+        from pathlib import Path
+        from unittest.mock import patch
+        from tools.pledge import filesystem_rules
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            base = root / "base-python"
+            venv = root / "projects" / "venv"
+            for sub in ("bin", "lib"):
+                (base / sub).mkdir(parents=True)
+                (venv / sub).mkdir(parents=True)
+            (venv / "pyvenv.cfg").write_text("home = %s\n" % (base / "bin"))
+            (root / "workspace").mkdir()
+            with patch.object(sys, "prefix", str(venv)), \
+                 patch.object(sys, "base_prefix", str(base)), \
+                 patch.object(sys, "executable", str(venv / "bin" / "python")):
+                spec = default_profile(str(root / "workspace"))
+                paths = {rule["path"]: rule["rights"] for rule in spec["rules"]}
+                self.assertIn(str(venv), paths, "venv root must be readable so pyvenv.cfg can be read")
+                self.assertNotIn(str(venv.parent), paths)
+                self.assertNotIn(str(root), paths)
+                for right in ("WRITE_FILE", "MAKE_REG", "MAKE_DIR", "REMOVE_FILE"):
+                    self.assertNotIn(right, paths[str(venv)])
+                pledge_paths = {r.path for r in filesystem_rules(
+                    frozenset({"stdio"}), workspace=str(root / "workspace"), tmpdir=str(root / "tmp"))}
+                self.assertIn(str(venv), pledge_paths)
+                self.assertNotIn(str(venv.parent), pledge_paths)
+
+    def test_plain_install_prefix_is_not_widened(self):
+        # Not a venv (prefix == base_prefix): the prefix itself must NOT be allowed,
+        # only its bin/ and lib/ (a prefix like /opt/python or ~/.pyenv is too wide).
+        from pathlib import Path
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            prefix = root / "toolcache" / "python"
+            for sub in ("bin", "lib"):
+                (prefix / sub).mkdir(parents=True)
+            (root / "workspace").mkdir()
+            with patch.object(sys, "prefix", str(prefix)), \
+                 patch.object(sys, "base_prefix", str(prefix)), \
+                 patch.object(sys, "executable", str(prefix / "bin" / "python3")):
+                spec = default_profile(str(root / "workspace"))
+                paths = {rule["path"] for rule in spec["rules"]}
+                self.assertNotIn(str(prefix), paths)
+                self.assertIn(str(prefix / "bin"), paths)
+                self.assertIn(str(prefix / "lib"), paths)
+
     def test_build_spec_rejects_missing_paths(self):
         with self.assertRaises(LandlockError):
             build_landlock_spec(paths_read=["/no/such/dir"], paths_write=["/tmp"])
@@ -131,14 +183,26 @@ class TestSpec(RuntimeTestCase):
         self.assertIn(ws, paths)
         self.assertIn("/usr", paths)
 
+    def test_default_profile_grants_only_specific_device_nodes(self):
+        with tempfile.TemporaryDirectory() as ws:
+            spec = default_profile(ws)
+        rights_by_path = {rule["path"]: set(rule["rights"]) for rule in spec["rules"]}
+        self.assertNotIn("/dev", rights_by_path)
+        self.assertNotIn("/dev/shm", rights_by_path)
+        self.assertNotIn("/dev/pts", rights_by_path)
+        self.assertEqual(rights_by_path["/dev/null"], {"READ_FILE", "WRITE_FILE"})
+        for path in ("/dev/zero", "/dev/random", "/dev/urandom"):
+            if path in rights_by_path:
+                self.assertEqual(rights_by_path[path], {"READ_FILE"})
+
     def test_loader_argv_shape(self):
         spec = {"mode": "auto", "rules": [], "network": False, "tcp_ports": []}
         argv = landlock_loader_argv(["/bin/true"], spec)
         self.assertEqual(argv[0], "python3")
-        self.assertEqual(argv[1], "-c")
-        decoded = json.loads(base64.b64decode(argv[3]).decode())
+        self.assertEqual(argv[1:3], ["-S", "-c"])
+        decoded = json.loads(base64.b64decode(argv[4]).decode())
         self.assertEqual(decoded["mode"], "auto")
-        self.assertEqual(argv[4:], ["/bin/true"])
+        self.assertEqual(argv[5:], ["/bin/true"])
         with self.assertRaises(LandlockError):
             landlock_loader_argv([], spec)
 
@@ -175,6 +239,21 @@ class TestLiveLoader(RuntimeTestCase):
                 self.assertIn("Permission denied", fh.read())
             self.assertFalse(os.path.exists("/tmp/landlock_unit_nope"))
 
+    def test_symlink_inside_workspace_cannot_read_outside_file(self):
+        # Path-beneath confinement must follow the resolved target for access
+        # checks; a workspace symlink must not expose an otherwise denied file.
+        with tempfile.TemporaryDirectory() as root:
+            workspace = os.path.join(root, "workspace")
+            os.mkdir(workspace)
+            secret = os.path.join(root, "host-secret.txt")
+            with open(secret, "w", encoding="utf-8") as handle:
+                handle.write("host-only-secret")
+            os.symlink(secret, os.path.join(workspace, "escape.txt"))
+            result = self._run("cat escape.txt", workspace)
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertNotIn("host-only-secret", result.stdout)
+            self.assertIn("Permission denied", result.stderr)
+
     def test_tcp_denied(self):
         with tempfile.TemporaryDirectory() as ws:
             result = self._run(
@@ -183,6 +262,15 @@ class TestLiveLoader(RuntimeTestCase):
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("Permission denied", result.stderr)
+
+    def test_dev_shm_is_not_reachable_but_null_remains_writable(self):
+        with tempfile.TemporaryDirectory() as ws:
+            if os.path.isdir("/dev/shm"):
+                result = self._run("ls /dev/shm", ws)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("Permission denied", result.stderr)
+            null_result = self._run("printf ok >/dev/null", ws)
+            self.assertEqual(null_result.returncode, 0, null_result.stderr)
 
     def test_restriction_is_irreversible_for_child(self):
         # A second restrict_self can only add restrictions: the child tries to

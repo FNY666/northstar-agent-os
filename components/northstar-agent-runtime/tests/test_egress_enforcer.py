@@ -77,6 +77,29 @@ def decide(*, pol=None, req=None, **kwargs):
     return authorize_egress(pol or policy(), req or request(), **kwargs)
 
 
+class HttpShapeTests(unittest.TestCase):
+    def test_ambiguous_http_shapes_are_denied_before_dns(self):
+        for overrides in (
+            {"path": "/api/v1/log/entries\r\nHost: attacker"},
+            {"path": "//attacker/api/v1/log/entries"},
+            {"path": "/api/v1/log/entries/☃"},
+            {"host": " rekor.sigstore.dev"},
+            {"path": "/api/v1/log/entries#fragment"},
+            {"method": "POST\r\nGET"},
+            {"headers": {"X-Test\r\nInjected": "yes"}},
+            {"headers": {"X-Test": "one\r\ntwo"}},
+            {"headers": {"Transfer-Encoding": "chunked"}},
+            {"headers": {"Content-Length": "0"}},
+            {"headers": {"Connection": "keep-alive"}},
+            {"headers": {"X-Test": 4}},
+        ):
+            called = []
+            verdict = decide(req=request(**overrides), resolve=lambda host: called.append(host) or ["1.2.3.4"])
+            self.assertFalse(verdict.allowed, overrides)
+            self.assertEqual(verdict.deny_code, DENY_SHAPE, overrides)
+            self.assertEqual(called, [], "invalid HTTP syntax should be rejected before DNS")
+
+
 class PolicyLoadingTests(unittest.TestCase):
     def _write(self, text: str) -> str:
         d = tempfile.mkdtemp()
@@ -107,6 +130,15 @@ class PolicyLoadingTests(unittest.TestCase):
         )
         with self.assertRaises(EgressPolicyError):
             load_egress_policy(d)
+
+    def test_non_dns_authority_host_rejected(self):
+        for host in ("api.example.com/path", "user@example.com", "api..example.com", "api.example.com.."):
+            d = self._write(
+                'revision = "r1"\n[destinations.x]\nhosts = ["' + host + '"]\n'
+                'ports = [443]\nmethods = ["GET"]\npath_prefixes = ["/"]\n'
+            )
+            with self.subTest(host=host), self.assertRaises(EgressPolicyError):
+                load_egress_policy(d)
 
     def test_credential_value_rejected_reference_only(self):
         d = self._write(
@@ -174,19 +206,92 @@ class DecisionTests(unittest.TestCase):
         self.assertEqual(v.deny_code, DENY_UNRESOLVED)
 
     def test_ssrf_private_ip_denied(self):
-        for ip in ("10.0.0.1", "127.0.0.1", "169.254.169.254", "192.168.1.1", "::1"):
+        for ip in (
+            "10.0.0.1",
+            "127.0.0.1",
+            "169.254.169.254",
+            "192.168.1.1",
+            "100.64.0.1",  # shared carrier-grade NAT space is not globally reachable
+            "198.18.0.1",  # benchmarking space
+            "::1",
+            "::ffff:169.254.169.254",
+        ):
             v = decide(resolve=lambda h, ip=ip: [ip])
             self.assertFalse(v.allowed, ip)
             self.assertEqual(v.deny_code, DENY_DESTINATION_DENIED, ip)
+
+    def test_ssrf_ipv6_transition_addresses_denied(self):
+        # These ranges can route to internal destinations (some embed IPv4),
+        # while Python's ipaddress.is_global classification varies by version.
+        for ip in (
+            "64:ff9b::a9fe:a9fe",       # NAT64 -> 169.254.169.254
+            "64:ff9b::a00:1",           # NAT64 -> 10.0.0.1
+            "64:ff9b:1::a9fe:a9fe",     # local-use NAT64
+            "2002:a9fe:a9fe::",         # 6to4 -> 169.254.169.254
+            "2002:a00:1::",             # 6to4 -> 10.0.0.1
+            "fec0::1",                  # deprecated site-local
+        ):
+            with self.subTest(ip=ip):
+                verdict = decide(resolve=lambda host, ip=ip: [ip])
+                self.assertFalse(verdict.allowed, ip)
+                self.assertEqual(verdict.deny_code, DENY_DESTINATION_DENIED, ip)
+                self.assertEqual(verdict.receipt["resolved_destination"]["ips"], [ip])
+
+    def test_globally_routable_ipv6_remains_allowed(self):
+        verdict = decide(resolve=lambda host: ["2606:4700:4700::1111"])
+        self.assertTrue(verdict.allowed)
+        self.assertEqual(verdict.dial_ips, ("2606:4700:4700::1111",))
+    def test_special_use_ranges_are_not_dialable(self):
+        # R2538: Python marks 100.64.0.0/10 (shared address space, incl. the Alibaba
+        # metadata endpoint 100.100.100.200) as neither private nor global, so the
+        # old private/loopback/link-local test let it through.
+        for ip in ("100.64.0.1", "100.100.100.200", "100.127.255.254",
+                   "::ffff:100.64.0.1", "::ffff:127.0.0.1", "::ffff:10.0.0.5",
+                   "::ffff:169.254.169.254", "64:ff9b::7f00:1"):
+            v = decide(resolve=lambda h, ip=ip: [ip])
+            self.assertFalse(v.allowed, ip)
+            self.assertEqual(v.deny_code, DENY_DESTINATION_DENIED, ip)
+
+    def test_special_use_ranges_filtered_when_mixed_with_public(self):
+        v = decide(resolve=lambda h: ["100.100.100.200", "::ffff:127.0.0.1", "1.2.3.4"])
+        self.assertTrue(v.allowed)
+        self.assertEqual(v.dial_ips, ("1.2.3.4",))
+
+    def test_global_addresses_still_dialable(self):
+        for ip in ("1.2.3.4", "93.184.216.34", "8.8.8.8", "2606:4700:4700::1111"):
+            v = decide(resolve=lambda h, ip=ip: [ip])
+            self.assertTrue(v.allowed, ip)
+            self.assertEqual(v.dial_ips, (ip,), ip)
 
     def test_private_ip_allowed_when_opted_in(self):
         pol = policy(rule={"allow_private_ips": True})
         v = decide(pol=pol, resolve=lambda h: ["10.0.0.5"])
         self.assertTrue(v.allowed)
         self.assertEqual(v.dial_ips, ("10.0.0.5",))
+        nat64 = decide(pol=pol, resolve=lambda h: ["64:ff9b::a00:5"])
+        self.assertTrue(nat64.allowed)
+        self.assertEqual(nat64.dial_ips, ("64:ff9b::a00:5",))
+
+    def test_nat64_private_ipv4_destinations_are_denied(self):
+        for ip in (
+            "64:ff9b::a9fe:a9fe",  # NAT64 of cloud metadata
+            "64:ff9b::a00:1",       # NAT64 of RFC 1918
+            "64:ff9b::7f00:1",     # NAT64 of loopback
+            "64:ff9b:1::a9fe:a9fe", # local-use NAT64 is never globally reachable
+        ):
+            with self.subTest(ip=ip):
+                verdict = decide(resolve=lambda _host, address=ip: [address])
+                self.assertFalse(verdict.allowed, ip)
+                self.assertEqual(verdict.deny_code, DENY_DESTINATION_DENIED, ip)
+
+    def test_nat64_public_ipv4_destination_remains_allowed(self):
+        ip = "64:ff9b::5db8:d70e"  # NAT64 of 93.184.215.14
+        verdict = decide(resolve=lambda _host: [ip])
+        self.assertTrue(verdict.allowed)
+        self.assertEqual(verdict.dial_ips, (ip,))
 
     def test_mixed_ips_filters_to_public(self):
-        v = decide(resolve=lambda h: ["169.254.169.254", "1.2.3.4"])
+        v = decide(resolve=lambda h: ["169.254.169.254", "100.64.0.1", "1.2.3.4"])
         self.assertTrue(v.allowed)
         self.assertEqual(v.dial_ips, ("1.2.3.4",))
 
@@ -269,8 +374,16 @@ class ApprovalBindingTests(unittest.TestCase):
             approver_seed=self.seed,
             decided_at=NOW,
             body=b"{}",
+            request_shape_hash=request(
+                host="rekor.sigstore.dev", port=443, method="POST",
+                path="/api/v1/log/entries", body=b"{}",
+            ).approval_shape_hash(),
         )
-        self.pol = policy(rule={"require_approval": True, "allow_private_ips": True})
+        self.pol = policy(rule={
+            "require_approval": True,
+            "allow_private_ips": True,
+            "hosts": ("rekor.sigstore.dev", "other.example"),
+        })
 
     def _req(self, **overrides):
         base = {
@@ -297,6 +410,32 @@ class ApprovalBindingTests(unittest.TestCase):
         )
         self.assertTrue(v.allowed)
         self.assertEqual(v.receipt["approval_binding"]["approver_id"], "op1")
+
+    def test_approval_is_bound_to_destination_path_and_headers(self):
+        for changes in (
+            {"host": "other.example"},
+            {"path": "/api/v1/log/entries/other"},
+            {"headers": {"x-tenant": "other"}},
+        ):
+            verdict = authorize_egress(
+                self.pol, self._req(**changes), resolve=lambda h: ["10.0.0.5"],
+                now=NOW, approver_keys={"op1": self.pub},
+            )
+            self.assertFalse(verdict.allowed, changes)
+            self.assertEqual(verdict.deny_code, DENY_APPROVAL_BINDING)
+
+    def test_legacy_receipt_without_request_shape_fails_closed_for_egress(self):
+        legacy = build_approval_receipt(
+            card_id=self.card.card_id, call_id="call-9",
+            arguments_digest=self.card.arguments_digest, approver_id="op1",
+            approver_seed=self.seed, decided_at=NOW, body=b"{}",
+        )
+        verdict = authorize_egress(
+            self.pol, self._req(approval_receipt=legacy),
+            resolve=lambda h: ["10.0.0.5"], now=NOW, approver_keys={"op1": self.pub},
+        )
+        self.assertFalse(verdict.allowed)
+        self.assertEqual(verdict.deny_code, DENY_APPROVAL_BINDING)
 
     def test_missing_card_denied(self):
         v = authorize_egress(

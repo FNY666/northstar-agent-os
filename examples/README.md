@@ -13,6 +13,7 @@ of the product.
 | [observability](observability/README.md) | local trace backend for the runtime — Jaeger + Grafana over docker compose, with the `otel_bootstrap.py` provider seam; model turns stay scripted/offline; needs Docker + one pip extra | `docker compose -f examples/observability/docker-compose.yml up -d` |
 | [sdk](sdk/README.md) | embed one governed run in your own Python via `sdk.run()` — no subprocess, no API key; same gate refuses an unallowed Write | `python3 examples/sdk/run_sdk_demo.py` |
 | [ci-readonly-review](ci-readonly-review/README.md) | consumer CI recipe: governed, read-only agent review of a pull request, capped and audited; a template for *your* pipeline, not wired into this repository's CI | copy `run_review.sh` into your repo and read its comments |
+| [six-agent-team](six-agent-team/README.md) | bounded manager + five optional specialist profiles, using existing Task delegation; sequential children, shared parent budget, no new runtime code | follow its dry-run command; live model calls require an API key |
 
 Picking the right starting point:
 
@@ -28,6 +29,11 @@ Picking the right starting point:
 - Extending the stack? Each example keeps to public CLI surface, so it keeps
   working as the components evolve; the repository's own CI smoke runs the
   demo script on every push (see [packaging-and-ci](../docs/guides/packaging-and-ci.md)).
+
+Local packaging check: `make install-smoke` builds the five Python wheels and
+installs them into a temporary target without an index. This does not install or
+enable the systemd Sidecar. Build prerequisites and isolation limits are in the
+[packaging guide](../docs/guides/packaging-and-ci.md).
 
 Structure expectation (enforced by `tests/test_docbuild.py`): every directory
 under `examples/` with a `README.md` must be listed on this page.

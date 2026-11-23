@@ -1,0 +1,363 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "northstar.security-expectation.v1",
+  "title": "安全扫描期望",
+  "description": "Northstar 安全扫描策略与信任锚点。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "run_id",
+    "subject",
+    "policy",
+    "tools"
+  ],
+  "properties": {
+    "schema": {
+      "const": "northstar.security-expectation.v1"
+    },
+    "run_id": {
+      "$ref": "#/$defs/runId"
+    },
+    "subject": {
+      "$ref": "#/$defs/subject"
+    },
+    "policy": {
+      "$ref": "#/$defs/policy"
+    },
+    "tools": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "semgrep",
+        "osv-scanner"
+      ],
+      "properties": {
+        "semgrep": {
+          "$ref": "#/$defs/toolExpectation"
+        },
+        "osv-scanner": {
+          "$ref": "#/$defs/toolExpectation"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "minLength": 64,
+      "maxLength": 64
+    },
+    "commit": {
+      "type": "string",
+      "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$",
+      "anyOf": [
+        {
+          "minLength": 40,
+          "maxLength": 40
+        },
+        {
+          "minLength": 64,
+          "maxLength": 64
+        }
+      ]
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "not": {
+        "pattern": "[^A-Za-z0-9._-]"
+      }
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "bounded": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "ecosystems": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "$ref": "#/$defs/bounded"
+      },
+      "uniqueItems": true
+    },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start_commit",
+        "patch_sha256",
+        "candidate_manifest_sha256"
+      ],
+      "properties": {
+        "start_commit": {
+          "$ref": "#/$defs/commit"
+        },
+        "patch_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "candidate_manifest_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "sha256",
+        "blocking_severities",
+        "unknown_severity",
+        "max_scan_age_seconds",
+        "max_database_age_seconds",
+        "max_clock_skew_seconds",
+        "max_duration_ms"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/bounded"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "blocking_severities": {
+          "type": "array",
+          "uniqueItems": true,
+          "minItems": 0,
+          "maxItems": 5,
+          "items": {
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low",
+              "info"
+            ]
+          }
+        },
+        "unknown_severity": {
+          "enum": [
+            "review",
+            "block"
+          ]
+        },
+        "max_scan_age_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 604800
+        },
+        "max_database_age_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 31536000
+        },
+        "max_clock_skew_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 300
+        },
+        "max_duration_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400000
+        }
+      }
+    },
+    "artifactName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
+    "expectedInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256",
+        "ecosystems",
+        "min_packages"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/path"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "ecosystems": {
+          "$ref": "#/$defs/ecosystems"
+        },
+        "min_packages": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        }
+      }
+    },
+    "toolExpectation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required",
+        "not_applicable_reason",
+        "evidence_file",
+        "evidence_sha256",
+        "version",
+        "distribution_sha256",
+        "normalizer_sha256",
+        "config_sha256",
+        "rules_sha256",
+        "database_manifest_sha256",
+        "scan_view_manifest_sha256",
+        "isolation_backend",
+        "expected_inputs"
+      ],
+      "properties": {
+        "required": {
+          "type": "boolean"
+        },
+        "not_applicable_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/bounded"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evidence_file": {
+          "$ref": "#/$defs/artifactName"
+        },
+        "evidence_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "version": {
+          "$ref": "#/$defs/bounded"
+        },
+        "distribution_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "normalizer_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "config_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "rules_sha256": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "database_manifest_sha256": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scan_view_manifest_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "isolation_backend": {
+          "enum": [
+            "oci",
+            "bwrap",
+            "vm",
+            "none"
+          ]
+        },
+        "expected_inputs": {
+          "type": "array",
+          "maxItems": 4000,
+          "items": {
+            "$ref": "#/$defs/expectedInput"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "required": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "not_applicable_reason": {
+                "type": "null"
+              },
+              "isolation_backend": {
+                "enum": [
+                  "oci",
+                  "bwrap",
+                  "vm"
+                ]
+              },
+              "expected_inputs": {
+                "minItems": 1
+              }
+            },
+            "required": [
+              "expected_inputs"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "required": {
+                "const": false
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "not_applicable_reason": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "expected_inputs": {
+                "maxItems": 0
+              },
+              "isolation_backend": {
+                "enum": [
+                  "oci",
+                  "bwrap",
+                  "vm",
+                  "none"
+                ]
+              }
+            },
+            "required": [
+              "not_applicable_reason",
+              "expected_inputs"
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

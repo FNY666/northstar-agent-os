@@ -1,0 +1,25 @@
+{
+  "checked_at": "2026-10-17",
+  "sources": [
+    {
+      "url": "https://github.com/secure-systems-lab/dsse",
+      "supports": "DSSE认证精确payload字节与payloadType，不依赖重新规范化JSON。"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/secure-systems-lab/dsse/master/protocol.md",
+      "supports": "DSSEv1 PAE长度编码、keyid只作候选公钥提示、standard与URL-safe base64、验签后不得重新解析envelope提取payload。"
+    },
+    {
+      "url": "https://cryptography.io/en/latest/hazmat/primitives/asymmetric/ed25519/",
+      "supports": "Ed25519 API、32字节公钥、64字节签名、InvalidSignature与PEM序列化。"
+    },
+    {
+      "url": "https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations",
+      "supports": "actions/attest、subject-path、id-token与attestations写权限、gh attestation verify。"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/actions/attest/1e69f48acb82d1966a394da916b4c1698aa569d6/action.yml",
+      "supports": "本轮固定签名Action的subject-path、predicate-type、predicate-path输入与bundle-path输出。"
+    }
+  ]
+}
