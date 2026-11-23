@@ -204,6 +204,54 @@ class AgentCommandTests(unittest.TestCase):
         # Compact JSONL: no space after the colon.
         self.assertIn('"type":"checkpoint"', body, "default cadence is every turn, so a boundary must land")
 
+    def test_agent_and_resume_keep_workspace_egress_scope(self):
+        policy_dir = self.workspace / ".northstar"
+        policy_dir.mkdir(exist_ok=True)
+        (policy_dir / "config.toml").write_text(
+            'egress_targets = ["api.example.org"]\n', encoding="utf-8"
+        )
+        code, out, err = run_cli(
+            "agent",
+            "--workspace",
+            str(self.workspace),
+            "--prompt",
+            "first turn",
+            "--scripted-text",
+            "done",
+            "--dry-run",
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn("egress=off target_scope=api.example.org", out)
+
+        # Create a real checkpoint, then dry-run a forked resume. Both routes
+        # re-read the host-owned workspace policy instead of relying on a flag
+        # from the prior invocation.
+        code, out, err = run_cli(
+            "agent",
+            "--workspace",
+            str(self.workspace),
+            "--prompt",
+            "first turn",
+            "--scripted-text",
+            "done",
+            "--quiet",
+        )
+        self.assertEqual(code, 0, err)
+        session_file = next((self.workspace / ".northstar" / "sessions").glob("*.jsonl"))
+        code, out, err = run_cli(
+            "resume",
+            session_file.stem,
+            "--workspace",
+            str(self.workspace),
+            "--prompt",
+            "continue",
+            "--scripted-text",
+            "done",
+            "--dry-run",
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn("egress=off target_scope=api.example.org", out)
+
     def test_agent_no_session_matches_kernel_silence(self):
         code, out, err = run_cli(
             "agent",

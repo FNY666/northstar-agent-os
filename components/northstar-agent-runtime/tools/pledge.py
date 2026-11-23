@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import struct
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
@@ -354,6 +355,12 @@ def filesystem_rules(
     rules: list[FsRule] = []
     anchors: list[str] = []  # paths that actually got a rule -> need ancestor traversal
     for root in runtime_roots:
+        # Landlock opens every rule path before restricting. A system root that
+        # does not exist on this host (/lib64 is absent on aarch64 distros, merged
+        # /usr layouts differ) would abort the whole sandbox setup with
+        # FileNotFoundError instead of just granting nothing, so skip it here.
+        if not os.path.exists(root):
+            continue
         rules.append(FsRule(root, _LL_READ | _LL_EXECUTE))
     # /etc: read-only. The interpreter follows symlinks out of /usr/lib
     # (e.g. sitecustomize.py -> /etc/python3.12/...); without this the
@@ -413,8 +420,16 @@ _rs = _lib.syscall(444, _c.cast(_buf, _c.c_void_p), 24, 0, 0, 0, 0)
 if _rs < 0:
     _die("landlock_create_ruleset failed, errno %d" % _c.get_errno())
 try:
+    _skipped = []
     for _r in _rules:
-        _fd = _o.open(_r["path"], _o.O_PATH | _o.O_DIRECTORY | _o.O_CLOEXEC)
+        try:
+            _fd = _o.open(_r["path"], _o.O_PATH | _o.O_DIRECTORY | _o.O_CLOEXEC)
+        except FileNotFoundError:
+            # A rule for a path this host does not have cannot grant any
+            # access, and its absence must not take the whole sandbox down:
+            # report it and keep enforcing the rules that do apply.
+            _skipped.append(_r["path"])
+            continue
         try:
             # struct landlock_path_beneath_attr: u64 allowed_access,
             # s32 parent_fd, padded to 16 bytes (u64 alignment).
@@ -426,6 +441,8 @@ try:
             _o.close(_fd)
     if _lib.syscall(446, _rs, 0, 0, 0, 0, 0) != 0:
         _die("landlock_restrict_self failed, errno %d" % _c.get_errno())
+    if _skipped:
+        _o.write(2, ("northstar pledge: skipped absent rule paths: %s\n" % ",".join(_skipped)).encode())
 finally:
     _o.close(_rs)
 # 2. seccomp denylist, same contract as tools/seccomp.py's prctl loader.

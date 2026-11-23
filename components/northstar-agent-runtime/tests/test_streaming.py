@@ -34,6 +34,7 @@ from providers.base import (
     ProviderError,
     StreamDelta,
     TextBlock,
+    ThinkingBlock,
     Usage,
     split_for_stream,
     stream_comparable_text,
@@ -127,6 +128,29 @@ class ContractTests(unittest.TestCase):
 
 
 class LoopStreamTests(unittest.TestCase):
+    def test_streaming_drops_flagged_thinking_blocks_without_rewriting_signature(self):
+        provider = _Streaming(
+            [StreamDelta(text="done")],
+            generation=Generation(
+                content=(ThinkingBlock(text="api_key=sk-1234567890abcdef", signature="sig"), TextBlock("done")),
+            ),
+        )
+        events = run(provider)
+        assistant = next(event for event in events if type(event).__name__ == "AssistantMessage")
+        self.assertFalse(any(isinstance(block, ThinkingBlock) for block in assistant.content))
+        self.assertEqual(assistant.text, "done")
+
+    def test_streaming_output_is_screened_before_release(self):
+        secret = "api_key=sk-1234567890abcdef"
+        provider = _Streaming(
+            [StreamDelta(text="safe "), StreamDelta(text=secret)],
+            generation=Generation(content=("safe " + secret,)),
+        )
+        events = run(provider)
+        self.assertNotIn(secret, "".join(deltas(events)))
+        self.assertIn("blocked by defensive agent", "".join(deltas(events)))
+        self.assertEqual(events[-1].subtype, "success")
+
     def test_deltas_come_before_the_assistant_message_and_result_last(self):
         provider = ScriptedProvider([ScriptedTurn.streamed("hello there", ["hello ", "there"])])
         events = run(provider)
@@ -465,6 +489,40 @@ class ProviderAdapterTests(unittest.TestCase):
         broken_client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kw: fragments([TRUNCATED]))))
         with self.assertRaises(ProviderError):
             list(OpenAICompatProvider(client=broken_client).stream(GenerationRequest(system="", messages=(), model="gpt-4.1")))
+
+    def test_openai_stream_caps_partial_tool_arguments(self):
+        from providers.openai_compat import MAX_TOOL_ARGUMENT_CHARS, OpenAICompatProvider
+
+        fragments = ["{" + " " * (MAX_TOOL_ARGUMENT_CHARS // 2), " " * (MAX_TOOL_ARGUMENT_CHARS // 2) + "}"]
+        chunks = [
+            SimpleNamespace(
+                choices=[SimpleNamespace(
+                    delta=SimpleNamespace(tool_calls=[SimpleNamespace(
+                        index=0, id="c1" if index == 0 else None,
+                        function=SimpleNamespace(name="Read" if index == 0 else None, arguments=value),
+                    )]), finish_reason=None
+                )],
+                usage=None,
+            )
+            for index, value in enumerate(fragments)
+        ]
+        client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kw: iter(chunks))))
+        with self.assertRaisesRegex(ProviderError, "response limit"):
+            list(OpenAICompatProvider(client=client).stream(GenerationRequest(system="", messages=(), model="gpt-4.1")))
+
+    def test_openai_stream_caps_aggregate_tool_arguments(self):
+        from unittest.mock import patch
+        from providers.openai_compat import OpenAICompatProvider
+
+        calls = [
+            SimpleNamespace(index=index, id=f"c{index}", function=SimpleNamespace(name="Read", arguments="{}"))
+            for index in range(2)
+        ]
+        chunk = SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(tool_calls=calls), finish_reason=None)], usage=None)
+        client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kw: iter([chunk]))))
+        with patch("providers.openai_compat.MAX_TOOL_ARGUMENTS_TOTAL_BYTES", 3):
+            with self.assertRaisesRegex(ProviderError, "per-response limit"):
+                list(OpenAICompatProvider(client=client).stream(GenerationRequest(system="", messages=(), model="gpt-4.1")))
 
     def test_a_gateway_without_streaming_reports_a_provider_error(self):
         from providers.openai_compat import OpenAICompatProvider
