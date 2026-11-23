@@ -107,7 +107,7 @@ jobs:
         run: python -m pip install --quiet ../northstar-run-contract ../northstar-host
       - name: Compile agent interop component
         working-directory: components/northstar-agent-interop
-        run: python -m py_compile interop_contract.py handoff.py interop_adapter.py canary.py process_adapter.py process_backend.py remote_worker.py tests/test_*.py
+        run: python -m py_compile interop_contract.py handoff.py interop_adapter.py canary.py process_adapter.py process_backend.py remote_worker.py remote_transport.py tests/test_*.py
       - name: Agent interop component tests
         working-directory: components/northstar-agent-interop
         run: python -m unittest discover -s tests -p 'test_*.py' -v
@@ -116,7 +116,7 @@ jobs:
         run: |
           python -m pip install --quiet .
           cd /tmp
-          python -c "import interop_contract, handoff, interop_adapter, canary, process_adapter, process_backend; print('northstar-agent-interop imports OK')"
+          python -c "import interop_contract, handoff, interop_adapter, canary, process_adapter, process_backend, remote_transport; print('northstar-agent-interop imports OK')"
       - name: Shell syntax
         working-directory: components/northstar-codex-sidecar
         run: sh -n install.sh rollback.sh
@@ -143,6 +143,8 @@ jobs:
           # opposite of what a compile step is for.
           python -m py_compile *.py providers/*.py tools/*.py \
             tests/support.py tests/fixtures/*.py tests/test_*.py
+      - name: Targeted MCP network warning regression
+        run: python -m pytest -q tests/test_cli.py -k doctor_warns_about_server_supplied_oauth_discovery_with_mcp_network_allowed
       - name: Unit tests
         # No API key and no network: the scripted provider is the only model, and
         # the sidecar integration test starts a real listener on a Unix socket.

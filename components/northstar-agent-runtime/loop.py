@@ -39,7 +39,13 @@ from hooks import HookInput, HookRegistry
 from observer_verdict_ledger import ObserverVerdictLedger
 from safr_checkpoint import SafrCheckpoint
 from sealed_audit_sink import SealedAuditSink
-from checkpoints import CheckpointError, build as build_checkpoint, digest_transcript, prepare_resume
+from checkpoints import (
+    CheckpointError,
+    build as build_checkpoint,
+    digest_transcript,
+    _post_checkpoint_tool_call_count,
+    prepare_resume,
+)
 from dataflow_policy import DataflowPolicy, SessionDataflow
 from egress_scope import canonical_egress_host, validate_egress_target_scope
 from postconditions import (
@@ -110,6 +116,7 @@ from tools import (
     ToolSandbox,
     build_default_registry,
     codex_tool_spec,
+    read_file,
 )
 from tracing import Tracer
 
@@ -201,6 +208,8 @@ class RuntimeConfig:
     #: The boundary a resumed run continues from (checkpoints.Checkpoint). Setting
     #: this without carrying the parent's cost over is refused, not forgiven.
     resume_from: Any = None
+    #: Explicitly acknowledge that tools recorded after the selected checkpoint may be called again.
+    allow_checkpoint_tool_replay: bool = False
     #: Session id this run was forked from, recorded for the audit only.
     parent_session: str = ""
     max_output_tokens: int = 4096
@@ -234,6 +243,15 @@ class RuntimeConfig:
     #: Optional host-owned per-run subset of the egress sidecar policy. None
     #: leaves the sidecar's global exact-host allowlist as the only target gate.
     egress_target_scope: tuple[str, ...] | None = None
+    #: Gossip announce plane (see gossip_announcer). Off by default:
+    #: announcing the audit head changes observable behavior, so a host
+    #: opts in. ``gossip_node_id`` names this host on the plane (default:
+    #: the agent name); ``gossip_peers`` lists peer node ids;
+    #: ``gossip_fanout`` caps targets per spread.
+    gossip_enabled: bool = False
+    gossip_node_id: str = ""
+    gossip_peers: tuple[str, ...] = ()
+    gossip_fanout: int = 3
     #: Backend for the Shell tool (``auto`` | ``bwrap`` | ``process``). Does not
     #: grant Shell — the permission gate still denies it under ``default`` until
     #: ``--allow-tool Shell``. ``bwrap`` is refused at construction if unusable.
@@ -278,6 +296,14 @@ class RuntimeConfig:
     #: seccomp so the workload cannot contact a user/session manager to loosen
     #: the unit. Missing enforcement is a refusal, never an rlimits fallback.
     shell_aggregate_resource_scope: str = "off"
+    #: Optional per-run evidence bundle directory. When set, the runtime records
+    #: digest-first governance metadata into a hash-chained ledger. The evidence
+    #: component is loaded lazily, so a bare runtime remains dependency-free.
+    evidence_dir: str | None = None
+    #: When true, an evidence capture failure changes the terminal result to
+    #: ``error_evidence_incomplete``. When false, capture failures are reported
+    #: in the result while the run's business outcome is preserved.
+    evidence_required: bool = False
 
     def __post_init__(self) -> None:
         def fail(message: str) -> None:
@@ -327,6 +353,13 @@ class RuntimeConfig:
             fail("stream must be a boolean")
         if not isinstance(self.require_verification, bool):
             fail("require_verification must be a boolean")
+        if self.evidence_dir is not None:
+            if not isinstance(self.evidence_dir, str) or not self.evidence_dir.strip():
+                fail("evidence_dir must be a non-empty path string or None")
+        if not isinstance(self.evidence_required, bool):
+            fail("evidence_required must be a boolean")
+        if self.evidence_required and self.evidence_dir is None:
+            fail("evidence_required needs evidence_dir")
         if self.code_phase_machine is not None and any(
             not callable(getattr(self.code_phase_machine, name, None))
             for name in (
@@ -412,6 +445,21 @@ class RuntimeConfig:
                 object.__setattr__(self, "egress_target_scope", validate_egress_target_scope(self.egress_target_scope))
             except ValueError as error:
                 fail(str(error))
+        if not isinstance(self.gossip_enabled, bool):
+            fail("gossip_enabled must be a boolean")
+        if not isinstance(self.gossip_node_id, str):
+            fail("gossip_node_id must be a string")
+        if isinstance(self.gossip_peers, str) or not isinstance(self.gossip_peers, (tuple, list)):
+            fail("gossip_peers must be a tuple or list of node ids")
+        object.__setattr__(self, "gossip_peers", tuple(self.gossip_peers))
+        if not all(isinstance(p, str) and p for p in self.gossip_peers):
+            fail("gossip_peers must be non-empty strings")
+        if len(set(self.gossip_peers)) != len(self.gossip_peers):
+            fail("gossip_peers must not contain duplicates")
+        if isinstance(self.gossip_fanout, bool) or not isinstance(self.gossip_fanout, int):
+            fail("gossip_fanout must be an integer")
+        if self.gossip_fanout < 1:
+            fail("gossip_fanout must be >= 1")
     @property
     def budget_enabled(self) -> bool:
         return self.max_budget_usd is not None
@@ -447,6 +495,12 @@ class RuntimeConfig:
             "lock_session": self.lock_session,
             "sidecar": bool(self.sidecar_socket),
             "egress_target_scope": list(self.egress_target_scope) if self.egress_target_scope is not None else None,
+            "gossip_enabled": self.gossip_enabled,
+            "gossip_node_id": self.gossip_node_id,
+            "gossip_peers": list(self.gossip_peers),
+            "gossip_fanout": self.gossip_fanout,
+            "evidence_dir": self.evidence_dir,
+            "evidence_required": self.evidence_required,
         }
 
 
@@ -618,6 +672,8 @@ class RunReport:
     errors: tuple[str, ...] = ()
     session_id: str = ""
     spans: tuple[str, ...] = ()
+    #: Digests, paths, and capture errors for this run's optional evidence bundle.
+    evidence: Any = None
 
     @property
     def ok(self) -> bool:
@@ -676,6 +732,7 @@ class RunReport:
             "cost_usd": result.total_cost_usd if result else 0.0,
             "unverified_cost_usd": result.unverified_cost_usd if result else 0.0,
             "pricing_estimated": result.pricing_estimated if result else False,
+            "evidence": self.evidence.as_dict() if self.evidence is not None else None,
         }
 
     _trace: str = ""
@@ -718,6 +775,9 @@ class _RunState:
     budget_reservation_failed: bool = False
     #: Whether this run already spent its single free compaction on an oversized request.
     overflow_compacted: bool = False
+    #: Optional runtime evidence sink and its final capture report.
+    evidence_sink: Any = None
+    evidence_report: Any = None
 
 
 @dataclass(frozen=True)
@@ -786,6 +846,7 @@ class AgentRuntime:
         budget: Budget | None = None,
         summarizer: Callable[[Sequence[Any]], str] | None = None,
         dataflow: SessionDataflow | None = None,
+        gossip_transport: Any = None,
     ) -> None:
         if provider is None:
             raise RuntimeConfigurationError("a provider is required")
@@ -919,6 +980,41 @@ class AgentRuntime:
             observer=ObserverVerdictLedger(),
             ledger=self.sealed_ledger,
         )
+        # Gossip announce plane (see gossip_announcer): off unless the host
+        # opts in via config. The announcer owns a GossipNode (seen-set)
+        # and a GossipProtocol (membership + target selection) and
+        # announces the sealed ledger's head at turn boundaries and at run
+        # close. The transport is in-process loopback unless the host
+        # supplies its own register()/deliver() implementation; a future
+        # network transport plugs in here without touching the loop.
+        self.gossip_announcer: Any = None
+        self.gossip_transport: Any = None
+        self._gossip_announce_error: str | None = None
+        if self.config.gossip_enabled:
+            try:
+                from gossip_announcer import GossipAnnouncer, LocalGossipTransport
+
+                if gossip_transport is None:
+                    transport: Any = LocalGossipTransport()
+                elif callable(getattr(gossip_transport, "register", None)) and callable(
+                    getattr(gossip_transport, "deliver", None)
+                ):
+                    transport = gossip_transport
+                else:
+                    raise RuntimeConfigurationError(
+                        "gossip_transport must provide register() and deliver()"
+                    )
+                self.gossip_transport = transport
+                self.gossip_announcer = GossipAnnouncer(
+                    node_id=self.config.gossip_node_id or self.config.agent,
+                    peers=self.config.gossip_peers,
+                    fanout=self.config.gossip_fanout,
+                    transport=transport,
+                )
+            except RuntimeConfigurationError:
+                raise
+            except Exception as error:
+                raise RuntimeConfigurationError(f"gossip: {error}") from error
         self.session_id = resolve_session_id(self.config.session_id, self.sessions if self.sessions.enabled else None)
         if self.sessions.session_id != self.session_id:
             self.sessions = replace(self.sessions, session_id=self.session_id)
@@ -928,6 +1024,8 @@ class AgentRuntime:
         #: read a full report without re-deriving it from events.
         self._pending_state: _RunState | None = None
         self._last_report: RunReport | None = None
+        self._evidence_sink: Any = None
+        self._evidence_report: Any = None
         self.retry = getattr(config, "retry", None)
         if self.retry is not None:
             from provider_retry import RetryPolicy
@@ -945,6 +1043,39 @@ class AgentRuntime:
                 import zlib
 
                 self.retry = _replace(self.retry, seed=zlib.crc32(self.session_id.encode("utf-8")))
+
+    def _announce_audit_head(self) -> None:
+        """Announce the sealed ledger's head if it advanced, then tick.
+
+        Best-effort by design: gossip is dissemination, not delivery
+        proof, and a failed announcement must never fail a run. The
+        failure (if any) is recorded on ``_gossip_announce_error`` and
+        the run continues; the sealed ledger is unaffected. Called at
+        turn boundaries and at run close -- at most one head rumor per
+        turn, plus one anti-entropy round per call.
+        """
+        announcer = self.gossip_announcer
+        if announcer is None:
+            return
+        try:
+            announcer.announce_head(self.sealed_ledger)
+            announcer.tick()
+            self._gossip_announce_error = None
+        except Exception as error:  # noqa: BLE001 - announcement is best-effort
+            self._gossip_announce_error = f"{type(error).__name__}: {error}"
+
+    def announce_alert(self, kind: str, detail: Mapping[str, Any] | None = None) -> Any:
+        """Announce a kill-switch / config-drift alert immediately.
+
+        Host-called (a future kill-switch trigger or config-drift
+        detector calls this); returns the originated rumor, or None
+        when gossip is disabled. Unlike the automatic head announcement,
+        an explicit host call is fail-closed: an unknown kind raises.
+        """
+        announcer = self.gossip_announcer
+        if announcer is None:
+            return None
+        return announcer.announce_alert(kind, detail)
 
     # -- capability views --------------------------------------------------
     @property
@@ -1019,13 +1150,12 @@ class AgentRuntime:
         """
         from defensive_agent import assess as assess_defensive, sanitize_for_model
 
-        # Keep a mutable copy so malformed imported records can be removed
-        # without mutating the durable transcript or the caller's sequence.
-        payload = list(copy.deepcopy(tuple(messages)))
+        # Filter record shapes before copying. A hostile non-message object
+        # must not reach ``deepcopy`` and execute a caller-defined copy hook.
+        raw_messages = tuple(messages)
+        malformed_count = sum(not isinstance(message, dict) for message in raw_messages)
+        payload = [copy.deepcopy(message) for message in raw_messages if isinstance(message, dict)]
         findings: list[Any] = []
-        malformed_count = sum(not isinstance(message, dict) for message in payload)
-        if malformed_count:
-            payload = [message for message in payload if isinstance(message, dict)]
         changed = bool(malformed_count)
 
         def screen_text(value: Any) -> Any:
@@ -1488,6 +1618,30 @@ class AgentRuntime:
     def run(self, prompt: str, *, resume: Sequence[Any] | None = None) -> Iterator[Message]:
         """Stream events for one run. Terminates in exactly one ResultMessage."""
         state = _RunState(session_id=self.session_id)
+        # Evidence is per-run state. Child runtimes receive a separate sink only
+        # when the host asks for one; the parent never writes through a child.
+        self._evidence_sink = None
+        self._evidence_report = None
+        if self.config.evidence_dir is not None:
+            from runtime_evidence import RuntimeEvidenceSink
+
+            self._evidence_sink = RuntimeEvidenceSink(
+                self.config.evidence_dir,
+                run_id=self.config.run_id or f"session-{self.session_id}",
+                session_id=self.session_id,
+            )
+            state.evidence_sink = self._evidence_sink
+            self._evidence_sink.start_run(
+                provider=self.provider_name,
+                model=self.config.model,
+                permission_mode=self.permissions.mode,
+                policy_revision=self.config.policy_revision,
+                tools=self.tools.names(),
+                workspace=str(self.sandbox.root_real),
+                max_turns=self.config.max_turns,
+                max_tool_calls=self.config.max_tool_calls,
+                max_budget_usd=self.config.max_budget_usd,
+            )
         if resume:
             state.transcript.extend(resume)
             if self.dataflow is not None:
@@ -1508,6 +1662,14 @@ class AgentRuntime:
                 raise RuntimeConfigurationError(
                     "resume_from needs the parent transcript as run(resume=...): the checkpoint says where to cut, "
                     "but the messages to cut come from the session store"
+                )
+            post_checkpoint_tool_calls = _post_checkpoint_tool_call_count(checkpoint, state.transcript)
+            if post_checkpoint_tool_calls and not self.config.allow_checkpoint_tool_replay:
+                raise RuntimeConfigurationError(
+                    f"resume refused: checkpoint at turn {checkpoint.turns} would discard "
+                    f"{post_checkpoint_tool_calls} post-checkpoint tool call(s); their effects may already "
+                    "have run. Inspect the parent session and pass "
+                    "--allow-checkpoint-tool-replay only when replay is intentional"
                 )
             try:
                 state.transcript = prepare_resume(
@@ -1553,6 +1715,9 @@ class AgentRuntime:
                 "transcript_digest": checkpoint.transcript_digest[:12],
                 "forked": bool(self.config.parent_session),
             }
+            if post_checkpoint_tool_calls:
+                state.resumed_from["post_checkpoint_tool_calls"] = post_checkpoint_tool_calls
+                state.resumed_from["replay_acknowledged"] = True
         self._pending_state = state
         self._last_report = None
         # A subagent's run hangs off the span its parent opened for it, so the
@@ -1765,6 +1930,7 @@ class AgentRuntime:
                 if not calls:
                     if (yield from self._finish_without_tools(state, turn_index, assistant)):
                         return
+                    self._announce_audit_head()
                     continue
 
                 results, halted = self._run_tool_batch(calls, state, turn_index=turn_index, span=turn_span)
@@ -1775,6 +1941,7 @@ class AgentRuntime:
                 self._record_tool_message(tool_message)
                 yield tool_message
                 self._checkpoint(state, boundary="after_tools")
+                self._announce_audit_head()
                 if halted is not None:
                     yield self._finish(state, halted)
                     return
@@ -2261,12 +2428,63 @@ class AgentRuntime:
                 ),
                 data=verification_summary,
             )
+            if state.evidence_sink is not None:
+                state.evidence_sink.append_event(
+                    source="verifier",
+                    kind="runtime.verification.completed",
+                    sequence=str(turn_index),
+                    subject={
+                        "declared": verification_summary["declared"],
+                        "ran": verification_summary["ran"],
+                        "passed": verification_summary["passed"],
+                        "failed": verification_summary["failed"],
+                        "skipped": verification_summary["skipped"],
+                        "ok": verification_summary["ok"],
+                        "network": verification_summary["network"],
+                        "results": [
+                            {
+                                "command_index": receipt.index,
+                                "ok": receipt.ok,
+                                "exit_code": receipt.exit_code,
+                                "timed_out": receipt.timed_out,
+                                "duration_ms": receipt.duration_ms,
+                                "output_sha256": receipt.output_sha256,
+                                "truncated": receipt.truncated,
+                            }
+                            for receipt in receipts
+                        ],
+                    },
+                )
             self.sessions.record_system(verification_record, agent=config.agent)
             yield verification_record
             if not verification_summary["ok"]:
                 subtype = "error_postconditions_failed"
         if self.postconditions:
             summary = summarise_postconditions(self.postconditions.evaluate())
+            if state.evidence_sink is not None:
+                state.evidence_sink.append_event(
+                    source="verifier",
+                    kind="runtime.postconditions.completed",
+                    sequence=str(turn_index),
+                    subject={
+                        "checked": summary["checked"],
+                        "passed": summary["passed"],
+                        "failed": summary["failed"],
+                        "ok": summary["ok"],
+                        "structural_passed": summary["structural_passed"],
+                        "results": [
+                            {
+                                "kind": item.get("kind"),
+                                "path": item.get("path"),
+                                "ok": item.get("ok"),
+                                "structural": item.get("structural"),
+                                "digest_before": item.get("digest_before"),
+                                "digest_after": item.get("digest_after"),
+                            }
+                            for item in summary.get("results", [])
+                        ],
+                    },
+                )
             record = SystemMessage(
                 subtype="postconditions",
                 content=(
@@ -2403,6 +2621,21 @@ class AgentRuntime:
         )
         payload["boundary"] = boundary
         self.sessions.append("checkpoint", payload)
+        if state.evidence_sink is not None:
+            state.evidence_sink.append_event(
+                source="checkpoint",
+                kind="runtime.checkpoint",
+                sequence=str(self.sessions.written),
+                subject={
+                    "boundary": boundary,
+                    "record_index": self.sessions.written,
+                    "turns": state.turns,
+                    "tool_calls": state.tool_calls,
+                    "transcript_len": int(payload.get("transcript_len", 0) or 0),
+                    "transcript_digest": str(payload.get("transcript_digest", ""))[:80],
+                    "denials": len(state.denials),
+                },
+            )
         # A boundary is the moment to renew: whoever is reading this file from another
         # process should see the freshest possible promise about the holder.
         self._heartbeat()
@@ -2552,6 +2785,15 @@ class AgentRuntime:
             # refuses is_delegation specs), so the outcome is authorized or refused.
             assert not isinstance(outcome, _Delegate), "a delegation call reached a parallel batch"
             if isinstance(outcome, _Authorized):
+                self._record_authorized_tool_evidence(
+                    state,
+                    call,
+                    turn_index,
+                    outcome.spec,
+                    outcome.payload,
+                    outcome.decision,
+                    outcome.governed_inputs_digest,
+                )
                 prepared.append((call, outcome.spec, outcome.payload, outcome.decision, outcome.rewritten, outcome.governed_inputs_digest))
                 early.append(None)
                 state.tool_calls += 1
@@ -3098,6 +3340,21 @@ class AgentRuntime:
                 ).as_dict(),
             },
         )
+        if state.evidence_sink is not None:
+            state.evidence_sink.append_event(
+                source="permission",
+                kind="runtime.permission.denied",
+                sequence=f"{self.config.agent}-{turn_index}-{call.id}",
+                subject={
+                    "agent": self.config.agent,
+                    "turn_index": turn_index,
+                    "call_id": call.id,
+                    "tool": call.name,
+                    "source": "unknown_tool",
+                    "rule": "",
+                    "permission_mode": str(getattr(self.permissions.mode, "value", self.permissions.mode)),
+                },
+            )
         return _Refused(block, report, None)
 
     def _refuse_by_hook(
@@ -3127,6 +3384,20 @@ class AgentRuntime:
             agent=self.config.agent,
         )
         fatal = "error_permission_denied" if self.config.halt_on_denial else None
+        if state.evidence_sink is not None:
+            state.evidence_sink.append_event(
+                source="permission",
+                kind="runtime.permission.denied",
+                sequence=f"{self.config.agent}-{turn_index}-{call.id}",
+                subject={
+                    "agent": self.config.agent,
+                    "turn_index": turn_index,
+                    "call_id": call.id,
+                    "tool": spec.name,
+                    "source": f"hook:{pre.denied_by}",
+                    "permission_mode": str(getattr(self.permissions.mode, "value", self.permissions.mode)),
+                },
+            )
         return _Refused(block, report, fatal)
 
     def _safe_hook_text(self, value: Any, *, event: str, turn_index: int) -> str:
@@ -3219,6 +3490,22 @@ class AgentRuntime:
                 data={"denied": True, "source": decision.source},
             ),
         )
+        if state.evidence_sink is not None:
+            state.evidence_sink.append_event(
+                source="permission",
+                kind="runtime.permission.denied",
+                sequence=f"{self.config.agent}-{turn_index}-{call.id}",
+                subject={
+                    "agent": self.config.agent,
+                    "turn_index": turn_index,
+                    "call_id": call.id,
+                    "tool": spec.name,
+                    "source": decision.source,
+                    "rule": getattr(decision, "rule", "") or "",
+                    "permission_mode": str(getattr(self.permissions.mode, "value", self.permissions.mode)),
+                    "arguments_digest": digest_arguments(payload),
+                },
+            )
         block = ToolResultBlock(
             tool_use_id=call.id,
             # Structured denial (not a bare string): the model gets the
@@ -3311,6 +3598,37 @@ class AgentRuntime:
         governance_seal_error: str = "",
     ) -> tuple[ToolResultBlock, ToolCallReport]:
         """Post-hooks + ToolCallReport after a handler (or parallel handler) returns."""
+        skill_activation: dict[str, Any] | None = None
+        if (
+            spec.name == "Read"
+            and spec.handler is read_file
+            and not result.is_error
+            and isinstance(result.data, Mapping)
+        ):
+            skill_path = result.data.get("skill_path")
+            skill_digest = result.data.get("skill_digest")
+            expected_digest = (
+                self.config.skill_digests.get(skill_path)
+                if isinstance(skill_path, str)
+                else None
+            )
+            if (
+                isinstance(skill_path, str)
+                and "/" in skill_path
+                and skill_path.rsplit("/", 1)[-1] == "SKILL.md"
+                and isinstance(skill_digest, str)
+                and len(skill_digest) == 64
+                and all(char in "0123456789abcdef" for char in skill_digest)
+                and expected_digest == skill_digest
+            ):
+                skill_name = skill_path.rsplit("/", 1)[0].rsplit("/", 1)[-1]
+                if skill_name:
+                    skill_activation = {
+                        "skill_name": skill_name,
+                        "skill_path": skill_path,
+                        "skill_digest": f"sha256:{skill_digest}",
+                        "source_truncated": bool(result.data.get("truncated")),
+                    }
         # Give every handler result an origin before it crosses the provider
         # boundary. MCP adapters provide a more specific server/tool source;
         # ordinary built-ins inherit their registered runtime tool name.
@@ -3355,14 +3673,17 @@ class AgentRuntime:
         block, result_truncated = result.as_block_with_status(
             call.id, max_chars=self.limits.max_result_chars
         )
+        initial_result_truncated = result_truncated
         # Tool output is an input boundary too.  Run the local defensive
         # assessment on the already-bounded representation, then fail closed
         # for high-confidence findings before the provider sees the content.
         # This is deliberately after the result cap: an attacker-sized object
         # cannot force an unbounded stringify just to be inspected.
+        original_display_text = block.display_text()
         sanitized_text, defensive = sanitize_for_model(
-            block.display_text(), preserve_length=True
+            original_display_text, preserve_length=True
         )
+        defensive_sanitized = sanitized_text != original_display_text
         defensive_blocked = defensive.decision.value == "block"
         if defensive.findings:
             self.sessions.append(
@@ -3381,7 +3702,7 @@ class AgentRuntime:
                     ],
                 },
             )
-        if defensive_blocked or sanitized_text != block.display_text():
+        if defensive_blocked or defensive_sanitized:
             rule_ids = ",".join(f.rule_id for f in defensive.findings[:8]) or "unknown"
             if defensive_blocked:
                 result = ToolResult.error(
@@ -3395,6 +3716,23 @@ class AgentRuntime:
                 )
             block, result_truncated = result.as_block_with_status(
                 call.id, max_chars=self.limits.max_result_chars
+            )
+        if skill_activation is not None and not result.is_error:
+            self.sessions.append(
+                "informational",
+                {
+                    "subtype": "skill_loaded",
+                    "agent": self.config.agent,
+                    "tool_use_id": call.id,
+                    "turn_index": turn_index,
+                    **skill_activation,
+                    "truncated": bool(
+                        skill_activation["source_truncated"]
+                        or initial_result_truncated
+                        or result_truncated
+                    ),
+                    "sanitized": defensive_sanitized,
+                },
             )
         provenance_data = result.provenance.as_dict()
         if governance_seal_error:
@@ -3486,7 +3824,7 @@ class AgentRuntime:
                     },
                 ),
             )
-        else:
+        if not result.is_error:
             self._fire(
                 state,
                 "PostToolUse",
@@ -3507,6 +3845,33 @@ class AgentRuntime:
                         "provenance": provenance_data,
                     },
                 ),
+            )
+        if state.evidence_sink is not None:
+            state.evidence_sink.append_event(
+                source="tool",
+                kind="runtime.tool.completed",
+                sequence=f"{self.config.agent}-{turn_index}-{call.id}",
+                subject={
+                    "agent": self.config.agent,
+                    "turn_index": turn_index,
+                    "call_id": call.id,
+                    "tool": spec.name,
+                    "tool_kind": spec.kind,
+                    "mutating": bool(spec.is_mutating),
+                    "is_error": bool(result.is_error),
+                    "permission_source": getattr(decision, "source", "") or "",
+                    "input_rewritten": rewritten,
+                    "parallel": parallel,
+                    "duration_ms": min(duration_ms, 86_400_000),
+                    "result_chars": min(original_chars, 10_000_000),
+                    "truncated": result_truncated,
+                    "result_source": result.provenance.source,
+                    "result_trust": result.provenance.trust,
+                    "execution_status": execution_status,
+                    "execution_gate": execution_gate,
+                    "governance_input_digest": attrs["tool.governance_input_digest"],
+                    "defensive_decision": defensive.decision.value,
+                },
             )
         report = ToolCallReport(
             name=spec.name,
@@ -3531,6 +3896,77 @@ class AgentRuntime:
             agent=self.config.agent,
         )
         return block, report
+
+    def _record_authorized_tool_evidence(
+        self,
+        state: _RunState,
+        call: ToolUseBlock,
+        turn_index: int,
+        spec: Any,
+        payload: dict[str, Any],
+        decision: Any,
+        authorized_inputs_digest: str,
+    ) -> None:
+        """Record permission and governance authorization for every dispatch path."""
+        sink = state.evidence_sink
+        if sink is None:
+            return
+        sequence = f"{self.config.agent}-{turn_index}-{call.id}"
+        egress_subject: dict[str, Any] | None = None
+        if spec.name == "Fetch":
+            from egress_scope import canonical_egress_host
+
+            egress_subject = {
+                "agent": self.config.agent,
+                "turn_index": turn_index,
+                "call_id": call.id,
+                "host": canonical_egress_host(payload.get("host")),
+                "port": payload.get("port", 443),
+                "method": str(payload.get("method") or "GET").upper(),
+                "path_length": len(str(payload.get("path") or "")),
+                "permission_source": decision.source,
+                "target_scope": (
+                    list(self.config.egress_target_scope)
+                    if self.config.egress_target_scope is not None
+                    else None
+                ),
+            }
+        sink.append_event(
+            source="permission",
+            kind="runtime.permission.allowed",
+            sequence=sequence,
+            subject={
+                "agent": self.config.agent,
+                "turn_index": turn_index,
+                "call_id": call.id,
+                "tool": spec.name,
+                "tool_kind": spec.kind,
+                "source": decision.source,
+                "rule": getattr(decision, "rule", "") or "",
+                "permission_mode": str(getattr(self.permissions.mode, "value", self.permissions.mode)),
+                "arguments_digest": digest_arguments(payload),
+            },
+        )
+        if egress_subject is not None:
+            sink.append_event(
+                source="egress",
+                kind="runtime.egress.allowed",
+                sequence=sequence,
+                subject=egress_subject,
+            )
+        sink.append_event(
+            source="governance",
+            kind="runtime.governance.authorized",
+            sequence=sequence,
+            subject={
+                "agent": self.config.agent,
+                "turn_index": turn_index,
+                "call_id": call.id,
+                "tool": spec.name,
+                "permission_source": decision.source,
+                "authorized_inputs_digest": authorized_inputs_digest,
+            },
+        )
 
     def _dispatch(
         self,
@@ -3562,6 +3998,9 @@ class AgentRuntime:
             return outcome.block, outcome.report, outcome.fatal
 
         spec, payload, decision, rewritten = outcome.spec, outcome.payload, outcome.decision, outcome.rewritten
+        self._record_authorized_tool_evidence(
+            state, call, turn_index, spec, payload, decision, outcome.governed_inputs_digest
+        )
         context = ToolContext(
             session_id=state.session_id,
             agent=self.config.agent,
@@ -3573,6 +4012,23 @@ class AgentRuntime:
             services=self._services(),
         )
         started = time.monotonic()
+        if state.evidence_sink is not None:
+            # Bind the decision to the governed runner's canonical (tool,args)
+            # pin. This lets an offline reviewer correlate permission -> action
+            # without copying the arguments themselves.
+            state.evidence_sink.append_event(
+                source="governance",
+                kind="runtime.governance.authorized",
+                sequence=f"{self.config.agent}-{turn_index}-{call.id}",
+                subject={
+                    "agent": self.config.agent,
+                    "turn_index": turn_index,
+                    "call_id": call.id,
+                    "tool": spec.name,
+                    "permission_source": decision.source,
+                    "authorized_inputs_digest": outcome.governed_inputs_digest,
+                },
+            )
         # A: the authorized call runs through the governed-action runner, so
         # the SAFR 4-gate trail (declare -> authorize -> assess -> audit) is
         # booked and sealed for every production tool call.  The production
@@ -3929,6 +4385,24 @@ class AgentRuntime:
                 )
             task_prompt = filtered_prompt
 
+        if state.evidence_sink is not None:
+            state.evidence_sink.append_event(
+                source="interop",
+                kind="runtime.interop.delegation_admitted",
+                sequence=f"{self.config.agent}-{turn_index}-{call.id}",
+                subject={
+                    "parent_agent": self.config.agent,
+                    "call_id": call.id,
+                    "target_agent": definition.name,
+                    "prompt_chars": len(task_prompt),
+                    "tool_count": len(gate.allowed),
+                    "depth": self.config.depth + 1,
+                    "permission_mode": str(
+                        getattr(self.permissions.mode, "value", self.permissions.mode)
+                    ),
+                },
+            )
+
         child_provider = self.provider
         if definition.provider:
             child_provider = self.providers.get(definition.provider)
@@ -4201,6 +4675,24 @@ class AgentRuntime:
             },
         )
         block = result.as_block(call.id, max_chars=self.limits.max_result_chars)
+        if state.evidence_sink is not None:
+            state.evidence_sink.append_event(
+                source="interop",
+                kind="runtime.subagent.completed",
+                sequence=f"{self.config.agent}-{turn_index}-{call.id}",
+                subject={
+                    "parent_agent": self.config.agent,
+                    "child_agent": definition.name,
+                    "call_id": call.id,
+                    "subtype": subagent_report.subtype,
+                    "turns": subagent_report.turns,
+                    "tool_calls": subagent_report.tool_calls,
+                    "denials": len(subagent_report.denials),
+                    "cost_micro_usd": int(round(subagent_report.cost_usd * 1_000_000)),
+                    "accepted": accepted,
+                    "verdict_acceptance": verdict.acceptance if verdict is not None else "",
+                },
+            )
         report_row = ToolCallReport(
             name=spec.name,
             call_id=call.id,
@@ -4308,6 +4800,13 @@ class AgentRuntime:
         return result
 
     def _close_run(self, state: _RunState, run_span: Any) -> None:
+        # Announce the final audit head before anything is torn down: a run
+        # that ends without completing a turn still has a head worth pinning.
+        self._announce_audit_head()
+        # Apply the evidence policy before the terminal record is persisted: a
+        # required-capture failure must make the event stream, RunReport, and
+        # session transcript agree on the final subtype.
+        self._seal_evidence(state)
         if not state.session_end_fired:
             state.session_end_fired = True
             if state.refused_session:
@@ -4360,6 +4859,114 @@ class AgentRuntime:
         # tail that the next writer then appends to.
         self._release_session()
 
+    def _seal_evidence(self, state: _RunState) -> None:
+        """Seal opt-in evidence and apply the required-capture policy."""
+        sink = state.evidence_sink or self._evidence_sink
+        if sink is None:
+            return
+        existing = state.result
+        subtype = existing.subtype if existing is not None else "error_during_execution"
+        verification = next(
+            (
+                event
+                for event in reversed(state.events)
+                if isinstance(event, SystemMessage) and event.subtype == "verification"
+            ),
+            None,
+        )
+        postconditions = next(
+            (
+                event
+                for event in reversed(state.events)
+                if isinstance(event, SystemMessage) and event.subtype == "postconditions"
+            ),
+            None,
+        )
+        verifier_verdict = "unknown"
+        test_exit_code = None
+        if verification is not None:
+            data = dict(verification.data or {})
+            verifier_verdict = "passed" if data.get("ok") else "failed"
+            results = data.get("results")
+            if isinstance(results, list) and results and isinstance(results[0], dict):
+                exit_code = results[0].get("exit_code")
+                if isinstance(exit_code, int) and not isinstance(exit_code, bool):
+                    test_exit_code = max(0, min(255, exit_code))
+        elif postconditions is not None:
+            verifier_verdict = "passed" if (postconditions.data or {}).get("ok") else "failed"
+        completion = {
+            "status": "finished" if subtype in {"success", "success_unverified"} else "failed",
+            "subtype": subtype,
+            "turns": state.turns,
+            "tool_calls": state.tool_calls,
+            "denials": len(state.denials),
+            "verifier_verdict": verifier_verdict,
+            "test_exit_code": test_exit_code,
+        }
+        completion_entry = sink.append_event(
+            source="result",
+            kind="runtime.completed",
+            sequence="terminal",
+            subject={
+                **completion,
+                "error_count": len(state.errors),
+                "subagent_count": len(state.subagents),
+            },
+            ref_ids=tuple(
+                item
+                for item in (
+                    "runtime-started",
+                    *(
+                        f"{report.agent}-{report.turn_index}-{report.call_id}"
+                        for report in state.tool_reports
+                    ),
+                )
+                if item
+            ),
+        )
+        report = sink.seal(
+            completion={
+                **completion,
+                "evidence_entry_digest": (
+                    completion_entry.entry_digest if completion_entry is not None else None
+                ),
+            }
+        )
+        if completion_entry is None and report.ok:
+            report = replace(
+                report,
+                ok=False,
+                errors=("terminal evidence entry could not be appended",),
+            )
+        state.evidence_report = report
+        self._evidence_report = report
+        if report.ok:
+            return
+        message = (
+            "evidence capture is incomplete: " + "; ".join(report.errors)
+            if report.errors
+            else "evidence capture is incomplete"
+        )
+        if self.config.evidence_required and existing is not None:
+            state.errors.append(message)
+            replacement = replace(
+                existing,
+                subtype="error_evidence_incomplete",
+                errors=tuple(state.errors),
+            )
+            state.result = replacement
+            if state.events and state.events[-1] is existing:
+                state.events[-1] = replacement
+        else:
+            span = self.tracer.start_span("evidence.capture.failed", attributes={"evidence.ok": False})
+            span.record_error("evidence capture is incomplete")
+            span.end()
+        # ``run_collect`` and the SDK read ``last_report`` after the generator
+        # closes, while streaming callers already consumed the original result
+        # event. Keep both views truthful when the required-capture policy replaces
+        # the terminal subtype.
+        self._last_report = self._report(state.events, state=state)
+
     def _report(self, events: Sequence[Message], *, state: _RunState) -> RunReport:
         result = state.result
         if result is None and events:
@@ -4378,6 +4985,7 @@ class AgentRuntime:
             errors=tuple(state.errors),
             session_id=state.session_id,
             spans=tuple(self.tracer.names()),
+            evidence=state.evidence_report,
             _trace=self.tracer.tree(),
         )
 

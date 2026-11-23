@@ -182,6 +182,19 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     code_group.add_argument(
+        "--check-input",
+        dest="check_inputs",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help=(
+            "repository-relative file a host-declared check reads (check script, "
+            "helper, fixture); repeatable. Each input is content-addressed at the "
+            "starting commit and sealed; a delivery patch touching a pinned input "
+            "fails verification"
+        ),
+    )
+    code_group.add_argument(
         "--plan-only",
         action="store_true",
         help="understand and plan without allowing file edits or Shell execution",
@@ -264,6 +277,23 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     add_audit_arguments(audit)
+    evidence = sub.add_parser(
+        "evidence",
+        help="inspect, pack, seal, or verify run evidence (lazy optional dispatch)",
+        description=(
+            "Offline operations over a runtime evidence bundle. The run-evidence "
+            "component is imported only when this command runs; an install without "
+            "it gets an explicit installation message."
+        ),
+    )
+    evidence.add_argument(
+        "evidence_action",
+        nargs="?",
+        choices=("inspect", "pack", "verify", "seal"),
+        help="inspect/pack a runtime bundle, or use the evidence component's seal/verify commands",
+    )
+    evidence.add_argument("evidence_args", nargs=argparse.REMAINDER)
+    evidence.add_argument("--json", action="store_true", help="accepted by inspect (its output is always JSON)")
     mcp = sub.add_parser(
         "mcp",
         help="inspect the MCP servers this workspace declares (read-only; a run needs --mcp-config to start them)",
@@ -504,6 +534,7 @@ def _add_mcp_arguments(parser: argparse.ArgumentParser) -> None:
         mcp.add_argument("--mcp-max-rounds", type=int, default=3, help="how many times one tool call may be re-asked for input before the client gives up")
         mcp.add_argument("--mcp-seccomp", choices=("auto", "on", "off"), default="auto", help="seccomp-BPF denylist for MCP server processes on Linux (same escape-primitive denylist as the Shell process backend): auto applies it where loadable, on refuses to start where it is not, off runs the server command as-is")
         mcp.add_argument("--mcp-network", choices=("denied", "allowed"), default="denied", help="network for MCP server processes: denied (default) confines the server with Landlock TCP denial like the Shell process backend and refuses to start where that cannot be enforced; allowed runs the server with full host network (explicit opt-in for servers that need it)")
+        mcp.add_argument("--mcp-filesystem", choices=("unconfined", "workspace"), default="unconfined", help="filesystem for MCP server processes: unconfined preserves compatibility; workspace applies a fail-closed Landlock boundary granting system/runtime paths read/execute, /etc and /proc read-only, minimal device access, and the current workspace read/write")
 
 def _add_execution_arguments(parser: argparse.ArgumentParser) -> None:
         execution = parser.add_argument_group("execution delegation")
@@ -572,6 +603,17 @@ def _add_output_arguments(parser: argparse.ArgumentParser) -> None:
         output.add_argument("--trace", action="store_true", help="print the span tree afterwards")
         output.add_argument("--session-dir", default="", help="append an auditable JSONL transcript here")
         output.add_argument(
+            "--run-evidence-dir",
+            default="",
+            metavar="PATH",
+            help="write the generic run's digest-first evidence bundle here (opt-in)",
+        )
+        output.add_argument(
+            "--require-evidence",
+            action="store_true",
+            help="fail the run with error_evidence_incomplete (exit 8) if required evidence cannot be captured",
+        )
+        output.add_argument(
             "--session-lease-seconds",
             type=int,
             default=900,
@@ -596,6 +638,14 @@ def _add_output_arguments(parser: argparse.ArgumentParser) -> None:
             default=None,
             metavar="INDEX",
             help="with --resume-from: resume from the checkpoint at this transcript record index (default: the latest)",
+        )
+        output.add_argument(
+            "--allow-checkpoint-tool-replay",
+            action="store_true",
+            help=(
+                "acknowledge that tools after the selected checkpoint may be called again; "
+                "their effects are not rolled back and calls still pass current policy"
+            ),
         )
         output.add_argument("--redact-tool-output", action="store_true", help="record tool results in the session without output bodies")
         output.add_argument(
@@ -755,6 +805,10 @@ def _print_dry_run(
     print(f"sidecar={'on' if config.sidecar_socket else 'off'} "
           f"session_dir={args.session_dir or 'off'} "
           f"halt_on_denial={config.halt_on_denial}")
+    print(
+        f"run_evidence={config.evidence_dir or 'off'} "
+        f"required={getattr(config, 'evidence_required', False)}"
+    )
     target_scope = config.egress_target_scope
     target_scope_note = (
         "sidecar policy only" if target_scope is None else
@@ -815,7 +869,7 @@ def _run_code(args: argparse.Namespace) -> int:
     The generic runtime remains the only agent loop. This wrapper owns the
     repository lifecycle and evidence artifacts, then delegates to :func:`_run`.
     """
-    from code_task import CodePhaseMachine, CodeTask, IsolatedCodeWorkspace
+    from code_task import CodePhaseMachine, CodeTask, IsolatedCodeWorkspace, validate_check_inputs
     from verification import validate_commands
 
     task_text = _read_prompt(args)
@@ -826,12 +880,14 @@ def _run_code(args: argparse.Namespace) -> int:
         )
         return USAGE_ERROR
     checks = validate_commands(tuple(getattr(args, "checks", ()) or ()))
+    check_inputs = validate_check_inputs(tuple(getattr(args, "check_inputs", ()) or ()))
     task = CodeTask(
         goal=task_text.strip(),
         workspace=args.workspace,
         checks=checks,
         plan_only=bool(getattr(args, "plan_only", False)),
         network_targets=tuple(getattr(args, "egress_targets", ()) or ()),
+        check_inputs=check_inputs,
     )
 
     # Dry-run is intentionally read-only: validate the generic configuration
@@ -862,6 +918,7 @@ def _run_code(args: argparse.Namespace) -> int:
         plan_only=task.plan_only,
         worktree=workspace.worktree,
         start_commit=workspace.start_commit,
+        check_inputs=task.check_inputs,
     )
     phases.start()
 
@@ -1053,6 +1110,28 @@ def main(argv: Sequence[str] | None = None) -> int:
             from audit_cli import run_audit
 
             return run_audit(args)
+        if args.command == "evidence":
+            try:
+                import importlib
+                import sys as _sys
+
+                component = Path(__file__).resolve().parents[1] / "northstar-run-evidence"
+                if component.is_dir() and str(component) not in _sys.path:
+                    _sys.path.append(str(component))
+                module = importlib.import_module("evidence_cli")
+            except ImportError:
+                print(
+                    "configuration error: northstar-run-evidence is not installed; "
+                    "install that component to inspect or verify evidence bundles",
+                    file=sys.stderr,
+                )
+                return USAGE_ERROR
+            argv = list(args.evidence_args)
+            if args.evidence_action:
+                argv.insert(0, args.evidence_action)
+            elif "--json" in argv:
+                argv.remove("--json")
+            return module.main(argv)
         if args.command == "mcp":
             handler = getattr(args, "handler", None)
             if handler is None:
@@ -1280,6 +1359,8 @@ def _mcp_stance_note(args: argparse.Namespace) -> str:
             f"roots={'on' if getattr(args, 'mcp_allow_roots', False) else 'off'}",
             f"sensitive_input={'on' if getattr(args, 'mcp_allow_sensitive_input', False) else 'off'}",
             f"rounds={getattr(args, 'mcp_max_rounds', 3)}",
+            f"network={getattr(args, 'mcp_network', 'denied')}",
+            f"filesystem={getattr(args, 'mcp_filesystem', 'unconfined')}",
         ]
     )
 
@@ -1336,6 +1417,7 @@ def _connect_mcp_clients(
             "max_input_rounds": getattr(args, "mcp_max_rounds", 3),
             "seccomp": getattr(args, "mcp_seccomp", "auto"),
             "network": getattr(args, "mcp_network", "denied"),
+            "filesystem": getattr(args, "mcp_filesystem", "unconfined"),
             "workspace_root": Path(args.workspace).resolve(),
         }
     clients: list[Any] = []
@@ -1685,6 +1767,11 @@ def _run(args: argparse.Namespace) -> int:
     config_kwargs["shell_landlock"] = getattr(args, "landlock", "auto") or "auto"
     config_kwargs["shell_aggregate_resource_scope"] = getattr(args, "shell_aggregate_resource_scope", "off") or "off"
     config_kwargs["parallel_tools"] = int(getattr(args, "parallel_tools", 1) or 1)
+    if getattr(args, "run_evidence_dir", ""):
+        config_kwargs["evidence_dir"] = args.run_evidence_dir
+        config_kwargs["evidence_required"] = bool(getattr(args, "require_evidence", False))
+    elif getattr(args, "require_evidence", False):
+        raise RunConfigurationError("--require-evidence needs --run-evidence-dir")
 
     validate_session_flags(args, ceilings)
     session = resolve_session(args, ceilings)

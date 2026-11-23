@@ -63,6 +63,22 @@ from skill_audit import threshold_met as skill_threshold_met
 LOCK_SCHEMA_VERSION = "northstar.plugins-lock.v1"
 MAX_INSTALLED_PLUGIN_ENTRIES = 256
 
+
+def _strict_json_loads(text: str) -> Any:
+    """Parse the reviewed lock without duplicate-key or non-standard-value ambiguity."""
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON key {key!r}")
+            result[key] = value
+        return result
+
+    def reject_constant(value: str):
+        raise ValueError(f"non-standard JSON constant {value}")
+
+    return json.loads(text, object_pairs_hook=unique_object, parse_constant=reject_constant)
+
 #: The lockfile's whole shape. `schema_version` plus a map keyed by plugin name; entries
 #: carry the digest and enough identity to answer "who shipped this, and which version did
 #: we review" without re-reading the bundle (which is the untrusted artefact).
@@ -161,8 +177,8 @@ def read_lock(workspace: str | Path) -> dict[str, dict[str, Any]]:
     if not path.is_file():
         return {}
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
+        value = _strict_json_loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError) as error:
         raise PluginInstallError(f"{path}: cannot read the plugin lockfile ({error})") from error
     if not isinstance(value, dict) or value.get("schema_version") != LOCK_SCHEMA_VERSION:
         raise PluginInstallError(

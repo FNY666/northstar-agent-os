@@ -152,6 +152,22 @@ class ModeTests(unittest.TestCase):
                 engine = PermissionEngine(PermissionConfig(mode="default", can_use_tool=lambda *args: verdict))
                 self.assertEqual(engine.evaluate("Write", kind="edit").allowed, expected)
 
+    def test_structured_callback_verdict_requires_a_boolean(self):
+        cases = (
+            {"allowed": 1},
+            {"allowed": "false"},
+            {"allowed": "false", "allow": True},
+            {"allow": ["yes"]},
+        )
+        for verdict in cases:
+            with self.subTest(verdict=verdict):
+                engine = PermissionEngine(
+                    PermissionConfig(mode="default", can_use_tool=lambda *args: verdict)
+                )
+                decision = engine.evaluate("Write", kind="edit")
+                self.assertFalse(decision.allowed)
+                self.assertIn("must be a boolean", decision.reason)
+
     def test_a_dict_reason_reaches_the_denial_text(self):
         engine = PermissionEngine(PermissionConfig(mode="default", can_use_tool=lambda *args: {"allowed": False, "reason": "outside business hours"}))
         self.assertIn("outside business hours", engine.evaluate("Write", kind="edit").reason)

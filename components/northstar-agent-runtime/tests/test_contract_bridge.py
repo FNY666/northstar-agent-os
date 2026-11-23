@@ -215,6 +215,13 @@ class CrossCheckTests(unittest.TestCase):
         with self.assertRaises(BridgeError):
             run_document_from_environment()
 
+    def test_ambiguous_run_document_is_refused(self):
+        path = self.root / "ambiguous.json"
+        path.write_text('{"run_id":"run-1","run_id":"run-2"}', encoding="utf-8")
+        os.environ["NORTHSTAR_RUN_REQUEST"] = str(path)
+        with self.assertRaises(BridgeError):
+            run_document_from_environment()
+
     def test_unknown_request_field_is_refused_before_anything_else(self):
         report = cross_check({"request_id": "r", "prompt": "go", "timeout_ms": 5, "extra": 1})
         self.assertFalse(report.ok)

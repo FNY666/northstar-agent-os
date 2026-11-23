@@ -196,6 +196,50 @@ def sign_approval(approval: dict[str, Any], secret: bytes) -> str:
     return f"{payload}.{signature}"
 
 
+def _host_denial(message: str, safe_reason: str) -> ValueError:
+    """A refusal whose *message* is host text and whose *reason* is reportable.
+
+    ``safe_reason`` is a fixed, identifier-shaped token the evidence layer may
+    record. Anything provider- or model-derived must never be passed here;
+    approval-provider decisions in particular stay opaque (they are not
+    host-authored), which the evidence-leak test pins.
+    """
+    error = ValueError(message)
+    error.safe_reason = safe_reason
+    return error
+
+
+class ToolRefused(ValueError):
+    """The call was refused before the tool could run.
+
+    A refusal is an admission decision, not a world observation: the request
+    itself was inadmissible (bad payload shape, unauthorized path, wrong
+    scope). A loop that re-plans around a refusal would be re-planning around
+    a decision the gateway already made, so the distinction from a failed
+    execution matters to the caller.
+
+    ``safe_reason`` is a short machine-readable token. The human-readable
+    message may name the offending value, so it is never copied into evidence.
+    """
+
+    def __init__(self, message: str, *, safe_reason: str | None = None) -> None:
+        self.safe_reason = safe_reason
+        super().__init__(message)
+
+
+class ToolExecutionFailed(ValueError):
+    """The tool ran and raised.
+
+    The action was admitted and attempted; the world simply did not cooperate
+    (file missing, permission denied, a limit exceeded). This is an
+    observation, so the caller may re-plan and try again.
+    """
+
+    def __init__(self, message: str, *, safe_reason: str | None = None) -> None:
+        self.safe_reason = safe_reason
+        super().__init__(message)
+
+
 class ApprovalDeniedError(ValueError):
     """A signed approval whose decision is ``denied``.
 
@@ -587,6 +631,16 @@ class ActionGateway:
             raise ValueError("tool is already registered")
         self._tools[spec.name] = spec
 
+    def spec_for(self, tool_name: str) -> ToolSpec | None:
+        """Read-only lookup so a caller can prepare, e.g. request approval.
+
+        The dispatcher needs to know a tool's risk tier before it calls
+        execute, because a high-risk tool must carry a live approval and the
+        step must not consume its attempt budget while that approval is
+        pending.
+        """
+        return self._tools.get(tool_name)
+
     @property
     def enforcement_trace(self) -> tuple[dict[str, Any], ...]:
         """Append-only enforcement events (OCSF action/disposition analogue).
@@ -651,7 +705,8 @@ class ActionGateway:
         # Every remaining tombstone is unexpired (pruned above): dropping one
         # could let a live replay re-execute, so refuse instead of forgetting.
         if len(self._tombstones) >= self._max_tombstones:
-            raise ValueError("idempotency store exhausted; refusing to execute")
+            raise _host_denial("idempotency store exhausted; refusing to execute",
+                                    "idempotency_store_exhausted")
         old_key, (fingerprint, _result, valid_until) = self._results.popitem(
             last=False
         )
@@ -682,7 +737,8 @@ class ActionGateway:
             raise ValueError("now must be an integer")
         _require_id(current_policy_revision, "current_policy_revision")
         if now >= call.deadline_at:
-            raise ValueError("tool call deadline has expired")
+            raise _host_denial("tool call deadline has expired",
+                                    "tool_call_deadline_expired")
         if run is not None:
             validation = validate_run_request(run)
             if not validation.ok:
@@ -695,34 +751,42 @@ class ActionGateway:
             authorization_token, authorization_secret, now=now
         )
         if not authorization.ok or authorization.authorization is None:
-            raise ValueError("authorization grant is not valid")
+            raise _host_denial("authorization grant is not valid",
+                                    "authorization_invalid")
         grant = authorization.authorization
         if grant.get("policy_revision") != current_policy_revision:
-            raise ValueError("authorization policy revision is stale")
+            raise _host_denial("authorization policy revision is stale",
+                                    "authorization_policy_stale")
         for field in ("run_id", "actor_id", "workspace_id"):
             if grant[field] != getattr(call, field):
                 raise ValueError(f"authorization does not match tool call {field}")
         if call.resource_id != call.workspace_id or grant["workspace_id"] != call.resource_id:
-            raise ValueError("tool resource is not the authorized workspace")
+            raise _host_denial("tool resource is not the authorized workspace",
+                                    "resource_not_authorized")
 
         argument_digest = digest_arguments(arguments)
         if argument_digest != call.arguments_digest:
-            raise ValueError("tool arguments digest does not match call")
+            raise _host_denial("tool arguments digest does not match call",
+                                    "arguments_digest_mismatch")
         spec = self._tools.get(call.tool_name)
         if spec is None:
-            raise ValueError("tool is not registered")
+            raise _host_denial("tool is not registered", "tool_not_registered")
         if spec.required_capability not in grant["capabilities"]:
-            raise ValueError("tool capability is not authorized")
+            raise _host_denial("tool capability is not authorized",
+                                    "capability_not_authorized")
         requested_scope = set(call.requested_scope)
         if spec.required_scope not in requested_scope:
-            raise ValueError("tool scope does not include the required scope")
+            raise _host_denial("tool scope does not include the required scope",
+                                    "scope_not_requested")
         if not requested_scope.issubset(set(grant["capabilities"])):
-            raise ValueError("tool scope exceeds the authorization grant")
+            raise _host_denial("tool scope exceeds the authorization grant",
+                                    "scope_exceeds_grant")
         approval_expires_at: int | None = None
         approval: dict[str, Any] | None = None
         if spec.risk_level == "high":
             if approval_token is None:
-                raise ValueError("high-risk tool requires approval")
+                raise _host_denial("high-risk tool requires approval",
+                                    "approval_required")
             approval = _verify_approval(
                 approval_token, self._approval_secret, now=now
             )
@@ -758,17 +822,20 @@ class ActionGateway:
             self._results.move_to_end(call.idempotency_key)
             old_fingerprint, result, _valid_until = cached
             if old_fingerprint != fingerprint:
-                raise ValueError("idempotency key conflicts with another tool call")
+                raise _host_denial("idempotency key conflicts with another tool call",
+                                    "idempotency_key_conflict")
             return result
         tombstone = self._tombstones.get(call.idempotency_key)
         if tombstone is not None:
             old_fingerprint, _valid_until = tombstone
             if old_fingerprint != fingerprint:
-                raise ValueError("idempotency key conflicts with another tool call")
+                raise _host_denial("idempotency key conflicts with another tool call",
+                                    "idempotency_key_conflict")
             # The result was evicted but the key is still inside its replay
             # window: the result is gone so it cannot be served, and running
             # the executor again would break at-most-once. Fail closed.
-            raise ValueError("idempotency result was evicted; refusing to re-execute")
+            raise _host_denial("idempotency result was evicted; refusing to re-execute",
+                                    "idempotency_result_evicted")
 
         # OpenShell Validate-phase analogue: pre-execution allowlist check.
         # Runs after every authorization/approval gate and before the
@@ -835,6 +902,12 @@ class ActionGateway:
         self._reserve_idempotency_slot(now)
         try:
             output = spec.executor(arguments)
+        except (ToolRefused, ToolExecutionFailed):
+            # The executor distinguished an admission refusal from a failed
+            # execution on purpose. Flattening them into one ValueError would
+            # erase that distinction, and a caller that cannot tell them
+            # apart cannot decide whether re-planning is legal.
+            raise
         except Exception as error:
             raise ValueError("tool execution failed") from error
         if not isinstance(output, dict):
