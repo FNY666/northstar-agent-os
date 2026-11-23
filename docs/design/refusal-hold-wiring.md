@@ -1194,6 +1194,12 @@ there, and making it surfaced two **pre-existing** defects that this
 section had not found: a completed task's mirror job went back to
 `ready`, and the mirror's release ran outside the lease transaction.
 
+**CLOSED 2026-11-23 — see §16.2.**  The composition question that
+remained after §13 -- what happens to the **mirror's own reservation**
+when a queue-namespace refusal covers a mirror job -- was measured, and
+the answer is safe: the mirror takes the refusal, the lease transaction
+rolls back, and the two ledgers stay in step.
+
 ## 12. OPEN 2026-11-23 — the strands slice's BENCH_DIFF is a baseline-pointer question, not a strands question
 
 `b173-accept.sh strands` reports `FAIL (10/11, 1 skipped)` with one failing
@@ -1733,6 +1739,16 @@ told.  (The lease side's `reap()` is the opposite case -- it sweeps a
 batch, so it skips one refused task rather than abandoning the sweep.
 Different shape, different answer: §13.4.)
 
+**WITHDRAWN 2026-11-23 -- see §16.**  The decision above was **wrong**:
+a refusal is scoped to ONE (job, action) pair, not to the queue, and
+asking only about the head let one refusal wedge the **entire** queue
+**permanently** -- the refused job could never be handed out *and* never
+retired (every terminal operation needs it `reserved`), and it blocked
+every job behind it forever.  The gate is now asked about the candidates
+**in order**, and a refused candidate is **skipped**.  §15's fix -- the
+gate is asked inside the queue's own lock, before the write -- stands;
+only the *scope* of the question changed.
+
 **The action identity** is the job's own `task` string -- the same
 identity §7 established and the same one `retry()` uses.  No schema
 change.
@@ -1819,5 +1835,211 @@ of them is about something the defect does not change.
   that records a queue-namespace refusal against a mirror job will now
   find that the mirror's own reservation is refused, which raises
   `QueueMirrorError` through the lease transaction and rolls the lease
-  write back -- the safe direction.  That composition is the open
-  question §11.4 recorded, still open.)
+  write back -- the safe direction.  **CLOSED 2026-11-23 -- see
+  §16.2**: that composition was measured, not guessed.  The mirror
+  takes its refusal, it does NOT hand out another task's job, and the
+  two ledgers stay in step.)
+
+---
+
+## 16. AMENDED 2026-11-23 — a refused head wedged the whole queue
+
+### 16.1 The defect
+
+§15 landed the `dequeue()` gate, and it landed it with a **decision**:
+the gate is asked about the **head** of the eligible list only, and "a
+refused head blocks the whole dequeue, because the queue's contract is
+FIFO-by-priority: skipping the refused job and handing out the next one
+would silently reorder the queue."
+
+That decision was **wrong**, and it was wrong in the direction that
+matters most: it turned one refusal into a **permanent** denial of
+service for the whole queue.
+
+Measured 2026-11-23, on the tree as §15 left it, with a refusal
+recorded against `queue:j1:dispatch` and two healthy jobs behind it:
+
+```
+--- refused HEAD, two healthy jobs behind it ---
+dequeue raised: RefusalRefusedError
+states: [('j1', 'ready'), ('j2', 'ready'), ('j3', 'ready')]
+
+--- can the refused job ever be retired? ---
+ack   raised: JobStateError job j1 is ready, only reserved jobs may be acked
+dead  raised: JobStateError job j1 is ready, only reserved jobs may be killed
+retry raised: JobStateError job j1 is ready, only reserved jobs may be retried
+
+--- does j2 ever become reachable? ---
+dequeue raised: RefusalRefusedError   (x3, forever)
+```
+
+Read that carefully: **nothing could move the refused job again.**
+`ack()`, `dead()` and `retry()` all require the job to be `reserved`, and
+the refused job could never be reserved -- because the gate refused it.
+So the wedge had two halves, and both had to close for the job to come
+back:
+
+* the refusal stops it being **handed out** (that was the point of §15);
+* and the refusal also stops it being **retired**, because every
+  terminal operation needs `reserved` first.
+
+And because the refused head blocked the whole dequeue, **every job
+behind it was blocked too**, forever.
+
+So one refusal against one (job, action) pair denied the queue to every
+other job, permanently, with no way out.  §13.1's own table says a
+refusal is about the **offer**, and this is the refusal's own denial of
+service -- exactly what §13.1 said a refusal must not be able to do:
+
+| the write | what it means | is it a re-dispatch? |
+|---|---|---|
+| a task goes to `completed` / `dead` | the action is **withdrawn** | **no** |
+
+**The justification was the wrong worry.**  "Skipping the refused job
+would silently reorder the queue" is true in general and irrelevant
+here: the refusal has already made the refused job **not the next one to
+be handed out**.  A refused job is not eligible in the first place.  The
+reordering worry applies to a job that is eligible and *should* be
+handed out; a refused job is not that job.
+
+### 16.2 The fix
+
+The gate is now asked about the candidates **in the queue's own order**,
+and the first candidate it **allows** is the one handed out.  A refused
+candidate is **skipped**, and the next candidate is asked about.
+
+```python
+for candidate in eligible:
+    candidate_entry = self._entries[candidate]
+    try:
+        self._require_refusal_allows_dequeue(
+            candidate, str(candidate_entry["task"]), now
+        )
+    except Exception as exc:
+        if not _is_refusal(exc):
+            raise          # a BROKEN gate, not a refusal: fail closed
+        ...
+        continue          # a refused candidate: skip it
+    job_id = candidate
+    entry = candidate_entry
+    break
+```
+
+**When EVERY candidate is refused**, the call raises **the gate's own
+refusal error** -- the host catches it with the vocabulary it already
+knows, and no new error class is introduced.  Nothing is handed out: no
+job is reserved, no worker holds one, and no attempt was booked.  A
+`job.rejected` row is booked, so the trail records the refusal rather
+than a hand-out that did not happen.
+
+**A broken gate is NOT a refusal, and is not skipped.**  This is the
+load-bearing distinction in the fix.  The skip is only sound for a
+**per-job** refusal; a gate that cannot answer at all is a property of
+the **gate**, and skipping it would turn a broken gate into a silently
+degraded queue -- fail-**OPEN**.  So the classification is explicit
+(`_is_refusal`), and it is drawn on the error's own vocabulary: the
+error carries a `reason` attribute whose value is one of the hold's
+`blocked_*` reasons, or its class name is `RefusalRefusedError`.  A
+`RuntimeError` from a broken gate and the `TypeError` this module
+raises for an unusable gate are both **not** refusals, and both fail the
+whole call.
+
+**Why the skip is safe in the queue and NOT safe in the mirror.**  The
+queue's own dispatcher reads the ledger and chooses which job to offer;
+skipping a refused one is the dispatcher's business.  The **mirror's**
+reservation is a by-task operation with a **fixed target**: the mirror
+must reserve *that* task's job, and there is no "the next one" for it to
+fall back to.  Handing out a **different** task's job there would break
+the correspondence between the two ledgers -- which is what
+`QueueMirrorError` exists to prevent.  So the mirror takes its refusal,
+and the lease transaction rolls back.
+
+That is safe **because each mirror task has its own queue**:
+`LeasedTaskClaim.queue_name_for()` returns `task:<task id>`, so the
+mirror's reservation has exactly **one** candidate and the skip has
+nothing to skip to.  Measured:
+
+```
+mirror queue names: ['task:t1', 'task:t2']
+claim raised: RefusalRefusedError job 't1' may not be re-dispatched ...
+mirror: ready   ledger: ready
+audit: [('job.enqueued', 't1'), ('job.enqueued', 't2'), ('job.rejected', 't1')]
+```
+
+Both ledgers stay `ready`, the lease write is rolled back, and the
+mirror job is not handed out.  This is the composition §11.4 recorded as
+**open**, and it is now **closed by measurement**: the queue-namespace
+refusal refuses the mirror's reservation, it does not hand out another
+task's job, and the two ledgers stay in step.
+
+### 16.3 The guards, and why they can fail
+
+Twelve new guards in
+`RefusedCandidateDoesNotWedgeTheQueueTests`
+(`tests/test_refusal_hold_queue_wiring.py`):
+
+| guard | what it pins |
+|---|---|
+| `test_a_refused_head_does_not_block_the_jobs_behind_it` | the defect itself: the job behind the refused one is handed out |
+| `test_the_refused_candidate_is_still_ready_and_still_eligible` | the skipped job is not consumed -- still `ready`, no worker, no attempt |
+| `test_the_refused_candidate_is_asked_about_first` | the queue's order is kept: the head is asked about first |
+| `test_every_refused_candidate_raises_and_hands_nothing_out` | nothing is handed out when nothing is allowed |
+| `test_every_refused_candidate_books_a_rejected_row` | the trail records the refusal, not a hand-out |
+| `test_a_broken_gate_is_NOT_skipped` | a broken gate fails the whole call -- **not** skipped |
+| `test_a_gate_without_the_required_method_is_NOT_skipped` | an unusable gate is refused, not ignored and not skipped |
+| `test_an_unreadable_store_hands_out_nothing` | the hold's fail-closed direction survives the skip |
+| `test_a_refusal_scoped_to_another_action_does_not_skip_anything` | the control: a refusal about another action blocks nothing |
+| `test_a_refused_job_cannot_be_retired_and_does_not_need_to_be` | the wedge's two halves cannot be reassembled |
+| `test_the_mirror_may_NOT_fall_back_to_another_tasks_job` | the mirror takes its refusal; each task has its own queue |
+| `test_the_skipped_candidate_is_audited_by_the_gate` | the gate books a `checked`/`blocked=True` event for the skip |
+
+**The mutation run.**  Five mutants planted and re-run; all five killed:
+
+| mutant | verdict | killed by |
+|---|---|---|
+| M1 revert to head-only (the §15 defect) | **KILLED** | 5 guards |
+| M2 skip a **broken** gate as well (fail-open) | **KILLED** | `test_a_broken_gate_is_NOT_skipped` |
+| M3 never ask the gate at all | **KILLED** | 17 guards |
+| M4 do not book the `job.rejected` row | **KILLED** | `test_every_refused_candidate_books_a_rejected_row` |
+| M5 reverse the candidate order | **KILLED** | 3 guards |
+
+**M2 needed a second pass, and that is worth recording.**  The first
+version of the broken-gate guard used a gate that fails on **every**
+job, and it **survived** M2.  The reason is that a gate which fails on
+every job raises in **both** versions -- so the guard could see "the
+call raised" but not "the call raised *instead of* handing out a job
+behind a broken gate".  A guard that exercises only the all-fail path
+cannot cover the mixed path, and a mutant that only shows up on the
+mixed path is a mutant the guard was blind to.
+
+This is §13.5's M6 lesson in a new costume: **a guard that exercises
+only the refused path does not cover the ordinary path.**  The fixed
+guard uses a gate that fails on the FIRST job and works on the second,
+so the two behaviours differ in **outcome** and not just in "did it
+raise".
+
+### 16.4 What this does NOT change
+
+* `job_queue.py`'s version and schema pins are unchanged
+  (`job-queue.v1` / `northstar.job-queue.v1`), and no audit kind is
+  added or changed.  `job.rejected` is an existing kind.
+* `dequeue()`'s signature is unchanged: the `now` parameter §15 added is
+  still optional, and every existing call site is unchanged.
+* The gate is asked **once per candidate**, and the skip means a queue
+  of N candidates can produce up to N checks.  That is the price of not
+  wedging the queue, and it is the same shape as §13.4's batch
+  question: a queue with a refused head asks twice where it used to ask
+  once.
+* `ack()` and `dead()` still do not consult the gate -- a **withdrawal**
+  is not a re-dispatch (§13.1).
+* `retry()` and `retry_allowed()` are unchanged, including the "one
+  check per job" count §10 established.
+* The lease side is unchanged: `claim()`, `fail()`, `release()` and
+  `reap()` ask exactly what they asked before.
+* The queue's **ordering** is unchanged.  The skip does not reorder the
+  queue: the candidates are asked in the queue's own order, and the
+  first one the gate allows is the one that is handed out.
+* §15's "the refused head blocks the whole dequeue" decision is
+  **withdrawn**.  §15's fix -- the gate is asked inside the queue's own
+  lock, before the write -- stands; only the *scope* of the question
+  changed.

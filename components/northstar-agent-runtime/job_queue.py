@@ -20,7 +20,11 @@ Public API:
     reserves the highest-priority ready job whose backoff has elapsed
     (priority desc, then FIFO); the job becomes invisible
     (``reserved``) until it is acked or retried. Empty queue is
-    ``None`` as data, never raised.
+    ``None`` as data, never raised.  A recorded refusal covering a
+    candidate's action **skips** that candidate -- a refusal is scoped
+    to one (job, action) pair, so it must not deny the queue to every
+    other job -- and when every candidate is refused the call raises
+    the gate's own refusal error and hands nothing out.
   - ``ack(job_id, seq)`` -> frozen ``AckRecord``: terminal success.
   - ``dead(job_id, seq)`` -> frozen ``DeadRecord``: terminal **failure**.
     The job is withdrawn and never handed out again.  A recorded
@@ -310,6 +314,39 @@ def _check_seq(seq: Any) -> int:
     if seq < 0:
         raise SeqOrderError("seq must be non-negative")
     return seq
+
+
+def _is_refusal(exc: BaseException) -> bool:
+    """Is this exception a **per-job refusal**, rather than a broken gate?
+
+    The queue side skips a refused candidate and asks about the next one.
+    That is only sound when the exception means "this (job, action) pair
+    is refused" -- and NOT when it means "the gate could not answer at
+    all".  A broken gate is a property of the **gate**, not of the job,
+    so it must not be skipped: skipping it would turn a broken gate into a
+    silently degraded queue, which is fail-OPEN.
+
+    The distinction is drawn on the error's own vocabulary, and it is
+    duck-typed on purpose: the gate is supplied by the host, and this
+    module does not import the wiring (the wiring imports the hold, and
+    the hold must not drag the queue in).
+
+    Two shapes count as a refusal:
+
+    * the error carries a ``reason`` attribute whose value is one of the
+      hold's refusal reasons -- the wiring's ``RefusalRefusedError``
+      carries exactly that;
+    * the error's class name is ``RefusalRefusedError`` -- the shape a
+      host that re-implements the gate's contract uses.
+
+    Everything else -- including a ``RuntimeError`` from a broken gate,
+    and the ``TypeError`` this module raises for an unusable gate -- is
+    NOT a refusal, and is not skipped.
+    """
+    reason = getattr(exc, "reason", None)
+    if isinstance(reason, str) and reason.startswith("blocked_"):
+        return True
+    return type(exc).__name__ == "RefusalRefusedError"
 
 
 # ---------------------------------------------------------------------------
@@ -710,13 +747,59 @@ class JobQueue:
         with a different answer.)
 
         **Which jobs are asked about.**  The gate is asked about the
-        job that is **about to be handed out** -- the head of the
-        eligible list -- and not about the jobs behind it.  A refused
-        head blocks the whole dequeue, because the queue's contract is
-        FIFO-by-priority: skipping the refused job and handing out the
-        next one would silently reorder the queue, and a refused job
-        would sit at the head forever, blocking everything behind it.
-        The refused job stays ``ready``; the caller is told.
+        candidates **in the queue's own order**, and the first candidate
+        it ALLOWS is the one handed out.  A refused candidate is
+        **skipped**, and the next candidate is asked about.
+
+        The first version of this asked only about the HEAD of the
+        eligible list and let a refused head block the whole dequeue.
+        That was justified as "the queue's contract is FIFO-by-priority,
+        so skipping the refused job would silently reorder the queue" --
+        and it was **wrong**, because the refusal is scoped to ONE
+        (job, action) pair, not to the queue.  Measured 2026-11-23, on
+        the version that asked only about the head:
+
+            --- refused HEAD, two healthy jobs behind it ---
+            dequeue raised: RefusalRefusedError
+            states: [('j1', 'ready'), ('j2', 'ready'), ('j3', 'ready')]
+
+            --- can the refused job ever be retired? ---
+            ack   raised: JobStateError job j1 is ready, only reserved jobs may be acked
+            dead  raised: JobStateError job j1 is ready, only reserved jobs may be killed
+            retry raised: JobStateError job j1 is ready, only reserved jobs may be retried
+
+            --- does j2 ever become reachable? ---
+            dequeue raised: RefusalRefusedError   (x3, forever)
+
+        So one refusal against ONE job wedged the **entire queue**: the
+        refused job could never be retired (every terminal operation
+        needs it ``reserved``, and it could never be reserved), and it
+        blocked every job behind it, **permanently**.  That is the
+        refusal's own denial of service -- the very thing §13.1's table
+        says a refusal must not be able to do.
+
+        The reordering worry is real but it is the wrong worry: the
+        refusal already means "this job is not the next one to be
+        handed out", so skipping it does not reorder anything the
+        refusal did not already reorder.  A **refused** job is not
+        eligible in the first place.
+
+        **A broken gate is NOT a refusal.**  The skip is only sound for
+        a per-job refusal; a gate that cannot answer at all is a
+        property of the GATE, and skipping it would turn a broken gate
+        into a silently degraded queue -- fail-OPEN.  See
+        :func:`_is_refusal`.
+
+        **Why this is safe here and not in the mirror's case.**  The
+        queue's own dispatcher reads the ledger and chooses which job to
+        offer; skipping a refused one is the dispatcher's business.  The
+        MIRROR's reservation is a by-task operation with a **fixed
+        target**: the mirror must reserve *that* task's job, and there
+        is no "the next one" for it to fall back to.  Handing out a
+        DIFFERENT task's job there would break the two ledgers'
+        correspondence -- which is what ``QueueMirrorError`` exists to
+        prevent.  So the mirror asks about its own task and takes the
+        refusal, and the lease transaction rolls back.
         """
         gate = self._refusal_gate
         if gate is None:
@@ -981,10 +1064,19 @@ class JobQueue:
 
         **A recorded refusal blocks the hand-out.**  When a refusal gate
         is installed and a refusal covers the job's action, the job is
-        NOT handed to a worker: it stays ``ready`` and the call raises.
-        ``dequeue()`` is the moment the action is actually **issued**,
-        so it is a re-dispatch as much as ``retry()`` is -- see
+        NOT handed to a worker: it stays ``ready``.  ``dequeue()`` is the
+        moment the action is actually **issued**, so it is a re-dispatch
+        as much as ``retry()`` is -- see
         :meth:`_require_refusal_allows_dequeue`.
+
+        **A refused candidate is SKIPPED, not fatal.**  The gate is asked
+        about the candidates in the queue's own order, and the first
+        candidate the gate **allows** is the one handed out.  A refusal
+        is scoped to one (job, action) pair, so it must not be able to
+        deny the queue to every other job -- see
+        :meth:`_require_refusal_allows_dequeue` for the measurement that
+        forced this.  When EVERY candidate is refused, the call raises
+        the gate's own refusal error and nothing is handed out.
         """
         with self._lock:
             self._claim(seq)
@@ -1001,15 +1093,52 @@ class JobQueue:
             eligible = self._ordered_ready(queue, seq)
             if not eligible:
                 return None
-            job_id = eligible[0]
-            entry = self._entries[job_id]
-            # The gate is asked BEFORE the entry is flipped to
-            # ``reserved``, so a refusal leaves the job exactly where it
-            # was -- still ``ready``, still eligible, and no worker
-            # holding it.
-            self._require_refusal_allows_dequeue(
-                job_id, str(entry["task"]), now
-            )
+            # The gate is asked about the candidates in the queue's own
+            # order, and the FIRST candidate the gate ALLOWS is the one
+            # handed out.  A refused candidate is SKIPPED, not fatal: a
+            # refusal is scoped to one (job, action) pair, so it must
+            # not be able to deny the queue to every other job.
+            #
+            # See :meth:`_require_refusal_allows_dequeue` for the
+            # measurement that forced this, and for why the skip is safe
+            # here in a way it is NOT safe in the mirror's case.
+            first_refusal: Optional[BaseException] = None
+            blocked: list = []
+            job_id = None
+            entry = None
+            for candidate in eligible:
+                candidate_entry = self._entries[candidate]
+                try:
+                    self._require_refusal_allows_dequeue(
+                        candidate, str(candidate_entry["task"]), now
+                    )
+                except Exception as exc:
+                    if not _is_refusal(exc):
+                        # Not a refusal: the gate itself is broken (or
+                        # unusable).  That is NOT a per-job condition,
+                        # so it is NOT skipped -- it fails the whole
+                        # call, closed.
+                        raise
+                    if first_refusal is None:
+                        first_refusal = exc
+                    blocked.append(candidate)
+                    continue
+                job_id = candidate
+                entry = candidate_entry
+                break
+            if job_id is None or entry is None:
+                # EVERY candidate is refused.  The caller is told, and
+                # nothing was handed out: no job is reserved, no worker
+                # holds one, and no attempt was booked.
+                #
+                # The gate's OWN refusal error is raised, so the host
+                # catches it with the vocabulary it already knows.
+                assert first_refusal is not None
+                self._reject(
+                    seq, type(first_refusal).__name__,
+                    blocked[0] if blocked else "",
+                )
+                raise first_refusal
             entry["state"] = _STATE_RESERVED
             entry["worker_id"] = worker_id
             entry["attempts"] += 1

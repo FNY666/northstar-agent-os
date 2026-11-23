@@ -1842,5 +1842,301 @@ class QueueDequeueGateTests(unittest.TestCase):
         )
 
 
+class RefusedCandidateDoesNotWedgeTheQueueTests(unittest.TestCase):
+    """A refused candidate is SKIPPED, not a wedge on the whole queue.
+
+    THE DEFECT (measured 2026-11-23)
+    --------------------------------
+    The first version of the ``dequeue()`` guard asked the gate about
+    the HEAD of the eligible list only, and let a refused head block the
+    whole dequeue.  The justification was "the queue's contract is
+    FIFO-by-priority, so skipping the refused job would silently
+    reorder the queue".
+
+    That justification was wrong, because the refusal is scoped to ONE
+    (job, action) pair and not to the queue.  And the consequence was
+    that ONE refusal wedged the queue **permanently**:
+
+        --- refused HEAD, two healthy jobs behind it ---
+        dequeue raised: RefusalRefusedError
+        states: [('j1', 'ready'), ('j2', 'ready'), ('j3', 'ready')]
+
+        --- can the refused job ever be retired? ---
+        ack   raised: JobStateError job j1 is ready, only reserved jobs may be acked
+        dead  raised: JobStateError job j1 is ready, only reserved jobs may be killed
+        retry raised: JobStateError job j1 is ready, only reserved jobs may be retried
+
+        --- does j2 ever become reachable? ---
+        dequeue raised: RefusalRefusedError   (x3, forever)
+
+    Every terminal operation needs the job ``reserved``, and the refused
+    job could never be reserved -- so it could never be retired.  And it
+    blocked every job behind it, forever.  That is the refusal's own
+    denial of service: the very thing the slice's own table says a
+    refusal must not be able to do.
+
+    So the gate is now asked about the candidates **in order**, and the
+    first one it ALLOWS is handed out.
+    """
+
+    def setUp(self):
+        self.registry = RefusalHoldRegistry()
+        self.gate = RefusalHoldQueueGate(self.registry)
+
+    def _queue(self, job_ids, task="dispatch"):
+        queue = JobQueue(refusal_gate=self.gate)
+        for index, job_id in enumerate(job_ids):
+            queue.enqueue(job_id, "q", task, DIGEST, index + 1)
+        return queue
+
+    def test_a_refused_head_does_not_block_the_jobs_behind_it(self):
+        """The defect: one refused job denied the queue to the rest."""
+        queue = self._queue(["j1", "j2", "j3"])
+        self.gate.record_queue("j1", "dispatch", row=make_row())
+        got = queue.dequeue("worker-1", "q", 10)
+        self.assertIsNotNone(got, "the refused head wedged the whole queue")
+        self.assertEqual(got.job_id, "j2")
+        self.assertEqual(queue.job("j1").state, "ready")
+        self.assertEqual(queue.job("j2").state, "reserved")
+
+    def test_the_refused_candidate_is_still_ready_and_still_eligible(self):
+        """The skipped job is not consumed -- it is still in the queue."""
+        queue = self._queue(["j1", "j2"])
+        self.gate.record_queue("j1", "dispatch", row=make_row())
+        queue.dequeue("worker-1", "q", 10)
+        job = queue.job("j1")
+        self.assertEqual(job.state, "ready")
+        self.assertEqual(job.worker_id, "")
+        self.assertEqual(job.attempts, 0, "the skipped job was attempted")
+        self.assertIn("j1", queue.ready("q"))
+
+    def test_the_refused_candidate_is_asked_about_first(self):
+        """The queue's own order is kept: the head is asked about first.
+
+        The skip must not REORDER the queue -- it only removes a job
+        that is not eligible to be handed out anyway.
+        """
+        asked = []
+
+        class _Watching:
+            def require_queue_allowed(self, job_id, action, *, now=None):
+                asked.append(job_id)
+                if job_id == "j1":
+                    raise RefusalRefusedError("refused")
+                return None
+
+        queue = JobQueue(refusal_gate=_Watching())
+        for index, job_id in enumerate(["j1", "j2", "j3"]):
+            queue.enqueue(job_id, "q", "dispatch", DIGEST, index + 1)
+        got = queue.dequeue("worker-1", "q", 10)
+        self.assertEqual(got.job_id, "j2")
+        self.assertEqual(asked, ["j1", "j2"])
+
+    def test_every_refused_candidate_raises_and_hands_nothing_out(self):
+        """When nothing is allowed, the caller is told and nothing moves."""
+        queue = self._queue(["j1", "j2"])
+        self.gate.record_queue("j1", "dispatch", row=make_row())
+        self.gate.record_queue("j2", "dispatch", row=make_row())
+        with self.assertRaises(RefusalRefusedError):
+            queue.dequeue("worker-1", "q", 10)
+        for job_id in ("j1", "j2"):
+            job = queue.job(job_id)
+            self.assertEqual(job.state, "ready")
+            self.assertEqual(job.worker_id, "")
+            self.assertEqual(job.attempts, 0)
+
+    def test_every_refused_candidate_books_a_rejected_row(self):
+        """The trail records the refusal, not a hand-out."""
+        queue = self._queue(["j1", "j2"])
+        self.gate.record_queue("j1", "dispatch", row=make_row())
+        self.gate.record_queue("j2", "dispatch", row=make_row())
+        with self.assertRaises(RefusalRefusedError):
+            queue.dequeue("worker-1", "q", 10)
+        kinds = [row["kind"] for row in queue.audit_log()]
+        self.assertNotIn("job.dequeued", kinds)
+        self.assertIn("job.rejected", kinds)
+
+    def test_a_broken_gate_is_NOT_skipped(self):
+        """A gate that cannot answer must fail the whole call, closed.
+
+        The skip is only sound for a per-JOB refusal.  A broken gate is
+        a property of the GATE, and skipping it would turn a broken
+        gate into a silently degraded queue -- fail-OPEN.
+
+        The gate here fails on the FIRST job and works on the second,
+        which is what makes the guard able to tell the two behaviours
+        apart:
+
+        * not skipped -- the error reaches the caller and NOTHING is
+          handed out;
+        * skipped -- the broken job is passed over and the NEXT job is
+          handed out, which is the fail-open this guard forbids.
+
+        A gate that fails on EVERY job cannot distinguish the two: it
+        raises in both versions.  So the guard asks about the shape of
+        the OUTCOME, not just whether an error was raised.
+        """
+        class _BrokenOnFirst:
+            def __init__(self):
+                self.calls = 0
+
+            def require_queue_allowed(self, job_id, action, *, now=None):
+                self.calls += 1
+                if self.calls == 1:
+                    raise RuntimeError("the gate cannot answer")
+                return None
+
+        queue = JobQueue(refusal_gate=_BrokenOnFirst())
+        for index, job_id in enumerate(["j1", "j2"]):
+            queue.enqueue(job_id, "q", "dispatch", DIGEST, index + 1)
+        with self.assertRaises(RuntimeError):
+            queue.dequeue("worker-1", "q", 10)
+        for job_id in ("j1", "j2"):
+            self.assertEqual(
+                queue.job(job_id).state,
+                "ready",
+                "a job was handed out behind a broken gate",
+            )
+
+    def test_an_unreadable_store_hands_out_nothing(self):
+        """A gate that cannot READ refuses everything -- fail-closed.
+
+        The hold's own answer for an unreadable store is
+        ``blocked_store_unreadable``, which is refusal-shaped, so the
+        candidate is skipped like any other refusal.  That is safe
+        because EVERY candidate gets the same answer: the skip walks
+        the whole eligible list and hands nothing out.
+
+        This guard pins that the fail-closed direction survives the
+        skip -- the skip must not become a way to hand out a job when
+        the hold cannot read its own store.
+        """
+        registry = RefusalHoldRegistry()
+        gate = RefusalHoldQueueGate(registry)
+        gate.record_queue("j1", "dispatch", row=make_row())
+        # Break the store the gate reads.
+        store = registry.hold.store
+        store._entries = {}
+
+        class _Unreadable:
+            def require_queue_allowed(self, job_id, action, *, now=None):
+                raise RefusalRefusedError(
+                    "the store cannot answer", reason="blocked_store_unreadable"
+                )
+
+        queue = JobQueue(refusal_gate=_Unreadable())
+        for index, job_id in enumerate(["j1", "j2"]):
+            queue.enqueue(job_id, "q", "dispatch", DIGEST, index + 1)
+        with self.assertRaises(RefusalRefusedError):
+            queue.dequeue("worker-1", "q", 10)
+        for job_id in ("j1", "j2"):
+            self.assertEqual(queue.job(job_id).state, "ready")
+
+    def test_a_gate_without_the_required_method_is_NOT_skipped(self):
+        """An unusable gate is refused, not ignored -- and not skipped.
+
+        The gate offers no usable method at all, so every job fails.
+        The gate raises ``TypeError`` on the FIRST job; if the skip
+        were applied to it, the call would carry on and hand out a job
+        behind a broken gate.  So the TypeError must reach the caller
+        and nothing must be handed out.
+        """
+        class _Mute:
+            pass
+
+        queue = JobQueue(refusal_gate=_Mute())
+        for index, job_id in enumerate(["j1", "j2"]):
+            queue.enqueue(job_id, "q", "dispatch", DIGEST, index + 1)
+        with self.assertRaises(TypeError):
+            queue.dequeue("worker-1", "q", 10)
+        for job_id in ("j1", "j2"):
+            self.assertEqual(queue.job(job_id).state, "ready")
+
+    def test_the_skipped_candidate_is_audited_by_the_gate(self):
+        """The skip must leave a trail.
+
+        The queue's own audit trail records the hand-out (``job.dequeued``
+        for the job that WAS handed out) and, when nothing could be
+        handed out, the rejection.  The skipped candidate's refusal is
+        audited by the **gate**, which books a ``checked`` event with
+        ``blocked=True`` -- the same place every other check is audited
+        (§8: the queue side reaches the registry, so the check is
+        audited like every other check).
+
+        Without that event, a host could not tell "the queue skipped a
+        refused job" from "the queue never looked at it".
+        """
+        queue = self._queue(["j1", "j2"])
+        self.gate.record_queue("j1", "dispatch", row=make_row())
+        got = queue.dequeue("worker-1", "q", 10)
+        self.assertEqual(got.job_id, "j2")
+        checks = [
+            (event["key"], event["blocked"])
+            for event in self.registry.events()
+            if event["kind"] == "checked"
+        ]
+        self.assertIn(("queue:j1:dispatch", True), checks)
+        self.assertIn(("queue:j2:dispatch", False), checks)
+
+    def test_a_refusal_scoped_to_another_action_does_not_skip_anything(self):
+        """The control: a refusal about a DIFFERENT action blocks nothing."""
+        queue = self._queue(["j1", "j2"])
+        self.gate.record_queue("j1", "other-action", row=make_row())
+        got = queue.dequeue("worker-1", "q", 10)
+        self.assertEqual(got.job_id, "j1")
+
+    def test_a_refused_job_cannot_be_retired_and_does_not_need_to_be(self):
+        """The wedge had two halves; both are gone.
+
+        The refused job stays ``ready``, so it is not retried (a retry
+        needs ``reserved``) -- but that no longer matters, because the
+        job BEHIND it is reachable.  The point of this guard is that the
+        two halves of the old wedge cannot be reassembled: nothing about
+        the refused job's state can stop the rest of the queue.
+        """
+        queue = self._queue(["j1", "j2"])
+        self.gate.record_queue("j1", "dispatch", row=make_row())
+        got = queue.dequeue("worker-1", "q", 10)
+        self.assertEqual(got.job_id, "j2")
+        # The refused job is still ready, and still blocked.
+        self.assertEqual(queue.job("j1").state, "ready")
+        with self.assertRaises(RefusalRefusedError):
+            queue.dequeue("worker-1", "q", 11)
+        # ... and the healthy job was really handed out.
+        self.assertEqual(queue.job("j2").state, "reserved")
+
+    def test_the_mirror_may_NOT_fall_back_to_another_tasks_job(self):
+        """The skip is safe in the queue and NOT safe in the mirror.
+
+        The mirror reserves a **fixed** task's job -- there is no "the
+        next one" for it to fall back to, and handing out a DIFFERENT
+        task's job would break the correspondence between the two
+        ledgers, which is what ``QueueMirrorError`` exists to prevent.
+
+        Each mirror task has its OWN queue (``task:<id>``), so the
+        mirror's reservation has exactly one candidate; the skip has
+        nothing to skip to, and the refusal is taken.
+        """
+        queue = JobQueue(refusal_gate=self.gate)
+        manager = LeasedTaskClaim(queue=queue)
+        try:
+            manager.enqueue_task("t1", "demo-task", payload="hello")
+            manager.enqueue_task("t2", "demo-task", payload="world")
+            self.assertNotEqual(
+                queue.job("t1").queue,
+                queue.job("t2").queue,
+                "the mirror must give each task its own queue, or the "
+                "skip could hand out another task's job",
+            )
+            self.gate.record_queue("t1", "demo-task", row=make_row())
+            with self.assertRaises(RefusalRefusedError):
+                manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+            self.assertEqual(manager.task("t1").state, "ready")
+            self.assertEqual(queue.job("t1").state, "ready")
+            self.assertEqual(queue.job("t2").state, "ready")
+        finally:
+            manager.close()
+
+
 if __name__ == "__main__":
     unittest.main()
