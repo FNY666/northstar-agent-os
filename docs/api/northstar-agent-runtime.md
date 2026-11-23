@@ -64751,7 +64751,7 @@ How many times, how long apart, and until when.
 - `plan(attempt: int, fault: ProviderFault, *, waited_ms: int=0)`
   - Decide what to do after ``attempt`` calls failed with ``fault``.
 - `planned_wait_ms()`
-  - The most this policy can make a single turn wait, jitter at its ceiling.
+  - A safe upper bound for one turn's retry waiting budget.
 - `describe()`
   - One line, for ``--dry-run`` and ``doctor``.
 - `as_dict()`
