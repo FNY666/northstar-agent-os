@@ -101,6 +101,9 @@ _PAGE = r"""<!doctype html>
     if (value === null || value === undefined) return "";
     try { return JSON.stringify(value, null, 2); } catch (_) { return String(value); }
   }
+  function toolResultText(value) {
+    return String(value || "").replace(/^\[Northstar tool result (?:metadata: [^\n]*|trust=[^\]]*)\]\n/, "");
+  }
   function recordText(record) {
     const pieces = [];
     const content = record && record.content;
@@ -109,7 +112,7 @@ _PAGE = r"""<!doctype html>
         if (!block || typeof block !== "object") { pieces.push(String(block)); continue; }
         if (block.type === "text") pieces.push(block.text || "");
         else if (block.type === "tool_use") pieces.push("→ " + (block.name || "tool") + " " + text(block.input || {}));
-        else if (block.type === "tool_result") pieces.push("← " + text(block.content || ""));
+        else if (block.type === "tool_result") pieces.push("← " + toolResultText(block.content || ""));
         else pieces.push(text(block));
       }
     }
@@ -173,7 +176,7 @@ _PAGE = r"""<!doctype html>
         let isError = false;
         if (kind === "text") { title = "Text"; value = block.text || ""; }
         else if (kind === "tool_use") { title = "Tool call · " + (block.name || "tool"); value = block.input || {}; }
-        else if (kind === "tool_result") { title = block.is_error ? "Tool result · error" : "Tool result · success"; value = block.content ?? block; isError = Boolean(block.is_error); }
+        else if (kind === "tool_result") { title = block.is_error ? "Tool result · error" : "Tool result · success"; value = toolResultText(block.content ?? ""); isError = Boolean(block.is_error); }
         addDetailBlock(title, value, isError);
       }
     }
@@ -310,7 +313,22 @@ def write_replay_page(
     transcript_path = Path(session_dir) / f"{safe_id}{SESSION_FILE_SUFFIX}"
     if not transcript_path.is_file():
         raise FileNotFoundError(f"no transcript for session {safe_id!r} in {session_dir}")
-    records, dropped = load_jsonl(transcript_path)
+    # The UI is a read-only viewer and must be able to inspect a minimal or
+    # legacy transcript that has no runtime chain metadata. Resume/export paths
+    # keep strict integrity validation; rendering only normalizes payloads.
+    # UI is a read-only renderer. It accepts legacy JSONL values such as NaN and
+    # Infinity so _json_safe can render them as null; resume/export keep the
+    # strict session parser and reject those non-standard values.
+    records: list[dict[str, Any]] = []
+    dropped = 0
+    for line in transcript_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        value = json.loads(line)
+        if isinstance(value, dict):
+            records.append(value)
+        else:
+            dropped += 1
     html = render_replay_page(
         safe_id,
         records,

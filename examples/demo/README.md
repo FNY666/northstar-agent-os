@@ -14,7 +14,9 @@ That single command:
    through the **same code path** a live run uses — permission gate, ceilings,
    event stream, append-only session transcript;
 3. prints the run as JSONL events and points at the audit transcript under
-   `workspace/.northstar/sessions/` (and fails if a checkpoint record is missing).
+   `workspace/.northstar/sessions/` (and fails if a checkpoint record is missing);
+4. resumes into a child session, lists sessions, and verifies the parent transcript
+   is unchanged. Repeated runs leave local transcripts in that ignored directory.
 
 Everything is deterministic: the scripted provider supplies the model turn, so
 the demo needs no `ANTHROPIC_API_KEY`, no network, and no `anthropic` package.

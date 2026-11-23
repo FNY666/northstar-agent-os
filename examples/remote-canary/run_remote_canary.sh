@@ -19,6 +19,9 @@
 # Exit codes: 0 pass, 1 failure, 2 inconclusive (phase 2 only).
 set -eu
 
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PROBE="$SCRIPT_DIR/probe_socket.py"
+
 WORKER="${NS_WORKER:?set NS_WORKER=user@worker-host}"
 STATE_DIR="${NS_LOCAL_SOCK_DIR:-$HOME/.local/state/northstar/canary}"
 SOCKET="$STATE_DIR/sidecar.sock"
@@ -66,7 +69,7 @@ fi
 echo "   socket present after ~$((i / 2))s"
 
 echo "-- 3. deterministic probe (no model, no key)"
-if ! python3 probe_socket.py --socket "$SOCKET"; then
+if ! python3 "$PROBE" --socket "$SOCKET"; then
   echo "FAIL: probe failed" >&2
   exit 1
 fi
@@ -75,7 +78,7 @@ if [ "${NS_REAL:-0}" = "1" ]; then
   echo
   echo "-- 4. real run over the channel (needs codex + credentials on the worker)"
   rc=0
-  python3 probe_socket.py --socket "$SOCKET" --real || rc=$?
+  python3 "$PROBE" --socket "$SOCKET" --real || rc=$?
   if [ "$rc" -eq 2 ]; then
     echo "INCONCLUSIVE: channel works; the run itself did not succeed (see above)" >&2
     exit 2

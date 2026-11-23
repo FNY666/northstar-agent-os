@@ -6,7 +6,7 @@ README only has to describe its own slice.
 
 ## The invariant
 
-No path may bypass all four layers at once. Any tool transport — built-in
+Registered runtime tool calls pass through these governance layers. Tool transports — built-in
 tools, sidecar delegation (`CodexReadOnly`), skills, MCP servers, subagents —
 eventually crosses:
 
@@ -41,7 +41,9 @@ bypass.
   honestly-labelled `process` backend). See [threat-model.md](threat-model.md).
 - **Subagent subsets**: an agent-definition run fixes its tool subset and
   ceilings by definition, which is why `--mcp-server` cannot be combined with
-  `--agent` — silently widening a declared policy would defeat the gate.
+  `--agent` — silently widening a declared policy would defeat the gate. The
+  parent `max_tool_calls` is lineage-wide; each delegation consumes a slot and
+  children inherit only the remaining slots.
 - **Configuration is fail-closed**: unknown `deny_tools` names, unknown tool
   references, bad server names and unreachable MCP servers are configuration
   errors (exit 64 in the runtime CLI) — before anything runs.
@@ -77,7 +79,7 @@ bypass.
 | `northstar-host` | default-deny workspace/authorization broker around a verified run |
 | `northstar-durable-run` | per-call action gate + independent postcondition verification |
 | `northstar-run-contract` | the versioned request/receipt boundary encodes *what was authorized* |
-| `northstar-codex-sidecar` | read-only worker: no write tool, no path to host state |
+| `northstar-codex-sidecar` | worker launched with read-only Codex flags; host permissions and service configuration define filesystem visibility |
 | `northstar-agent-interop` | handoff boundary that re-asserts policy at the next engine |
 
 ## Reading on

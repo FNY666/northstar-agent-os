@@ -160,10 +160,34 @@ class FilesystemRulesTest(RuntimeTestCase):
 
     def test_runtime_roots_are_always_read_exec(self):
         rules = filesystem_rules(frozenset({"stdio"}), workspace="/ws", tmpdir="/t")
+        # Host-relative: only roots that exist here may (and must) carry a rule.
+        # /lib64 exists on x86_64 distros but not on aarch64 ones; asserting it
+        # unconditionally made this test (and the Landlock setup) host-specific.
         for root in ("/usr", "/bin", "/lib", "/lib64", "/sbin"):
             rule = [r for r in rules if r.path == root]
-            self.assertEqual(len(rule), 1)
-            self.assertTrue(rule[0].access & 0x1)  # EXECUTE
+            if os.path.exists(root):
+                self.assertEqual(len(rule), 1, root)
+                self.assertTrue(rule[0].access & 0x1)  # EXECUTE
+            else:
+                self.assertEqual(rule, [], f"{root} is absent on this host but got a rule")
+
+    def test_no_rule_targets_a_system_root_that_does_not_exist(self):
+        # Landlock opens each rule path before restricting; a missing one aborts the
+        # whole sandbox setup (FileNotFoundError), which is a hard failure, not a skip.
+        rules = filesystem_rules(frozenset({"stdio"}), workspace="/ws", tmpdir="/t")
+        system_roots = {"/usr", "/bin", "/lib", "/lib64", "/sbin"}
+        absent = [r.path for r in rules if r.path in system_roots and not os.path.exists(r.path)]
+        self.assertEqual(absent, [])
+
+    def test_missing_runtime_root_is_skipped_when_roots_are_injected(self):
+        # Deterministic on every host: inject one real and one missing root.
+        rules = filesystem_rules(
+            frozenset({"stdio"}), workspace="/ws", tmpdir="/t",
+            runtime_roots=("/usr", "/definitely-not-a-real-root-r2524"),
+        )
+        paths = [r.path for r in rules]
+        self.assertIn("/usr", paths)
+        self.assertNotIn("/definitely-not-a-real-root-r2524", paths)
 
 
 class LandlockProbeTest(RuntimeTestCase):
