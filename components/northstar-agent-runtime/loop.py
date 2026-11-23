@@ -749,6 +749,7 @@ class _RunState:
     """Mutable per-run bookkeeping."""
 
     session_id: str
+    shell_sessions: dict[str, dict[str, Any]] = field(default_factory=dict)
     transcript: list[Any] = field(default_factory=list)
     turns: int = 0
     tool_calls: int = 0
@@ -2435,7 +2436,14 @@ class AgentRuntime:
             return False
         state.final_text = assistant.text
         self._checkpoint(state, boundary="after_text")
+
+        # R2552: an empty or whitespace-only final text is a protocol error only when the
+        # whole run has made no tool call. After any tool call, a silent finish is a
+        # legitimate completion (the transcript already holds the work product).
+        has_content = bool(assistant.text and assistant.text.strip())
         subtype = "success"
+        if not has_content and state.tool_calls == 0:
+            subtype = "error_during_execution"
         if config.code_phase_machine is not None and config.depth == 0:
             try:
                 config.code_phase_machine.begin_verification()
@@ -2454,6 +2462,7 @@ class AgentRuntime:
                 sandbox=self.sandbox,
                 limits=self.limits,
                 services=self._services(),
+                shell_sessions=state.shell_sessions,
             )
             receipts = run_verification_commands(
                 config.verification_commands,
@@ -2508,7 +2517,7 @@ class AgentRuntime:
             yield verification_record
             if not verification_summary["ok"]:
                 subtype = "error_postconditions_failed"
-        if self.postconditions:
+        if self.postconditions and subtype == "success":
             summary = summarise_postconditions(self.postconditions.evaluate())
             if state.evidence_sink is not None:
                 state.evidence_sink.append_event(
@@ -2881,6 +2890,7 @@ class AgentRuntime:
                     sandbox=self.sandbox,
                     limits=self.limits,
                     services=self._services(),
+                    shell_sessions=state.shell_sessions,
                 )
                 started = time.monotonic()
                 # Same governed execution as the serial path: the runner is
@@ -4059,6 +4069,7 @@ class AgentRuntime:
             sandbox=self.sandbox,
             limits=self.limits,
             services=self._services(),
+            shell_sessions=state.shell_sessions,
         )
         started = time.monotonic()
         if state.evidence_sink is not None:

@@ -115,12 +115,17 @@ def test_parse_json_object():
     assert bad.verify()
     duplicate = op.parse("cfg", '{"name":"svc","name":"evil"}', 6)
     assert not duplicate.success and duplicate.error_code == "bad-json"
-    arr = op.parse("cfg", "[1, 2]", 7)
+    nonfinite = op.parse("cfg", '{"name":"svc","value":NaN}', 7)
+    assert not nonfinite.success and nonfinite.error_code == "bad-json"
+    arr = op.parse("cfg", "[1, 2]", 8)
     assert not arr.success and arr.error_code == "not-an-object"
     with pytest.raises(UnknownParserError):
-        op.parse("ghost", "{}", 8)
+        op.parse("ghost", "{}", 9)
     with pytest.raises(BadTextError):
-        op.parse("cfg", 123, 9)
+        op.parse("cfg", 123, 10)
+    # A sequence number may not be reused: the parser rejects the repeat.
+    with pytest.raises(SeqOrderError):
+        op.parse("cfg", '{"name":"reused-seq"}', 10)
 
 
 def test_parse_other_types():

@@ -82,6 +82,32 @@ class IsolatedCodeWorkspaceTests(unittest.TestCase):
             self.assertTrue(task_path.exists())
             self.assertTrue(verification_path.exists())
 
+    def test_worktree_checkout_does_not_run_repository_filter_command(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary)
+            source = self.make_repository(parent)
+            (source / ".gitattributes").write_text("app.py filter=probe\n", encoding="utf-8")
+            git(source, "add", ".gitattributes")
+            git(source, "commit", "-m", "declare a test filter")
+
+            marker = parent / "filter-ran"
+            filter_command = parent / "smudge.sh"
+            filter_command.write_text(
+                f"#!/bin/sh\n: > '{marker}'\ncat\n",
+                encoding="utf-8",
+            )
+            filter_command.chmod(0o700)
+            git(source, "config", "filter.probe.smudge", str(filter_command))
+
+            isolated = IsolatedCodeWorkspace(
+                source, evidence_root=parent / "evidence"
+            ).prepare()
+            try:
+                self.assertIsNotNone(isolated.worktree)
+                self.assertFalse(marker.exists(), "repository smudge filter executed")
+            finally:
+                isolated.cleanup()
+
     def test_failed_run_can_preserve_worktree(self):
         with tempfile.TemporaryDirectory() as temporary:
             parent = Path(temporary)

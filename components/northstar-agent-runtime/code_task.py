@@ -78,6 +78,77 @@ class CodeTaskError(ValueError):
     """The requested code workspace cannot be prepared or evidenced safely."""
 
 
+
+_GIT_COMMAND_CONFIG = (
+    ("core.fsmonitor", "false"),
+    ("core.hooksPath", os.devnull),
+    ("diff.external", ""),
+    ("commit.gpgSign", "false"),
+    ("merge.verifySignatures", "false"),
+    ("submodule.recurse", "false"),
+    ("status.submoduleSummary", "false"),
+    ("merge.autoStash", "false"),
+    ("core.pager", "cat"),
+    ("safe.bareRepository", "explicit"),
+)
+_FILTER_DRIVER_SUFFIXES = frozenset({"clean", "smudge", "process"})
+_FILTER_CONFIG_PATTERN = r"^filter\..*\.(clean|smudge|process)$"
+
+
+def _git_environment(overrides: Sequence[tuple[str, str]]) -> dict[str, str]:
+    """Build a small environment with host-controlled, non-executable Git config."""
+    environment = {
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "HOME": os.environ.get("HOME", ""),
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_COUNT": str(len(overrides)),
+    }
+    for index, (key, value) in enumerate(overrides):
+        environment[f"GIT_CONFIG_KEY_{index}"] = key
+        environment[f"GIT_CONFIG_VALUE_{index}"] = value
+    return environment
+
+
+def _git_environment_for_repository(root: str | Path) -> dict[str, str]:
+    """Neutralize repo-controlled Git commands and filters for every invocation.
+
+    Git's highest-precedence environment configuration overrides local repository
+    settings. Filter drivers are enumerated under the already-safe environment
+    and then explicitly blanked before the caller's Git command runs.
+    """
+    overrides = list(_GIT_COMMAND_CONFIG)
+    environment = _git_environment(overrides)
+    filters = subprocess.run(
+        [
+            "git", "-C", str(root), "config", "--local", "--name-only",
+            "--get-regexp", _FILTER_CONFIG_PATTERN,
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=environment,
+        timeout=10,
+        check=False,
+    )
+    if filters.returncode not in {0, 1}:
+        raise CodeTaskError("cannot safely inspect repository Git filter configuration")
+    if len(filters.stdout) > 64 * 1024:
+        raise CodeTaskError("repository Git filter configuration exceeds the safety limit")
+    try:
+        keys = filters.stdout.decode("utf-8", errors="strict").splitlines()
+    except UnicodeDecodeError as error:
+        raise CodeTaskError("repository Git filter configuration is not valid UTF-8") from error
+    for key in dict.fromkeys(keys):
+        if not key.startswith("filter.") or key.rsplit(".", 1)[-1] not in _FILTER_DRIVER_SUFFIXES:
+            raise CodeTaskError("Git returned an unexpected filter configuration key")
+        overrides.append((key, ""))
+    return _git_environment(overrides)
+
 CODE_PHASE_TERMINALS = frozenset(
     {
         "success",
@@ -516,6 +587,7 @@ def _run_git(
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        env=_git_environment_for_repository(root),
         check=False,
     )
     if len(process.stdout) > MAX_GIT_OUTPUT_BYTES or len(process.stderr) > MAX_GIT_OUTPUT_BYTES:
@@ -535,6 +607,7 @@ def _current_patch(worktree: Path) -> bytes:
         "--binary",
         "--no-color",
         "--no-ext-diff",
+        "--no-textconv",
         "--full-index",
         "HEAD",
         "--",
@@ -559,15 +632,8 @@ def validate_patch_replay(
         os.close(handle)
         index = Path(raw_index)
         index.unlink()
-        environment = dict(os.environ)
-        environment.update(
-            {
-                "GIT_INDEX_FILE": str(index),
-                "GIT_OPTIONAL_LOCKS": "0",
-                "GIT_TERMINAL_PROMPT": "0",
-                "LC_ALL": "C.UTF-8",
-            }
-        )
+        environment = _git_environment_for_repository(root)
+        environment["GIT_INDEX_FILE"] = str(index)
         try:
             seeded = subprocess.run(
                 ["git", "-C", str(root), "read-tree", start_commit],

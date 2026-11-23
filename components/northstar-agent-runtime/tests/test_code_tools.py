@@ -119,6 +119,22 @@ index 760a15b..87de0d4 100644
         self.assertFalse(inspected.is_error, inspected.text())
         self.assertIn("+    return 2", inspected.text())
 
+    def test_git_inspect_does_not_run_repository_fsmonitor_command(self):
+        marker = self.root / "fsmonitor-ran"
+        fsmonitor = self.root / "fsmonitor.sh"
+        fsmonitor.write_text(
+            f"#!/bin/sh\n: > '{marker}'\nprintf 'token\\n\\0'\n",
+            encoding="utf-8",
+        )
+        fsmonitor.chmod(0o700)
+        git(self.root, "config", "core.fsmonitor", str(fsmonitor))
+
+        inspected = self.registry.require("GitInspect").handler(
+            {"action": "status"}, self.context
+        )
+        self.assertFalse(inspected.is_error, inspected.text())
+        self.assertFalse(marker.exists(), "repository core.fsmonitor command executed")
+
     def test_apply_patch_cannot_modify_governance_paths(self):
         (self.root / ".northstar").mkdir()
         (self.root / ".northstar" / "config.toml").write_text("mode='default'\n", encoding="utf-8")
