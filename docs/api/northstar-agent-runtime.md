@@ -43695,6 +43695,40 @@ Build a detector with the standard rule pack registered.
 
 Self-check the module shape.
 
+### `frontier_registry`
+
+Source: `components/northstar-agent-runtime/frontier_registry.py`
+
+Frontier registry: a machine-readable record of surveyed AI approaches.
+
+#### `FrontierRegistryError`
+
+Raised when an entry or a transition is not well formed.
+
+#### `FrontierEntry`
+
+One surveyed approach.
+
+- `as_dict()`
+  - Return the entry as a plain dict.
+#### `FrontierRegistry`
+
+The registry of surveyed approaches.
+
+- `get(source_url: str)`
+  - Return the entry for ``source_url``, or ``None``.
+- `list(verdict: Optional[str]=None, category: Optional[str]=None, status: Optional[str]=None)`
+  - Return the entries, optionally filtered.
+- `add(entry: FrontierEntry)`
+  - Add an entry, or return the existing one with the same URL.
+- `transition(source_url: str, verdict: str, linked_slice: Optional[str]=None)`
+  - Move an entry to a new verdict, and return the new entry.
+- `link(source_url: str, linked_slice: str)`
+  - Attach a follow-up slice to an entry without changing its verdict.
+- `as_list()`
+  - Return every entry as a plain dict, in listing order.
+- `source_urls()`
+  - Return every source URL, in listing order.
 ### `frontmatter`
 
 Source: `components/northstar-agent-runtime/frontmatter.py`
