@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from tools import ToolAccessError, ToolContext, ToolInputError, ToolResult, ToolSpec, grep_files
+from code_task import CodeTaskError, _git_environment_for_repository
 
 MAX_REPOSITORY_FILES = 8_000
 MAX_PATCH_BYTES = 256 * 1024
@@ -36,18 +37,6 @@ def _schema(properties: dict[str, Any], required: Sequence[str] = ()) -> dict[st
     return schema
 
 
-def _git_environment() -> dict[str, str]:
-    """Small deterministic environment for read-only Git plumbing and apply."""
-    return {
-        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
-        "HOME": os.environ.get("HOME", ""),
-        "LANG": "C.UTF-8",
-        "LC_ALL": "C.UTF-8",
-        "GIT_OPTIONAL_LOCKS": "0",
-        "GIT_TERMINAL_PROMPT": "0",
-    }
-
-
 def _run_git(
     ctx: ToolContext,
     arguments: Sequence[str],
@@ -57,12 +46,16 @@ def _run_git(
 ) -> subprocess.CompletedProcess[bytes]:
     if ctx.sandbox is None:
         raise ToolAccessError("repository tools need a workspace sandbox")
+    try:
+        environment = _git_environment_for_repository(ctx.sandbox.root_real)
+    except CodeTaskError as error:
+        raise ToolInputError(f"Git configuration was refused: {error}") from error
     process = subprocess.run(
         ["git", "-C", str(ctx.sandbox.root_real), *arguments],
         input=stdin,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        env=_git_environment(),
+        env=environment,
         timeout=timeout,
         check=False,
     )
