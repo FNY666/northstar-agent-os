@@ -319,16 +319,7 @@ def write_replay_page(
     # UI is a read-only renderer. It accepts legacy JSONL values such as NaN and
     # Infinity so _json_safe can render them as null; resume/export keep the
     # strict session parser and reject those non-standard values.
-    records: list[dict[str, Any]] = []
-    dropped = 0
-    for line in transcript_path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        value = json.loads(line)
-        if isinstance(value, dict):
-            records.append(value)
-        else:
-            dropped += 1
+    records, dropped = load_jsonl(transcript_path, strict=True)
     html = render_replay_page(
         safe_id,
         records,
