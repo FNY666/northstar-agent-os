@@ -629,10 +629,13 @@ class EgressBudgetLedger:
             return True
 
 
-# These IPv6 ranges can conceal or route to internal destinations while
-# Python classifies the address as global. Keep the guard stable across the
-# Python versions Northstar supports; the NAT64 well-known prefix is global
-# under is_global on every supported version.
+_NAT64_WELL_KNOWN_PREFIX = ipaddress.IPv6Network("64:ff9b::/96")
+_NAT64_LOCAL_USE_PREFIX = ipaddress.IPv6Network("64:ff9b:1::/48")
+
+#: IPv6 ranges that can conceal or route to internal destinations while
+#: Python still classifies the address as global. The guard stays stable across
+#: the Python versions Northstar supports; on 3.12 the deprecated site-local
+#: range below reports is_global=True and is_private=False.
 _NON_GLOBAL_IPV6_SPECIAL_NETWORKS = tuple(
     ipaddress.ip_network(prefix)
     for prefix in (
@@ -645,20 +648,29 @@ _NON_GLOBAL_IPV6_SPECIAL_NETWORKS = tuple(
 
 
 def _ip_permitted(ip_text: str, rule: DestinationRule) -> bool:
-    """SSRF guard: exclude known IPv6 translation and scoped ranges by default."""
+    """SSRF guard: require a globally reachable destination by default."""
     try:
         ip = ipaddress.ip_address(ip_text)
     except ValueError:
         return False
     if rule.allow_private_ips:
         return True
-    if isinstance(ip, ipaddress.IPv6Address) and any(
-        ip in network for network in _NON_GLOBAL_IPV6_SPECIAL_NETWORKS
-    ):
-        return False
-    # Positive classification blocks ordinary private ranges and the shared
-    # carrier space; explicit transition checks close routes Python's
-    # ipaddress classification intentionally leaves globally reachable.
+    # A global-looking NAT64 address can carry a private IPv4 destination.
+    # Judge the well-known /96 by its embedded address before authorizing the
+    # address the sidecar will dial. The local-use NAT64 prefix is never public.
+    if isinstance(ip, ipaddress.IPv6Address):
+        if ip in _NAT64_LOCAL_USE_PREFIX:
+            return False
+        if ip.ipv4_mapped is not None:
+            ip = ip.ipv4_mapped
+        elif ip in _NAT64_WELL_KNOWN_PREFIX:
+            ip = ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
+        elif any(ip in network for network in _NON_GLOBAL_IPV6_SPECIAL_NETWORKS):
+            # 6to4 and the deprecated site-local range report is_global=True
+            # on the interpreter Northstar ships, so name them explicitly.
+            return False
+    # Positive classification also rejects ranges such as 100.64.0.0/10,
+    # which is neither private nor reserved in some Python ipaddress versions.
     return ip.is_global
 
 

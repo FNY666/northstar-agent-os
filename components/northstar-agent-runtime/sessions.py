@@ -72,6 +72,22 @@ _SESSION_CONTENT_KEYS = frozenset({
 })
 
 
+def _strict_json_loads(text: str) -> Any:
+    """Parse transcript records without duplicate-key or non-standard-value ambiguity."""
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON key {key!r}")
+            result[key] = value
+        return result
+
+    def reject_constant(value: str):
+        raise ValueError(f"non-standard JSON constant {value}")
+
+    return json.loads(text, object_pairs_hook=unique_object, parse_constant=reject_constant)
+
+
 def _redact_session_payload(value: Any) -> Any:
     """Remove likely conversational or sensitive values while retaining record shape."""
     if isinstance(value, dict):
@@ -280,7 +296,7 @@ class SessionStore:
                         yield raw_line.decode("ascii")
                         continue
                     try:
-                        candidate = json.loads(raw_line.decode("utf-8"))
+                        candidate = _strict_json_loads(raw_line.decode("utf-8"))
                     except (UnicodeDecodeError, json.JSONDecodeError) as error:
                         raise SessionIntegrityError(
                             f"{path.name}: cannot resume from malformed record {record_count - 1}"
@@ -432,7 +448,7 @@ class SessionStore:
             line = json.dumps(record, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":"))
             line = line[: self.max_record_chars] + ',"note":"' + TRUNCATION_NOTE + '"}'
             try:
-                record = json.loads(line)
+                record = _strict_json_loads(line)
             except json.JSONDecodeError:  # pragma: no cover - keep valid JSON or drop the tail
                 record = {
                     "index": record["index"], "ts": record["ts"], "session_id": self.session_id,
@@ -607,8 +623,8 @@ def load_jsonl(path: str | os.PathLike[str], *, strict: bool = True) -> tuple[li
             line = raw_line.decode("utf-8", errors="replace")
             reason = "is not valid JSON"
             try:
-                value = json.loads(line)
-            except json.JSONDecodeError:
+                value = _strict_json_loads(line)
+            except (ValueError, RecursionError):
                 if not strict:
                     dropped += 1
                     continue
@@ -698,6 +714,10 @@ def transcript_from_records(records: Sequence[dict[str, Any]]) -> list[Any]:
             )
         elif kind == "informational":
             data = record.get("data") or {}
+            if record.get("subtype") == "skill_loaded":
+                # This is an audit-only event. Do not insert runtime metadata
+                # into the resumed provider context.
+                continue
             if isinstance(data, dict) and data.get("reason") == "session_lease_lost":
                 # This is an audit warning emitted outside the transcript; it was
                 # never part of the in-memory provider context.

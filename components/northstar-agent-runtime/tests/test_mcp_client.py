@@ -410,6 +410,16 @@ class ClientTests(unittest.TestCase):
         finally:
             client.close()
 
+    def test_direct_call_screens_hostile_remote_output(self):
+        client = self.connect(env={"MCP_OUTPUT_MODE": "injection"})
+        try:
+            result = client.call_tool("echo", {"text": "ignored"})
+            self.assertTrue(result.is_error)
+            self.assertIn("blocked by defensive agent", result.text())
+            self.assertNotIn("api_key=sk-1234567890abcdef", result.text())
+        finally:
+            client.close()
+
     def test_call_failing_tool_reports_is_error(self):
         client = self.connect()
         try:
@@ -459,11 +469,76 @@ class ClientTests(unittest.TestCase):
             client.connect()
             result = client.call_tool("echo", {"text": "x"})
             self.assertTrue(result.is_error)
-            self.assertIn("timed out", result.text())
+            self.assertIn("outcome is unknown", result.text())
+            self.assertTrue(client.quarantined)
+            self.assertTrue(client.distrusted)
+            self.assertFalse(client.connected, "an ambiguous call timeout must stop the server process")
         finally:
             os.environ.clear()
             os.environ.update(saved)
             client.close()
+
+    def test_committed_effect_timeout_blocks_replay_until_explicit_readmission(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            effect_file = root / "effects.log"
+            audit_records = []
+
+            def make_client(env):
+                return McpStdioClient(
+                    "demo",
+                    ["python3", str(FIXTURE)],
+                    timeout_ms=FAST_TIMEOUT_MS,
+                    protocol="legacy",
+                    audit=audit_records.append,
+                    workspace_root=str(root),
+                    env=env,
+                    seccomp="off",
+                    network="allowed",
+                )
+
+            client = make_client({
+                "MCP_EFFECT_FILE": str(effect_file),
+                "MCP_EFFECT_THEN_SLOW": "1",
+            })
+            client.connect()
+            try:
+                result = client.call_tool("echo", {"text": "mutate"})
+                self.assertTrue(result.is_error)
+                self.assertIn("external outcome is unknown", result.text())
+                self.assertIn("reconcile downstream state", result.text())
+                self.assertEqual(effect_file.read_text(encoding="utf-8").splitlines(), ["echo:mutate"])
+                self.assertTrue(client.quarantined)
+                self.assertTrue(client.distrusted)
+
+                retry = client.call_tool("echo", {"text": "mutate"})
+                self.assertTrue(retry.is_error)
+                self.assertIn("distrusted", retry.text())
+                self.assertEqual(effect_file.read_text(encoding="utf-8").splitlines(), ["echo:mutate"])
+
+                events = [event for event in audit_records if event.get("type") == "mcp.call_outcome_unknown"]
+                self.assertEqual(len(events), 1)
+                self.assertEqual(events[0]["tool"], "echo")
+                self.assertEqual(events[0]["outcome"], "unknown")
+                self.assertTrue(events[0]["distrusted"])
+            finally:
+                client.close()
+
+            restarted = make_client({"MCP_EFFECT_FILE": str(effect_file)})
+            restarted.connect()
+            try:
+                self.assertTrue(restarted.distrusted, "ambiguous effects must remain blocked across client restarts")
+                retry_after_restart = restarted.call_tool("echo", {"text": "mutate"})
+                self.assertTrue(retry_after_restart.is_error)
+                self.assertIn("distrusted", retry_after_restart.text())
+                self.assertEqual(effect_file.read_text(encoding="utf-8").splitlines(), ["echo:mutate"])
+
+                restarted.close()
+                restarted.re_admit()
+                restarted.connect()
+                self.assertFalse(restarted.distrusted)
+            finally:
+                restarted.close()
 
     def test_close_terminates_the_server_process_group(self):
         client = self.connect()
@@ -662,6 +737,23 @@ class GenerationFlagTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("protocol=auto, elicit=off", out)
         self.assertIn("roots=off, sensitive_input=off, rounds=3", out)
+        self.assertIn("network=allowed, filesystem=unconfined", out)
+
+    def test_workspace_filesystem_scope_is_shown_in_dry_run_stance(self):
+        code, out, _ = run_cli(
+            "run", "--workspace", str(self.ws), "--prompt", "hi", "--scripted-text", "x",
+            "--mcp-server", self.server(), "--mcp-filesystem", "workspace", "--dry-run",
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("filesystem=workspace", out)
+
+    def test_mcp_filesystem_flag_rejects_unknown_modes(self):
+        with self.assertRaises(SystemExit) as exited:
+            run_cli(
+                "run", "--workspace", str(self.ws), "--prompt", "hi", "--scripted-text", "x",
+                "--mcp-server", self.server(), "--mcp-filesystem", "host",
+            )
+        self.assertEqual(exited.exception.code, 2)
 
     def test_unattended_a_remote_question_becomes_a_visible_tool_error(self):
         code, out, _ = self.run_with("--json")
@@ -728,6 +820,131 @@ class GenerationFlagTests(unittest.TestCase):
         self.assertIn("echo:still fine", out)
 
 
+class McpConnectPaginationTests(unittest.TestCase):
+    def test_connect_lists_tools_from_every_page_before_exposing_them(self):
+        client = McpStdioClient(
+            "demo", ["python3", str(FIXTURE)], timeout_ms=4000,
+            protocol="legacy", env={}, network="allowed",
+        )
+        pages = iter((
+            {
+                "tools": [{
+                    "name": "first",
+                    "description": "first tool",
+                    "inputSchema": {"type": "object", "properties": {}},
+                }],
+                "nextCursor": "second-page",
+            },
+            {
+                "tools": [{
+                    "name": "second",
+                    "description": "second tool",
+                    "inputSchema": {"type": "object", "properties": {}},
+                }],
+            },
+        ))
+        calls = []
+        original_request = client._request
+
+        def request(method, params=None):
+            if method == "tools/list":
+                calls.append(params)
+                return next(pages)
+            return original_request(method, params)
+
+        client._request = request  # type: ignore[method-assign]
+        try:
+            client.connect()
+            self.assertEqual(client.tool_names(), ("first", "second"))
+            self.assertEqual(calls, [{}, {"cursor": "second-page"}])
+        finally:
+            client.close()
+
+
+class ToolListPaginationTests(unittest.TestCase):
+    def client(self) -> McpStdioClient:
+        return McpStdioClient("demo", ["true"], env={})
+
+    def test_list_all_tools_follows_opaque_cursors_and_preserves_page_order(self):
+        client = self.client()
+        calls = []
+        pages = iter((
+            {"tools": [{"name": "first"}], "nextCursor": "opaque/page-2"},
+            {"tools": [{"name": "second"}]},
+        ))
+
+        def request(method, params):
+            calls.append((method, params))
+            return next(pages)
+
+        client._request = request  # type: ignore[method-assign]
+        self.assertEqual(
+            client._list_all_tools(),
+            [{"name": "first"}, {"name": "second"}],
+        )
+        self.assertEqual(calls, [
+            ("tools/list", {}),
+            ("tools/list", {"cursor": "opaque/page-2"}),
+        ])
+
+    def test_list_all_tools_accepts_a_final_page_at_the_page_limit(self):
+        from unittest.mock import patch
+
+        client = self.client()
+        pages = iter((
+            {"tools": [], "nextCursor": "page-2"},
+            {"tools": [{"name": "last"}]},
+        ))
+        client._request = lambda *_args, **_kwargs: next(pages)  # type: ignore[method-assign]
+        with patch.object(mcp_client, "MAX_TOOL_LIST_PAGES", 2):
+            self.assertEqual(client._list_all_tools(), [{"name": "last"}])
+
+    def test_list_all_tools_rejects_repeated_or_malformed_cursors(self):
+        cases = (
+            (
+                ({"tools": [], "nextCursor": "same"}, {"tools": [], "nextCursor": "same"}),
+                "repeated a pagination cursor",
+            ),
+            (({"tools": [], "nextCursor": 7},), "nextCursor must be a string"),
+        )
+        for pages, message in cases:
+            with self.subTest(message=message):
+                client = self.client()
+                responses = iter(pages)
+                client._request = lambda *_args, **_kwargs: next(responses)  # type: ignore[method-assign]
+                with self.assertRaisesRegex(McpError, message):
+                    client._list_all_tools()
+
+    def test_list_all_tools_bounds_empty_page_chains(self):
+        from unittest.mock import patch
+
+        client = self.client()
+        calls = []
+
+        def request(_method, _params):
+            calls.append(None)
+            return {"tools": [], "nextCursor": f"cursor-{len(calls)}"}
+
+        client._request = request  # type: ignore[method-assign]
+        with patch.object(mcp_client, "MAX_TOOL_LIST_PAGES", 2):
+            with self.assertRaisesRegex(McpError, "exceeded the 2 page limit"):
+                client._list_all_tools()
+        self.assertEqual(len(calls), 2)
+
+    def test_list_all_tools_preserves_the_aggregate_tool_count_cap(self):
+        from unittest.mock import patch
+
+        client = self.client()
+        pages = iter((
+            {"tools": [{"name": "first"}], "nextCursor": "page-2"},
+            {"tools": [{"name": "second"}]},
+        ))
+        client._request = lambda *_args, **_kwargs: next(pages)  # type: ignore[method-assign]
+        with patch.object(mcp_client, "MAX_TOOLS_PER_SERVER", 1):
+            with self.assertRaisesRegex(McpError, "more than 1 tools"):
+                client._list_all_tools()
+
+
 class ToolPinningTests(unittest.TestCase):
     """Tool-definition pinning: drift quarantines the server."""
 
@@ -738,11 +955,140 @@ class ToolPinningTests(unittest.TestCase):
         client.connect()
         return client
 
+    def connect_with_annotations(self, annotations: dict[str, object]):
+        client = McpStdioClient(
+            "demo", ["python3", str(FIXTURE)], timeout_ms=4000, env={}, network="allowed"
+        )
+        original_request = client._request
+
+        def annotated_request(method, *args, **kwargs):
+            response = original_request(method, *args, **kwargs)
+            if method != "tools/list":
+                return response
+            tools = [dict(item) for item in response.get("tools", [])]
+            for item in tools:
+                if item.get("name") == "echo":
+                    item["annotations"] = annotations
+            return {**response, "tools": tools}
+
+        client._request = annotated_request  # type: ignore[method-assign]
+        client.connect()
+        return client, original_request
+
+    def test_unnegotiated_task_result_is_rejected_and_audited(self):
+        client = self.connect()
+        records: list[dict] = []
+        request_methods: list[str] = []
+        client.audit = records.append
+        try:
+            def task_response(method, *_args, **_kwargs):
+                request_methods.append(method)
+                return {
+                    "resultType": "task",
+                    "taskId": "server-task-secret",
+                    "status": "working",
+                }
+
+            client._request = task_response  # type: ignore[method-assign]
+            self.assertNotIn("extensions", client._capabilities())
+            result = client.call_tool("echo", {})
+            self.assertTrue(result.is_error)
+            self.assertIn("without negotiated task support", result.text())
+            self.assertNotIn("server-task-secret", result.text())
+            self.assertTrue(client.quarantined)
+            self.assertEqual(request_methods, ["tools/call"])
+            self.assertEqual(len(records), 1)
+            self.assertEqual(records[0]["type"], "mcp.tool_drift")
+            self.assertEqual(records[0]["at"], "output_validation")
+            self.assertNotIn("server-task-secret", json.dumps(records))
+
+            denied = client.call_tool("echo", {})
+            self.assertTrue(denied.is_error)
+            self.assertIn("quarantined", denied.text())
+            self.assertEqual(request_methods, ["tools/call"])
+        finally:
+            client.close()
+
+    def test_unknown_result_type_without_extension_is_rejected_and_audited(self):
+        client = self.connect()
+        records: list[dict] = []
+        request_methods: list[str] = []
+        client.audit = records.append
+        try:
+            def unknown_response(method, *_args, **_kwargs):
+                request_methods.append(method)
+                return {
+                    "resultType": "future_extension_result",
+                    "taskId": "server-task-secret",
+                    "status": "working",
+                }
+
+            client._request = unknown_response  # type: ignore[method-assign]
+            self.assertNotIn("extensions", client._capabilities())
+            result = client.call_tool("echo", {})
+            self.assertTrue(result.is_error)
+            self.assertIn("unsupported result type", result.text())
+            self.assertIn("completion is unknown", result.text())
+            self.assertNotIn("future_extension_result", result.text())
+            self.assertNotIn("server-task-secret", result.text())
+            self.assertTrue(client.quarantined)
+            self.assertEqual(request_methods, ["tools/call"])
+            self.assertEqual(len(records), 1)
+            self.assertEqual(records[0]["type"], "mcp.tool_drift")
+            self.assertEqual(records[0]["at"], "output_validation")
+            self.assertNotIn("future_extension_result", json.dumps(records))
+            self.assertNotIn("server-task-secret", json.dumps(records))
+
+            denied = client.call_tool("echo", {})
+            self.assertTrue(denied.is_error)
+            self.assertIn("quarantined", denied.text())
+            self.assertEqual(request_methods, ["tools/call"])
+        finally:
+            client.close()
+
     def test_refresh_with_no_drift_returns_empty(self):
         client = self.connect()
         try:
             self.assertEqual(client.refresh_tools(), ())
             self.assertFalse(client.quarantined)
+        finally:
+            client.close()
+
+    def test_refresh_checks_later_pages_before_returning_no_drift(self):
+        client = self.connect()
+        try:
+            echo = client._tools["echo"]
+            echo_definition = {
+                "name": echo.name,
+                "description": echo.description,
+                "inputSchema": echo.input_schema,
+            }
+            if echo.output_schema is not None:
+                echo_definition["outputSchema"] = echo.output_schema
+            pages = iter((
+                {"tools": [echo_definition], "nextCursor": "later-tools"},
+                {
+                    "tools": [{
+                        "name": "new_tool",
+                        "description": "added on page two",
+                        "inputSchema": {"type": "object", "properties": {}},
+                    }],
+                },
+            ))
+            calls = []
+
+            def request(method, params):
+                calls.append((method, params))
+                return next(pages)
+
+            client._request = request  # type: ignore[method-assign]
+            drifts = client.refresh_tools()
+            self.assertEqual(calls, [
+                ("tools/list", {}),
+                ("tools/list", {"cursor": "later-tools"}),
+            ])
+            self.assertIn("added", {drift.kind for drift in drifts})
+            self.assertTrue(client.quarantined)
         finally:
             client.close()
 
@@ -857,6 +1203,69 @@ class ToolPinningTests(unittest.TestCase):
         finally:
             client.close()
 
+    def test_annotations_are_captured_without_relaxing_mutating_default(self):
+        client, _original_request = self.connect_with_annotations({"readOnlyHint": True})
+        try:
+            self.assertEqual(client.tool("echo").annotations, {"readOnlyHint": True})
+            echo = next(spec for spec in mcp_tool_specs(client) if spec.name.endswith("__echo"))
+            self.assertTrue(echo.is_mutating)
+            self.assertEqual(echo.kind, "other")
+            self.assertEqual(client.refresh_tools(), ())
+        finally:
+            client.close()
+
+    def test_annotation_change_during_refresh_quarantines_and_audits(self):
+        client, original_request = self.connect_with_annotations({"readOnlyHint": True})
+        records: list[dict] = []
+        client.audit = records.append
+        try:
+            def changed_request(method, *args, **kwargs):
+                response = original_request(method, *args, **kwargs)
+                if method != "tools/list":
+                    return response
+                tools = [dict(item) for item in response.get("tools", [])]
+                for item in tools:
+                    if item.get("name") == "echo":
+                        item["annotations"] = {"destructiveHint": True}
+                return {**response, "tools": tools}
+
+            client._request = changed_request  # type: ignore[method-assign]
+            drifts = client.refresh_tools()
+            self.assertEqual([(drift.tool_name, drift.kind) for drift in drifts], [("echo", "changed")])
+            self.assertTrue(client.quarantined)
+            self.assertTrue(client.call_tool("echo", {}).is_error)
+            self.assertEqual(records[0]["type"], "mcp.tool_drift")
+            self.assertNotIn("readOnlyHint", json.dumps(records))
+        finally:
+            client.close()
+
+    def test_refresh_rejects_invalid_or_oversized_annotations(self):
+        from mcp_client import MAX_TOOL_ANNOTATIONS_BYTES
+
+        client = self.connect()
+        try:
+            for bad_annotations in (
+                None,
+                [],
+                {"readOnlyHint": "true"},
+                {"extension": "x" * MAX_TOOL_ANNOTATIONS_BYTES},
+            ):
+                with self.subTest(annotation=type(bad_annotations).__name__):
+                    client._request = lambda *_args, _value=bad_annotations, **_kwargs: {
+                        "tools": [{
+                            "name": "echo",
+                            "inputSchema": {"type": "object", "properties": {}},
+                            "annotations": _value,
+                        }]
+                    }  # type: ignore[method-assign]
+                    client._quarantined = False
+                    client._quarantine_reason = ""
+                    self.assertEqual(client.refresh_tools(), ())
+                    self.assertTrue(client.quarantined)
+                    self.assertIn("annotation", client._quarantine_reason)
+        finally:
+            client.close()
+
     def test_digest_is_stable_and_sensitive(self):
         from mcp_client import tool_definition_digest
 
@@ -870,6 +1279,29 @@ class ToolPinningTests(unittest.TestCase):
             "s", "t", "desc", {"type": "object"}, {"type": "string"}
         )
         self.assertNotEqual(base, with_output, "output schema changes are part of the pinned tool contract")
+        self.assertEqual(
+            base,
+            tool_definition_digest("s", "t", "desc", {"type": "object"}, annotations={}),
+            "empty annotations preserve pre-annotation baselines",
+        )
+        annotated = tool_definition_digest(
+            "s", "t", "desc", {"type": "object"},
+            annotations={"readOnlyHint": True, "destructiveHint": False},
+        )
+        self.assertEqual(
+            annotated,
+            tool_definition_digest(
+                "s", "t", "desc", {"type": "object"},
+                annotations={"destructiveHint": False, "readOnlyHint": True},
+            ),
+        )
+        self.assertNotEqual(base, annotated, "advertised behavior annotations are part of the pin")
+        self.assertNotEqual(
+            annotated,
+            tool_definition_digest(
+                "s", "t", "desc", {"type": "object"}, annotations={"readOnlyHint": False}
+            ),
+        )
 
     def test_baseline_persists_across_reconnects(self):
         import tempfile
@@ -996,9 +1428,12 @@ class ToolPinningTests(unittest.TestCase):
             client2.connect()
             try:
                 self.assertTrue(client2.quarantined)
-                self.assertEqual(len(records), 1)
-                self.assertEqual(records[0]["type"], "mcp.tool_drift")
-                self.assertEqual(records[0]["at"], "connect")
+                self.assertEqual(
+                    [record["type"] for record in records],
+                    ["mcp.server_isolation", "mcp.tool_drift"],
+                )
+                self.assertEqual(records[0]["filesystem_scope"], "unconfined")
+                self.assertEqual(records[1]["at"], "connect")
             finally:
                 client2.close()
 

@@ -280,7 +280,10 @@ class VerdictTests(unittest.TestCase):
         self.assertEqual(Path(seen["cwd"]).resolve(), self.root.resolve())
 
 
-@unittest.skipUnless(sys.platform.startswith("linux") and Path("/proc/self/fd").is_dir(), "Linux sealed snapshots only")
+@unittest.skipUnless(
+    command_hooks.sealed_snapshot_supported(),
+    "this host cannot seal script snapshots",
+)
 class SnapshotExecutionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.root = Path(support.tempfile.mkdtemp(prefix="nsar-hook-snapshot-"))

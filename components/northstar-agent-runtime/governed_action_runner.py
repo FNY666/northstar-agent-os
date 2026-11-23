@@ -42,9 +42,12 @@ from __future__ import annotations
 import ast
 import copy
 import hashlib
+import importlib.util as _importlib_util
 import json
+import sys as _sys
 import threading
 from dataclasses import dataclass
+from pathlib import Path as _Path
 from typing import Any, Callable, Dict, Optional
 
 #: Module version pin.  v2: real digests (no placeholder pins), the ledger
@@ -71,6 +74,46 @@ DEFAULT_CRITERIA: Dict[str, Any] = {
 
 class GovernedRunnerError(Exception):
     """Fail-closed: any gate failure or malformed input raises."""
+
+
+#: Tools whose ``command``/``cmd``/``argv`` argument carries shell source.
+#: Canonicalized the same way the PermissionEngine canonicalizes tool names.
+_SHELL_TOOL_NAMES = frozenset({"shell", "bash", "sh", "zsh"})
+
+
+def _load_bash_parser() -> Any:
+    """Load sibling ``bash_parser`` by path (component convention)."""
+    module = _sys.modules.get("bash_parser")
+    if module is not None:
+        return module
+    path = _Path(__file__).resolve().parent / "bash_parser.py"
+    spec = _importlib_util.spec_from_file_location("bash_parser", str(path))
+    if spec is None or spec.loader is None:  # pragma: no cover - defensive
+        raise ImportError("bash_parser not loadable")
+    module = _importlib_util.module_from_spec(spec)
+    _sys.modules["bash_parser"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _shell_command_text(tool_args: Dict[str, Any]) -> Optional[str]:
+    """Return the shell source carried by tool args, or None when there is none.
+
+    Mirrors the Shell handler's accepted shapes: ``command``/``cmd`` text, or
+    ``argv`` (joined so the parser inspects executable positions).
+    """
+    argv = tool_args.get("argv")
+    if isinstance(argv, (list, tuple)) and argv and all(
+        isinstance(item, str) for item in argv
+    ):
+        import shlex
+
+        return shlex.join(argv)
+    for key in ("command", "cmd"):
+        value = tool_args.get(key)
+        if isinstance(value, str):
+            return value
+    return None
 
 
 @dataclass(frozen=True)
@@ -384,7 +427,63 @@ class GovernedActionRunner:
                     )
                 return outcome
 
-        # Gate 4: EXECUTE (outside the lock -- parallelism preserved).
+            # Gate 3b: BASH PARSER (fail-closed AST allowlist).  Shell source
+            # gets a second, structural check after the PermissionEngine's
+            # substring denylist and before the executor sees it.  Non-shell
+            # tools skip this entirely.  The parser is specified never to
+            # raise; we still treat any failure as a block rather than trust
+            # that promise with a real command.
+            if tool.strip().casefold() in _SHELL_TOOL_NAMES:
+                blocked_reason = ""
+                bash_verdict = None
+                command_text = _shell_command_text(tool_args)
+                if command_text is not None:
+                    try:
+                        bash_verdict = _load_bash_parser().check_command(command_text)
+                        kind = getattr(
+                            getattr(bash_verdict, "kind", None), "value", ""
+                        )
+                    except Exception as error:  # noqa: BLE001 - fail closed
+                        kind = ""
+                        blocked_reason = (
+                            "bash_parser raised "
+                            f"{type(error).__name__}: {error}"
+                        )
+                    if not blocked_reason:
+                        if kind == "deny":
+                            blocked_reason = (
+                                "bash_parser denied: "
+                                f"{bash_verdict.node}: {bash_verdict.reason}"
+                            )
+                        elif kind != "allow":
+                            blocked_reason = (
+                                "bash_parser too complex for automatic approval: "
+                                f"{getattr(bash_verdict, 'node', '')}: "
+                                f"{getattr(bash_verdict, 'reason', '') or kind or 'unknown'}"
+                            )
+                if blocked_reason:
+                    outcome = GovernedOutcome(
+                        declaration_id=decl_id,
+                        executed=False,
+                        gate="bash_parser",
+                        decision="blocked",
+                        reason=blocked_reason,
+                    )
+                    seal_error = self._seal(
+                        tool=tool, subject=subject, declaration_id=decl_id,
+                        criteria_digest=criteria_digest, inputs_digest=inputs_digest,
+                        gate_decision=gate_decision, observer_verdict=verdict,
+                        outcome="denied:bash_parser", reason=blocked_reason,
+                    )
+                    seal_note = f" [seal_failed:{seal_error}]" if seal_error else ""
+                    if seal_error:
+                        outcome = GovernedOutcome(
+                            decl_id, False, "bash_parser", "blocked",
+                            blocked_reason + seal_note,
+                            audit_seal_error=seal_error,
+                        )
+                    return outcome
+
         try:
             result = run_executor(tool, tool_args)
         except Exception as error:  # noqa: BLE001 - a broken tool must not kill the run
@@ -433,7 +532,10 @@ def stdlib_only() -> bool:
     import pathlib
 
     tree = ast.parse(pathlib.Path(__file__).read_text(encoding="utf-8"), filename=__file__)
-    allowed = {"__future__", "ast", "copy", "dataclasses", "hashlib", "json", "pathlib", "threading", "typing", "unittest"}
+    allowed = {
+        "__future__", "ast", "copy", "dataclasses", "hashlib", "importlib",
+        "json", "pathlib", "shlex", "sys", "threading", "typing", "unittest",
+    }
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:

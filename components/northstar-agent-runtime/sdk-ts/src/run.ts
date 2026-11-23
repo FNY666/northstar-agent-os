@@ -213,8 +213,12 @@ export async function* streamRun(
       aborted: true,
     });
     try {
+      // Signal the leader directly as well as its detached process group. Some
+      // minimal/container runtimes report a detached child successfully but do
+      // not deliver a negative-PID signal reliably; the direct signal preserves
+      // the stop contract while the group signal still cleans up descendants.
+      child.kill("SIGTERM");
       if (child.pid) process.kill(-child.pid, "SIGTERM");
-      else child.kill("SIGTERM");
     } catch {
       child.kill("SIGTERM"); // already gone: the failure we recorded is the interesting part
     }

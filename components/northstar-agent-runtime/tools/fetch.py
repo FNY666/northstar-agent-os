@@ -96,6 +96,16 @@ def fetch_tool_spec() -> Any:
         )
         if result.status == "ok":
             text = result.body.decode("utf-8", errors="replace")
+            # Keep the network tool safe even when an embedding calls its handler
+            # directly instead of routing the result through AgentRuntime's final
+            # model boundary.
+            from defensive_agent import sanitize_for_model
+
+            safe_text, assessment = sanitize_for_model(text, preserve_length=True)
+            if assessment.decision.value == "block":
+                rule_ids = ",".join(item.rule_id for item in assessment.findings[:8]) or "unknown"
+                return ToolResult.error(f"[blocked by defensive agent; rules={rule_ids}]")
+            text = safe_text
             return ToolResult(
                 content=text,
                 data={
@@ -105,13 +115,19 @@ def fetch_tool_spec() -> Any:
                 },
             )
         if result.status == "denied":
+            reason = getattr(result, "reason", "") or getattr(result, "error", "")
+            errors = getattr(result, "errors", ()) or ()
+            detail = reason or (errors[0] if errors else "policy refusal")
             return ToolResult.error(
-                f"egress denied ({result.deny_code}): {result.error or 'policy refusal'}",
+                f"egress denied ({result.deny_code}): {detail}",
                 deny_code=result.deny_code,
                 receipt=result.receipt,
             )
+        reason = getattr(result, "reason", "") or getattr(result, "error", "")
+        errors = getattr(result, "errors", ()) or ()
+        detail = reason or (errors[0] if errors else "sidecar failure")
         return ToolResult.error(
-            f"egress {result.status}: {result.error or 'sidecar failure'}",
+            f"egress {result.status}: {detail}",
             status=result.status,
             receipt=result.receipt,
         )

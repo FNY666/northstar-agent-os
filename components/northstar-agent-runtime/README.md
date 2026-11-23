@@ -98,6 +98,27 @@ The command never replays it. Python callers can use `reconcile_code_run()` for
 the same receipt. See the [code recovery guide](../../docs/guides/code-recovery.md)
 for classification and exit-code semantics.
 
+## Unified run evidence
+
+Generic runs can write an optional digest-first evidence bundle:
+
+```sh
+northstar run --workspace . --run-evidence-dir ./run-evidence --require-evidence \
+  --prompt "summarise README" --provider scripted --scripted-text ok
+northstar evidence inspect ./run-evidence --json
+```
+
+The bundle records run configuration, permission decisions, tool outcomes,
+checkpoints, verification/postconditions, egress decisions, subagent results,
+and the terminal outcome as a canonical hash-chained ledger. It contains no
+prompts, raw tool arguments, tool output bodies, credentials, or handoff tokens.
+
+Capture is opt-in. A sink failure is reported in `RunReport.evidence`; with
+`--require-evidence` it changes the result to `error_evidence_incomplete`
+(exit 8). Existing tool effects are never replayed or silently undone. Runtime
+code loads the evidence component lazily, so a bare runtime remains importable
+without it.
+
 ```sh
 northstar code "fix the parser regression" --workspace . \
   --check "python3 -m unittest discover -s tests" \
@@ -250,6 +271,8 @@ screening path for imported provider messages.
 Malformed non-message records in an imported sequence are dropped from the
 copy-on-write request instead of crashing the runtime, and recorded as a
 `D-RESUME-001` defensive assessment.
+Non-message values are filtered before any defensive copy operation, so
+untrusted object hooks cannot run during transcript admission.
 After Unicode cleanup, the detector rechecks collapsed whitespace so hidden
 instruction spans cannot reassemble into a jailbreak at the release boundary.
 If that second pass finds an instruction pattern, the release is quarantined
@@ -321,6 +344,12 @@ the only switch; without it `CodexReadOnly` is not registered at all:
 python3 -m cli run --sidecar-socket /var/run/northstar-codex/sidecar.sock \
   --probe-sidecar            # one health-check prompt, then exit
 ```
+
+Sidecar responses are screened at the client boundary too: direct SDK callers
+receive a blocked marker or sanitized text before remote output can become an
+instruction channel. The main loop applies its own result-boundary checks as a
+second defense. Malformed or excessively recursive response JSON is reported as
+`protocol_error` rather than escaping as a client exception.
 
 ## Creating a governed project (`new`)
 
@@ -452,6 +481,20 @@ python3 -m cli run --workspace . --prompt "summarise the files" \
 - Each server is a child process speaking JSON-RPC 2.0 over stdio, under a
   per-request deadline (`--mcp-timeout-ms`, default 15 s); a server that stops
   answering is TERM→KILLed as a process group.
+- `--mcp-filesystem workspace` opts into a fail-closed Landlock filesystem
+  boundary: system/runtime paths are read/execute, /etc and /proc are read-only,
+  the runtime's small device-node set stays available, the current workspace is
+  read/write, and other filesystem paths are denied. It requires Linux with
+  Landlock ABI 1+ and never falls back to the unconfined profile. The default
+  `unconfined` mode preserves compatibility. Workspace scope applies to the
+  whole server process, not individual MCP tools, so every admitted server tool
+  can read and change workspace files, including local secrets and state.
+  Treat this flag as a direct filesystem capability grant: filesystem syscalls
+  made inside the server bypass Northstar's per-tool permission gate, tool-call
+  budgets, and per-operation audit. The `mcp.server_isolation` audit record
+  records the selected scope, not each file access. Keep anything requiring
+  tighter protection outside this tree. The boundary also does not make the
+  process a container or VM.
 - **Two protocol generations, one probe.** `--mcp-protocol auto` (the default)
   opens with `server/discover` — the request the 2026-07-28 revision made
   mandatory — and only falls back to the older `initialize` handshake when that
@@ -515,13 +558,20 @@ python3 -m cli run --workspace . --prompt "summarise the files" \
 - Verdicts are audited as field **names**, never values: `client.elicitation_log`
   and the `audit=` callback (embedders) record
   `{"kind": "mcp-elicitation", "server", "tool", "method", "action", "reason",
-  "answered_fields"}`, and a short `[governance] …` note is appended to the tool
+  "answered_fields"}`; a successful server connection also emits
+  `mcp.server_isolation` with its selected network/filesystem scopes and Landlock
+  ABI when denied networking or workspace filesystem scope applies. A short
+  `[governance] …` note is appended to the tool
   result so the refusal is inside the transcript rather than beside it.
 - Output is bounded client-side (per-line and per-call caps); image/resource
-  content blocks are replaced with a placeholder rather than rendered.
+  content blocks are replaced with a placeholder rather than rendered. The
+  low-level `McpStdioClient.call_tool()` path also runs the defensive-agent
+  output screen, so callers that bypass the main loop still get hostile
+  instruction/credential payloads blocked or sanitized before they see them.
 - `run --dry-run` lists the configured servers **and the stance**
   (`protocol=auto, elicit=off→input_required is declined, roots=off,
-  sensitive_input=off, rounds=3`) without spawning them, and appends what an import
+  sensitive_input=off, rounds=3, network=denied, filesystem=unconfined`)
+  without spawning them, and appends what an import
   contributed (`config 1 server(s) from .mcp.json: demo`). MCP servers cannot be declared
   in `.northstar/config.toml` — that file's tables cap what a run may do, and a server list
   is not a ceiling — so a server is either a per-run flag or a workspace file the operator
@@ -1317,6 +1367,7 @@ condition arrives as an event, never as a raised exception:
 | `error_permission_denied`   | a denial ended the run (`halt_on_denial`)           |
 | `error_postconditions_failed` | the model stopped, but a declared workspace check did not hold |
 | `error_session_busy` | another live run holds this session's transcript; nothing was written |
+| `error_evidence_incomplete` | required evidence capture failed; the run may have had effects |
 | `error_during_execution`    | provider failure, malformed tool input, internal bug |
 
 The three ceilings are independent, each with its own subtype, so an operator can
@@ -1448,6 +1499,9 @@ A passing verdict is an assertion the runtime can audit, not a vibe.
   audit feed `audit.ndjson/1` — denials, failed tool results and `error_*`
   results carry `"level":"error"`; see
   [audit trail concept](../../docs/concepts/audit-trail.md).
+  Successful screened reads of SHA-256-pinned root `SKILL.md` files also add
+  `skill_loaded` informational records with path and digest only; instruction
+  text is not copied.
 - **Fork points are verifiable without spending a run**: `session_replay.py` rebuilds the
   transcript from a session's own records, recomputes every checkpoint's prefix digest, and
   reports each boundary as `verified`, `digest-mismatch`, `prefix-short` or `malformed`.
@@ -1543,7 +1597,7 @@ size (`result_chars`), so truncation is visible instead of inferred.
 
 `0` success · `1` error_during_execution · `2` error_max_turns ·
 `3` error_max_tool_calls · `4` error_max_budget_usd · `5` error_permission_denied ·
-`6` error_postconditions_failed · `7` error_session_busy ·
+`6` error_postconditions_failed · `7` error_session_busy · `8` error_evidence_incomplete ·
 `64` usage or configuration error (nothing was run). Result errors and refusals
 are printed to stderr; `--json` emits one object per event.
 
