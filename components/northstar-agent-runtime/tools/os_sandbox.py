@@ -365,6 +365,7 @@ def probe_capabilities(*, force: bool = False, bwrap_bin: str | None = None) -> 
             with tempfile.TemporaryFile() as filter_file:
                 filter_file.write(build_default_filter())
                 filter_file.flush()
+                filter_file.seek(0)
                 seccomp_probe = _probe_bwrap_feature(path, seccomp_fd=filter_file.fileno())
             seccomp_usable = seccomp_probe.returncode == 0
             seccomp_output = (seccomp_probe.stderr or seccomp_probe.stdout or "").strip().splitlines()

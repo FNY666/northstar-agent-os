@@ -261,6 +261,31 @@ class OsSandboxProbeTests(unittest.TestCase):
             launch.assert_not_called()
             self.assertFalse(Path(root, ".northstar").exists())
 
+    def test_bwrap_run_rewinds_filter_fd_before_spawn(self):
+        from tools import os_sandbox
+
+        caps = SandboxCapabilities(
+            bwrap_path="/fake/bwrap", bwrap_usable=True, bwrap_detail="base probe passed",
+            bwrap_cap_drop=True, bwrap_seccomp=True, preferred="bwrap",
+        )
+        stub = SandboxResult(("true",), "bwrap", "os", 0, False, "", "", 1)
+        offsets = []
+
+        def inspect_spawn(*_args, **kwargs):
+            seccomp_fds = kwargs["pass_fds"]
+            self.assertEqual(len(seccomp_fds), 1)
+            offsets.append(os.lseek(seccomp_fds[0], 0, os.SEEK_CUR))
+            return stub
+
+        with tempfile.TemporaryDirectory() as root, patch.object(
+            os_sandbox, "_run_scoped_popen", side_effect=inspect_spawn
+        ):
+            request = SandboxRequest(argv=("true",), cwd=Path(root), workspace=Path(root))
+            result = run_sandboxed(request, backend="bwrap", capabilities=caps)
+
+        self.assertIs(result, stub)
+        self.assertEqual(offsets, [0])
+
     def test_operator_disabled_capdrop_is_explicit_and_can_run(self):
         from tools import os_sandbox
 
@@ -421,6 +446,7 @@ class OsSandboxProcessBackendTests(RuntimeTestCase):
                 "open_files": MAX_OPEN_FILES,
             },
         )
+        self.assertEqual(target[1:3], ("-S", "-c"))
         parent = (
             "import os,resource,sys; "
             "resource.setrlimit(resource.RLIMIT_AS,(64*1024*1024,64*1024*1024)); "
