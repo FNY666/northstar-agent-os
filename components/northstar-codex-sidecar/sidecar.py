@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 MAX_PROMPT_CHARS=100_000
+MAX_JSON_DEPTH=128
 MIN_TIMEOUT_MS=1_000
 MAX_TIMEOUT_MS=300_000
 FALLBACK_STATUSES={"transport_unavailable","timeout"}
@@ -26,6 +27,28 @@ SENSITIVE_PATTERNS=(
 class Validation:
  ok: bool
  errors: tuple[str,...]=()
+
+def _strict_json_loads(raw:str)->Any:
+ depth=0; in_string=False; escaped=False
+ for character in raw:
+  if in_string:
+   if escaped: escaped=False
+   elif character=="\\": escaped=True
+   elif character=='"': in_string=False
+   continue
+  if character=='"': in_string=True
+  elif character in "[{":
+   depth+=1
+   if depth>MAX_JSON_DEPTH: raise ValueError(f"JSON depth limit exceeded ({MAX_JSON_DEPTH} containers)")
+  elif character in "]}": depth-=1
+ def unique_object(pairs):
+  result={}
+  for key,value in pairs:
+   if key in result: raise ValueError(f"duplicate JSON key {key!r}")
+   result[key]=value
+  return result
+ def reject_constant(value:str): raise ValueError(f"non-standard JSON constant {value}")
+ return json.loads(raw,object_pairs_hook=unique_object,parse_constant=reject_constant)
 
 def _walk(value:Any):
  if isinstance(value,dict):
@@ -54,8 +77,8 @@ def classify_request(request:Any)->Validation:
  elif not MIN_TIMEOUT_MS<=timeout<=MAX_TIMEOUT_MS: errors.append("timeout_ms is outside the permitted range")
  return Validation(not errors,tuple(errors))
 def parse_codex_event(line:str)->dict[str,str]|None:
- try: event=json.loads(line)
- except (TypeError,json.JSONDecodeError): return None
+ try: event=_strict_json_loads(line)
+ except (TypeError,ValueError,RecursionError): return None
  item=event.get("item") if isinstance(event,dict) and event.get("type")=="item.completed" else None
  if not isinstance(item,dict) or item.get("type")!="agent_message" or not isinstance(item.get("text"),str): return None
  return {"type":"text","text":item["text"]}
@@ -102,8 +125,8 @@ def run_one(request:object)->dict:
  return {"request_id":request["request_id"],"status":"ok","text":text}
 def main()->int:
  for line in sys.stdin:
-  try: result=run_one(json.loads(line))
-  except (json.JSONDecodeError,TypeError): result={"request_id":None,"status":"rejected","errors":["invalid JSON request"]}
+  try: result=run_one(_strict_json_loads(line))
+  except (TypeError,ValueError,RecursionError): result={"request_id":None,"status":"rejected","errors":["invalid JSON request"]}
   print(json.dumps(result,ensure_ascii=False),flush=True)
  return 0
 if __name__=="__main__": raise SystemExit(main())

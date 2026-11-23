@@ -61,10 +61,50 @@ HOST_KEY_ENV = "NORTHSTAR_HOST_KEY"
 RUN_REQUEST_ENV = "NORTHSTAR_RUN_REQUEST"
 
 LEGACY_PREFIX = "nsar"
+MAX_RUN_REQUEST_BYTES = 1 << 20
 
 
 class BridgeError(ValueError):
     """A run id or binding that cannot be used. Reported to the operator."""
+
+
+def _strict_json_loads(raw: str) -> Any:
+    """Parse the host-supplied run document without ambiguous JSON."""
+    depth = 0
+    in_string = False
+    escaped = False
+    for character in raw:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            continue
+        if character == '"':
+            in_string = True
+        elif character in "[{":
+            depth += 1
+            if depth > 128:
+                raise ValueError("JSON depth limit exceeded (128 containers)")
+        elif character in "]}":
+            depth -= 1
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON key {key!r}")
+            result[key] = value
+        return result
+
+    def reject_constant(value: str):
+        raise ValueError(f"non-standard JSON constant {value}")
+
+    import json
+
+    return json.loads(raw, object_pairs_hook=unique_object, parse_constant=reject_constant)
 
 
 @dataclass(frozen=True)
@@ -161,7 +201,10 @@ def run_document_from_environment() -> dict[str, Any] | None:
         import json
 
         with open(path, encoding="utf-8") as handle:
-            document = json.load(handle)
+            raw = handle.read(MAX_RUN_REQUEST_BYTES + 1)
+        if len(raw.encode("utf-8")) > MAX_RUN_REQUEST_BYTES:
+            raise BridgeError(f"{RUN_REQUEST_ENV} exceeds the {MAX_RUN_REQUEST_BYTES}-byte limit")
+        document = _strict_json_loads(raw)
     except OSError as error:
         raise BridgeError(f"{RUN_REQUEST_ENV} cannot be read: {error}") from error
     except ValueError as error:

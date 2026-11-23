@@ -1,0 +1,3 @@
+{
+  "async_map.ts": "export async function asyncMapLimit<T, U>(values: readonly T[], limit: number, fn: (value: T, index: number) => Promise<U>): Promise<U[]> {\n  if (!Number.isInteger(limit) || limit <= 0) throw new RangeError(\"limit must be a positive integer\");\n  const result: U[] = new Array(values.length);\n  let next = 0;\n  let failed = false;\n  async function worker(): Promise<void> {\n    while (!failed && next < values.length) {\n      const index = next++;\n      try {\n        result[index] = await fn(values[index], index);\n      } catch (error) {\n        failed = true;\n        throw error;\n      }\n    }\n  }\n  await Promise.all(Array.from({length: Math.min(limit, values.length)}, () => worker()));\n  return result;\n}\n"
+}

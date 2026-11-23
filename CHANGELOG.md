@@ -1,3 +1,26 @@
+## Unreleased — complete runtime API reference coverage
+
+The runtime API manifest and generated reference now include the 518 public
+modules that were missing from the catalog. The existing generated/internal
+exclusions remain explicit.
+
+## Unreleased — run the complete runtime test suite in CI
+
+The runtime CI job installs its test-only pytest dependency and uses pytest to
+run both unittest classes and standalone pytest tests. Three tests now resolve
+the runtime component relative to their own file instead of a developer's
+worktree path.
+
+## Unreleased — delegation expiry uses timezone-aware instants
+
+`agent_identity.verify_delegation_chain()` now parses expiry and reference
+timestamps as timezone-aware ISO 8601 instants and compares their UTC values.
+Naive, malformed, or out-of-range timestamps fail closed. This prevents
+offset-bearing timestamps from passing or failing expiry checks based on
+lexical order.
+The identity suite covers an equal instant written with a different offset,
+an expiry timestamp without a timezone, and UTC normalization overflow.
+
 ## Unreleased (one-hundred-sixtieth batch) — construction-site AI discipline (AI-construction absorption)
 
 New module `construction_agents.py`: `progress_evidence_receipt()` —

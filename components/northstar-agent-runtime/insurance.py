@@ -94,7 +94,9 @@ via :func:`hmac.compare_digest`.
 
 from __future__ import annotations
 
+import hashlib
 import hmac
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
@@ -1397,3 +1399,534 @@ def dark_pattern_audit_event(verdict: DarkPatternVerdict, *, action: str) -> dic
         "reason": verdict.reason,
         "markers_found": list(verdict.markers_found),
     }
+
+
+# ---------------------------------------------------------------------------
+# Cyber-insurance lifecycle ledger: Insurance assess/claim/renew
+# (additive extension — zero changes to the denial-receipt layer above)
+# ---------------------------------------------------------------------------
+#
+# Distinct layer from the denial-receipt ledger above: this is the
+# *cyber-insurance lifecycle decision ledger* — it books declared risk
+# assessments, declared claim filings, and declared policy renewals as a
+# deterministic single-host state machine. The lifecycle half is
+# Simulated: runs no actuarial math, contacts no underwriter, pays no
+# claims. A booked assessment/claim/renewal is ledger truth (what the host
+# declared), never proof of insurability, loss, or coverage.
+#
+# House style: frozen dataclasses, caller int seqs strictly increasing with
+# claim-then-burn (failed mutations consume their seq and book
+# ``insurance-lifecycle.rejected``; rewinds raise bare), no wall-clock,
+# RLock-guarded, fail-closed, ``sha256:`` digest pins with ``verify()``,
+# ``audit.ndjson/1`` events.
+
+#: Module version for the lifecycle ledger layer.
+INSURANCE_LIFECYCLE_VERSION = "insurance-lifecycle.v1"
+
+#: Schema pin for records produced by this layer.
+INSURANCE_LIFECYCLE_SCHEMA = "northstar.insurance-lifecycle.v1"
+
+#: Hash domain separator so lifecycle pins cannot collide with other digests.
+_LIFECYCLE_HASH_DOMAIN = b"northstar.insurance-lifecycle.v1\x00"
+
+#: Pinned risk-class vocabulary for assessments. ``prohibited`` means the
+#: host will not underwrite the policy — claims against it are refused
+#: fail-closed.
+RISK_CLASSES: tuple[str, ...] = ("low", "standard", "elevated", "high", "prohibited")
+
+#: Audit event kinds booked by this layer.
+_INSURANCE_ASSESSED_EVENT = "insurance-lifecycle.assessed"
+_INSURANCE_CLAIMED_EVENT = "insurance-lifecycle.claimed"
+_INSURANCE_RENEWED_EVENT = "insurance-lifecycle.renewed"
+_INSURANCE_REJECTED_EVENT = "insurance-lifecycle.rejected"
+
+_INSURANCE_AUDIT_KINDS: Mapping[str, str] = {
+    "assessed": _INSURANCE_ASSESSED_EVENT,
+    "claimed": _INSURANCE_CLAIMED_EVENT,
+    "renewed": _INSURANCE_RENEWED_EVENT,
+    "rejected": _INSURANCE_REJECTED_EVENT,
+}
+
+#: Raw-content keys banned from the audit boundary (exact-key matching).
+_INSURANCE_LIFECYCLE_BANNED_KEYS: frozenset[str] = frozenset({
+    "policy_terms",
+    "coverage",
+    "loss",
+    "notes",
+    "text",
+    "description",
+    "evidence",
+    "secret",
+    "key",
+    "payload",
+    "raw",
+    "message",
+})
+
+
+class InsuranceSpecError(ValueError):
+    """Base error for insurance-lifecycle ledger misuse."""
+
+
+class BadIdError(InsuranceSpecError):
+    """A policy/claim/renewal id was empty or not a string."""
+
+
+class DuplicatePolicyError(InsuranceSpecError):
+    """A policy id was assessed twice (ids are never recycled)."""
+
+
+class UnknownPolicyError(InsuranceSpecError):
+    """A claim/renewal named a policy with no booked assessment."""
+
+
+class DuplicateClaimError(InsuranceSpecError):
+    """A claim id was filed twice (ids are never recycled)."""
+
+
+class DuplicateRenewalError(InsuranceSpecError):
+    """A renewal id was booked twice (ids are never recycled)."""
+
+
+class BadRiskClassError(InsuranceSpecError):
+    """risk_class was not in the pinned vocabulary."""
+
+
+class BadDigestError(InsuranceSpecError):
+    """A digest was not ``""`` or ``sha256:<64hex>``."""
+
+
+class BadAmountError(InsuranceSpecError):
+    """An amount was not a non-negative int of minor currency units."""
+
+
+class BadTermError(InsuranceSpecError):
+    """term_months was not an int >= 1."""
+
+
+class ProhibitedPolicyError(InsuranceSpecError):
+    """A claim was filed against a policy assessed ``prohibited``."""
+
+
+class SeqOrderError(InsuranceSpecError):
+    """seq was malformed or not strictly increasing."""
+
+
+class AuditKindError(InsuranceSpecError):
+    """The audit builder received an unknown kind or a banned raw key."""
+
+
+def _lifecycle_check_id(value: Any, field_name: str) -> str:
+    if isinstance(value, bool) or not isinstance(value, str):
+        raise BadIdError(f"{field_name} must be a str")
+    if not value:
+        raise BadIdError(f"{field_name} must be non-empty")
+    return value
+
+
+def _lifecycle_check_digest(value: Any, field_name: str) -> str:
+    if not isinstance(value, str):
+        raise BadDigestError(f"{field_name} must be a str")
+    if value == "":
+        return value
+    if len(value) != 71 or not value.startswith("sha256:"):
+        raise BadDigestError(f"{field_name} must be '' or 'sha256:<64hex>'")
+    hexpart = value[7:]
+    if len(hexpart) != 64 or any(c not in "0123456789abcdef" for c in hexpart):
+        raise BadDigestError(f"{field_name} must be '' or 'sha256:<64hex>'")
+    return value
+
+
+def _lifecycle_check_risk_class(value: Any) -> str:
+    if value not in RISK_CLASSES:
+        raise BadRiskClassError(f"risk_class must be one of {RISK_CLASSES}")
+    return value
+
+
+def _lifecycle_check_amount(value: Any, field_name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise BadAmountError(f"{field_name} must be a non-negative int")
+    if value < 0:
+        raise BadAmountError(f"{field_name} must be >= 0")
+    return value
+
+
+def _lifecycle_check_term(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise BadTermError("term_months must be an int >= 1")
+    if value < 1:
+        raise BadTermError("term_months must be an int >= 1")
+    return value
+
+
+def _lifecycle_pin(payload: Mapping[str, Any]) -> str:
+    """Deterministic ``sha256:`` pin for a canonicalized payload."""
+    canonical = jcs_canonical_json(payload)
+    if isinstance(canonical, str):
+        canonical = canonical.encode("utf-8")
+    digest = hashlib.sha256(_LIFECYCLE_HASH_DOMAIN + canonical).hexdigest()
+    return "sha256:" + digest
+
+
+def insurance_lifecycle_audit_event(audit_kind: str, **details: Any) -> dict[str, Any]:
+    """Build one audit event for the lifecycle layer.
+
+    ``audit_kind`` is one of ``assessed``/``claimed``/``renewed``/
+    ``rejected``. Raw content keys are banned from ``details`` — only
+    digests and bookkeeping fields may cross the audit boundary.
+    """
+    if audit_kind not in _INSURANCE_AUDIT_KINDS:
+        raise AuditKindError(f"unknown audit kind: {audit_kind!r}")
+    for key in details:
+        if key in _INSURANCE_LIFECYCLE_BANNED_KEYS:
+            raise AuditKindError(f"raw key banned from audit boundary: {key!r}")
+    return {
+        "schema": "audit.ndjson/1",
+        "kind": _INSURANCE_AUDIT_KINDS[audit_kind],
+        "details": dict(details),
+    }
+
+
+@dataclass(frozen=True)
+class AssessmentRecord:
+    """Booked risk assessment for one policy (host-declared, Simulated)."""
+
+    policy_id: str
+    seq: int
+    risk_class: str
+    coverage_digest: str
+    premium_cents: int
+    digest_pin: str
+    schema: str = INSURANCE_LIFECYCLE_SCHEMA
+
+    def verify(self) -> bool:
+        expected = _lifecycle_pin({
+            "policy_id": self.policy_id,
+            "seq": self.seq,
+            "risk_class": self.risk_class,
+            "coverage_digest": self.coverage_digest,
+            "premium_cents": self.premium_cents,
+        })
+        return hmac.compare_digest(expected, self.digest_pin)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "schema": self.schema,
+            "policy_id": self.policy_id,
+            "seq": self.seq,
+            "risk_class": self.risk_class,
+            "coverage_digest": self.coverage_digest,
+            "premium_cents": self.premium_cents,
+            "digest_pin": self.digest_pin,
+        }
+
+
+@dataclass(frozen=True)
+class ClaimRecord:
+    """Booked claim filing against one assessed policy (host-declared)."""
+
+    claim_id: str
+    policy_id: str
+    seq: int
+    loss_digest: str
+    amount_cents: int
+    digest_pin: str
+    schema: str = INSURANCE_LIFECYCLE_SCHEMA
+
+    def verify(self) -> bool:
+        expected = _lifecycle_pin({
+            "claim_id": self.claim_id,
+            "policy_id": self.policy_id,
+            "seq": self.seq,
+            "loss_digest": self.loss_digest,
+            "amount_cents": self.amount_cents,
+        })
+        return hmac.compare_digest(expected, self.digest_pin)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "schema": self.schema,
+            "claim_id": self.claim_id,
+            "policy_id": self.policy_id,
+            "seq": self.seq,
+            "loss_digest": self.loss_digest,
+            "amount_cents": self.amount_cents,
+            "digest_pin": self.digest_pin,
+        }
+
+
+@dataclass(frozen=True)
+class RenewalRecord:
+    """Booked policy renewal declaration (host-declared)."""
+
+    renewal_id: str
+    policy_id: str
+    seq: int
+    terms_digest: str
+    term_months: int
+    digest_pin: str
+    schema: str = INSURANCE_LIFECYCLE_SCHEMA
+
+    def verify(self) -> bool:
+        expected = _lifecycle_pin({
+            "renewal_id": self.renewal_id,
+            "policy_id": self.policy_id,
+            "seq": self.seq,
+            "terms_digest": self.terms_digest,
+            "term_months": self.term_months,
+        })
+        return hmac.compare_digest(expected, self.digest_pin)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "schema": self.schema,
+            "renewal_id": self.renewal_id,
+            "policy_id": self.policy_id,
+            "seq": self.seq,
+            "terms_digest": self.terms_digest,
+            "term_months": self.term_months,
+            "digest_pin": self.digest_pin,
+        }
+
+
+class Insurance:
+    """Cyber-insurance lifecycle decision ledger: assess → claim → renew.
+
+    Deterministic single-host state machine. Caller-supplied int seqs must
+    be strictly increasing (claim-then-burn: failed mutations consume their
+    seq and book ``insurance-lifecycle.rejected``; rewinds raise bare
+    without consuming). RLock-guarded. Pure-read views validate the seq
+    shape, never consume it, and write no audit rows.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.RLock()
+        self._last_seq = 0
+        self._assessments: dict[str, AssessmentRecord] = {}
+        self._claims: dict[str, ClaimRecord] = {}
+        self._renewals: dict[str, RenewalRecord] = {}
+        self._audit: list[dict[str, Any]] = []
+
+    # -- seq discipline ----------------------------------------------------
+
+    def _check_seq_shape(self, seq: Any) -> int:
+        if isinstance(seq, bool) or not isinstance(seq, int):
+            raise SeqOrderError("seq must be an int")
+        if seq < 1:
+            raise SeqOrderError("seq must be >= 1")
+        return seq
+
+    def _claim_seq(self, seq: Any) -> int:
+        seq = self._check_seq_shape(seq)
+        if seq <= self._last_seq:
+            raise SeqOrderError("seq must be strictly increasing")
+        self._last_seq = seq
+        return seq
+
+    # -- audit -------------------------------------------------------------
+
+    def _emit(self, audit_kind: str, seq: int, **details: Any) -> None:
+        event = insurance_lifecycle_audit_event(audit_kind, **details)
+        event["seq"] = seq
+        self._audit.append(event)
+
+    def _fail(self, seq: int, exc: InsuranceSpecError) -> None:
+        self._emit("rejected", seq,
+                   error=type(exc).__name__, detail=str(exc))
+        raise exc
+
+    # -- mutations ---------------------------------------------------------
+
+    def assess(self, policy_id: str, seq: int, risk_class: str = "standard",
+               coverage_digest: str = "", premium_cents: int = 0) -> AssessmentRecord:
+        """Book one risk assessment for a policy (host-declared).
+
+        Coverage terms travel as a digest pin only — raw terms never enter
+        a record. Duplicate policy ids are refused (ids never recycled).
+        """
+        with self._lock:
+            seq = self._claim_seq(seq)
+            try:
+                pid = _lifecycle_check_id(policy_id, "policy_id")
+                if pid in self._assessments:
+                    raise DuplicatePolicyError(f"policy already assessed: {pid!r}")
+                rc = _lifecycle_check_risk_class(risk_class)
+                cd = _lifecycle_check_digest(coverage_digest, "coverage_digest")
+                prem = _lifecycle_check_amount(premium_cents, "premium_cents")
+            except InsuranceSpecError as exc:
+                self._fail(seq, exc)
+            record = AssessmentRecord(
+                policy_id=pid,
+                seq=seq,
+                risk_class=rc,
+                coverage_digest=cd,
+                premium_cents=prem,
+                digest_pin=_lifecycle_pin({
+                    "policy_id": pid,
+                    "seq": seq,
+                    "risk_class": rc,
+                    "coverage_digest": cd,
+                    "premium_cents": prem,
+                }),
+            )
+            self._assessments[pid] = record
+            self._emit("assessed", seq, policy_id=pid, risk_class=rc,
+                       premium_cents=prem, digest=record.digest_pin)
+            return record
+
+    def claim(self, policy_id: str, claim_id: str, seq: int,
+              loss_digest: str = "", amount_cents: int = 0) -> ClaimRecord:
+        """Book one claim filing against an assessed policy (host-declared).
+
+        Loss details travel as a digest pin only. The policy must exist and
+        must not have been assessed ``prohibited``. One claim per claim id.
+        """
+        with self._lock:
+            seq = self._claim_seq(seq)
+            try:
+                pid = _lifecycle_check_id(policy_id, "policy_id")
+                cid = _lifecycle_check_id(claim_id, "claim_id")
+                if pid not in self._assessments:
+                    raise UnknownPolicyError(f"unknown policy: {pid!r}")
+                if self._assessments[pid].risk_class == "prohibited":
+                    raise ProhibitedPolicyError(
+                        f"policy assessed prohibited: {pid!r}")
+                if cid in self._claims:
+                    raise DuplicateClaimError(f"claim already filed: {cid!r}")
+                ld = _lifecycle_check_digest(loss_digest, "loss_digest")
+                amt = _lifecycle_check_amount(amount_cents, "amount_cents")
+            except InsuranceSpecError as exc:
+                self._fail(seq, exc)
+            record = ClaimRecord(
+                claim_id=cid,
+                policy_id=pid,
+                seq=seq,
+                loss_digest=ld,
+                amount_cents=amt,
+                digest_pin=_lifecycle_pin({
+                    "claim_id": cid,
+                    "policy_id": pid,
+                    "seq": seq,
+                    "loss_digest": ld,
+                    "amount_cents": amt,
+                }),
+            )
+            self._claims[cid] = record
+            self._emit("claimed", seq, policy_id=pid, claim_id=cid,
+                       amount_cents=amt, digest=record.digest_pin)
+            return record
+
+    def renew(self, policy_id: str, renewal_id: str, seq: int,
+              terms_digest: str = "", term_months: int = 12) -> RenewalRecord:
+        """Book one policy renewal declaration (host-declared).
+
+        Terms travel as a digest pin only. The policy must exist. One
+        renewal per renewal id; renewals chain in booked order.
+        """
+        with self._lock:
+            seq = self._claim_seq(seq)
+            try:
+                pid = _lifecycle_check_id(policy_id, "policy_id")
+                rid = _lifecycle_check_id(renewal_id, "renewal_id")
+                if pid not in self._assessments:
+                    raise UnknownPolicyError(f"unknown policy: {pid!r}")
+                if rid in self._renewals:
+                    raise DuplicateRenewalError(f"renewal already booked: {rid!r}")
+                td = _lifecycle_check_digest(terms_digest, "terms_digest")
+                tm = _lifecycle_check_term(term_months)
+            except InsuranceSpecError as exc:
+                self._fail(seq, exc)
+            record = RenewalRecord(
+                renewal_id=rid,
+                policy_id=pid,
+                seq=seq,
+                terms_digest=td,
+                term_months=tm,
+                digest_pin=_lifecycle_pin({
+                    "renewal_id": rid,
+                    "policy_id": pid,
+                    "seq": seq,
+                    "terms_digest": td,
+                    "term_months": tm,
+                }),
+            )
+            self._renewals[rid] = record
+            self._emit("renewed", seq, policy_id=pid, renewal_id=rid,
+                       term_months=tm, digest=record.digest_pin)
+            return record
+
+    # -- pure-read views ---------------------------------------------------
+
+    def assessment_record(self, policy_id: str, seq: int) -> AssessmentRecord:
+        """Return the booked assessment for a policy (no seq consumed)."""
+        with self._lock:
+            self._check_seq_shape(seq)
+            pid = _lifecycle_check_id(policy_id, "policy_id")
+            try:
+                return self._assessments[pid]
+            except KeyError:
+                raise UnknownPolicyError(f"unknown policy: {pid!r}") from None
+
+    def claims_for(self, policy_id: str, seq: int) -> tuple[ClaimRecord, ...]:
+        """Claims filed against a policy, in booked order."""
+        with self._lock:
+            self._check_seq_shape(seq)
+            pid = _lifecycle_check_id(policy_id, "policy_id")
+            if pid not in self._assessments:
+                raise UnknownPolicyError(f"unknown policy: {pid!r}")
+            return tuple(
+                rec for rec in self._claims.values() if rec.policy_id == pid
+            )
+
+    def renewals_for(self, policy_id: str, seq: int) -> tuple[RenewalRecord, ...]:
+        """Renewals booked for a policy, in booked order."""
+        with self._lock:
+            self._check_seq_shape(seq)
+            pid = _lifecycle_check_id(policy_id, "policy_id")
+            if pid not in self._assessments:
+                raise UnknownPolicyError(f"unknown policy: {pid!r}")
+            return tuple(
+                rec for rec in self._renewals.values() if rec.policy_id == pid
+            )
+
+    def policy_ids(self, seq: int) -> tuple[str, ...]:
+        """All assessed policy ids, sorted."""
+        with self._lock:
+            self._check_seq_shape(seq)
+            return tuple(sorted(self._assessments))
+
+    def stats(self, seq: int) -> dict[str, int]:
+        """Ledger counts as data."""
+        with self._lock:
+            self._check_seq_shape(seq)
+            prohibited = sum(
+                1 for rec in self._assessments.values()
+                if rec.risk_class == "prohibited"
+            )
+            return {
+                "policies": len(self._assessments),
+                "claims": len(self._claims),
+                "renewals": len(self._renewals),
+                "prohibited": prohibited,
+            }
+
+    def audit_log(self, seq: int) -> tuple[dict[str, Any], ...]:
+        """Booked audit events, in order (no audit row for the read)."""
+        with self._lock:
+            self._check_seq_shape(seq)
+            return tuple(self._audit)
+
+
+def insurance_lifecycle_main() -> None:
+    """Self-check for the lifecycle ledger layer."""
+    ins = Insurance()
+    ins.assess("pol-1", 1, risk_class="low", premium_cents=1000)
+    ins.claim("pol-1", "clm-1", 2, amount_cents=500)
+    ins.renew("pol-1", "rnw-1", 3, term_months=12)
+    assert ins.assessment_record("pol-1", 4).verify()
+    assert ins.stats(5)["policies"] == 1
+    print("insurance-lifecycle OK: assess, claim, renew, pins, audit")
+
+
+if __name__ == "__main__":
+    insurance_lifecycle_main()

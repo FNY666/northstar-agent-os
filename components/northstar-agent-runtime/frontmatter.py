@@ -7,7 +7,8 @@ and anything outside that subset is an error, not a guess:
   ``---`` line; the remainder is the body;
 - fields are ``key: value`` lines (blank lines and ``#`` comments allowed);
   values may be scalars (quoted or bare strings, booleans, integers, floats),
-  inline arrays ``key: [a, b]``, or block arrays of ``- item`` lines;
+  inline arrays ``key: [a, b]``, block arrays of ``- item`` lines, or two-space
+  block mappings of scalar values;
 - duplicate keys, malformed lines, and keys outside ``[A-Za-z_][A-Za-z0-9_-]*``
   are errors. Unknown *field names* are the caller's decision to reject, so a
   typo in a skill or agent definition can never be silently ignored.
@@ -72,6 +73,46 @@ def _parse_fields(lines: list[str]) -> dict[str, Any]:
             fields[key] = [item.strip() for item in inner.split(",") if item.strip()] if inner else []
             continue
         if value_text == "":
+            # A small, strict block-mapping subset covers Agent Skills metadata
+            # while keeping arbitrary YAML out of this dependency-free parser.
+            probe = index
+            while probe < len(lines) and (
+                not lines[probe].strip() or lines[probe].lstrip().startswith("#")
+            ):
+                probe += 1
+            probe_line = lines[probe] if probe < len(lines) else ""
+            probe_indent = len(probe_line) - len(probe_line.lstrip(" "))
+            if probe_indent > 0 and not probe_line.strip().startswith("- "):
+                mapping: dict[str, Any] = {}
+                while index < len(lines):
+                    candidate_line = lines[index]
+                    candidate = candidate_line.strip()
+                    if not candidate or candidate.startswith("#"):
+                        index += 1
+                        continue
+                    indent = len(candidate_line) - len(candidate_line.lstrip(" "))
+                    if indent == 0:
+                        break
+                    if indent != 2 or candidate.startswith("- ") or ":" not in candidate:
+                        raise FrontmatterError(
+                            f"frontmatter key {key!r}: block mappings require two-space scalar entries"
+                        )
+                    nested_key, _, nested_value = candidate.partition(":")
+                    nested_key = nested_key.strip()
+                    if not _KEY_RE.match(nested_key):
+                        raise FrontmatterError(
+                            f"frontmatter key {key!r}: invalid mapping key {nested_key!r}"
+                        )
+                    if nested_key in mapping:
+                        raise FrontmatterError(
+                            f"frontmatter key {key!r}: duplicate mapping key {nested_key!r}"
+                        )
+                    nested_value = nested_value.strip()
+                    mapping[nested_key] = _parse_scalar(nested_value, nested_key) if nested_value else None
+                    index += 1
+                fields[key] = mapping
+                continue
+
             # Block array: subsequent lines of "- item".
             items: list[str] = []
             while index < len(lines):
