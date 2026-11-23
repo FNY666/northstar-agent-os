@@ -247,7 +247,7 @@ jobs:
         # so this runs offline with no dependency install.
         run: python3 tests/docbuild.py verify
 
-  agent-runtime-pytest:
+  agent-runtime-pytest-files:
     name: Agent runtime (pytest-style tests)
     runs-on: ubuntu-latest
     defaults:
