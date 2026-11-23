@@ -181,6 +181,34 @@ class RuntimeTestCase(unittest.TestCase):
         return [event.subtype for event in report.events if isinstance(event, SystemMessage) and event.subtype == "init"]
 
 
+def doctor_capability_skip_reason(caps=None) -> str | None:
+    """Why doctor cannot exit clean here, or None if it can.
+
+    Doctor's Shell seccomp check fails when the host kernel cannot load a
+    BPF filter, and one failed check makes the whole report exit non-zero.
+    A test that asserts "doctor exits clean" is then asserting a property of
+    the kernel it runs on. This names the missing capability instead, and
+    quotes the probe so a skip still tells the reader what the host said.
+    """
+    if caps is None:
+        from tools.os_sandbox import probe_capabilities
+
+        caps = probe_capabilities()
+    if not caps.bwrap_usable:
+        return f"bwrap unusable on this host, so doctor cannot exit clean: {caps.bwrap_detail}"
+    if not caps.bwrap_cap_drop:
+        return (
+            "bwrap capability-drop probe failed on this host, so doctor cannot exit "
+            f"clean: {caps.bwrap_detail}"
+        )
+    if not caps.bwrap_seccomp:
+        return (
+            "bwrap seccomp probe failed on this host, so doctor cannot exit clean: "
+            f"{caps.bwrap_seccomp_detail}"
+        )
+    return None
+
+
 def tool_call(name: str, payload: dict[str, Any] | None = None, *, call_id: str = "") -> dict[str, Any]:
     block: dict[str, Any] = {"type": "tool_use", "name": name, "input": dict(payload or {})}
     if call_id:

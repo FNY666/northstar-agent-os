@@ -313,7 +313,22 @@ def write_replay_page(
     transcript_path = Path(session_dir) / f"{safe_id}{SESSION_FILE_SUFFIX}"
     if not transcript_path.is_file():
         raise FileNotFoundError(f"no transcript for session {safe_id!r} in {session_dir}")
-    records, dropped = load_jsonl(transcript_path)
+    # The UI is a read-only viewer and must be able to inspect a minimal or
+    # legacy transcript that has no runtime chain metadata. Resume/export paths
+    # keep strict integrity validation; rendering only normalizes payloads.
+    # UI is a read-only renderer. It accepts legacy JSONL values such as NaN and
+    # Infinity so _json_safe can render them as null; resume/export keep the
+    # strict session parser and reject those non-standard values.
+    records: list[dict[str, Any]] = []
+    dropped = 0
+    for line in transcript_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        value = json.loads(line)
+        if isinstance(value, dict):
+            records.append(value)
+        else:
+            dropped += 1
     html = render_replay_page(
         safe_id,
         records,

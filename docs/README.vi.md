@@ -6,6 +6,8 @@
 
 **Tóm tắt trong một câu:** Northstar là một runtime nhỏ cho agent, vẫn đang hoàn thiện — một lối vào duy nhất (`northstar agent`), ranh giới rõ ràng, có thể kiểm toán và thực thi khôi phục được. Kernel được lắp từ các hệ con rõ ràng (runtime, contract, host, durable, sidecar, interop). Đây **không phải** nền tảng đa agent hoàn chỉnh (không cloud lưu trữ, không đội agent song song); thứ được phát hành hôm nay là phần hạ tầng hữu ích để chạy agent mà không bất ngờ: **`Shell`** sandbox **từ chối theo mặc định** (dùng bubblewrap khi được, nếu không thì fallback process trung thực), cùng Northstar Codex Sidecar như một bộ điều hợp worker cục bộ bị giới hạn.
 
+Trong các phiên được lưu, mỗi lần đọc thành công `SKILL.md` đã xác minh bằng SHA-256 được ghi thành sự kiện kiểm toán `skill_loaded`; bản ghi có đường dẫn và digest, không chứa nội dung hướng dẫn.
+
 > English is the canonical project entry. Translations mirror its scope and security claims; update them when the canonical README changes.
 
 ## Đây là gì?

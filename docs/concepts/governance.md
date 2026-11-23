@@ -6,7 +6,7 @@ README only has to describe its own slice.
 
 ## The invariant
 
-No path may bypass all four layers at once. Any tool transport — built-in
+Registered runtime tool calls pass through these governance layers. Tool transports — built-in
 tools, sidecar delegation (`CodexReadOnly`), skills, MCP servers, subagents —
 eventually crosses:
 
@@ -79,7 +79,7 @@ bypass.
 | `northstar-host` | default-deny workspace/authorization broker around a verified run |
 | `northstar-durable-run` | per-call action gate + independent postcondition verification |
 | `northstar-run-contract` | the versioned request/receipt boundary encodes *what was authorized* |
-| `northstar-codex-sidecar` | read-only worker: no write tool, no path to host state |
+| `northstar-codex-sidecar` | worker launched with read-only Codex flags; host permissions and service configuration define filesystem visibility |
 | `northstar-agent-interop` | handoff boundary that re-asserts policy at the next engine |
 
 ## Reading on

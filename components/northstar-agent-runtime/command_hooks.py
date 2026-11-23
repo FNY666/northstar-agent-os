@@ -138,6 +138,29 @@ def _read_hook_script(path: Path) -> bytes:
         os.close(fd)
 
 
+def sealed_snapshot_supported() -> bool:
+    """Report whether this host can seal a script snapshot for real.
+
+    The platform is not the question. A Linux kernel can expose
+    os.memfd_create and still refuse to implement it, so the only honest
+    answer comes from sealing an empty memfd and seeing whether it works.
+    """
+    if not sys.platform.startswith("linux") or not Path("/proc/self/fd").is_dir():
+        return False
+    try:
+        fd = _sealed_script_fd(b"")
+    except OSError:
+        return False
+    except Exception:
+        # A host that raises something other than OSError while sealing is
+        # still a host that cannot seal. Never let a probe crash a caller.
+        return False
+    try:
+        return True
+    finally:
+        os.close(fd)
+
+
 def _sealed_script_fd(source: bytes) -> int:
     """Put reviewed bytes in a Linux anonymous file sealed against later writes."""
     if not sys.platform.startswith("linux") or not Path("/proc/self/fd").is_dir():
@@ -279,8 +302,11 @@ def parse_hooks(
         if execution_mode == "snapshot":
             if interpreter not in {"python", "python3", "node", "sh", "bash"}:
                 raise _fail(f"hooks[{index}]: snapshot execution requires an explicit supported interpreter")
-            if not sys.platform.startswith("linux") or not Path("/proc/self/fd").is_dir():
-                raise _fail(f"hooks[{index}]: snapshot execution requires Linux procfs and sealed memfd support")
+            if not sealed_snapshot_supported():
+                raise _fail(
+                    f"hooks[{index}]: snapshot execution requires Linux procfs and a "
+                    "working memfd_create on this host"
+                )
         tool = entry.get("tool")
         if tool is not None:
             if not isinstance(tool, str) or not tool.strip():

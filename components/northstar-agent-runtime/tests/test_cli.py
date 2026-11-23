@@ -19,7 +19,7 @@ from pathlib import Path
 from unittest import mock
 
 import support  # noqa: F401
-from support import text_turn, tool_turn
+from support import doctor_capability_skip_reason, text_turn, tool_turn
 
 import cli
 from cli import EXIT_CODES, USAGE_ERROR, _load_script, _tool_lists, build_parser, main
@@ -443,6 +443,7 @@ class CeilingTests(unittest.TestCase):
                 # or an exit code nothing ever returns - fails here rather than in a
                 # pipeline that reads 1 as "the run failed" and 7 as "try again".
                 "error_session_busy": 7,
+                "error_evidence_incomplete": 8,
             },
         )
 
@@ -816,18 +817,27 @@ class DoctorTests(unittest.TestCase):
     def test_doctor_reports_missing_optional_sdks_as_warnings(self):
         # The check follows the selected provider: a scripted run needs no model
         # SDK at all, and only the SDK a live provider actually imports is named.
+        reason = doctor_capability_skip_reason()
+        if reason:
+            self.skipTest(reason)
         code, out, _ = run_cli("doctor", "--mcp-network", "allowed")
         self.assertEqual(code, 0)  # warnings, not failures
         self.assertIn("model-sdk", out)
         self.assertIn("none required", out)
         self.assertNotIn("anthropic", out, "doctor must not nag about an SDK this provider never imports")
         self.assertIn("session-dir", out)
+        reason = doctor_capability_skip_reason()
+        if reason:
+            self.skipTest(reason)
         code, out, _ = run_cli("doctor", "--provider", "anthropic", "--mcp-network", "allowed")
         self.assertEqual(code, 0)
         self.assertIn("anthropic", out)
 
     def test_doctor_reports_the_openai_compatible_endpoint_without_touching_it(self):
         tmp = Path(tempfile.mkdtemp(prefix="nsar-doctor-openai-"))
+        reason = doctor_capability_skip_reason()
+        if reason:
+            self.skipTest(reason)
         code, out, _ = run_cli("doctor", "--workspace", str(tmp), "--provider", "openai", "--model", "gpt-4.1", "--mcp-network", "allowed")
         self.assertEqual(code, 0)
         self.assertIn("openai-compatible", out)
@@ -881,8 +891,20 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(findings[0].name, "seccomp")
         self.assertEqual(findings[0].level, "warn")
 
+    def test_doctor_warns_about_server_supplied_oauth_discovery_with_mcp_network_allowed(self):
+        code, out, _ = run_cli("doctor", "--mcp-network", "allowed")
+        self.assertEqual(code, 0)  # explicit network opt-in remains a warning
+        warning = next(line for line in out.splitlines() if line.startswith("[warn] mcp-network"))
+        self.assertIn("loopback/private destinations", warning)
+        self.assertIn("stdio-to-HTTP OAuth bridges", warning)
+        self.assertIn("server-supplied discovery URLs", warning)
+        self.assertIn("SSRF risk", warning)
+
     def test_doctor_reports_mcp_seccomp_status(self):
         tmp = Path(tempfile.mkdtemp(prefix="nsar-doctor-"))
+        reason = doctor_capability_skip_reason()
+        if reason:
+            self.skipTest(reason)
         code, out, _ = run_cli("doctor", "--workspace", str(tmp), "--mcp-network", "allowed")
         self.assertEqual(code, 0)
         self.assertIn("[ok]", out)
@@ -892,6 +914,9 @@ class DoctorTests(unittest.TestCase):
 
     def test_doctor_reports_mcp_seccomp_off_as_a_warning(self):
         tmp = Path(tempfile.mkdtemp(prefix="nsar-doctor-"))
+        reason = doctor_capability_skip_reason()
+        if reason:
+            self.skipTest(reason)
         code, out, _ = run_cli("doctor", "--workspace", str(tmp), "--mcp-seccomp", "off", "--mcp-network", "allowed")
         self.assertEqual(code, 0)  # warnings, not failures
         self.assertIn("[warn] mcp-seccomp", out)

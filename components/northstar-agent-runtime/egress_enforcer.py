@@ -646,6 +646,23 @@ _NON_GLOBAL_IPV6_SPECIAL_NETWORKS = tuple(
 
 def _ip_permitted(ip_text: str, rule: DestinationRule) -> bool:
     """SSRF guard: exclude known IPv6 translation and scoped ranges by default."""
+_NAT64_WELL_KNOWN_PREFIX = ipaddress.IPv6Network("64:ff9b::/96")
+_NAT64_LOCAL_USE_PREFIX = ipaddress.IPv6Network("64:ff9b:1::/48")
+
+# IPv6 ranges that Python still classifies as global but that can conceal or
+# route to internal destinations.  6to4 embeds an IPv4 address in the low 32
+# bits, and the deprecated site-local prefix is site-scoped by definition.
+_NON_GLOBAL_IPV6_SPECIAL_NETWORKS = tuple(
+    ipaddress.ip_network(prefix)
+    for prefix in (
+        "2002::/16",          # RFC 3056 6to4 (classification varies by Python)
+        "fec0::/10",          # RFC 3879 deprecated site-local
+    )
+)
+
+
+def _ip_permitted(ip_text: str, rule: DestinationRule) -> bool:
+    """SSRF guard: require a globally reachable destination by default."""
     try:
         ip = ipaddress.ip_address(ip_text)
     except ValueError:
@@ -659,6 +676,20 @@ def _ip_permitted(ip_text: str, rule: DestinationRule) -> bool:
     # Positive classification blocks ordinary private ranges and the shared
     # carrier space; explicit transition checks close routes Python's
     # ipaddress classification intentionally leaves globally reachable.
+    # A global-looking NAT64 address can carry a private IPv4 destination.
+    # Judge the well-known /96 by its embedded address before authorizing the
+    # address the sidecar will dial. The local-use NAT64 prefix is never public.
+    if isinstance(ip, ipaddress.IPv6Address):
+        if ip in _NAT64_LOCAL_USE_PREFIX:
+            return False
+        if any(ip in network for network in _NON_GLOBAL_IPV6_SPECIAL_NETWORKS):
+            return False
+        if ip.ipv4_mapped is not None:
+            ip = ip.ipv4_mapped
+        elif ip in _NAT64_WELL_KNOWN_PREFIX:
+            ip = ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
+    # Positive classification also rejects ranges such as 100.64.0.0/10,
+    # which is neither private nor reserved in some Python ipaddress versions.
     return ip.is_global
 
 
