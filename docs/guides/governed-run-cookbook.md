@@ -2,7 +2,10 @@
 
 End-to-end walk of one governed run with the offline tools, then with a live
 provider. All switches shown here are validated by the runtime's own tests and
-demo; exit codes follow the table in the runtime README.
+demo; exit codes follow the table in the runtime README. Commands using
+`python3 -m cli` require an installed runtime or a working directory of
+`components/northstar-agent-runtime`. From the repository root without installing,
+use `bin/northstar` instead and keep workspace paths explicit.
 
 ## 1. Bring up the components
 
@@ -16,7 +19,7 @@ make demo          # offline demo smoke (see step 2)
 To install into a virtualenv (`components/*` are local path-installable):
 
 ```sh
-make install       # creates ./.venv with all six components
+make install       # creates ./.venv with five Python packages; Sidecar is separate
 ./.venv/bin/northstar doctor --workspace .
 ```
 
@@ -41,7 +44,8 @@ bin/northstar agent --workspace . --prompt "summarise the repo" \
 ```
 
 Prints the plan — provider, pricing, tools, skills, MCP servers, sessions —
-and exits 0 **without sending a request or spawning a child process**.
+and exits 0 **without sending a model request or executing the proposed task**.
+Configuration checks may probe local executables (for example bubblewrap).
 `--dry-run` is the cheapest way to validate a configuration.
 
 ## 4. Tighten, then run
@@ -74,12 +78,30 @@ the scripted provider. Any denial under `--halt-on-denial` ends the run with
 
 ```sh
 python3 -m cli sessions list
-python3 -m cli sessions view <session-id>     # read-only
+python3 -m cli sessions show <session-id>     # read-only
 ```
 
 Transcripts are append-only JSONL; the final summary line prints
 `turns=… tool_calls=… cost=$… session=…` and is the one stable line scripts
 should parse (`--quiet` keeps it).
+
+For a cross-component, digest-first audit artifact, opt in to a run evidence
+bundle:
+
+```sh
+python3 -m cli run --workspace . --prompt "..." \
+  --run-evidence-dir ./evidence/run-1 --require-evidence
+python3 -m cli evidence inspect ./evidence/run-1 --json
+```
+
+The bundle chains run configuration, permission decisions, tool outcomes,
+checkpoints, verification/postconditions, egress decisions, delegation, and the
+terminal result without copying prompts, raw arguments, or tool bodies.
+`--require-evidence` makes a capture failure end as
+`error_evidence_incomplete` (exit 8); omit it to preserve the business result
+while reporting the incomplete bundle in `RunReport.evidence`. Unsigned bundles
+are structurally verifiable, not authenticated; use a sealed run receipt when
+authenticity matters.
 
 ## 7. Make "it says it finished" not the evidence
 
@@ -115,9 +137,13 @@ python3 -m cli skills check --root ../downloaded-bundle  # vet a third-party bun
 
 `skill_audit` is deterministic and offline: instruction override, concealment,
 policy self-edit, `curl … | bash`, credential paths, metadata endpoints, invisible
-unicode, and context bloat. Commit `skills.lock`; `doctor` warns when it disagrees
-with the tree. A run cannot rewrite it — `.northstar` is write-protected for the
-agent, so the review record stays outside the reach of what it gates.
+unicode, and context bloat. Runnable files under each skill's `scripts/` directory
+are statically scanned and individually pinned too; changing one makes
+`--require-skill-lock` refuse before the provider runs. Script symlinks are rejected
+so the reviewed bytes stay the executed bytes. Commit `skills.lock`; `doctor` warns
+when it disagrees with the tree. A run cannot rewrite it — `.northstar` is
+write-protected for the agent, so the review record stays outside the reach of what
+it gates.
 
 ## 9. Resume and fork at a turn boundary
 

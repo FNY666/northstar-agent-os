@@ -1,0 +1,25 @@
+{
+  "deny_set": [
+    [
+      "argument-denylist",
+      "denial.argument.policy_violation"
+    ],
+    [
+      "ceiling-fail-closed",
+      "denial.ceiling.needs_approval"
+    ],
+    [
+      "composition-forbidden-sequence",
+      "denial.composition.forbidden_sequence"
+    ],
+    [
+      "disallowed-tool",
+      "denial.disallowed_tools"
+    ],
+    [
+      "mutating-no-callback",
+      "denial.mode.default.no_callback"
+    ]
+  ],
+  "version": "deny-monotonicity.v1"
+}
