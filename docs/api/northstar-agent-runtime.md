@@ -51702,6 +51702,10 @@ Shape an ``audit.ndjson/1`` record for the job queue.
 
 Deterministic Celery/Sidekiq-shaped job queue bookkeeping.
 
+- `refusal_gate` (property)
+  - The installed refusal gate, if any.
+- `set_refusal_gate(gate: Optional[Any])`
+  - Install (or remove) the refusal gate.
 - `job(job_id: str)`
   - State of one job, or None if never enqueued.
 - `ready(queue: str)`
@@ -51716,7 +51720,7 @@ Deterministic Celery/Sidekiq-shaped job queue bookkeeping.
   - Reserve the next eligible job in ``queue`` for a worker.
 - `ack(job_id: str, seq: int)`
   - Terminal success of a reserved job.
-- `retry(job_id: str, seq: int, delay_seqs: int=0)`
+- `retry(job_id: str, seq: int, delay_seqs: int=0, now: Optional[float]=None)`
   - Return a reserved job to ``ready`` with a backoff.
 #### `main()`
 

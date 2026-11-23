@@ -569,7 +569,7 @@ class JobQueue:
     ``audit_log``) are pure: seq shape is validated, never consumed.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, refusal_gate: Optional[Any] = None) -> None:
         self._lock = threading.RLock()
         self._last_seq = -1
         self._entries: Dict[str, Dict[str, Any]] = {}
@@ -580,6 +580,61 @@ class JobQueue:
         self._retries: list = []
         self._dead: int = 0
         self._audit: list = []
+        #: The optional **refusal gate** (see
+        #: ``refusal_hold_wiring.RefusalHoldQueueGate``).  When one is
+        #: installed, a job whose re-dispatch is covered by a recorded
+        #: refusal is NOT put back to ``ready`` -- ``retry()`` refuses
+        #: the write and the job stays where it is.
+        #:
+        #: The gate is **duck-typed**: this module does not import the
+        #: wiring (the wiring imports the hold, and the hold must not
+        #: drag the queue ledger in).  It must offer
+        #: ``require_queue_allowed(job_id, action, now=...)``.
+        #:
+        #: WHY IT LIVES HERE (measured 2026-11-23):  before this, the
+        #: queue side had the gate only as an opt-in context manager
+        #: (``install_queue_refusal_gate``), which the HOST had to
+        #: remember to use at every call site.  A plain ``retry()``
+        #: returned the job to ``ready`` with the refusal on the books.
+        #: The lease side (``leased_task_claim``) never had that hole,
+        #: because its gate is inside the object.  This is the same
+        #: seam, closed the same way.
+        self._refusal_gate = refusal_gate
+
+    @property
+    def refusal_gate(self) -> Optional[Any]:
+        """The installed refusal gate, if any."""
+        return self._refusal_gate
+
+    def set_refusal_gate(self, gate: Optional[Any]) -> None:
+        """Install (or remove) the refusal gate.
+
+        The gate is asked about the job's **action identity**, which the
+        job already carries: the ``task`` string of the enqueue is the
+        work item's action, so no schema change is needed.
+        """
+        self._refusal_gate = gate
+
+    def _require_refusal_allows(self, job_id: str, action: str,
+                                now: Optional[float]) -> None:
+        """Ask the refusal gate, if one is installed.
+
+        Called **inside** ``retry()``'s lock, immediately before the
+        entry is flipped back to ``ready``.  A refusal raises, so the
+        job keeps its state, its attempt count and its backoff -- and
+        the gate's answer and the write are serialized, because both
+        happen under the same lock.
+        """
+        gate = self._refusal_gate
+        if gate is None:
+            return
+        require = getattr(gate, "require_queue_allowed", None)
+        if not callable(require):
+            raise TypeError(
+                "the refusal gate must offer require_queue_allowed(job_id, "
+                f"action, now=...), got {type(gate).__name__}"
+            )
+        require(job_id, action, now=now)
 
     # -- seq discipline ----------------------------------------------------
 
@@ -891,7 +946,8 @@ class JobQueue:
             return record
 
     def retry(
-        self, job_id: str, seq: int, delay_seqs: int = 0
+        self, job_id: str, seq: int, delay_seqs: int = 0,
+        now: Optional[float] = None,
     ) -> RetryRecord:
         """Return a reserved job to ``ready`` with a backoff.
 
@@ -903,6 +959,14 @@ class JobQueue:
         is marked ``dead`` and ``MaxRetriesExceededError`` is raised
         fail-closed; a dead job is terminal. Only ``reserved`` jobs
         may be retried.
+
+        **A recorded refusal blocks the re-dispatch.**  When a refusal
+        gate is installed (see :attr:`refusal_gate`) and a refusal
+        covers this job's action, the write is refused: the job does
+        not go back to ``ready``, its attempt count does not advance,
+        and no backoff is booked.  The check runs inside the queue's
+        own lock, immediately before the entry is flipped, so a refusal
+        and the re-dispatch cannot interleave.
         """
         with self._lock:
             self._claim(seq)
@@ -917,6 +981,11 @@ class JobQueue:
                         f"job {job_id} is {entry['state']}, "
                         "only reserved jobs may be retried"
                     )
+                # The refusal gate is asked BEFORE the budget check, so a
+                # refusal is reported as a refusal rather than as an
+                # exceeded budget -- and before the entry is flipped, so
+                # a refusal leaves the job exactly where it was.
+                self._require_refusal_allows(job_id, str(entry["task"]), now)
                 if entry["attempts"] >= entry["max_retries"]:
                     entry["state"] = _STATE_DEAD
                     entry["worker_id"] = ""

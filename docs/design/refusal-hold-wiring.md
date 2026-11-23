@@ -485,12 +485,19 @@ format is unchanged — this is a new *namespace*, not a new key shape.
   context manager that binds the gate into the queue's lock, so the
   check and the re-dispatch are serialized against the queue's own
   critical section.
+  **AMENDED by §10:** the queue side now ALSO carries the gate inside
+  the object (`JobQueue(refusal_gate=...)` / `set_refusal_gate()`), so
+  the context manager is no longer the only way to get a gate onto a
+  queue — and a plain `retry()` is refused without any wrapping.
 * `LeasedTaskClaim` gains an optional, **duck-typed** refusal gate
   (`refusal_gate=` / `set_refusal_gate()`), and **all three** of the
   paths that put a task back to `ready` consult it **inside the
   transaction**, immediately before the `UPDATE`. A refusal raises, the
   transaction rolls back, and the task keeps its state, its failure
   count and its delay.
+* `JobQueue` gains the same seam — see §10. The lease side's gate was
+  always inside the object; the queue side's was not, and that gap is
+  what let a recorded refusal be followed by a re-dispatch anyway.
 
 The gate is duck-typed on purpose: `leased_task_claim.py` does not
 import `refusal_hold_wiring` (the wiring imports the hold, and the
@@ -822,3 +829,158 @@ part that matters.
   path) are still open.  This section closes neither.
 * The gate's **answers** are unchanged.  Only the *meaning* of an
   answer, and what the ledger does with it, changed.
+
+## 10. AMENDED 2026-11-23 — the QUEUE side has no gate at all
+
+### 10.1 The asymmetry
+
+`refusal_hold.py`'s module docstring names the two re-dispatch paths that
+actually send the action again:
+
+> The two paths that actually **send the action again** --
+> ``JobQueue.retry()`` returning a job to ``ready`` and
+> ``LeasedTaskClaim.fail()`` returning a task to ``ready``.
+
+And it says neither sits on the refusal path.  §7 landed the *identity*
+for both sides and §8 landed the *auditing* for both sides.  But the
+**gate itself** is installed on only one of them:
+
+| | gate installed in the object? | how a caller consults it |
+|---|---|---|
+| `LeasedTaskClaim` (lease side) | **yes** -- `refusal_gate=` / `set_refusal_gate()` | the object asks it itself, inside its own transaction |
+| `JobQueue` (queue side) | **no** -- `job_queue.py` mentions "refusal" **zero** times | the caller must wrap the call in `install_queue_refusal_gate(...)` **by hand** |
+
+`install_queue_refusal_gate` is a correct, tested context manager.  The
+problem is that it is **opt-in at every call site**, and the call sites
+are the host's, not the runtime's:
+
+```python
+queue = JobQueue()
+gate = RefusalHoldQueueGate(registry)
+gate.record_queue("job-1", "dispatch", row=make_row())
+queue.retry("job-1", 3)
+# -> the job goes back to "ready"
+```
+
+Measured on this branch, 2026-11-23, with the refusal recorded and the
+gate built but **not** wrapped around the call:
+
+```
+reserved: reserved
+after a plain retry, job-1 state = ready
+=> the refusal was on the books, and the job went back to ready: True
+```
+
+The refusal is faithfully recorded, the gate can answer, and the job goes
+back to ``ready`` anyway.  That is the exact failure `refusal_hold.py`'s
+docstring warns about -- *"recorded but not enforced ... which is worse
+than not recorded, because the ledger creates the illusion that the
+refusal was handled"* -- reproduced on the side that has the identity
+and the auditing but not the gate.
+
+The lease side avoids it because the gate is **inside the object**:
+`fail()` calls `self._require_refusal_allows(...)` itself, inside its
+transaction, immediately before the ``UPDATE`` that flips the task back
+to ``ready``.  There is no call site for the host to forget.
+
+### 10.2 The fix
+
+`JobQueue` grows the same seam the lease side has:
+
+* `JobQueue.__init__(..., refusal_gate=None)` and
+  `set_refusal_gate(gate)` / a `refusal_gate` property;
+* `retry()` asks the gate **inside its own lock**, immediately before it
+  flips the entry to ``ready`` -- so the gate's answer and the write are
+  serialized, exactly as the lease side's are.
+
+The action identity is the job's own ``task`` string, which `JobQueue`
+already carries on every entry -- no schema change, and the same
+identity §7 established.
+
+**The gate is duck-typed**, as on the lease side: `job_queue.py` does
+not import the wiring (the wiring imports the hold, and the hold must
+not drag the queue ledger in).  It must offer
+`require_queue_allowed(job_id, action, now=...)`.
+
+**The check is raised, not boolean.**  `retry()` reports ONE job for ONE
+call, so a refusal can raise -- the caller asked about that job and
+nothing else.  (The lease side has a second, boolean path for `reap()`,
+which sweeps a **batch**; `JobQueue` has no batch sweep over retries, so
+there is no boolean form here, and inventing one would create a second
+question with a different answer.)
+
+**`install_queue_refusal_gate` stays.**  It is not removed: it is the
+way a host binds the gate into a queue it does not own, and its
+context-manager form is still correct.  But it is no longer the *only*
+way to get a gate onto a queue -- and a host that installs the gate in
+the object gets the guarantee without having to remember.
+
+### 10.3 The guards, and why they can fail
+
+| guard | what it pins |
+|---|---|
+| `test_a_refused_retry_leaves_the_job_reserved` | the observable proof: the job does **not** go back to ``ready`` |
+| `test_the_gate_is_consulted_without_any_wrapping` | the defect itself: a plain `retry()` with the gate installed in the object is refused -- **no context manager** |
+| `test_an_allowed_retry_puts_the_job_back_to_ready` | the control: no refusal, the re-dispatch happens |
+| `test_a_different_action_is_not_refused` | the refusal covers one action, not the whole job |
+| `test_a_broken_gate_leaves_the_job_reserved` | an unusable gate fails **closed** |
+| `test_the_gate_is_asked_under_the_queue_lock` | the gate's answer and the write are serialized |
+| `test_a_refusal_recorded_concurrently_never_loses_to_a_retry` | "recorded but still re-dispatched" must never happen |
+| `test_a_queue_without_a_gate_behaves_exactly_as_before` | the default is unchanged: a queue with no gate seals as before |
+
+The second guard is the one that can fail on the defect: it makes the
+plain `retry()` call -- the one a host writes -- the thing under test,
+with no wrapping to hide behind.
+
+### 10.4 Measured, and what the mutation run found
+
+**The defect, measured on the tree before the fix:**
+
+```
+reserved: reserved
+after a plain retry, job-1 state = ready
+=> the refusal was on the books, and the job went back to ready: True
+```
+
+**The mutants.**  Every guard was checked by planting the defect and
+re-running.  A guard that was not killed was **fixed**, not waived.
+
+| mutant | what it plants | killed by |
+|---|---|---|
+| MUT-A | the gate call deleted from `retry()` | 5 guards |
+| MUT-B | the gate asked **outside** the queue's lock | 5 guards (incl. `test_the_gate_is_asked_under_the_queue_lock`) |
+| MUT-C | the action identity is the `job_id`, not the job's `task` | 3 guards |
+| MUT-D | a gate that does not offer the required method is **ignored** (fail-OPEN) | 1 guard |
+| MUT-G | the registry is **not bound** to the queue's lock | 1 guard (the concurrency guard) |
+
+**The concurrency guard was rewritten once, because the first version
+could not fail.**  The first version asserted on the **final state** —
+"the job is not back in ``ready``".  That assertion **survived** MUT-G,
+and it survived for a structural reason: the final state is ``ready`` in
+BOTH the legal order and the illegal one.  The retry winning the race
+leaves the job in ``ready`` (the action was issued, and is then
+refused), and the recording winning it also leaves the job in
+``ready`` (the refusal was recorded, and the re-dispatch went out
+anyway — the defect).  A single final state cannot tell those apart;
+only the **order** can.
+
+The rewritten guard asserts on completion order: the recording must
+never complete before the retry.  It also **widens the window
+deliberately** — the gate pauses inside the queue's lock just before it
+answers — because with plain timing the recording thread rarely wins the
+race, and a guard that cannot lose is not a guard.  With the pause, the
+mutant is caught every time:
+
+```
+E  AssertionError: 'record' != 'retry'
+E    the refusal was recorded BEFORE the retry completed, so the retry
+E    had the refusal on the books and must have been refused -- the job
+E    went back to ready anyway
+```
+
+**Suites.**  87 passed across `test_refusal_hold_queue_wiring.py` and
+`test_job_queue.py`; 347 passed + 10 subtests across the five
+targeted refusal/lease/ledger suites; the repo suite 461 passed +
+6230 subtests under pytest and `Ran 461 tests ... OK` under unittest;
+`job_queue`'s own self-check: `job-queue OK: enqueue, priority,
+dequeue, ack, retry, delay, dead`.
