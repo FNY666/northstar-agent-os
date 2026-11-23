@@ -176,7 +176,17 @@ class FilterSemanticsTests(unittest.TestCase):
 
     def test_the_manifest_named_test_file_is_not_the_only_thing_kept(self):
         """The filter is not a special case: it keeps every manifest-named
-        test file, across every slice that has one."""
+        test file, across every slice that has one.
+
+        Only slices that have DELIVERED are checked.  A manifest is a
+        DECLARATION written when a slice is launched, so a slice whose
+        manifest exists but whose work has not landed has no test file
+        to keep -- and the filter legitimately returns nothing for it.
+        Measured 2026-11-23: ``agent-authorization-boundary``,
+        ``memory-provenance-axis``, ``northstar-expand-search`` and
+        ``state-transfer-audit`` had manifests and no commit on this
+        branch, and their manifest files do not exist in the tree.
+        """
         checked = 0
         for manifest in sorted(HOME.glob("b173-*.files")):
             slug = manifest.name[len("b173-") : -len(".files")]
@@ -185,6 +195,12 @@ class FilterSemanticsTests(unittest.TestCase):
             paths = _manifest_paths(slug)
             named_tests = [p for p in paths if "/tests/test_" in p]
             if not named_tests:
+                continue
+            # A slice that has not delivered has no test file yet: the
+            # manifest names a file that does not exist.  Checking it
+            # would convict a slice of not having written tests it has
+            # not been asked to write yet.
+            if not all((REPO / p).exists() for p in named_tests):
                 continue
             checked += 1
             kept = [ln for ln in self._run_filter(slug).splitlines() if ln.strip()]

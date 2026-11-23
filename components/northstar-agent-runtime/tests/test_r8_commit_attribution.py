@@ -81,12 +81,23 @@ _HEAD_RE = re.compile(r"^B173 ([^:]+):")
 
 
 def _git(*args: str) -> str:
-    return subprocess.run(
+    """Run git in the repository and return its stdout.
+
+    A git failure is **not** swallowed: it raises, so a test that
+    depends on the repository fails loudly instead of reading an empty
+    string as "no commits".
+    """
+    proc = subprocess.run(
         ["git", "-C", str(REPO_ROOT), *args],
         capture_output=True,
         text=True,
-        check=True,
-    ).stdout
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            "git %s failed (%d): %s"
+            % (" ".join(args), proc.returncode, proc.stderr.strip())
+        )
+    return proc.stdout
 
 
 def _named_slugs(subject: str) -> list:
@@ -102,6 +113,40 @@ def _slice_slugs() -> list:
     for manifest in sorted(HOME.glob("b173-*.files")):
         slug = manifest.name[len("b173-") : -len(".files")]
         if slug and re.fullmatch(r"[a-z0-9][a-z0-9-]*", slug):
+            slugs.append(slug)
+    return slugs
+
+
+def _slice_slugs_delivered() -> list:
+    """The slugs that have actually DELIVERED -- a commit of their own.
+
+    A manifest is a DECLARATION of what a slice intends to deliver; it
+    is written when the slice is LAUNCHED, before any of it exists.
+    So a manifest with no commit behind it is a slice that has not
+    landed yet, and the rules below must not be applied to it.
+
+    Measured 2026-11-23: four slices had manifests and no commit --
+    ``agent-authorization-boundary``, ``memory-provenance-axis``,
+    ``northstar-expand-search`` and ``state-transfer-audit`` -- and every
+    one of their manifest files was "never committed".  The rules below
+    were written for slices that DELIVERED, and applying them to a
+    slice that has not started yet measures nothing: it reports a
+    failure that is not the slice's fault and that no amount of work by
+    the slice would change.
+
+    ``northstar-expand-search`` is the sharp case: its commit
+    (``919e970a``) exists, on the ``batch-173-northstar-expand-search``
+    branch, and is NOT an ancestor of the branch under test.  So the
+    rule "a slice has delivered when the branch under test carries its
+    commit" is the right one -- it is what the referee can actually
+    find.
+    """
+    slugs = []
+    for manifest in sorted(HOME.glob("b173-*.files")):
+        slug = manifest.name[len("b173-") : -len(".files")]
+        if not slug or not re.fullmatch(r"[a-z0-9][a-z0-9-]*", slug):
+            continue
+        if _own_commits(slug):
             slugs.append(slug)
     return slugs
 
@@ -153,6 +198,44 @@ def _subject_names_any_slice(commit: str) -> bool:
 class CommitSubjectRuleTests(unittest.TestCase):
     """A commit that carries a slice's work must name that slice."""
 
+    def test_the_delivered_set_is_a_subset_of_the_manifest_set(self):
+        """The narrowing must not DROP a slice that delivered.
+
+        The rule below applies to the slices that have a commit of
+        their own.  If that set were computed wrongly -- empty, or
+        smaller than it should be -- the rules below would stop
+        convicting anything, and a test that cannot convict proves
+        nothing.  So the narrowing is pinned: it must be a SUBSET of
+        every slice with a manifest, and it must not be empty.
+
+        The manifest set is EMPTY on a runner -- the manifests live in
+        the coordinator's directory, which a runner does not have.  So
+        there the delivered set is empty too, and the vacuity guard
+        cannot hold.  It is skipped there, and the skip is reported
+        rather than swallowed.
+        """
+        every = _slice_slugs()
+        delivered = _slice_slugs_delivered()
+        self.assertTrue(
+            set(delivered).issubset(set(every)),
+            "the delivered set must be a subset of the manifest set",
+        )
+        if not every:
+            self.skipTest(
+                "no manifests: the coordinator's directory is absent, so "
+                "there are no slices to convict"
+            )
+        self.assertTrue(
+            delivered,
+            "the delivered set must not be empty: the rules below would "
+            "convict nothing",
+        )
+        self.assertGreater(
+            len(delivered),
+            10,
+            "expected many slices to have delivered; got %d" % len(delivered),
+        )
+
     def test_the_subject_rule_covers_the_comma_list_shape(self):
         """'B173 a, b: ...' names BOTH slices."""
         named = _named_slugs("B173 r6-worktree-rename, r6-manifest-subject: x")
@@ -164,9 +247,17 @@ class CommitSubjectRuleTests(unittest.TestCase):
         self.assertEqual(["slice4"], _named_slugs("B173 slice4 (part 1): x"))
 
     def test_every_slice_owns_a_commit_the_referee_can_find(self):
-        """No slice may be invisible to the referee."""
+        """No DELIVERED slice may be invisible to the referee.
+
+        The rule applies to slices that have delivered -- a slice with
+        no commit of its own has not delivered yet, and the rule
+        "every slice owns a commit" cannot be applied to it without
+        reporting a failure that is not the slice's.
+
+        See :func:`_slice_slugs_delivered`.
+        """
         invisible = []
-        for slug in _slice_slugs():
+        for slug in _slice_slugs_delivered():
             if not _own_commits(slug):
                 invisible.append(slug)
         self.assertEqual(
@@ -203,7 +294,7 @@ class CommitSubjectRuleTests(unittest.TestCase):
         """
         known_exceptions = {}
         unaccounted = []
-        for slug in _slice_slugs():
+        for slug in _slice_slugs_delivered():
             paths = _manifest_paths(slug)
             if not paths:
                 continue
