@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from tools import ToolAccessError, ToolContext, ToolInputError, ToolResult, ToolSpec, grep_files
-from code_task import CodeTaskError, git_environment_for_repository
+from code_task import CodeTaskError, _git_environment_for_repository
 
 MAX_REPOSITORY_FILES = 8_000
 MAX_PATCH_BYTES = 256 * 1024
@@ -47,7 +47,7 @@ def _run_git(
     if ctx.sandbox is None:
         raise ToolAccessError("repository tools need a workspace sandbox")
     try:
-        environment = git_environment_for_repository(ctx.sandbox.root_real)
+        environment = _git_environment_for_repository(ctx.sandbox.root_real)
     except CodeTaskError as error:
         raise ToolInputError(f"Git configuration was refused: {error}") from error
     process = subprocess.run(

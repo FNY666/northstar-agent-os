@@ -114,7 +114,7 @@ def _git_environment(overrides: Sequence[tuple[str, str]]) -> dict[str, str]:
     return environment
 
 
-def git_environment_for_repository(root: str | Path) -> dict[str, str]:
+def _git_environment_for_repository(root: str | Path) -> dict[str, str]:
     """Neutralize repo-controlled Git commands and filters for every invocation.
 
     Git's highest-precedence environment configuration overrides local repository
@@ -587,7 +587,7 @@ def _run_git(
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        env=git_environment_for_repository(root),
+        env=_git_environment_for_repository(root),
         check=False,
     )
     if len(process.stdout) > MAX_GIT_OUTPUT_BYTES or len(process.stderr) > MAX_GIT_OUTPUT_BYTES:
@@ -632,7 +632,7 @@ def validate_patch_replay(
         os.close(handle)
         index = Path(raw_index)
         index.unlink()
-        environment = git_environment_for_repository(root)
+        environment = _git_environment_for_repository(root)
         environment["GIT_INDEX_FILE"] = str(index)
         try:
             seeded = subprocess.run(
