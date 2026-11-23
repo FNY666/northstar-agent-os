@@ -498,6 +498,34 @@ class RefusalHoldRegistry:
         the gate was unusable.
         """
         key = self.key_for(grant_id, action, subject)
+        return self.check_key(key, now=now)
+
+    def check_key(
+        self, key: RefusalHoldKey, *, now: Optional[float] = None
+    ) -> RefusalHoldResult:
+        """The gate's full answer for an **already-built** hold key.
+
+        This is :meth:`check` without the key construction, for the
+        callers that already hold a key: the queue gate's two namespaces
+        (``queue`` and ``lease``) build their keys with
+        :func:`queue_hold_key` and :func:`task_hold_key`, because those
+        keys carry a scope kind the ledger side does not use.
+
+        The reason this method exists at all is the **audit trail**.  The
+        registry's events are documented as "what was recorded and what
+        was checked", and every check that goes through the registry
+        records a ``checked`` event.  The queue gate used to reach past
+        the registry into ``registry.hold.check`` and read the hold
+        directly, so a queue-side check produced **no event at all** --
+        the gate that stops a job from going back to ``ready`` left no
+        trace.  Measured 2026-11-23, before the fix:
+
+            registry.check("grant-1", "seal")       ->  1 event
+            gate.check_queue("job-1", "dispatch")   ->  still 1
+            gate.check_task("task-1", "dispatch")   ->  still 1
+
+        Routing both sides through one method is what makes them agree.
+        """
         result = self._hold.check(key, now=now)
         self._record_event("checked", key, result)
         return result
@@ -954,18 +982,25 @@ class RefusalHoldQueueGate:
     def check_queue(
         self, job_id: str, action: str, *, now: Optional[float] = None
     ) -> RefusalHoldResult:
-        """The gate's answer for one **queue-side** re-dispatch."""
+        """The gate's answer for one **queue-side** re-dispatch.
+
+        The check goes through the registry, not around it, so it is
+        **audited** like every other check -- see
+        :meth:`RefusalHoldRegistry.check_key`.
+        """
         key = queue_hold_key(job_id, action)
-        result = self._registry.hold.check(key, now=int(now) if now is not None else None)
-        return result
+        return self._registry.check_key(key, now=now)
 
     def check_task(
         self, task_id: str, action: str, *, now: Optional[float] = None
     ) -> RefusalHoldResult:
-        """The gate's answer for one **lease-side** re-dispatch."""
+        """The gate's answer for one **lease-side** re-dispatch.
+
+        Audited, like every other check -- see
+        :meth:`RefusalHoldRegistry.check_key`.
+        """
         key = task_hold_key(task_id, action)
-        result = self._registry.hold.check(key, now=int(now) if now is not None else None)
-        return result
+        return self._registry.check_key(key, now=now)
 
     # -- the check that refuses -------------------------------------------
 

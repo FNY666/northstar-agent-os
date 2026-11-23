@@ -90398,6 +90398,8 @@ The registry the seal ledger's injection point accepts.
   - The hold key for one ledger-side identity.
 - `check(grant_id: str, action: str, subject: Optional[str]=None, *, now: Optional[float]=None)`
   - The gate's full answer for one identity.
+- `check_key(key: RefusalHoldKey, *, now: Optional[float]=None)`
+  - The gate's full answer for an **already-built** hold key.
 - `blocked(grant_id: str, action: str, subject: Optional[str]=None, *, now: Optional[float]=None)`
   - The refusal that blocks this action now, if any.
 - `is_blocked(grant_id: str, action: str, subject: Optional[str]=None, *, now: Optional[float]=None)`

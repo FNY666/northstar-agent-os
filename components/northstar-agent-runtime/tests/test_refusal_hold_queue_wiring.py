@@ -247,6 +247,130 @@ class QueueGateTests(unittest.TestCase):
             self.gate.record_queue("job-1", "dispatch")
 
 
+class QueueGateAuditTests(unittest.TestCase):
+    """A queue-side check must be AUDITED, exactly like a ledger-side one.
+
+    THE DEFECT (measured 2026-11-23)
+    --------------------------------
+    The registry's audit trail is documented as "what was recorded and
+    what was checked" -- and the ledger side honours that: every
+    ``registry.check(...)`` appends a ``checked`` event.
+
+    The queue side did not.  ``RefusalHoldQueueGate.check_queue`` and
+    ``check_task`` reached past the registry into ``registry.hold.check``
+    and read the hold directly, so a queue-side check produced **no
+    event at all**.  Measured on the tree before the fix:
+
+        registry.check("grant-1", "seal")   ->  1 event
+        gate.check_queue("job-1", "dispatch")   ->  still 1
+        gate.check_task("task-1", "dispatch")   ->  still 1
+
+    Two queue-side checks, and the audit trail does not know they
+    happened.  The gate is the thing that stops a job from going back
+    to ``ready``; a check that leaves no trace cannot answer "was this
+    job ever refused?" after the fact.
+
+    The shape of the defect is the shape this batch keeps hitting: the
+    two sides are supposed to be the same gate, and one of them took a
+    different path through it.  The queue gate exists to reuse the
+    registry's semantics -- "a host can record a refusal once and
+    consult it from either side" -- but it reused the *answer* and not
+    the *recording*.
+    """
+
+    def setUp(self):
+        self.registry = RefusalHoldRegistry()
+        self.gate = RefusalHoldQueueGate(self.registry)
+
+    def _checked_events(self):
+        return [
+            event
+            for event in self.registry.events()
+            if event["kind"] == "checked"
+        ]
+
+    def test_a_queue_side_check_is_audited(self):
+        self.gate.check_queue("job-1", "dispatch")
+        checked = self._checked_events()
+        self.assertEqual(
+            len(checked),
+            1,
+            "a queue-side check left no trace in the audit trail: "
+            "the trail is documented as 'what was recorded and what was "
+            "checked'",
+        )
+        self.assertEqual(checked[0]["key"], "queue:job-1:dispatch")
+        self.assertFalse(checked[0]["blocked"])
+
+    def test_a_task_side_check_is_audited(self):
+        self.gate.check_task("task-1", "dispatch")
+        checked = self._checked_events()
+        self.assertEqual(
+            len(checked),
+            1,
+            "a task-side check left no trace in the audit trail",
+        )
+        self.assertEqual(checked[0]["key"], "lease:task-1:dispatch")
+
+    def test_a_blocking_queue_side_check_is_audited_as_blocked(self):
+        """The blocked answer is the one an operator will ask about."""
+        self.gate.record_queue("job-1", "dispatch", row=make_row())
+        self.gate.check_queue("job-1", "dispatch")
+        checked = self._checked_events()
+        self.assertEqual(len(checked), 1)
+        self.assertTrue(
+            checked[0]["blocked"],
+            "the audit trail says the check was allowed, but it blocked",
+        )
+        self.assertEqual(checked[0]["reason"], REASON_BLOCKED_BY_REFUSAL)
+        self.assertIsNotNone(
+            checked[0]["row_digest"],
+            "a blocking check must record which refusal blocked it",
+        )
+
+    def test_the_queue_side_and_the_ledger_side_agree_on_being_audited(self):
+        """Neither side is the privileged one.
+
+        This is the symmetry the module promises: "a host can record a
+        refusal once and consult it from either side".  If one side is
+        audited and the other is not, the promise is only half true.
+        """
+        self.registry.check("grant-1", "seal")
+        self.gate.check_queue("job-1", "dispatch")
+        self.gate.check_task("task-1", "dispatch")
+        self.assertEqual(
+            len(self._checked_events()),
+            3,
+            "the three sides do not agree on what gets audited",
+        )
+
+    def test_a_refusing_gate_is_audited_too(self):
+        """The raising form must leave the same trace as the boolean form.
+
+        ``require_queue_allowed`` raises; a caller that catches the
+        refusal still needs the trail to show that a check happened.
+        """
+        self.gate.record_queue("job-1", "dispatch", row=make_row())
+        with self.assertRaises(RefusalRefusedError):
+            self.gate.require_queue_allowed("job-1", "dispatch")
+        checked = self._checked_events()
+        self.assertEqual(len(checked), 1)
+        self.assertEqual(checked[0]["key"], "queue:job-1:dispatch")
+        self.assertTrue(checked[0]["blocked"])
+
+    def test_the_batch_sweep_form_is_audited_per_item(self):
+        """``task_allowed`` is the batch form: one item, one event.
+
+        The docstring says the boolean form exists "for the caller that
+        sweeps a batch of work items: a refusal there must skip one
+        item, not abandon the whole sweep".  A sweep of three items is
+        three checks, and the trail must show three.
+        """
+        for task_id in ("task-1", "task-2", "task-3"):
+            self.gate.task_allowed(task_id, "dispatch")
+        self.assertEqual(len(self._checked_events()), 3)
+
+
 class QueueRetryWiringTests(unittest.TestCase):
     """The re-dispatch path: the gate is inside the queue's own lock."""
 

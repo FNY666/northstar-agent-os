@@ -563,3 +563,101 @@ tests) after the regenerated `docs/api` page.
 Open items 2 (the subject layer), 3 (no lift path) and 4 (the ledger
 file itself) are unchanged by this section — item 4 was closed by §6.
 Open item 1 is closed by this section.
+
+## 8. AMENDED 2026-11-23 — the queue side was not audited
+
+### 8.1 The defect
+
+The registry's audit trail is documented as **"what was recorded and what
+was checked"** (`RefusalHoldRegistry.events`).  The ledger side honoured
+that: every `registry.check(...)` appends a `checked` event.
+
+**The queue side did not.**  `RefusalHoldQueueGate.check_queue` and
+`check_task` reached *past* the registry into `registry.hold.check` and
+read the hold directly:
+
+```python
+key = queue_hold_key(job_id, action)
+result = self._registry.hold.check(key, now=int(now) if now is not None else None)
+return result
+```
+
+So a queue-side check produced **no event at all**.  Measured on the tree
+before the fix:
+
+```
+registry.check("grant-1", "seal")            ->  1 event
+gate.check_queue("job-1", "dispatch")        ->  still 1
+gate.check_task("task-1", "dispatch")        ->  still 1
+```
+
+Two queue-side checks, and the audit trail does not know they happened.
+
+### 8.2 Why it matters
+
+The queue gate is the thing that stops a job from going back to
+`ready`.  A check that leaves no trace cannot answer *"was this job ever
+refused?"* after the fact — which is exactly the question the trail
+exists for, and exactly the question a host asks when a job is stuck.
+
+The shape of the defect is the shape this batch keeps hitting: **the two
+sides are supposed to be the same gate, and one of them took a different
+path through it.**  §7's whole point is that "a host can record a
+refusal once and consult it from either side" — the queue gate reused
+the registry's *answer* and not its *recording*.
+
+There is a second, smaller asymmetry the same line carried: it cast
+`now` to `int` (`int(now) if now is not None else None`) while the
+ledger side did not.  `now` does not affect the answer today (nothing
+expires), so the cast was behaviour-neutral — but two sides of one gate
+disagreeing about a parameter is how a real difference grows later.
+
+### 8.3 The fix
+
+One new method on the registry:
+
+```python
+def check_key(self, key: RefusalHoldKey, *, now: Optional[float] = None) -> RefusalHoldResult:
+    result = self._hold.check(key, now=now)
+    self._record_event("checked", key, result)
+    return result
+```
+
+`RefusalHoldRegistry.check` is now `check_key` plus the key
+construction, and **both** queue-gate methods go through `check_key`.
+One method, three sides, one audit trail.
+
+The `now` cast is gone with it: the queue side now passes `now` through
+exactly as the ledger side does.
+
+### 8.4 The guards, and why they can fail
+
+Six new tests in `test_refusal_hold_queue_wiring.py`
+(`QueueGateAuditTests`), each verified by running it against the
+pre-fix code:
+
+| test | what it pins |
+|---|---|
+| `test_a_queue_side_check_is_audited` | one queue check → one `checked` event, keyed `queue:<job>:<action>` |
+| `test_a_task_side_check_is_audited` | one lease check → one `checked` event, keyed `lease:<task>:<action>` |
+| `test_a_blocking_queue_side_check_is_audited_as_blocked` | the **blocked** answer is recorded as blocked, with the refusal's `row_digest` — the one an operator will ask about |
+| `test_the_queue_side_and_the_ledger_side_agree_on_being_audited` | three sides, three events: neither side is the privileged one |
+| `test_a_refusing_gate_is_audited_too` | the **raising** form leaves the same trace as the boolean form — a caller that catches the refusal still needs the trail |
+| `test_the_batch_sweep_form_is_audited_per_item` | `task_allowed` (the batch-sweep form) is one event **per item** — three items, three checks |
+
+The last two are the ones a "just call `check_key`" fix would miss: the
+raising form and the batch form are separate code paths, and a sweep that
+recorded one event for the whole sweep would be just as blind as the
+original defect.
+
+### 8.5 What this does NOT change
+
+* The gate's **answers** are unchanged — only the recording of them
+  changed.  The targeted suites (`test_refusal_hold`,
+  `test_refusal_hold_wiring`, `test_refusal_hold_queue_wiring`,
+  `test_leased_task_claim`, `test_job_queue`) are green.
+* The **namespaces** are unchanged: `queue:` and `lease:` are still
+  distinct, and a refusal in one still does not block the other.
+* The **open items** are unchanged: 2 (the subject layer) and 3 (no lift
+  path) are still open.  This section closes neither; it fixes an
+  asymmetry in the auditing of a gate that already existed.
