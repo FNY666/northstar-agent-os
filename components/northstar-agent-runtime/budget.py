@@ -188,9 +188,9 @@ def estimate_request_cost(request: Any, model: str | None = None) -> float:
 
 def compute_cost(usage: Any, model: str) -> CostBreakdown:
     """Price one usage report. Accepts a :class:`Usage` or a mapping."""
-    from providers.base import Usage  # local import: keeps budget.py import-cycle free
+    from providers.base import _usage_from_provider_value  # local import keeps cycles free
 
-    value = usage if isinstance(usage, Usage) else Usage.from_mapping(usage)
+    value = _usage_from_provider_value(usage)
     pricing, estimated = price_for(model)
     return CostBreakdown(
         model=model,
@@ -366,9 +366,9 @@ def _zero_usage():
 
 
 def _as_usage(value: Any):
-    from providers.base import Usage
+    from providers.base import _usage_from_provider_value
 
-    return value if isinstance(value, Usage) else Usage.from_mapping(value)
+    return _usage_from_provider_value(value)
 
 
 def describe_pricing(models: Iterable[str]) -> Mapping[str, Any]:
