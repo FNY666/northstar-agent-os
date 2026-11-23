@@ -1,0 +1,3 @@
+{
+  "jsonl_summary.py": "\"\"\"Summarize an iterable of JSON lines containing a numeric value.\"\"\"\nimport json\n\ndef summarize(lines):\n    count = 0\n    total = 0.0\n    for line_number, line in enumerate(lines, 1):\n        if not line.strip():\n            continue\n        try:\n            row = json.loads(line)\n            value = row[\"value\"]\n            if isinstance(value, bool) or not isinstance(value, (int, float)):\n                raise ValueError(\"value must be numeric\")\n        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as error:\n            raise ValueError(f\"line {line_number}: invalid record\") from error\n        count += 1\n        total += value\n    return {\"records\": count, \"total\": total}\n"
+}

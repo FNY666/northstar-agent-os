@@ -79,6 +79,21 @@ class PolicyFileLoadTests(unittest.TestCase):
         self.assertEqual(policy.max_budget_usd, 0.25)
         self.assertEqual(policy.project_context_setting, "AGENTS.md")
 
+    def test_egress_targets_are_a_canonical_tightening_scope(self):
+        write_policy(self.ws, 'egress_targets = ["Example.org.", "api.example.org"]\n')
+        policy = self.load()
+        self.assertEqual(policy.egress_targets, ("example.org", "api.example.org"))
+
+        for value in (
+            '["*.example.org"]',
+            '["example.org/path"]',
+            '["example.org", "EXAMPLE.ORG."]',
+            '"example.org"',
+        ):
+            write_policy(self.ws, f"egress_targets = {value}\n")
+            with self.assertRaises(PolicyFileError):
+                self.load()
+
     def test_an_unknown_key_is_a_configuration_error(self):
         write_policy(self.ws, 'loosen_tools = ["Write"]\n')
         with self.assertRaises(PolicyFileError) as caught:
@@ -200,6 +215,14 @@ class ProjectContextTests(unittest.TestCase):
         self.assertTrue(context.truncated)
         self.assertEqual(len(context.text), CONTEXT_MAX_CHARS)
 
+    def test_oversized_multibyte_context_has_bounded_read_and_character_limit(self):
+        (self.ws / "AGENTS.md").write_text("😀" * (CONTEXT_MAX_CHARS + 100), encoding="utf-8")
+        context = discover_project_context(self.ws)
+        assert context is not None
+        self.assertTrue(context.truncated)
+        self.assertEqual(len(context.text), CONTEXT_MAX_CHARS)
+        self.assertTrue(context.text.endswith("😀"))
+
     def test_append_marks_the_developer_authored_section(self):
         (self.ws / "AGENTS.md").write_text("repo rules", encoding="utf-8")
         context = discover_project_context(self.ws)
@@ -304,6 +327,20 @@ class PolicyCliIntegrationTests(unittest.TestCase):
         code, out, _ = self.dry_run("--no-project-context")
         self.assertEqual(code, 0)
         self.assertIn("project_context=off (--no-project-context)", out)
+
+    def test_cli_egress_targets_intersect_workspace_policy(self):
+        write_policy(self.ws, 'egress_targets = ["example.org", "api.example.org"]\n')
+        code, out, err = self.dry_run(
+            "--egress-target", "api.example.org", "--egress-target", "outside.example"
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn("egress=off target_scope=api.example.org", out)
+
+        # A configured empty policy set means deny all; operator flags cannot widen it.
+        write_policy(self.ws, "egress_targets = []\n")
+        code, out, err = self.dry_run("--egress-target", "example.org")
+        self.assertEqual(code, 0, err)
+        self.assertIn("target_scope=none (Fetch denied)", out)
 
     def test_context_file_outside_the_workspace_is_refused(self):
         outside = Path(tempfile.mkdtemp(prefix="nsar-outside-")) / "x.md"

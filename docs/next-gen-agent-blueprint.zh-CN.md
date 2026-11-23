@@ -1,395 +1,392 @@
-# 次世代 Agent 蓝图：顶级工具的优点，哪些能收、哪些必须改、哪些要拒
+# Northstar 次世代编程 Agent OS 蓝图
 
-> 编制日期：2026-09-08 ｜ 触发问题：**"能不能包含所有顶级 agent 的优点，因为我们要创造次世代的 agent"**
-> 本文是设计与取舍文档；本批已按其中 P0 四条落了代码（见 §6）。配套现状对标见 [benchmark-top-agents-2026-09.zh-CN.md](benchmark-top-agents-2026-09.zh-CN.md)。
-> **2026-09-09**：产品目标从「组件库」升格为 **Agent OS 整机**——见 [next-gen-agent-os.zh-CN.md](next-gen-agent-os.zh-CN.md)（统一入口 `northstar agent`、默认会话/检查点、优先级重排）。本文的吸收/拒绝判据仍然有效；「明确不做」里的 shell 在 OS 沙箱落地前仍拒绝，但已排进脊梁第 1 序而非永久搁置。
+> 版本：v2.2（2026-10-17）\
+> 状态：现行产品与工程总纲\
+> 历史：旧版能力取舍与 149 批安全实现记录已归档到
+> [next-gen-agent-blueprint-v1-2026-09.zh-CN.md](history/next-gen-agent-blueprint-v1-2026-09.zh-CN.md)。
 
----
+Northstar 的下一阶段只有一条主线：**先成为能完成真实仓库任务、又不绕过治理边界的编程 Agent OS；编程能力稳定后，再扩展多模态。**
 
-## 1. 直接回答
-
-**不能"全都要"。不是能力不够，是那些优点彼此冲突，而且有 8 组与 Northstar 的不变量直接矛盾。**
-
-把 2026 年头部工具的优点摊开看，它们并非同向叠加：Claude Code 的"无 per-server MCP 工具上限"与它自己的"上下文是公共财产"互相拉扯；Codex 的 Full Auto 与可审计确定性互相拉扯；OpenAI Agents SDK v2 的 snapshot/rehydrate 需要可变工作区状态，而"append-only 审计"要求不可变；Cursor 的多模型自由切换与"成本可预测"互相拉扯。**头部工具的做法是各自选边，形成一个产品人格**；把它们的优点做布尔并集，得到的是一个没有一致语义的框架，而不是次世代 agent。
-
-所以"次世代"的定义必须换掉：
-
-> **不是"拥有他们所有的能力"，而是"把每一项能力都重写成穿过同一道门的治理原语"。**
-> 同一条工具调用，在 Claude Code 里是"能跑"，在 Northstar 里必须是"能跑 + 谁批准的 + 花多少 + 留下什么证据 + 崩了从哪儿续"。
-
-这件事有一个可检验的判据，本仓已经具备而头部工具都没有：
-
-> **零凭据、零网络、1515 项测试（另加 57 项 node 面测试）跑通同一套语义。** 任何被吸收进来的优点，若不能在没有 API key 的情况下被确定性测试，就不算吸收成功——那只是多了一条无法回归的功能面。
-
-按这个判据，顶级工具的优点分成三类。
+这份蓝图不再按“又修了一个安全边角”的时间顺序堆叠章节。它回答五个长期问题：产品交付什么、任务怎样完成、哪些边界不可绕、如何证明进步、下一刀切在哪里。
 
 ---
 
-## 2. 八组硬冲突（必须显式选边，不能默默并集）
+## 1. 产品定义
 
-| # | 想吸收的优点 | 来源 | 与 Northstar 哪条不变量冲突 | 裁决 |
-|---|---|---|---|---|
-| C1 | 任意 shell 工具 + Full Auto | Codex Full Auto、Devin/OpenHands 长自主 | 根 README 的"不是通用 shell 执行 API"；`Shell` 已落地但**默认 deny** + OS 沙箱（bwrap\|process） | ✅ **改造落地**：有隔离才有 Shell；宿主机 Full Auto 仍明确拒绝；显式 `--allow-tool Shell` 才放行 |
-| C2 | settings 里声明 command hooks | Claude Code（31 事件 × 5 类 handler） | 仓库文件=可执行代码 → 绕过权限门；clone 即执行 | ✅ **改造后收**：本批 P0-3 落地，但只允许否决型事件 + 无 shell + 脚本必须在工作区内 + 默认关 + 子进程环境变量清洗 |
-| C3 | 无限工具/无限技能（no per-server cap、几百个 skill） | Claude Code Tool Search、Skills 生态 71k+ | `MAX_TOOLS_PER_SERVER=25`、`MAX_SKILLS=40`、listing 上限——"仓库文件不得无界撑大上下文" | 🔧 **改造**：数量可有界放宽（如 25→100），但必须配 **deferred definitions**（按需取 schema）；直接去上限 = 放弃边界 |
-| C4 | 模型分类器自动批准（`auto` mode） | Claude Code auto、Cursor auto-review | 三层权限门的确定性；"谁批准了这次调用"必须可复现 | ⛔ **拒绝原样**：分类器只能作为**额外否决**挂在 PreToolUse 上（可 deny、不可 allow），默认关 |
-| C5 | 插件市场 / install 即得能力 | Claude Code marketplace、skills 目录 | "策略只能收紧"（`policy_file` fail-closed）；市场内容未签名 | ✅ **改造后收**（第 19 批，§6.24）：落地 `northstar.plugin.v1` bundle = config/agents/skills/hooks/MCP 的打包格式，安装 = `.northstar/plugins/<name>/` 一次 git 可见的拷贝 + `plugins.lock` 按内容 digest 钉住；策略只收紧、hook 走 `command_hooks.parse_hooks`、跨平台用 `compatibility` 装前拒绝而非半装。**不做在线市场/解析器/远程拉取** |
-| C6 | 容器快照/恢复（sandbox 丢了能续） | OpenAI Agents SDK v2 snapshot+rehydrate | 需要可变工作区生命周期；本仓 `northstar-host` 只有 0700 分配，无 lease/回收 | 🔧 **改造**：F3 的 durable 接线已落地（§6.23：lease 与检查点翻译），剩下的快照/回收属于 host 层，不进 runtime |
-| C7 | 全局记忆（跨会话 MEMORY.md、user-scope memory） | Claude Code memory scopes、OpenAI 双层记忆 | 记忆是 ASI06 上下文投毒的持久载体；审计边界"只在工作区内" | ⛔ **拒绝全局**：只做 workspace-scoped、带摘要+摘要 digest、可 `--no-memory`、写入走 Edit 同一道门 |
-| C8 | 后台并行 / 20 并发子代理 | Claude Code background+Agent Teams | 成本上限与"每 run 恰好一个 ResultMessage"要重定义（并发下预算是共享还是分片） | 🔧 **改造**：批内并行工具调用（每次调用独立过门，denial 记账顺序确定）先行；子代理并发必须继承**父预算池**而非各自新开 |
+### 1.1 一句话
 
-一句话：**8 组里有 3 组直接拒、5 组要改造后再收，0 组可原样搬。** 这就是"全都要"不成立的精确原因——也恰好是次世代 agent 的机会：别人做不到的"能力多 + 门不绕"，正因为他们在这些点上被迫选边。
+**Northstar 接收一个软件工程任务，在隔离工作区中理解代码、制定计划、修改文件、运行验证，并交付补丁与可审计证据。**
 
----
+目标用户是把真实仓库任务交给智能体的开发者和团队。核心场景是：
 
-## 3. 应该吸收的（无冲突，纯粹是欠账）
+- 修复有复现步骤的缺陷；
+- 按验收条件实现小到中型功能；
+- 重构代码并证明行为没有退化；
+- 修复测试、构建、类型和安全问题；
+- 在中断、预算耗尽或工具失败后安全恢复。
 
-这几项与不变量不相冲，不做没有理由，属于"必须补齐"：
+Northstar 不是安全模块陈列馆，也不是把 Claude Code、Codex、Gemini CLI、OpenHands 和 SWE-agent 的功能做并集。可吸收的能力必须变成一条完整产品路径，并穿过同一套权限、预算、审计与恢复语义。
 
-| 优点 | 来源 | 吸收形态 | 状态 |
-|---|---|---|---|
-| 策略即代码（settings 里写权限/钩子/上限） | Claude Code | `.northstar/config.toml` + `[[hooks]]`，收紧型、fail-closed | ✅ 本批补齐 hooks 面 |
-| 契约化的 run↔执行关联 | 无（Northstar 独有零件） | `contract_bridge`：单一 wire 定义 + 绑定交叉校验 | ✅ 本批 |
-| 检查点/可恢复执行 | LangGraph / Temporal / v2 | `checkpoints.py`：turn 边界记录（长度+前缀摘要+已消耗计数器），恢复时**继承**而非重置 | ✅ 已落地（第十四批续） |
-| durable 词汇与会话上锁的统一 | LangGraph/Temporal 的 event sourcing + 本仓 durable-run | `session_lease.py`（一写者）+ `durable_bridge.py`（检查点 ↔ durable 事件/文档双向翻译，跨校验） | ✅ 已落地（第十八批） |
-| 多模型 | OpenAI 100+ / Cursor | `providers/openai_compat.py`：一个 Chat Completions 适配器覆盖一片模型 | ✅ 已落地（P1-2） |
-| 独立完成判定 | 无人做（各家都把"模型自述"当完成） | `postconditions.py`：`--verify` / `[[verify]]`，运行前后快照比对 | ✅ 已落地 |
-| token 级流式 | 全员 | `--stream`：`StreamDelta` 事件 + **流-记录一致性校验**（不一致即判 provider fault，不写 assistant 记录），唯一 `ResultMessage` 不变 | ✅ 已落地（第十七批） |
-| 显式重试/退避/降级 | Claude fallback | `provider_retry.py`：故障分类 + 纯函数退避 + per-turn 等待预算 + `compact_once` | ✅ 已落地（第二十批） |
-| 外家 `.mcp.json` 导入 | Claude Code/Cursor/VS Code 的配置文件 | `mcp_config.py` + `--mcp-config`（默认 off）+ `mcp list`（拒绝即 exit 1，可当 CI 门） | ✅ 已落地（第二十一批） |
-| MCP 现行规范 2026-07-28 | 标准 | `mcp_negotiate.py`：`server/discover` 代际探测 + `params._meta` 逐请求携带 + MRTR 重试 + 旧代际 fallback | ✅ 已落地（第十六批） |
-| elicitation ↔ 审批回合 | MCP 特性 | `mcp_elicitation.py`：把"服务器问用户"映射到权限门，无人应答即拒绝并 `notifications/cancelled`（**这是别人没有的角度**） | ✅ 已落地（第十六批） |
-| OS 级沙箱 | Claude seatbelt/bubblewrap、Gemini gVisor | `tools/os_sandbox.py`：bwrap 优先、process 诚实回退；`Shell` 默认 deny；[threat-model](concepts/threat-model.md) | ✅ 已落地（次世代脊梁 P1；显式 bwrap 不可用则硬错误，不静默降级） |
-| 技能供应链校验 | 无人做（第三方审计：99% 坏味道/36% 缺陷） | `skills check`：规则纯函数 + `skills.lock` 摘要钉定 + 漂移拒跑 | ✅ 已落地（第十五批） |
-| 两语言可编程面（Python + TypeScript SDK） | Claude Agent SDK（py/ts 双官方面） | `sdk-ts/`：把 `run --json` 包成 `RunOptions`/`RunEvent`/`RunReport`，**镜像而非重定义**，两侧各有一条漂移门 | ✅ 已落地（第二十三批）；发布仍按纪律不做（`private: true`） |
-| 会话 rewind/fork | Claude /rewind、LangGraph time-travel | `--resume-from`：从任一检查点分叉新 session（摘要校验），**绝不回写**旧文件 | ✅ 已落地（与 append-only 兼容） |
+### 1.2 当前阶段的优先顺序
 
----
+1. **编程闭环**：理解 → 计划 → 执行 → 验证。
+2. **编程可靠性**：冲突检测、长任务、恢复、可复现环境。
+3. **授权攻防实验室**：攻击、检测、防护和效用分开评分。
+4. **规模化协作**：并行子任务、评审者、跨 Agent handoff。
+5. **多模态编程**：截图、视觉回归、图表、PDF 和 UI 操作。
 
-## 4. 五项"只有 Northstar 组合起来才有"的次世代能力
+第 5 项只有在编程门槛连续两个里程碑保持后才能进入产品主线。
 
-吸收完上面那些只是"齐平"。真正让别人抄不动的是这几条——它们的共同点是**用治理机制实现别处用自由度实现的功能**：
+**2026-10-17 用户优先级确认：先编程，后多模态；攻击工具与防护工具均需建设。** 因此 M0/M1 的编程闭环同步运行局部授权攻防回归，而不是等到多模态后再补安全。当前攻击面从本次拥有的离线仓库夹具开始，覆盖计划闸门、策略改写、路径越界、验证伪造、交付污染和预算突破；防护复用现有权限、路径、验证与证据边界。通用外部红队适配器仍归 M3 Labs，不进入默认产品工具集。
 
-1. **可证明的策略变更（policy as code, with revision）**
-   `.northstar/config.toml` 带 `schema_version` + `revision`，只能收紧、非法即拒绝启动；本批起 `revision` 进 `init` 事件与审计 feed，`doctor` 直接对比 git HEAD 报漂移（P0-4）。
-   → 头部工具的权限配置是"行为开关"，这里是**可评审、可归因、可 diff 的策略文档**。CI 场景里这是合规资产，不是 DX 糖。
+### 1.3 明确拒绝
 
-2. **确定性回归治理（治理本身的 golden test）**
-   scripted provider + 1515 项离线测试 + guard 红绿 harness，意味着"把 deny 改成 allow 会让哪些测试变红"是可计算的。
-   第二张脸（TypeScript）也不放宽这条：它的测试直接问 Python 侧的模块与 argparse 树"你今天的定义是什么"。
-   → 别人有 output eval；**没有人在 eval 权限决策**。这条可以直接做成公开基准（denial correctness / 注入抵抗 / 预算命中率），是 Northstar 唯一能自定义考题的赛道。
-
-3. **可归因的委派链（contract → execution → receipt）**
-   本批把 runtime↔contract↔sidecar 三方字段焊成一份（漂移即测试失败），`run_id` 贯穿 runtime transcript 与 sidecar 日志；interop 组件已有签名 attestation + narrowed handoff + typed receipt。
-   → 多代理生态现状是"消息能传"，没人能回答"**这一步是谁授权的、结果被谁验证过**"。A2A 不管这个，Claude Agent Teams 不管这个。这是 Northstar 的正面战场。
-
-4. **后置条件验证，独立于模型** ✅ 本批已接进 runtime
-   durable-run 的 `verifier.py` 用文件系统工件摘要判定 `verified|failed|unknown`；本批在 runtime 侧落为 `postconditions.py`（`exists`/`absent`/`changed`/`unchanged`/`contains`），运行前取摘要、结束后由**本进程**比对，失败即 `error_postconditions_failed`（exit 6）并写入独立审计记录类型 `postconditions`。
-   → 即：**agent 说"我改完了"不再算数**。这比任何"自我批评/反思"式提示技巧都更接近次世代该有的定义。
-   → 关键约束：**验证条件绝不进 prompt**——告诉模型要查什么，模型就去写那句话；`contains` 因此被明确标为"便利而非证据"，可依赖的是结构型四种。
-
-5. **把协议的"问用户"变成治理的"要审批"** ✅ 已落地（第十六批）
-   MCP 2026-07-28 的 MRTR/elicitation 让服务器能中途要输入；把它接到权限门上，远端工具的确认请求就走与本地写操作**同一道**门、进**同一条**审计流。
-   → 头部工具把 MCP 当"工具管道"；这里是"带审批的管道"。
-   → **原文那句"工程量小（只补一轮）"是错的，留在这里当反面教材**：真正小的是一轮重试的编码。变大的是它旁边的三件事——代际探测必须先于一切请求（否则 modern-only 服务器只会给一个"超时"）、能力宣告必须与"有没有审批人"绑定（否则"没人答就默认答"这条底线从协议层就漏了）、以及拒绝之后要做成**可审计事件**而不是吞掉。总计两个新模块 67 项测试。凡是被文档写成"顺手就能补"的协议改动，都要按"它会牵住握手语义"来估工。
+- 宿主机上的无边界 Full Auto；
+- 模型、检测器或“安全分数”自动扩大权限；
+- 未声明目标的网络访问；
+- 将工具调用提议当作已执行事实；
+- 将最终回答中的“完成了”当作验证证据；
+- 把研究探针和攻击工具装进默认生产运行时；
+- 为追逐功能数量而复制多个互不一致的任务循环；
+- 在编程闭环未达标前建设通用浏览器或多模态平台。
 
 ---
 
-## 5. 明确不做（拒绝清单，写下来防漂移）
+## 2. 成功标准
 
-自建云/托管服务；交互 TUI 与 IDE 插件；插件市场与在线索引；模型微调；浏览器/计算机操作；全局跨项目记忆；模型分类器批准；无界工具注入；以及在 OS 沙箱之前引入 shell 工具。
+一个任务只有同时满足以下条件才算完成：
 
-这一栏的价值在于**可检验**：它让"要不要加 X"从每次重新争论变成一次对照——想加就得先改这一节，改这一节就得给出上面 8 组冲突里对应的那一条怎么解。
+1. 任务目标、约束和验收条件被记录；
+2. 修改发生在本次运行拥有的隔离工作区；
+3. 每次读取、修改、执行和联网都经过正常治理路径；
+4. 声明的检查全部通过，并有命令、退出码、输出摘要和环境摘要；
+5. 最终补丁可从初始提交重放；
+6. 运行只产生一个终态，预算和未决风险可解释；
+7. 用户得到补丁与证据包，Northstar 不自动提交或推送。
+
+没有声明或无法运行验证时，可以交付 `success_unverified`，但不能交付 `success`。发生副作用后进程失联时，终态必须是 `needs_reconciliation`，不得自动重跑。
+
+### 2.1 第一阶段发布门
+
+| 维度 | 门槛 |
+|---|---|
+| 离线仓库任务 | 固定 24 题至少完成 20 题 |
+| SWE-bench Verified 样本 | 固定 50 题相对基线至少多完成 5 题；两次运行取较低值 |
+| 治理关键测试 | 权限、预算、审计、沙箱、数据流全部通过 |
+| 完成真实性 | 0 次“验证失败但返回 success” |
+| 成本 | 单任务中位成本不高于基线 125% |
+| 可恢复性 | 所有阶段边界可恢复；未知副作用不重放 |
+
+第一次实现评测器时先冻结模型、模型版本、容器摘要、任务清单、网络策略和预算，然后测当前基线。没有固定实验条件的榜单数字不能进入发布声明。
 
 ---
 
-## 6. 本批已落地（P0，代码 + 测试）
+## 3. 默认用户路径
 
-| 项 | 内容 | 验证 |
+```text
+northstar code "修复 issue #123" --workspace repo --check "pytest -q"
+        │
+        ├── 捕获精确 HEAD、工作区状态与项目指令
+        ├── 创建隔离 Git worktree
+        ├── Understand：建立有界仓库地图并复现问题
+        ├── Plan：给出文件、步骤、风险与验证计划
+        ├── Execute：检索、补丁、受控 Shell、阶段检查点
+        ├── Verify：运行声明检查并审阅最终 diff
+        └── Deliver：补丁 + 验证回执 + 风险 + 审计摘要
+```
+
+现有 `northstar agent` 在一个次版本内转发到同一内核并给出迁移提示。底层 `northstar run` 继续作为通用运行时入口，不承担编程产品默认值。
+
+### 3.1 默认工作区行为
+
+- 从当前精确 HEAD 创建隔离 worktree；原工作目录永不被修改。
+- 原仓库有未提交改动时，记录其存在但不复制进任务 worktree。
+- 成功后保留补丁和证据包；失败后保留 worktree 与恢复命令。
+- 不自动 `git commit`、不自动建远端分支、不自动推送。
+- 非 Git 目录可以运行，但只能交付文件清单补丁，恢复与重放保证降级并明确标注。
+
+### 3.2 默认网络行为
+
+- 默认断网。
+- 每个允许目标由宿主声明精确 DNS 主机名与用途。
+- 网络授权绑定方法、主机、端口、路径类别、数据敏感度和调用 ID。
+- PyPI、npm、GitHub 等常用服务也不获得隐式白名单。
+- 依赖下载结果进入供应链清单；锁文件与实际安装内容不一致时失败关闭。
+
+---
+
+## 4. 编程任务协议
+
+### 4.1 Understand
+
+运行时生成有界 `RepositorySnapshot`：
+
+- Git HEAD、分支、脏状态和子模块状态；
+- 根目录及受限深度的文件树；
+- AGENTS.md、项目策略和适用的技能；
+- 语言、包管理器、构建与测试入口；
+- 与任务关键词相关的文件和符号；
+- 初始失败复现或“无法复现”的结构化原因。
+
+仓库内容全部视为不可信数据。代码注释、测试输出、issue 正文和依赖文档不能改变系统策略或授权范围。
+
+### 4.2 Plan
+
+计划必须包含：目标解释、拟修改文件、步骤依赖、验证命令、风险点、需要授权的操作。计划是审计对象，不是权限凭据；执行时每一步仍重新校验。
+
+`--plan-only` 在写文件或执行变更命令前结束，并交付计划与仓库证据。
+
+### 4.3 Execute
+
+执行面由结构化工具优先、Shell 补充：
+
+| 工具 | 职责 | 核心边界 |
 |---|---|---|
-| P0-1 | `contract_bridge.py`：单一 wire 字段来源；`--run-id` → sidecar `request_id`；host 注入 binding 时对 runtime 请求做**契约交叉校验**，不一致或不可验证即**拒绝发起**（fail-closed，非降级）；无 binding 时完全惰性，runtime 仍零依赖 | `tests/test_contract_bridge.py` 18 项，含 runtime↔adapter↔sidecar 三方一致性 |
-| P0-2 | `.northstar` 进入写保护（`Write`/`Edit` 拒绝），`--allow-policy-writes` 为一次性逃生门，生效集合写入 `init` 事件 | `tests/test_governance_writes.py` 12 项（含 symlink、未创建文件、Edit 打补丁、开关后审计可见） |
-| P0-3 | `[[hooks]]` 仓库声明式生命周期钩子（C2 的改造形态） | `tests/test_command_hooks.py` 30 项，其中真跑子进程的 3 项做了反向突变验证（泄露凭据→测试失败；去掉超时→测试变慢可见） |
-| P0-4 | `doctor` 增加 `policy-drift`（对比 git HEAD 的磁盘策略摘要）与 hooks 声明告警；`--dry-run` 打印 `run_id`/`policy_revision`/`protected_prefixes` | 手工实测篡改策略后 warn 命中；文档测试同步 |
+| `RepoMap` | 项目结构、清单、测试入口 | 节点、深度、字节和时间有界 |
+| `SearchCode` | 文本、路径、符号检索 | 结果、文件和扫描总量有界 |
+| `ApplyPatch` | 多文件补丁 | 原内容摘要、冲突检测、原子替换 |
+| `GitInspect` | status/diff/log/blame | 只读，不隐式切分支 |
+| `SubmitPlan` | 提交文件、步骤、风险与检查索引 | 只允许一次；成功前变更工具不能进入处理器 |
+| `RunCheck` | 测试、构建、lint、类型检查 | 宿主声明或逐次批准，结构化回执 |
+| `Shell` | 工具未覆盖的受控操作 | 沙箱、资源限额、默认断网、完整审计 |
 
-**全仓 890 项测试全绿**（sidecar 51 / run-contract 41 / host 37 / durable-run 65 / interop 54 / runtime 596 / 文档 46），离线、无 key、无网络。
+首版不把 LSP 设为硬依赖。符号检索先采用语言无关的有界索引；后续 LSP/tree-sitter 作为可选适配器，适配器故障不能阻止文本路径完成任务。
 
-### 6.20 第十五批（技能供应链）
+### 4.4 Verify
 
-| 项 | 内容 | 验证 |
-|---|---|---|
-| 技能审查 | `skill_audit.py`：注入/隐藏/自改策略/远程脚本/凭据/元数据端点/不可见字符/上下文膨胀；代码块内降一级 | `tests/test_skill_check.py` 48 项，含"良性技能零告警"与"确定性可重复" |
-| 审完即钉 | `--write-lock` 写 `skills.lock`（按路径+摘要）；`--require-skill-lock` 漂移即 64；`doctor` 加 `skills-review` | 审→钉→篡改→**拒跑**全流程实测；改名不继承他人审查 |
-| 模型无法自证 | `skills.lock` 在 `.northstar` 下，工具层拒绝写 → 运行不能把自己的技能标成"已审" | 端到端断言：工具错误而非权限拒绝 |
+验证顺序固定：
 
-### 6.15 第十四批续（F3：可恢复执行）
+1. 检查补丁能应用到初始 HEAD；
+2. 运行用户声明的 `--check`；
+3. 运行计划中获批的局部测试；
+4. 检查格式、静态分析或构建（项目存在对应入口时）；
+5. 审阅最终 diff，拒绝意外大文件、凭据、生成物和策略改写；
+6. 输出每项检查的独立回执。
 
-| 项 | 内容 | 验证 |
-|---|---|---|
-| F3 | `checkpoints.py` + `--checkpoint-turns` / `--resume-from` / `--resume-record`；恢复时**继承**花费与计数器；fork 写新文件、父文件字节不变；前缀摘要不符即拒跑；SDK 平价。**第 22 批补上只读面**：`sessions checkpoints`（校验每条边界，不符即 exit 1）与 `sessions replay --from-checkpoint`（孩子在花钱之前能看到自己会继承什么） | `tests/test_checkpoints.py` 26 项（"预算不能被 resume 洗掉"断言 exit 4）+ `tests/test_session_replay.py` 39 项（含"listing 说 verified 的边界真能 resume"） |
+当前实现还会在宿主检查之后生成 `delivery-seal.json`，证明交付补丁仍与检查前的补丁一致。检查命令即使返回 0，只要改写交付内容，终态仍降级为 `error_postconditions_failed`。
 
-**这一项的真实动机不是便利，是漏洞**：上限是 per-run 的，而 `--resume` 会新开一次运行——
-所以"恢复"一直是绕过 `max_budget_usd` 的后门。现在它必须把父花费带过来；
-嵌入式调用忘了传 seed 过的 `Budget` 会直接报错，而不是拿到更宽的额度。
-
-### 6.28 第二十三批（第二张脸不能变成第二份真相）
-
-**选边**：Claude Agent SDK 有官方 py + ts 两 face；本仓只有 `sdk.py`。要补 TS 面，最省事的写法是
-"照抄一份类型定义"，而照抄的定义一旦漂移，用户拿到的就是**同一条命令的两种语义**——这恰好是本项目
-最不能接受的失败。因此第二十三批的实现把"抄"变成"抄 + 对账"，并让对账在没有 node 的机器上也跑。
-
-落地：`components/northstar-agent-runtime/sdk-ts/`（`@northstar/agent-runtime`，57 项 node 测试）：
-
-- **一次运行 = 一个子进程**：`run(options)` / `streamRun(options)` / `preview(options)` 直接组装
-  `python3 -m cli run ... --json`，权限门、上限、transcript、退出码全部继承；没有守护进程、没有第二协议，
-  也就没有"TS 侧多一条能绕过的路"。
-- **封闭选项面**：`RunOptions` 45 个键与 `run` 的 60 个 flag 一一对上，`retry/mcp/sidecar` 是命名空间；
-  未知键是 `ConfigurationError`（在建 argv 时、进程存在前），`--json` 由 SDK 追加、调用方不得关闭；
-  没有 `extraArgs` 逃生舱——那会把漂移门挡在真正需要它的那些选项之外。
-- **语义陷阱写明而非抹平**：`maxToolCalls: 0` = 一次工具调用都不允许（不是 unlimited）；
-  `compactionThresholdTokens: 0` = 关闭压缩；`retry.baseDelayMs/jitter/onContextOverflow` 属于
-  `[retry]` 策略表，被点名拒绝而不是静默丢弃；`mcp.elicitAnswers` 必须配 `elicit: true`；
-  `agent` 与 `mcp.servers` 互斥；`null`/`undefined` 都表示"不设"，永远不等于"放宽"。
-- **失败形状**：跑完的 run 从不抛错（subtype + `exitCode` 说话），只有"流不可信"才抛——
-  没有 result 事件、出现非 JSON 行、exit 64 分别对应 `RunFailedError`/`UsageError`；
-  `exitCode`（契约）与 `processExitCode`（事实）同时保留，两者不一致时报出来而不是被抹平。
-- **取消是一等公民**：`signal`/`timeoutMs` 发 SIGTERM（正是 runtime 会封存 transcript 的那个信号），
-  宽限后再对**进程组** SIGKILL；测试用一个自证文件确认"被中止的运行没有留下孤儿"。
-
-**漂移门（两面都装）**：`sdk-ts/test/parity.test.ts` 直接问 Python 侧——`events.EXIT_CODES`、
-`providers.base.RESULT_SUBTYPES`/`ResultMessage` 的字段集、`loop.Denial.as_dict()`、
-`permissions.PERMISSION_MODES`、`postconditions.KINDS`、`provider_retry.RETRYABLE_CLASSES`、
-`cli.build_parser()` 里 `run` 的真实 flag 与 `choices`，外加一次真实 `--json` 跑的 result 键集合；
-`tests/test_typescript_sdk.py`（21 项）用同一批断言在 **Python** 里再跑一遍，所以
-"这台机器没有 node"不能成为绿灯的理由。`Makefile` 的 `ts-test` 是**守卫式**的：node < 22.6 时打印
-skip 并 exit 0，绝不把"跑不了"伪装成"跑过了"，也绝不让真失败的测试被 `||` 吞掉。
-
-**顺手修掉一个显示层的谎**：`run --dry-run` 把显式 `--max-tool-calls 0` 打成 `unlimited`，而
-`loop.py` 的判定是 `max_tool_calls is not None`——0 是"一次都不许"，且 `_ceiling_stop` 在**首次生成之前**
-就结束运行（`num_turns: 0`、`input_tokens: 0`、连 denials 都没有，因为根本没有调用被拒）。
-`cli.format_tool_call_ceiling` 现在把三种状态分开写：`unlimited` / `0 (no tool call allowed)` / 数字；
-`CeilingTests` 钉住 0 与 1 的差别（1 会花掉一次请求并记录一条 denial）。镜像读错这一点，正是"第二张脸
-能让第一张脸变诚实"的最直接证据。
-
-测试量：**+9 → 1197**（runtime 片：上限语义 +5、守卫 harness 自身 +4），TypeScript 面 **+57**（node，
-独立口径不与 python 相加），全仓 `make test` **1515 全绿**（51+41+37+65+54+1197+70）；`make demo` exit 0。
-
-**顺手把 CI 的一个"假绿"变真**：`tools/verify_invariants.py` 过去只把本组件拷进临时目录，而本组件的
-桥接测试是**故意**去 import 真实的兄弟组件的——拷贝里缺了它们，基线直接红，于是每次变异的结果都不再说明
-任何事（这正是 `Guard verification` 步骤自桥接落地起就失败的原因）。现在它拷整棵 `components/`，并由
-`tests/test_tools_verify_invariants.py` 钉住"拷贝必须带齐兄弟组件 + 一次端到端变异必须变红"；另一条
-变异锚点原本按 `loop.py` 的缩进写，缩进一改就变成"锚点没找到"——一个报不出结果的守卫等于没有守卫，
-现在锚在调用上方的注释上。五个守卫对 1197 项基线全部转红 ✓。§10.5 T1 的"TS 面"尾巴因此收口，剩下的只有发布纪律
-之外的部分——见第 23 批 dx-benchmark 追加。
-
-### 6.27 第二十二批（fork 点必须能在花钱之前被检查）
-
-checkpoint 自第 14 批起就在写，`run --resume-from` 也一直在按它恢复——但**没有任何办法先问一句**：
-这个 session 有哪些边界？第 6 条记录还作不作数？从那儿恢复的孩子会带着什么起步？于是一个组件里
-最强的持久化原语，恰好是其中最不可检视的一个；README 里"无篡改痕迹"那句话也就此失去了 excuse
-（每个 checkpoint 记录里就躺着前缀摘要）。
-
-- **校验不能靠两份实现"碰巧一致"**：`session_replay.py` 用读方自己的过滤器重建 transcript、用写方
-  自己的规范化形式重算摘要，所以"这里说 verified"与"`run --resume-from` 会接受"是**同一条代码路径**
-  的两个出口，而不是两个近似实现。四种结论：`verified` / `digest-mismatch` / `prefix-short` /
-  `malformed`——被认出是 checkpoint 却缺 `turns` 的记录**只报告不补零**，因为"恢复部分计数器"正是
-  checkpoint 当初要堵的那个预算漏洞。
-- **`sessions checkpoints` 是给 CI 的那一半**：扫一个 transcript 或整个目录，有任何边界不是 verified
-  就 **exit 1**。于是"审计流被改过/被截断"变成一个构建结果，不需要 provider key、不占 session lease、
-  也不为了发现它而花一次运行。每条边界同时报价：文件里记着的 `max_budget_usd` 上限减去已花费，就是
-  孩子还能花的钱；已经花完的边界会直说"resume 会被拒"。
-- **`sessions replay` 回答"这次运行干了什么、能在哪儿切"**：记录折成帧（start/prompt/turn/checkpoint/
-  compaction/result/note），一个 turn 帧同时带上散文、调用清单、错误与拒绝计数、token 用量——可 diff
-  的清单，而不是滚动原始记录。`--from-checkpoint N` 把回放**切在该边界处**：那之后的记录是"孩子看不见
-  的历史"，这一句就是 fork 预览。`--json` 给机器同一形状；孩子的 `session_start` 谱系会被渲染出来
-  （"forked from session X record #N, inherits 2 turns / $0.500000"），因为说不出父亲的 fork 就是没人
-  能审计的 fork。
-- **刻意不做的**：不是 TUI，也不是重放执行器——不二次运行任何工具、不重新裁决任何权限，transcript 是
-  "当时被允许了什么"的记录而不是待重演的脚本；也不是签名——摘要能发现事故与顺手改文件，能改写文件的
-  人就能重算摘要，这句现在写进 limitations 而不是含糊过去。
-
-诚实边界继续写全：`transcript_len` 决定切点（在任何消息之前的边界合法地摘要空 transcript）；谱系优先读
-loop 写的嵌套 `resumed_from`，旧的平铺键仍接受（append-only 的文件不能因为读方洁癖而变成读不出）。
-
-测试量到 **1188**（runtime 片，+39：`test_session_replay`，其中两条是"这里说 verified 的边界，真去
-resume 也被接受"与"改一行 prompt 后两条命令一起拒绝"），仓库 `make test` 全绿（51+41+37+65+54+1188+49）。
-接线：runtime README 的读回小节 + Sessions 条目 + limitations 改写、cookbook §16、`py-modules`/`docbuild`
-MANIFEST，以及 `dx-benchmark` §10.5 的 T3 整项收口。
-
-### 6.26 第二十一批（外家的 `.mcp.json` 可以读，外家的审批不能读）
-
-这一批始于一个勘误：三处文档让操作者"把 MCP server 写进工作区的 `[mcp.servers]` 表"，而那张表从来
-不存在——`policy_file.py` 里没有 `mcp` 键，唯一的入口是 `--mcp-server`。勘误恰好暴露了缺口本身：2026
-年每一家宿主都读 `.mcp.json`，于是采用者的 server 清单被抄在两个文件里，靠人肉同步。补上它，顺手也就
-把那句话变成真的。
-
-- **读他们的格式，留我们的门**：`.mcp.json` / `.cursor/mcp.json` / `.vscode/mcp.json` /
-  `.gemini/settings.json`（`mcpServers`，或 VS Code 的 `servers`——同一文件里两者并存即报错），产出的
-  就是 `--mcp-server` 产出的东西：名字 + argv（+ 可选 `env`/`cwd`）。因此导入的 server 默认 mutating、
-  未点名即拒、随 run 一起 TERM→KILL、在 transcript 里与旗标无差别——**没有第二类工具**。
-- **三档严重度，因为配置文件可能以三种方式出错**：*含义*需要猜的一律 fatal（JSON 坏、两个表键并存、
-  本导入器不读的键、`command` 写成数组、未解析的 `${VAR}`、`cwd` 逃出工作区、超过 16 个 server）→
-  exit 64，什么都不启动；本运行时*起不了*的（`url`/`headers`/`type: http|sse`）是 stderr 上点名跳过，
-  因为这是我们缺的传输而不是别人写错的文件——一个仓库里有一个远程 server 不该连累它的 stdio 伙伴；
-  `disabled: true` 是**注记**，那是文件自己的决定，但评审该看得见。
-- **`autoApprove` 不是配置项，是被拒的申请**：仓库里的文件不能替操作者把撤回的审批买回来，所以非空的
-  `autoApprove`/`alwaysAllow` 直接终止运行并打印"该删的是这句"；空列表是 no-op。`env` 的值从**操作者的
-  环境**展开（`${VAR}` 缺失是错误而不是空 API key），是往子进程环境里**加**而不是**筛**（裁剪进程能看
-  什么归宿主 OS，写在这里就是吹一个兑现不了的承诺），报告里只出现变量名。
-- **默认 off，不问就不动**：`--mcp-config off|auto|PATH` 默认 `off`。仓库里的一个文件不能自己启动进程
-  ——这跟"插件的 server 仍要操作者的旗标"是同一条规则。`northstar mcp list --workspace .` 是只读面
-  （不 spawn、不联网），有任何拒绝就 **exit 1**，于是 CI 能为"某个依赖悄悄加了个 server"这件事红掉。
-- **名字不翻译**：`"GitHub"` 被拒并附改写指引——没人读过的工具名就是没人评审过的工具名；同一个名字被
-  两个文件声明，两边都拒（"哪个赢"不该是评审进程启动器时要做的事）。
-
-诚实边界：没有 HTTP/SSE 传输，也没有那套传输自带的 auth（远程声明因此只是被跳过，不是被降级实现）；
-`mcp list` 只描述不启动，`--mcp-config` 只在命令行里被打开；导入的 `env` 不是隔离机制。
-
-测试量到 **1149**（runtime 片，+46：`test_mcp_config`，含"孩子进程自己报告拿到了什么 env/cwd"的端到端
-一条），仓库 `make test` 全绿（51+41+37+65+54+1149+49）。接线：runtime README 的 MCP 节 + 布局行 +
-Limitations、cookbook §15、`py-modules`/`tests/docbuild.py` MANIFEST，以及把插件加载器那句指向不存在
-的 `[mcp.servers]` 的错误文案改成指向 `.mcp.json` + `--mcp-config`。
-
-### 6.25 第二十批（重试预算必须属于运行时，不属于 SDK）
-
-契约面最后一项。此前"会不会重试"在本仓**没有答案**：两个 provider 把 `max_retries` 交给
-SDK 客户端，于是一次运行的请求数 = 我们的循环 × 它的循环，`Retry-After` 由库按自己的上限处理，
-没有任何事件/跨度说过"第 2 轮实际发了 4 个请求、等了 11 秒"。所谓"运行受 max_turns 与
-max_tool_calls 约束"在这种传输层上是不成立的。
-
-- **先分类，再谈退避**：`provider_retry.py` 用十个封闭名字描述故障（429/529/网络/超时/5xx/
-  超长/鉴权/坏请求/流中断/未知），判据顺序是状态码 → provider 自己的声明 → 文本模式。
-  四类**禁止**出现在 `retry_on` 里：auth 与 client_error 不会因为重发变真；`unknown` 不是"临时"的证据
-  （把"我们判断不了"当成"可重试"，等于把每个 bug 变成对已故障服务的请求风暴）；`stream_interrupted`
-  是刻意堵死的——终端已经看到文字，重发就是同一句话出现两次，而"记录与所见一致"正是流式契约存在的全部理由。
-- **日程是纯函数**：`plan(attempt, fault, waited)` 只回一个延迟或一个具名停止（attempts_exhausted /
-  deadline_exceeded / not_retryable），于是整份策略可以作为一张数字表被测试；`execute()` 是唯一碰时间的
-  地方，且 sleeper 由调用方注入。full jitter 的**种子取自 session id**：这样"测试要确定性"与
-  "别一起卡在同一个 429 窗口"才不再互相矛盾。上限归运行时而非操作者（8 次尝试 / 单次 120 s /
-  每轮等待 15 min），越界直接拒绝而不是四舍五入。
-- **`[retry]` 是工作区表，命令行只能收紧**：`restrict()` 统一钳制（`--retry-max-attempts 9` 遇到文件里的 4
-  就是 4），`--no-retry` 额外关掉 jitter，让"我要第一时间看到故障"真的最早看到。插件碰不到它——
-  `retry` 不是 bundle `[policy]` 的键，否则包就能自己抬高自己访问 provider 的请求数。
-  `Retry-After` 服从到 `max_delay_ms` 为止，并且**越权覆盖必须写进事件**；HTTP-date 形式宁可不解析。
-- **降级有界，且不换答题人**：`on_context_overflow = "compact_once"` 把 413 当作请求问题——走正常
-  `PreCompact` hook 路径压缩一次（hook 仍可否决）、重发、**不消耗重试预算**，一个 run 只许一次
-  （能被爬两次的梯子就是把上下文削到什么都不剩）。没有 `fallback_model`：换模型 = 换定价/能力/审计归属，
-  那是策略决定，不是传输细节。
-- **可见但不改格式**：provider 侧 `max_retries` 默认为 0，并把 `failure_kind`/`status_code`/`retry_after_ms`
-  附在抛出的 `ProviderError` 上（循环的分类因此与它的分类由构造一致）；重试是**事件 + 跨度属性**，
-  不是 transcript 记录——429 发生不该移动评审员钉住的摘要；但若重试耗尽导致失败，它进记录，因为那时它就是解释。
-- **零凭据可彩排**：`--script` 的轮次现在可写 `{"raises": {"status": 429, "retry_after_ms": 300}}`，
-  造出与真实网关同形的已分类故障；未知键在装载脚本期就拒（静默不产生故障的脚本会测错东西）。于是 74 项
-  新测试全部跑在 demo 用的那个 provider 上。
-
-诚实边界（写进 README 同一节）：这不是熔断器（进程间无共享状态，靠种子化抖动避免齐步走），也不是队列
-（`deadline_ms` 封住等待，需要十分钟恢复的 provider 应该由 CI 显式稍后重跑，让意图可见）；没有触碰任何
-真实服务端点；"流中断后继续生成"这类能力我们**刻意不做**。
-
-测试量到 **1103**（runtime 片，+74：`test_provider_retry`，其中含 CLI 层"429+529 重试后落地答案"与
-"`--no-retry` 让同一脚本立即失败"两条端到端），仓库 `make test` 全绿（51+41+37+65+54+1103+49）。
-接线：runtime README 新增 "Provider faults, retries and the wait budget" 一节 + 布局行、cookbook §14、
-`py-modules`/`tests/docbuild.py` MANIFEST、CI 编译行改为整目录 glob（手抄清单已漏掉数个新模块，正是它该被自动化的原因）。
-
-### 6.24 第十九批（插件是打包格式，不是权限通道）
-
-用户问的是"我们有插件吗？能不能适配所有平台"。诚实的基线是：这一批之前有**四个扩展缝**
-（skills、agent files、command hooks、MCP），**没有 bundle 概念**——`dx-benchmark-2026` 因此把
-扩展生态记 3/5、N4 记 2/5，缺的就是"无 plugins/市场、无安装器/索引"。这一批只补 C5 裁定允许的
-那一半：**格式**，并把"适配所有平台"拆成两个都能验证的答案。
-
-- **格式与钉住**：`plugin.toml`（`northstar.plugin.v1`）是封闭 schema——未知键直接拒（"A key nobody
-  reads is a capability somebody meant"）。`load_bundle` 计算内容 digest，**故意排除 `[integrity]` 表**：
-  自己哈希自己是自证，能治理加载的那个数字属于 `plugins.lock`（`{name, version, content_digest, source}`）。
-  安装 = `shutil.copytree` 到 `.northstar/plugins/<name>/`，一次 git 可见的落地；卸载只删自己放下的东西，
-  且**拒绝穿过符号链接删**（进去时也不收 symlink）。没有市场、没有解析器、没有远程拉取。
-- **能力只减不增**：`[policy]` 与已加载的 workspace policy 比，放宽即拒；没有 `allow_tools` 键；
-  `permission_mode` 只接受 `plan`——`acceptEdits`/`bypassPermissions` 是**批准**，批准只能由人在命令行给。
-  四个缝全部复用既有门：skill 走 `discover_skills(..., extra_roots=)`（与仓库同名 = 错误，不是覆盖）、
-  agent 走 `register_workspace_agents(..., extra_paths=)`（不得遮蔽内置）、hook 渲染成**真实 `[[hooks]]` 表**
-  交给 `command_hooks.parse_hooks(workspace=<workspace>)`（脚本必须在包内、无 shell、`--enable-workspace-hooks`
-  仍是唯一开关）、MCP server 进操作者自己的 `--mcp-server` 列表（默认 mutating、未点名即拒）。**声明 env 的
-  MCP server 在加载时被拒**，指向 workspace 自己的 `.mcp.json`（由 `--mcp-config` 导入，第二十批前无处可指）：
-  为插件密钥另开一条通道 = 新的权限路径；而配置文件里那份 `env` 的值来自操作者的环境，不来自仓库。
-- **安装即评审**：bundle 自己的 `SKILL.md` 在拷贝**之前**过一遍 `skills check` 的同一套规则，
-  `--fail-on`（默认 `error`）之上有发现即拒绝安装；`plugin verify` 每次重跑该评审（规则随
-  `RULES_VERSION` 进化，"三月干净"不等于"九月干净"），但 `run` 刻意不看它——规则升级本身不该把
-  所有工作区的已装插件变成配置错误，那是一次人工复审（`--write-lock`）的事。
-- **不"半装"**：未钉住、内容漂移、seal 不可验、denial 指向不存在的工具——一律 block 整个 run（exit 64），
-  而不是 warn。理由与 C2 同源：「skills 装上了但 hooks 没装」不是任何人评审过的状态。
-- **发布者**：stdlib 里做不了签名验证，所以 `[integrity]` 是 **HMAC-SHA256 seal**（`seal_key_env`），并如实叫它 seal；
-  `--require-seal` 时"验不了的 seal"不等于"没有 seal"，仍然拒。
-- **跨平台第一义 = 按宿主门禁**：`compatibility.{platforms,min_python,requires_flock,requires_network}` 在**安装时**
-  拒掉跑不起来的 bundle（不是装上再失败）；`plugin compat` 对每个已装 bundle 打印 `HOST_PROFILES` 矩阵，含
-  **大小写不敏感宿主上的同名冲突**（`A1.md`/`a1.md` 在 Windows 是一个文件）。矩阵只改显示、不改结论
-  （`only_hosts` 过滤视图，`portable_everywhere` 仍按全表算），且如实标注：profile 是我们对自己用到的原语的描述，
-  不是一致性测试，本仓没有任何东西在 Windows 上跑过。
-- **跨平台第二义 = 导出到别家原生格式，并列出丢了什么**：`plugin export <target>` 支持 7 个目标
-  （`claude-code/codex/openai-agents/agents-md/cursor/mcp/skills`）。`dropped` **由 `CARRIED_BY_TARGET` 一处算出**，
-  渲染器无权各写一份；目标带不动 hook 与 ceiling 时默认**拒写**，要 `--allow-drop` 才落盘。别家格式是按我们读到的
-  文档渲染的，本仓没跑过任何别的宿主——这句话写进每个导出的 notes 里。
-
-测试量到 **1029**（runtime 片，+87：`test_plugin_manifest` 42 / `test_plugin_install` 45，其余为
-`test_module_layout`/`docbuild` 对新模块的接线），仓库 `make test` 全绿（51+41+37+65+54+1029+49）。
-新增两个公开模块同时进 `pyproject.toml` 的 `py-modules` 与 `tests/docbuild.py` 的 MANIFEST，
-`policy_file.read_policy_document()` 作为"只取值、不重复评审"的原始读入口被抽出来——插件的比较需要
-workspace 的数字，但不需要在这里第二次判定文件名对不对。
-
-### 6.23 第十八批（durable 统一：会话只有一个写者，运行边界只有一份事实）
-
-| 项 | 内容 | 验证 |
-|---|---|---|
-| 会话上锁 | `session_lease.py`：按会话文件认领（`flock LOCK_EX`，运行期一直持有），认领发生在**第一条记录落盘之前**、释放在**最后一条记录落盘之后**；冲突即 `error_session_busy`（**exit 7**），不写任何字节、不触发任何 hook；`--session-lease-seconds N`（默认 900，每轮与每个检查点续期）/ `--no-session-lease`；`sessions list/show` 只复述持有者的声明并标注"未验证" | `tests/test_session_lease.py` 54 项：真起子进程争同一把锁、子进程被 kill 后锁随描述符消失、"过期但仍持有"不可被夺、无 `fcntl` 即拒启动、退出码表与 `RESULT_SUBTYPES` 双向钉死、委派不会自锁（子 agent 与父共享同一 transcript 文件） |
-| 词汇统一 | `durable_bridge.py`：把 runtime 的 `checkpoint` 记录翻译成通过 durable-run **闭合** `EventContract` schema 的字典（`checkpoint.created → running`、sequence 一对一连续、id 字符集同规则、`payload_digest` 覆盖边界事实），以及 `northstar.checkpoint.v1` 文档（`state_digest` 用 durable 的规范 JSON 规则）；`cross_check()` 在可导入时用真模块复算，不可导入即报 `unchecked` | `tests/test_durable_bridge.py` 33 项：镜像常量与真 schema 逐项对齐（字段集是**有序元组**比对，因为规范 JSON 的键序进摘要）、翻译出的事件真投进 `EventStore` 追加并 replay、同键重放是 no-op 而不同边界撞键即冲突、`EventStore.restore()` 对外来文档**如期拒绝**、无 durable 目录时子进程仍可用 |
-
-**"统一"在这里不是把两个组件并成一个。** 依赖方向仍然单向：runtime 不 import durable。统一的是**工件**——同一份边界既能被 transcript 的摘要规则解释，也能被 durable 的 event schema 接受；以及**词汇**——lease 的信封字段、`checkpoint.created` 这个事件类型、`sha256:` 前缀的摘要写法。跨校验是可选的（`cross_check()` 报 `unchecked` 而不是猜），漂移由测试兜住。
-
-**明确不统一的东西**：transcript 的记录格式（`RECORD_TYPES` 仍是 13 项——检查点摘要认证的是 transcript 的字节区间，改字节就是改所有既有检查点的断言），以及"durable 事件可以授权恢复"这件别人会顺手做的事：事件的 `payload_digest` 认证的是它自己的 payload，不是 transcript，所以 `checkpoint_from_event()` 必须把外来边界送进 `prepare_resume` 的同一道摘要门。**同一个门**是这批唯一真正想守住的抽象：不管边界是谁写的，能恢复的只有摘要对得上的。
-
-**enforcement 分歧是设计而非遗漏**：durable-run 的 `LeaseManager` 按时间戳回收（它的 run 可以活过请求），runtime 不能把锁从一个活着的进程手里夺走（那正是我们要防的损坏）。因此 `expires_at` 在 runtime 侧是"我还活着"的声明而非回收期限，并且信封写在**已加锁的描述符上**（绝不 `os.replace`——那会 unlink 锁所在的 inode，让互斥静默失效）。这两条都写在模块 docstring 里，也各有一条测试守着。
-
-### 6.22 第十七批（token 级流式，且流不能绕开记录）
-
-| 项 | 内容 | 验证 |
-|---|---|---|
-| 流式 | `providers/base.py`：`StreamDelta` + `Provider.stream()`（"分片→恰好一个 `Generation`"契约）+ `stream_fidelity`；`loop`：转发/重新切片/每轮字符与事件双上限/前缀放宽；`--stream`（CLI）与 `RunOptions.stream`（SDK）；`scripted`/`anthropic`/`openai` 三适配器全接 | `tests/test_streaming.py` 45 项：流与记录不一致即 `error_during_execution` 且**不写 assistant 记录**；中途断流不留残片；transcript 与不流式**逐字节相同**（只差 init 里的 `stream` 声明）；`RECORD_TYPES` 不变、恢复无可回放 |
-
-**这批的难点不是把 token 打出来**，而是三条同时成立：(1) 唯一 `ResultMessage`；(2) 审计不被流式改写（分片不入 transcript，摘要/检查点语义不变）；(3) **"给操作者看的"与"记下来的"必须同源**。第 (3) 条是别人不做的：多数客户端把流式当 provider 的自由文本转发，于是"直播说成功、记录里是失败"成为可能。这里由 loop 强制 `"".join(deltas) == 记录文本`（客户端自己截断时放宽为前缀），不信任 provider 的自述。
-
-**刻意不流的东西**：`tool_use` 的半截 `arguments`（半个 JSON 既不能显示成定论也不能执行）、`thinking`/`reasoning_content`（Anthropic 侧签名未到 ≠ 合法块，chat 侧它根本不进 transcript）、以及子 agent 的运行（流式是操作者终端的属性，不是委派链的语义）。
-
-### 6.21 第十六批（MCP 代际 + elicitation 走审批门）
-
-| 项 | 内容 | 验证 |
-|---|---|---|
-| P1-1 | `mcp_negotiate.py`：`server/discover` 探测→代际判定（`-32022` 即 modern 并采纳服务器点名的版本；method-not-found/垃圾/超时才回落到 `initialize`）；`_meta` 逐请求携带（含探测与通知），legacy 载荷一个多余键都不加；`--mcp-protocol auto\|legacy\|modern` | `tests/test_mcp_negotiate.py` 30 项：断言的是**线上字节**（fixture 把每条入站消息写进 wire log），不是客户端自述 |
-| §4-5 | `mcp_elicitation.py` + `call_tool` 的 MRTR 循环：能力位与"是否挂了审批人"绑定；`sampling` 永远拒绝；`roots` 仅在 `--mcp-allow-roots` 下回答且只给工作区一个根；凭据字段名先拒后问；schema 宽度/深度/体积设界；重试是**新请求**且逐字回显 `requestState`；`--mcp-max-rounds` 设界；整轮皆拒即 `notifications/cancelled` 并回错 | `tests/test_mcp_elicitation.py` 37 项 + CLI 层 10 项：包含"答案值绝不进审计"、"预批集少一个必填字段就是拒绝"、"非 tty 拒绝启动" |
-
-**为什么这行的收益不是"兼容性"**：MCP 更新把 elicitation 从"服务器发起请求"改成"结果里内嵌请求"，各家都当成协议细节跟着改；但对治理系统来说，这是**第一个从网络那头递进来的审批请求**。跟法有三条，全都可测：没人被授权时就答不了（能力位没宣告，问题不会来）、答了也只答预批过的字段（值不猜）、以及答与不答都留在 transcript 里（`[governance]` 注记 + `answered_fields`，永不含值）。
-
-**明确没做**：HTTP/Streamable 传输（代际规则与 MRTR 与传输无关，只差封帧）、`prompts`/`resources` 的 UI 面、tasks 扩展、以及"对着真实厂商服务器验证"——本仓库无网络，fixture 是按规范文本自写的，说"符合规范"就是说"符合已发表的语法"。
-
-### 6.2 第十四批（多模型 + 独立验证）
-
-| 项 | 内容 | 验证 |
-|---|---|---|
-| P1-2 | `providers/openai_compat.py` + `--provider openai`：双向翻译、`thinking` 只出请求不出 transcript、非 JSON `arguments` 失败闭合、reasoning 代际自动换 `max_completion_tokens`、价格不臆造、`--model`/`--provider` 组合在触网前校验 | `tests/test_provider_openai_compat.py` 28 项，含"聊天形状的工具调用仍过同一道权限门" |
-| §4-4 | `postconditions.py` + `--verify` / `[[verify]]`；协议新增 `error_postconditions_failed`(exit 6) 与 `RECORD_TYPES` 第 12 项 `postconditions`；面板渲染 | `tests/test_postconditions.py` 32 项：条件对模型不可见、符号链接/越界配置期拒绝、仓库只能加不能减、只读评估（mtime 不变） |
-| 漂移防护 | `py-modules` 与磁盘模块集合一致性；面板 record 词表测试如期报警 | 反向验证：从 `pyproject.toml` 删掉一行即失败 |
-
-全仓 954 项测试全绿（runtime 660）。**未做**：流式（`StreamDelta`）、`skills check`、F3。
-
-**F3、skills check、P1-1、token 级流式、durable 统一、plugin bundle（C5）、显式重试/退避/降级均已完成**（见 §6.15、§6.20、§6.21、§6.22、§6.23、§6.24、§6.25）：契约面**清空**。重试之所以排在最后是有理由的——它是跨组件接口之上的调用点，先定死接口再谈"失败后怎么再来一次"，才不会把重试写成第二个未定义的边界；这条理由已随 §6.25 兑现。此后本蓝图剩余的都是产品面（T 清单：SDK 化、发布、交互、后台/远程、托管），不是语义。
+模型可以建议检查，不能伪造检查结果。回执来自执行器，包含命令摘要、环境摘要、开始/结束时间、退出码、截断信息和输出摘要。
 
 ---
 
-**未做且刻意留在后面的**：sidecar 侧真正校验 binding（要动它那个"只允许三字段"的协议——这是安全敏感组件的协议决策，不该在一次功能批次里顺手改）；F3 durable 接线；P1 全组。
+## 5. 状态、恢复与终态
 
-（以上是第十四批之前的排序，已被 §6.21 末尾的当前排序取代：F3、P1-1、skills check、P1-2 多模型与 `[[verify]]` 均已落地。）
+### 5.1 状态机
+
+```text
+created → understanding → planned → executing → verifying
+   └────────────── failure / denied / budget_exhausted ──────┘
+verifying → success | success_unverified | needs_reconciliation | failed
+```
+
+阶段转换写入 forward-sealed 会话。每个可变更工具调用绑定 `call_id`、输入指纹、授权决定、执行 receipt 和生成的文件版本。
+
+### 5.2 恢复语义
+
+- 读取、检索和纯验证步骤可以按记录安全重算。
+- 文件补丁通过前像摘要判断是否已应用，允许幂等恢复。
+- 已获得成功 receipt 的命令不重复执行。
+- 超时、连接中断或缺少终态 receipt 的命令标为未知，等待 reconcile。
+- 恢复继承轮次、工具调用、成本、网络和子 Agent 预算。
+- checkpoint 只能收紧后续能力，不能扩大最初授权。
+
+当前可用的 [`code-reconcile`](guides/code-recovery.md) 会检查阶段转换链、工具与宿主检查回执和封存文件摘要；开始后未返回、部分修改后抛错、缺少旧版回执及证据不一致均不会触发自动重放。它提供恢复裁决所需证据；自动阶段续跑仍未实现。
+
+### 5.3 公共结果
+
+`CodeRunReport` 至少暴露：任务 ID、初始提交、worktree、终态、阶段、补丁摘要、检查回执、成本、拒绝、未知副作用、网络目标、子任务报告和证据包路径。
 
 ---
 
-## 7. 一句话
+## 6. 内核与实验室边界
 
-**"包含所有顶级 agent 的优点"这条路的正确走法，是把每个优点都过一遍"能不能不绕门"的改写；改不动的就明确拒绝。**
-Northstar 的次世代位置不在功能并集上，在于：**同一个 agent loop，别人要牺牲确定性或牺牲边界来换能力，这里两样都不换——而且每一项能力都能在 CI 里用 1515 个无 key 测试（外加 TypeScript 面的 57 个）证明它今天和昨天行为一致。**
+当前 runtime 的研究规模远大于产品调用图。重构采用 **Core + Labs**，而不是继续向一个扁平包追加模块。
+
+### 6.1 Core
+
+默认 wheel 只包含：
+
+- 编程任务状态机和通用 agent loop；
+- provider、工具、权限、预算、审计、会话、恢复；
+- 沙箱、MCP、skills、plugins 与受控网络；
+- Python SDK、TypeScript SDK 和 CLI；
+- 生产路径直接依赖的策略与数据流模块。
+
+Core 使用正式 `northstar.*` 命名空间。旧扁平模块保留一个次版本的导入 shim，随后删除。
+
+### 6.2 Labs
+
+Labs 包含攻击语料、模拟探针、外部基准适配器、研究性防御和行业场景。它不随默认 Core 安装，不得被生产入口隐式导入。
+
+迁移依据是从 CLI/SDK 出发的静态与运行时调用图。任何模块在移动前都必须分类为 Core、Labs、兼容层或待审查；待审查不等于可删除。
+
+首轮可复现静态清单见 [`architecture/runtime-module-inventory.md`](architecture/runtime-module-inventory.md)。它识别出 1,569 个模块，其中 178 个被当前生产入口静态触达，1,391 个留待人工复核，另有 24 处动态导入。入口可达集合中已经混入行业、基准和研究模块，因此“可达”只表示当前存在耦合，不代表已经批准进入 Core。下一步必须结合离线任务运行时导入轨迹，为可达模块逐个给出 Core、Labs、兼容层或待审查裁决。
+
+---
+
+## 7. 授权攻防实验室
+
+攻击能力服务于防护验证，不是生产 Agent 的默认工具。
+
+### 7.1 统一场景模型
+
+```text
+Scenario = Target + Attack + Delivery + Defense + Budget + Scope + Scorer
+```
+
+每次运行分别报告：
+
+- 攻击是否生成或送达；
+- 检测器是否告警；
+- 权限门是否拒绝；
+- 工具是否实际执行；
+- 外部状态是否改变；
+- 用户最终是否知情；
+- 正常任务效用是否保留。
+
+检测命中不是阻断，工具提议不是执行，最终文本不是外部效果证明。
+
+### 7.2 默认授权范围
+
+- 只允许本地靶场、仓库测试夹具或显式授权目标；
+- 默认关闭网络和真实凭据；
+- 外部目标必须提供范围清单、有效期、允许动作和操作者授权回执；
+- 攻击工具运行在独立沙箱和独立预算中；
+- 所有原始攻击内容按不可信数据处理，不能进入 Core 策略层。
+
+### 7.3 适配顺序
+
+M0/M1 先交付独立的编程安全脚本入口：攻击载荷仅作用于临时本地靶场，报告分别记录提议、门禁拒绝、处理器进入、有害状态变化和良性任务效用。脚本不接受任意外部目标，不把 process 后端测试等同于 OS 隔离，不把确定性脚本通过率等同于真实模型防护率。
+
+1. 继续完善已存在的 AgentThreatBench 离线适配器；
+2. 增加 AgentDojo 动态任务适配器；
+3. 以可选依赖接入 PyRIT、garak、Promptfoo 和 Inspect Evals；
+4. 增加 Northstar 自有的编程 Agent 攻击集：恶意仓库指令、测试输出注入、依赖投毒、MCP 工具漂移、跨 Agent 隐蔽通道和验证伪造。
+
+---
+
+## 8. 评测体系
+
+### 8.1 离线确定性任务
+
+固定 24 个小型仓库任务，Python 与 TypeScript 各半，覆盖：
+
+- 8 个缺陷修复；
+- 6 个功能添加；
+- 4 个行为保持重构；
+- 3 个测试/构建修复；
+- 3 个安全修复。
+
+每题包含公开任务描述和隐藏验收检查。Agent 看不到隐藏检查，评测器只从干净初始提交应用补丁并运行检查。
+
+当前 [24 题任务包](../benchmarks/code-tasks/v1/README.md)已完成全部夹具、公开检查、隐藏检查及固定摘要。参考对照证明原始 24 题均被验收拒绝，参考补丁在干净初始仓库上重放后均通过；这个数字只说明夹具有效，不能当作真实模型成功率。参考补丁与隐藏检查均不会被任务准备器复制进 Agent 工作区。
+
+### 8.2 外部真实任务
+
+固定 50 个 SWE-bench Verified 题目作为开发样本。任务 ID、容器、模型、预算、并发、温度和网络策略全部锁定。完整榜单运行属于发布候选验证，不用于每次小改动。
+
+### 8.3 攻防与效用
+
+每个安全用例必须有恶意样本和良性对照。发布门看四个独立指标：攻击执行率、关键策略绕过数、正常任务成功率、误拒率。不能用降低所有任务成功率的“全部拒绝”获得安全高分。
+
+### 8.4 回归层次
+
+1. 纯函数与 schema 单测；
+2. 工具边界集成测试；
+3. scripted provider 完整任务；
+4. 隔离 worktree 端到端任务；
+5. 固定真实模型样本；
+6. Linux 原生沙箱与资源控制验证。
+
+---
+
+## 9. 路线图
+
+### M0：重写方向与测出基线
+
+- 完成本蓝图、历史归档和唯一入口说明；
+- 冻结 24 个离线任务与 50 个 SWE-bench 样本；
+- 在现有 runtime 上记录成功率、成本、失败分类和安全基线；
+- 生成 Core/Labs 模块分类清单，不移动待审查代码。
+
+### M1：本地编程闭环
+
+- `northstar code` 与 `CodeTask`/`CodeRunReport`；
+- 隔离 worktree、RepositorySnapshot 和四阶段状态机；
+- RepoMap、SearchCode、ApplyPatch、GitInspect、RunCheck；
+- 补丁与证据包交付；
+- 达到第一阶段发布门。
+
+### M2：可靠长任务
+
+- 后台进程与日志游标；
+- 阶段恢复、未知副作用 reconcile、磁盘配额；
+- 可选 LSP/tree-sitter 适配器；
+- 大仓库渐进索引和上下文选择评测。
+
+### M3：授权攻防实验室
+
+- 独立 Labs 包和 `northstar labs run`；
+- AgentDojo 与外部红队工具适配器；
+- 编程 Agent 专项攻击集；
+- 安全、效用、误拒和用户知情度联合报告。
+
+### M4：受治理的协作
+
+- planner、implementer、reviewer 使用同一父预算池；
+- 默认按文件/任务隔离 worktree，显式合并；
+- handoff 只收窄能力并携带来源与执行证据；
+- 并发结果按确定性顺序进入会话。
+
+### M5：多模态编程
+
+- provider 增加有界 image/document block；
+- UI 截图理解、视觉回归、图表与 PDF；
+- 图像来源、像素/字节预算、OCR 文本和工具结果保持 provenance；
+- 多模态工具仍走同一权限、预算、数据流和证据路径。
+
+### 9.1 当前实现边界（2026-10-13）
+
+| 项目 | 状态 | 证据或缺口 |
+|---|---|---|
+| `northstar code` / Python `run_code()` | 已实现 | CLI 与 SDK 共用治理内核 |
+| 隔离 worktree 与 `RepositorySnapshot` | 已实现 | 原工作目录不修改；成功清理、失败保留 |
+| 四阶段协议 | 已实现首版 | 父任务和委派子任务的变更工具共享 `SubmitPlan` 闸门；转换与副作用回执写入 `phases.json` |
+| 结构化编程工具 | 已实现首版 | RepoMap、SearchCode、GitInspect、SubmitPlan、ApplyPatch、RunCheck |
+| 宿主独立验证与终态 | 已实现首版 | 失败为 `error_postconditions_failed`；无检查为 `success_unverified` |
+| 补丁与证据包 | 已实现首版 | snapshot、task、phases、patch-replay、patch-audit、delivery-seal、verification、patch、status、manifest |
+| 24 题离线任务 | 24/24 已物化并完成参考对照 | 12 Python / 12 TypeScript；原始夹具全部拒绝、参考补丁全部通过；源码、隐藏检查和对照摘要已固定并接入 CI |
+| 离线补丁评测器 | 本地首版已实现 | 固定初始提交、干净副本重放补丁、公开/隐藏检查、摘要回执；尚缺发布级沙箱回执和真实模型基线 |
+| 50 题 SWE-bench 样本 | 未完成 | 样本、容器摘要和模型配置仍需冻结 |
+| 阶段恢复与 reconcile | reconcile 首版已实现 | 变更工具有开始/完成回执；未知副作用禁止自动重放；尚不能从阶段边界自动续跑 |
+| Core / Labs 拆包 | 静态清单首版已实现 | 1,569 个模块完成保守分类；仍需运行时轨迹和逐模块裁决，当前不移动代码 |
+
+---
+
+## 10. 持续研究与停止条件
+
+研究不是无终点地向仓库增加文件。每个里程碑执行：
+
+```text
+来源雷达 → 可复现差距 → 最小设计 → 实现 → 双轨评测 → 裁决
+```
+
+一项研究只有在产生以下结果之一时结束：进入产品路线、进入 Labs、明确拒绝、等待更强证据。每个里程碑在发布门通过时形成稳定版本；未完成项进入下一轮，不阻止已经得到证明的能力交付。
+
+来源优先级为：官方代码/规范 > 同行评审论文 > 官方工程文档 > 可复现实验 > 社区讨论。社区和论坛可以触发研究，不能单独支撑产品声明。
+
+---
+
+## 11. 当前最近的一刀
+
+接下来只做 M0 和 M1。具体顺序：
+
+1. 固定真实模型、版本、沙箱、网络、预算和容器摘要；
+2. 用当前 `northstar code` 在已经冻结的 24 题上测出真实模型基线；
+3. 冻结 50 题 SWE-bench 样本和运行环境；
+4. 补齐阶段恢复与未知副作用 reconcile；
+5. 达到 24 题离线门槛后再扩展长任务和 Labs。
+
+这五步同步保留编程攻防双轨：每个有害样本配一个有效的良性对照，验证证据由宿主检查，不以模型自述或平均安全分替代硬门。来源雷达与本轮候选裁决见 [2026-10-17 生态研究](../research/2026-10-17/00-ecosystem-synthesis.md)。
+
+Northstar 的护城河不是拥有最多模块，而是：**它能完成真实代码任务，并能证明自己改了什么、为什么获准、怎样验证、失败后从哪里继续。**
