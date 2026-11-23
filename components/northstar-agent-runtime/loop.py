@@ -749,6 +749,7 @@ class _RunState:
     """Mutable per-run bookkeeping."""
 
     session_id: str
+    shell_sessions: dict[str, dict[str, Any]] = field(default_factory=dict)
     transcript: list[Any] = field(default_factory=list)
     turns: int = 0
     tool_calls: int = 0
@@ -2461,6 +2462,7 @@ class AgentRuntime:
                 sandbox=self.sandbox,
                 limits=self.limits,
                 services=self._services(),
+                shell_sessions=state.shell_sessions,
             )
             receipts = run_verification_commands(
                 config.verification_commands,
@@ -2888,6 +2890,7 @@ class AgentRuntime:
                     sandbox=self.sandbox,
                     limits=self.limits,
                     services=self._services(),
+                    shell_sessions=state.shell_sessions,
                 )
                 started = time.monotonic()
                 # Same governed execution as the serial path: the runner is
@@ -4066,6 +4069,7 @@ class AgentRuntime:
             sandbox=self.sandbox,
             limits=self.limits,
             services=self._services(),
+            shell_sessions=state.shell_sessions,
         )
         started = time.monotonic()
         if state.evidence_sink is not None:
