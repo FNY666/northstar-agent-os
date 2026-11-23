@@ -4851,9 +4851,6 @@ class AgentRuntime:
     def _close_run(self, state: _RunState, run_span: Any) -> None:
         primary: Exception | None = None
         close_records = not state.session_end_fired
-        if close_records:
-            # Mark once before the first append so re-entrant cleanup cannot duplicate
-            # the result record. SessionEnd is still attempted independently below.
         # Announce the final audit head before anything is torn down: a run
         # that ends without completing a turn still has a head worth pinning.
         self._announce_audit_head()
