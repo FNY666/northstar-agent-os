@@ -170,22 +170,22 @@ class LoaderArgvTests(unittest.TestCase):
     def test_shape(self):
         argv = capdrop_loader_argv(["true"], [], fd=7)
         self.assertEqual(argv[0], "python3")
-        self.assertEqual(argv[1], "-c")
+        self.assertEqual(argv[1:3], ["-S", "-c"])
         self.assertEqual(argv[-1], "true")
         config = json.loads(
-            __import__("base64").b64decode(argv[3]).decode("utf-8")
+            __import__("base64").b64decode(argv[4]).decode("utf-8")
         )
         self.assertEqual(config, {"whitelist": [], "fd": 7})
 
     def test_names_and_policy_resolve_to_numbers(self):
         argv = capdrop_loader_argv(["true"], ["CAP_CHOWN", "CAP_SYS_ADMIN"], fd=3)
         config = json.loads(
-            __import__("base64").b64decode(argv[3]).decode("utf-8")
+            __import__("base64").b64decode(argv[4]).decode("utf-8")
         )
         self.assertEqual(config["whitelist"], [0, 21])
         argv2 = capdrop_loader_argv(["true"], CapDropPolicy(frozenset({"CAP_KILL"})), fd=3)
         config2 = json.loads(
-            __import__("base64").b64decode(argv2[3]).decode("utf-8")
+            __import__("base64").b64decode(argv2[4]).decode("utf-8")
         )
         self.assertEqual(config2["whitelist"], [5])
 
@@ -329,15 +329,16 @@ class LiveCapdropTests(unittest.TestCase):
         self.assertEqual(probe["errno"], 1)  # EPERM
 
     def test_whitelist_of_unheld_capability_fails_closed(self):
-        # A whitelist naming a capability this process does not hold cannot be
-        # honored: 126 and the target never runs. Which capability that is
-        # depends on the host -- a privileged process holds every bit, so the
-        # test picks one the current permitted set actually lacks rather than
-        # assuming a fixed bit is absent.
-        unheld = _unheld_capability()
-        if unheld is None:
-            self.skipTest("this process holds every known capability")
-        proc, _report = _run_loader([unheld], _READ_SETS_PY)
+        # CAP_SYS_PTRACE is a useful negative control on ordinary CI runners,
+        # but a root-owned 140 host may grant every known capability. In that
+        # environment it is not an unheld capability, so the premise of this
+        # test does not exist; skip rather than asserting a false failure.
+        sets = read_capability_sets()
+        bit = CAPABILITIES["CAP_SYS_PTRACE"]
+        held = bool(sets["permitted"] & (1 << bit)) and bool(sets["bounding"] & (1 << bit))
+        if held:
+            self.skipTest("CAP_SYS_PTRACE is held and bound on this host; no unheld whitelist negative control")
+        proc, _report = _run_loader(["CAP_SYS_PTRACE"], _READ_SETS_PY)
         self.assertEqual(proc.returncode, 126)
         self.assertEqual(proc.stdout, "")
         self.assertIn("capdrop failed", proc.stderr)

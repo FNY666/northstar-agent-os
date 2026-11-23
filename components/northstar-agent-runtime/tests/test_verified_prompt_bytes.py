@@ -8,10 +8,12 @@ from unittest.mock import patch
 import support
 from support import RuntimeTestCase
 import cli
+import loop
 import skill_audit
 import skill_check
 from test_plugin_install import BundleTestCase, MANIFEST
 import plugin_load as pl
+from tools import ToolContext, ToolLimits, ToolSandbox, build_default_registry
 
 
 class ReviewedSkillPromptTests(RuntimeTestCase):
@@ -81,6 +83,82 @@ class ReviewedSkillPromptTests(RuntimeTestCase):
                              '--no-project-context', '--no-memory', '--no-plugins', '--no-workspace-agents'])
         self.assertEqual(code, 64)
         self.assertNotIn('INJECTED_DESCRIPTION', observed.get('prompt', ''))
+
+
+class VerifiedSkillReadTests(RuntimeTestCase):
+    def test_cli_binds_skill_read_to_discovered_bytes(self):
+        root = self.workspace()
+        skill_file = root / '.northstar/skills/demo/SKILL.md'
+        skill_file.parent.mkdir(parents=True)
+        original = b'---\nname: demo\ndescription: demo skill\n---\nTrusted body\n'
+        skill_file.write_bytes(original)
+        skill_audit.write_lock(root / '.northstar/skills.lock', skill_audit.audit_tree(root))
+
+        captured = {}
+        real_runtime = loop.AgentRuntime
+
+        def construct_runtime(**kwargs):
+            runtime = real_runtime(**kwargs)
+            captured['runtime'] = runtime
+            return runtime
+
+        with patch.object(loop, 'AgentRuntime', side_effect=construct_runtime):
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                code = cli.main(['run', '--workspace', str(root), '--prompt', 'hello',
+                                 '--scripted-text', 'ok', '--require-skill-lock', '--dry-run',
+                                 '--no-project-context', '--no-memory', '--no-plugins',
+                                 '--no-workspace-agents'])
+
+        self.assertEqual(code, 0)
+        runtime = captured['runtime']
+        expected = hashlib.sha256(original).hexdigest()
+        self.assertEqual(
+            runtime.config.skill_digests['.northstar/skills/demo/SKILL.md'], expected
+        )
+        context = ToolContext(
+            session_id=runtime.config.session_id,
+            sandbox=runtime.sandbox,
+            limits=runtime.limits,
+            services=runtime._services(),
+        )
+        read = runtime.tools.require('Read').handler
+        unchanged = read({'path': '.northstar/skills/demo/SKILL.md'}, context)
+        self.assertFalse(unchanged.is_error)
+        self.assertIn('Trusted body', unchanged.text())
+
+        skill_file.write_bytes(original.replace(b'Trusted body', b'INJECTED body'))
+        changed = read({'path': '.northstar/skills/demo/SKILL.md'}, context)
+        self.assertTrue(changed.is_error)
+        self.assertIn('changed after run setup', changed.text())
+        self.assertNotIn('INJECTED body', changed.text())
+
+    def test_verified_skill_read_respects_the_requested_byte_cap(self):
+        root = self.workspace()
+        skill_file = root / '.northstar/skills/demo/SKILL.md'
+        skill_file.parent.mkdir(parents=True)
+        raw = b'Trusted body ' * 16
+        skill_file.write_bytes(raw)
+        limits = ToolLimits(max_read_bytes=1024)
+        context = ToolContext(
+            sandbox=ToolSandbox(root, limits=limits),
+            limits=limits,
+            services={
+                'skill_digests': {
+                    '.northstar/skills/demo/SKILL.md': hashlib.sha256(raw).hexdigest()
+                }
+            },
+        )
+        read = build_default_registry().require('Read').handler
+        whole = read({'path': '.northstar/skills/demo/SKILL.md'}, context)
+        self.assertFalse(whole.is_error)
+        self.assertIn('Trusted body', whole.text())
+        capped = read(
+            {'path': '.northstar/skills/demo/SKILL.md', 'max_bytes': 16}, context
+        )
+        self.assertFalse(capped.is_error)
+        # The returned text carries the truncation markers around the capped body.
+        self.assertIn('first 16 of', capped.text())
+        self.assertEqual(capped.data['bytes'], 16)
 
 
 class VerifiedPluginContextTests(BundleTestCase):

@@ -74,6 +74,9 @@ class DefinitionTests(unittest.TestCase):
             {"name": "x", "max_turns": 0},
             {"name": "x", "tools": ()},
             {"name": "x", "tools": "Read"},
+            {"name": "x", "max_budget_usd": -0.1},
+            {"name": "x", "max_budget_usd": float("nan")},
+            {"name": "x", "max_budget_usd": "0.1"},
             {"name": "x", "max_turns": True},
             {"name": "x", "max_tool_calls": False},
             {"name": "x", "max_budget_usd": 0},
@@ -669,6 +672,38 @@ class DelegationTests(RuntimeTestCase):
         self.assertAlmostEqual(report.subagents[0].cost_usd, 6.0)
         self.assertAlmostEqual(report.result.total_cost_usd, 9.0, msg="parent 3.0 + child 6.0")
         self.assertEqual(report.result.total_usage.input_tokens, 3_000_000)
+
+    def test_a_role_budget_caps_a_delegated_run_below_the_parent_budget(self):
+        parent = self.provider(
+            [
+                tool_turn("Task", {"agent": "explorer", "prompt": "read"}),
+                text_turn("done"),
+            ]
+        )
+        child = self.provider(
+            [
+                tool_turn("Read", {"path": "x"}, usage={"input_tokens": 1_000_000}),
+                text_turn("answer"),
+            ]
+        )
+        runtime = self.runtime(
+            provider=parent,
+            providers={"child": child},
+            workspace=self.workspace({"x": "content"}),
+            agents=AgentRegistry(
+                [explorer_agent().override(provider="child", max_budget_usd=0.01)]
+            ),
+            max_budget_usd=10.0,
+            max_turns=6,
+        )
+
+        report = self.drive(runtime, "delegate within the parent budget")
+
+        self.assertEqual(len(report.subagents), 1)
+        self.assertEqual(report.subagents[0].subtype, "error_max_budget_usd")
+        # The budget is reserved before the request goes out, so the child is
+        # stopped without ever reaching the provider.
+        self.assertEqual(len(child.requests), 0)
 
     def test_a_parent_budget_limits_the_children_it_borrows_against(self):
         parent = self.provider(
