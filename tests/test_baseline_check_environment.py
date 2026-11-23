@@ -259,5 +259,94 @@ class BaselineCheckQuotaDetectionTests(unittest.TestCase):
         )
 
 
+class BaselineCheckConcurrencyTests(unittest.TestCase):
+    """The check must not delete a CONCURRENT run's scratch.
+
+    THE DEFECT (measured 2026-11-23)
+    --------------------------------
+    The check swept the shared temp root before running the suite:
+
+        find /tmp -maxdepth 1 -type d -name "nsar-*" -exec rm -rf {} +
+
+    to clear "residue" so that a nearly-full tmpfs would not make the
+    suite report spurious "Disk quota exceeded" errors.  But that find
+    cannot tell residue from a LIVE directory.  The runtime's own test
+    scratch uses the prefix ``nsar-test-``
+    (``tests/support.py``: ``tempfile.mkdtemp(prefix="nsar-test-")``),
+    and 65 distinct ``nsar-*`` prefixes are in use across the suite.
+
+    So the sweep deleted any concurrently-running suite's scratch out
+    from under it.  Measured on this machine:
+
+    * ``test_the_offloaded_bytes_are_still_on_disk_with_the_qualifier``
+      failed, because the offload file the run had just written was
+      removed between the write and the assertion; and
+    * "Disk quota exceeded" (Errno 122) inside a parallel copy, because
+      the copy's source tree vanished mid-copy.
+
+    Neither is a defect in the runtime.  Both are the check corrupting a
+    concurrent run.
+
+    THE RULE
+    --------
+    > **A cleanup must only ever remove what it created.**
+
+    ``tempfile`` honours ``TMPDIR``, so the fix is to run the suite
+    under a private ``TMPDIR`` and drop the sweep entirely.
+    """
+
+    def setUp(self):
+        if not SCRIPT.exists():
+            self.skipTest(f"baseline check script missing: {SCRIPT}")
+        self.text = SCRIPT.read_text(encoding="utf-8")
+
+    def _executable_lines(self):
+        """The script's COMMANDS, not its prose.
+
+        The header documents the old find in a comment, and a comment is
+        not a command -- so the check reads the executable lines only.
+        """
+        return "\n".join(
+            line
+            for line in self.text.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        )
+
+    def test_the_check_does_not_sweep_the_shared_temp_root(self):
+        self.assertNotRegex(
+            self._executable_lines(),
+            re.compile(r"find\s+/tmp\b[^\n]*nsar-\*"),
+            "the check must not blanket-delete /tmp/nsar-*: that is the "
+            "live scratch of any suite running at the same moment",
+        )
+
+    def test_the_check_runs_the_suite_under_a_private_tmpdir(self):
+        self.assertIn(
+            'export TMPDIR="$SCRATCH"',
+            self.text,
+            "the check must give the suite a private TMPDIR, or its "
+            "scratch lands in the shared temp root that other runs use",
+        )
+        self.assertIn(
+            'SCRATCH="$WORK/scratch"',
+            self.text,
+            "the private TMPDIR must live under the script's own work "
+            "directory, so the trap that removes $WORK removes it too",
+        )
+
+    def test_the_both_runners_inherit_the_private_tmpdir(self):
+        """A TMPDIR set in the environment is inherited by both.
+
+        The runners are the two places the suite is actually started, so
+        they are the two places the TMPDIR has to reach.
+        """
+        for marker in ("python3 -m pytest -q tests", "python3 -m unittest $MODS"):
+            self.assertIn(
+                f'TMPDIR="$SCRATCH" PYTHONPATH=.:tests {marker}',
+                self.text,
+                f"the {marker} runner does not get the private TMPDIR",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -465,6 +465,8 @@ code).
 | **A-5** | **install the `json-schema` extra** in the CI/verification image (`pip install -e "components/northstar-agent-runtime[json-schema]"`), and make `pyproject.toml`'s "the whole deterministic test suite run on a bare interpreter" comment honest — it is no longer true | 4 baseline items are pure missing-extra noise; the comment is stale | 4 items leave the baseline |
 | **A-6** | **fix the stale comment** in `pyproject.toml` (`dependencies` block) that claims the whole deterministic suite runs on a bare interpreter | the claim was true when written and is false now | documentation only |
 | **A-7** | **add `scripts/b173-baseline-check.sh` to the batch's CI** so that "failure set identical to baseline" is machine-checked rather than asserted in prose | the baseline drifted twice in one day (27 → 26 → 30) and four slices' reports are now wrong about it | prevents a repeat |
+| **A-7d** | **done** | the check was measured **end to end on a simulated runner** -- the thing A-7c's wiring had never actually done.  With the coordinator's directory pointed at a path that does not exist (the script's `-f` test is a **shell builtin**, so a Python-level simulation cannot hide the real directory; the script reads `B173_BASELINE_DIR`), the run reads `BASELINE MATCH: 0 failure item(s) identical to <repo>/docs/baseline/current.failures.txt` over `33507 passed, 20 skipped, 1501 subtests passed` -- so the checkout-local fallback **works**.  The measurement also found that **the guard written to pin A-7c had four holes of its own**: it ran the wrong runner (so it passed **vacuously** on the `documentation` job, which installs no dependencies and has no `pytest`), it could not see a skip (pytest prints skip reasons only under `-rs`), it read unittest's "Ran 6 tests" as six **passes** (unittest counts skipped tests too), and it could not tell a legitimate skip from a lost copy.  See `mutant-evidence-closure.md` §9.1d. | the CI step now has **measured** evidence that it resolves the local copy, runs the suite CI runs, and reports a match -- and the guard that pins the surrounding behaviour is one that can actually fail. |
+| **A-7e** | **done** | the check was **destroying a concurrently-running test suite**.  Both `scripts/b173-baseline-check.sh` and `scripts/b173-baseline-gen.sh` swept the shared temp root with `find /tmp -maxdepth 1 -type d -name "nsar-*" -exec rm -rf {} +`, which cannot tell residue from a LIVE directory -- the runtime's own test scratch uses the prefix `nsar-test-`, and **65** distinct `nsar-*` prefixes are in use across the suite.  Measured damage: `test_the_offloaded_bytes_are_still_on_disk_with_the_qualifier` FAILED (the offload file was deleted between the write and the assertion) and a parallel copy hit `Errno 122 Disk quota exceeded` mid-`copytree`.  Neither is a runtime defect; both are the check corrupting a concurrent run.  Fixed by running the suite under a **private `TMPDIR`** (`tempfile` honours it, and the runtime hardcodes no `/tmp` path) and dropping the sweep.  See `mutant-evidence-closure.md` §9.1e. | the rule it adds: **a cleanup must only ever remove what it created.**  A deletion with a justification attached is not a cleanup -- the justification (a nearly-full tmpfs) was about a different problem than the one the deletion caused.  Four new guards, each verified by planting the old line back. |
 | **A-8** | **re-take the baseline once A-1..A-4 land** and publish a new dated baseline file; until then the 30-item file is the authority | the 30-item baseline contains 25 defects that are about to be fixed | the next slice's baseline drops to ~2 items |
 | **A-9** | **correct the strategy ledger** (`b173-strategy-ledger-2026-11-14.md` §5): its 27-item list and its "缺 optional extra 4 / 内核能力缺失 6–8 / 本机环境 6 / 本批自造 1" table are all wrong for the current tree | the ledger is the input to the next slice's brief; a wrong ledger produces wrong briefs | prevents the next slice repeating this measurement |
 | **A-10** | **fix `b173-accept.sh`'s `FULL_SUITE` grep** (`Ran 19[0-9]{3}`) — the suite is at 21 072 tests | the pattern was written when the suite was ~19 000 and was never widened; it false-fails every slice that reports its current count | grader correctness (not a code fix) |
@@ -789,6 +791,83 @@ fixes **A-5**'s items, and turns **A-6**'s claim from false to true.
   a check, and a check that crashes on the runner is worse than one
   that is absent** -- because it makes CI red for a reason unrelated to
   the code, and trains everyone to ignore red.
+
+* **A-7d** — **done, 2026-11-23.**  The check itself was measured **end
+  to end on a simulated runner**, which is the thing A-7c's wiring had
+  never actually done: the script was *wired* into CI, but nothing had
+  ever run it on a machine without the coordinator's directory.
+
+  Measured, with the coordinator's directory pointed at a path that does
+  not exist (the script's `-f` test is a **shell builtin**, so a
+  Python-level simulation cannot hide the real directory -- the script
+  reads `B173_BASELINE_DIR`, and that is what the measurement used):
+
+  ```
+  baseline file: <repo>/docs/baseline/current.failures.txt
+  suite runner: pytest
+  suite: 33507 passed, 20 skipped, 7 warnings, 1501 subtests passed
+  BASELINE MATCH: 0 failure item(s) identical to <repo>/docs/baseline/current.failures.txt
+  ```
+
+  So the checkout-local fallback **works**: the CI step resolves the
+  local copy, runs the same suite CI runs, and reports a match.
+
+  The measurement also found that **the guard written to pin A-7c had
+  four holes of its own** -- it ran the wrong runner (so it passed
+  vacuously on the job that has no `pytest`), it could not see a skip,
+  it read unittest's "Ran 6 tests" as six passes, and it could not
+  tell a legitimate skip from a lost copy.  `mutant-evidence-closure.md`
+  §9.1d has the measurement and the fix.  The rule it adds:
+
+  > **A guard must be able to fail, and it must fail when the thing it
+  > measures is not measured.**  A guard that passes because it looked
+  > in the wrong place is worse than no guard, because it is trusted.
+
+* **A-7e** — **done, 2026-11-23.**  The check was **destroying a
+  concurrently-running test suite**, and the end-to-end measurement of
+  A-7d is what exposed it.
+
+  Both `scripts/b173-baseline-check.sh` and `scripts/b173-baseline-gen.sh`
+  swept the shared temp root before running the suite:
+
+  ```bash
+  find /tmp -maxdepth 1 -type d -name "nsar-*" -exec rm -rf {} +
+  ```
+
+  The reason was sound -- a nearly-full tmpfs makes three unrelated
+  cases report a spurious `Disk quota exceeded`, which reads as drift.
+  The mechanism was not: **the sweep cannot tell residue from a LIVE
+  directory.**  The runtime's own test scratch uses the prefix
+  `nsar-test-` (`tests/support.py`), and **65** distinct `nsar-*`
+  prefixes are in use across the suite (measured by AST).
+
+  The measured damage, in files this slice did not touch:
+
+  | what the sweep did | what it broke |
+  |---|---|
+  | deleted the offload file the run had just written, between the write and the assertion | `test_the_offloaded_bytes_are_still_on_disk_with_the_qualifier` FAILED |
+  | deleted a parallel copy's source tree **mid-copy** | `OSError: [Errno 122] Disk quota exceeded` inside `copytree` |
+
+  Neither is a defect in the runtime.  **Both are the check corrupting a
+  concurrent run** -- and the first is the sharper one, because the test
+  that failed was the one asserting an on-disk promise, and the tool
+  that broke it was the tool that deletes directories.
+
+  The fix: `tempfile` honours `TMPDIR`, and the runtime hardcodes no
+  `/tmp` path (measured), so the suite runs under a **private `TMPDIR`**
+  and the sweep is deleted outright.  The pre-flight refusal on a
+  nearly-full `/tmp` stays -- that part was right.
+
+  The rule it adds:
+
+  > **A cleanup must only ever remove what it created.**
+
+  A deletion with a justification attached is not a cleanup.  The
+  justification (a nearly-full tmpfs) was about a *different* problem
+  than the one the deletion caused -- the same "measurement of the wrong
+  thing" shape as §9.1d.  Four new guards, each verified by planting
+  the old line back and re-running.  `mutant-evidence-closure.md` §9.1e
+  has the measurement.
 
 * **A-8** — the baseline in force over-reports by **26** (the newest
   baseline file on this machine holds ZERO).  It should be

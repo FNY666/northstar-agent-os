@@ -12,7 +12,11 @@ What is tested here:
   * the naming and pointer conventions (``b173-baseline-CURRENT``);
   * the generator script ``scripts/b173-baseline-gen.sh``: it refuses bad
     input, it writes the file in the documented format, it is idempotent,
-    and it leaves no worktree and no ``/tmp/nsar-*`` residue behind;
+    it leaves no worktree behind, and it does **not** delete the live
+    scratch of a suite running at the same moment (measured 2026-11-23:
+    the blanket ``rm -rf /tmp/nsar-*`` it used to run deleted a
+    concurrently-running suite's scratch out from under it, which failed
+    the needle test and produced spurious "Disk quota exceeded" errors);
   * the acceptance-check patch handed to the coordinator: it reads the
     pointer, it records the baseline sha in the verdict line, it SKIPs
     rather than FAILs when the pointer is missing, and it does not change
@@ -228,14 +232,91 @@ class GeneratorScriptTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(len(out.strip().splitlines()), 1, out)
 
-    def test_generator_clears_the_nsar_scratch_residue(self):
-        residue = Path(tempfile.gettempdir()) / "nsar-r6-baseline-unify-probe"
-        residue.mkdir(parents=True, exist_ok=True)
-        self.addCleanup(shutil.rmtree, residue, True)
-        (residue / "junk").write_text("x", encoding="utf-8")
+    def test_generator_does_not_delete_a_concurrent_runs_scratch(self):
+        """The generator must not touch a LIVE nsar-* directory.
+
+        The defect (measured 2026-11-23)
+        ---------------------------------
+        The generator used to run, before the suite:
+
+            find /tmp -maxdepth 1 -type d -name "nsar-*" -exec rm -rf {} +
+
+        to clear "residue" so a full tmpfs would not make three cases
+        report a spurious "Disk quota exceeded".  But the find cannot
+        tell residue from a LIVE directory: the runtime's own test
+        scratch uses the prefix ``nsar-test-``
+        (``tests/support.py``: ``tempfile.mkdtemp(prefix="nsar-test-")``),
+        and 65 distinct ``nsar-*`` prefixes are in use across the suite.
+
+        So a baseline taken while any suite was running deleted that
+        suite's scratch out from under it.  The damage was measured:
+
+        * ``test_the_offloaded_bytes_are_still_on_disk_with_the_qualifier``
+          failed, because the offload file the run had just written was
+          removed between the write and the assertion; and
+        * "Disk quota exceeded" (Errno 122) inside a parallel copy,
+          because the copy's source tree vanished mid-copy.
+
+        Neither is a defect in the runtime.  Both are this script
+        corrupting a concurrent run.
+
+        The rule: **a cleanup must only ever remove what it created.**
+        The generator now runs the suite under a private ``TMPDIR`` and
+        clears only that.
+        """
+        # A directory that LOOKS like the suite's scratch, in the shared
+        # temp root, and is live: it has a file in it that the "owner"
+        # still needs.
+        live = Path(tempfile.gettempdir()) / "nsar-test-b173-concurrency-probe"
+        live.mkdir(parents=True, exist_ok=True)
+        self.addCleanup(shutil.rmtree, live, True)
+        keeper = live / "offload" / "tool-result-000001.txt"
+        keeper.parent.mkdir(parents=True, exist_ok=True)
+        keeper.write_text("the bytes the offload promised", encoding="utf-8")
+
         rc, _, err = self._gen()
         self.assertEqual(rc, 0, err)
-        self.assertFalse(residue.exists(), "nsar-* scratch must be cleared")
+        self.assertTrue(
+            live.exists(),
+            "the generator deleted a live nsar-* directory; it may only "
+            "remove scratch it created itself",
+        )
+        self.assertTrue(
+            keeper.exists(),
+            "the generator deleted a file inside a live nsar-* directory",
+        )
+
+    def test_generator_runs_the_suite_under_a_private_tmpdir(self):
+        """The suite's scratch must land somewhere the generator owns.
+
+        This is the mechanism behind the rule above: ``tempfile``
+        honours ``TMPDIR``, so a private ``TMPDIR`` is what makes the
+        cleanup safe.  A generator that ran the suite in the shared temp
+        root would have to clean the shared root -- which is exactly the
+        defect.
+        """
+        text = GEN_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn(
+            "TMPDIR",
+            text,
+            "the generator must give the suite a private TMPDIR, or its "
+            "cleanup has to touch the shared temp root",
+        )
+        # The check is on the EXECUTABLE lines only: the header documents
+        # the old find in prose, and a comment is not a command.
+        commands = [
+            line
+            for line in text.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        body = "\n".join(commands)
+        self.assertNotRegex(
+            body,
+            re.compile(r"find\s+/tmp\b[^\n]*nsar-\*"),
+            "the generator must not blanket-delete /tmp/nsar-*: that "
+            "directory is the live scratch of any suite running at the "
+            "same moment",
+        )
 
 
 class AcceptancePatchTests(unittest.TestCase):

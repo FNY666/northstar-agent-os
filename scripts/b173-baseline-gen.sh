@@ -19,9 +19,36 @@
 # Properties:
 #   * idempotent -- the same sha produces a byte-identical file (no
 #     timestamps, no host names, no run order dependence)
-#   * self-cleaning -- the worktree is removed and the /tmp/nsar-* scratch
-#     residue the suite leaves behind is cleared
+#   * self-cleaning -- the worktree is removed and the scratch residue
+#     the suite leaves behind is cleared
 #   * read-only w.r.t. the repository -- it writes nothing into the checkout
+#   * NON-DESTRUCTIVE to a concurrent run -- the suite runs under a
+#     private TMPDIR, and the cleanup only ever touches that private
+#     directory.  See "CONCURRENCY" below; the previous version of this
+#     script deleted every /tmp/nsar-* directory, which is the live
+#     scratch of any suite running at the same moment.
+#
+# CONCURRENCY
+# -----------
+# The script used to run `find /tmp -maxdepth 1 -type d -name "nsar-*"
+# -exec rm -rf {} +` before the suite, to clear residue so that a full
+# tmpfs would not make three cases report a spurious "Disk quota
+# exceeded".  That find has no way to tell residue from a LIVE
+# directory: the runtime's own test scratch uses the prefix
+# `nsar-test-` (tests/support.py: `tempfile.mkdtemp(prefix="nsar-test-")`),
+# and 65 distinct `nsar-*` prefixes are in use across the suite.  So a
+# baseline taken while any suite was running deleted that suite's
+# scratch out from under it, and the deleted bytes turned into:
+#
+#   * `test_the_offloaded_bytes_are_still_on_disk_with_the_qualifier`
+#     failing, because the offload file the run had just written was
+#     removed between the write and the assertion; and
+#   * "Disk quota exceeded" (Errno 122) inside a parallel copy, because
+#     the copy's source tree vanished mid-copy.
+#
+# Neither failure is a defect in the runtime: they are this script
+# corrupting a concurrent run.  The fix is to give the suite a private
+# TMPDIR and clear only that.
 #
 # Environment overrides (all optional; the defaults are the production path):
 #   B173_BASELINE_GEN_REPO  repository to take the baseline from
@@ -51,6 +78,11 @@ SHA=$(git -C "$REPO_ROOT" rev-parse "${SHA}^{commit}")
 OUT_FILE="$OUT_DIR/b173-baseline-${SHA}.failures.txt"
 WORK="$(mktemp -d /tmp/b173-baseline-gen.XXXXXX)"
 WT="$WORK/wt"
+#: The suite's private scratch root.  Everything the suite writes under
+#: TMPDIR lands here, so the cleanup below can never touch a directory
+#: another process is using.
+SCRATCH="$WORK/scratch"
+mkdir -p "$SCRATCH"
 
 cleanup() {
   git -C "$REPO_ROOT" worktree remove --force "$WT" >/dev/null 2>&1 || true
@@ -71,9 +103,15 @@ if [ ! -d "$RUNTIME_DIR" ]; then
   exit 2
 fi
 
-# 2. Clear the /tmp/nsar-* scratch residue first: a full tmpfs makes three
-#    unrelated cases report a spurious "Disk quota exceeded" error.
-find /tmp -maxdepth 1 -type d -name "nsar-*" -exec rm -rf {} + 2>/dev/null || true
+# 2. Give the suite a PRIVATE scratch root.  This is what makes the
+#    cleanup below safe: `tempfile` honours TMPDIR, so every directory
+#    the suite creates is under $SCRATCH and under nothing else.
+#
+#    The previous version cleared the SHARED /tmp/nsar-* residue with a
+#    blanket `find ... -exec rm -rf`, which cannot tell residue from a
+#    live directory and deleted any concurrently-running suite's scratch
+#    out from under it.  See "CONCURRENCY" in the header.
+export TMPDIR="$SCRATCH"
 
 # 3. Run the full runtime suite.  The module-list form is used (not
 #    `unittest discover`): tests/ has no __init__.py, and Python 3.11+
@@ -81,7 +119,7 @@ find /tmp -maxdepth 1 -type d -name "nsar-*" -exec rm -rf {} + 2>/dev/null || tr
 #    same invocation as scripts/b173-baseline-check.sh.
 LOG="$WORK/suite.log"
 MODS=$(cd "$RUNTIME_DIR" && ls tests/test_*.py | xargs -n1 basename | sed 's/\.py$//' | tr '\n' ' ')
-( cd "$RUNTIME_DIR" && PYTHONPATH=.:tests python3 -m unittest $MODS ) \
+( cd "$RUNTIME_DIR" && TMPDIR="$SCRATCH" PYTHONPATH=.:tests python3 -m unittest $MODS ) \
   >"$LOG" 2>&1
 SUITE_RC=$?
 

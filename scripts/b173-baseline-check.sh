@@ -9,7 +9,9 @@
 # in force.  See the selection block below.
 #
 # Behaviour:
-#   * clears the /tmp/nsar-* scratch residue the runtime suite leaves behind
+#   * runs the runtime suite under a PRIVATE TMPDIR, so the suite's
+#     scratch never lands in the shared temp root -- see "CONCURRENCY"
+#     below
 #   * REFUSES to measure when /tmp is nearly full, or when the run itself
 #     hit "Disk quota exceeded" -- those failures are environmental, and
 #     reporting them as drift reads as "the code regressed"
@@ -107,8 +109,34 @@ echo "baseline file: $BASELINE"
 WORK="$(mktemp -d /tmp/b173-baseline-check.XXXXXX)"
 trap 'rm -rf "$WORK"' EXIT
 
-# 1. Clear the scratch residue first (see b173-runtime-suite-tmp-scratch-leak).
-find /tmp -maxdepth 1 -type d -name "nsar-*" -exec rm -rf {} + 2>/dev/null || true
+# 1. Give the suite a PRIVATE scratch root.
+#
+#    The suite used to be run with the shared /tmp as its scratch root,
+#    and the shared /tmp was then swept with
+#
+#        find /tmp -maxdepth 1 -type d -name "nsar-*" -exec rm -rf {} +
+#
+#    to clear "residue" (see b173-runtime-suite-tmp-scratch-leak).  That
+#    find cannot tell residue from a LIVE directory: the runtime's own
+#    test scratch uses the prefix `nsar-test-` (tests/support.py:
+#    `tempfile.mkdtemp(prefix="nsar-test-")`), and 65 distinct `nsar-*`
+#    prefixes are in use across the suite.  So the sweep deleted any
+#    concurrently-running suite's scratch out from under it.
+#
+#    Measured 2026-11-23, on this machine: the sweep failed the needle
+#    test (`test_the_offloaded_bytes_are_still_on_disk_with_the_qualifier`
+#    -- the offload file the run had just written was removed between the
+#    write and the assertion) and produced spurious "Disk quota exceeded"
+#    errors inside a parallel copy.  Neither is a defect in the runtime;
+#    both are this script corrupting a concurrent run.
+#
+#    The rule: **a cleanup must only ever remove what it created.**
+#    `tempfile` honours TMPDIR, so a private TMPDIR is what makes the
+#    cleanup safe: every directory the suite creates is under $SCRATCH
+#    and under nothing else, and the sweep can be dropped entirely.
+SCRATCH="$WORK/scratch"
+mkdir -p "$SCRATCH"
+export TMPDIR="$SCRATCH"
 
 # 1b. Refuse to measure on a tmpfs that is nearly full.
 #
@@ -182,11 +210,11 @@ else
   echo "suite runner: $RUNNER"
   case "$RUNNER" in
     pytest)
-      ( cd "$RUNTIME_DIR" && PYTHONPATH=.:tests python3 -m pytest -q tests ) >"$SUITE_LOG" 2>&1
+      ( cd "$RUNTIME_DIR" && TMPDIR="$SCRATCH" PYTHONPATH=.:tests python3 -m pytest -q tests ) >"$SUITE_LOG" 2>&1
       ;;
     unittest)
       MODS=$(cd "$RUNTIME_DIR" && ls tests/test_*.py | xargs -n1 basename | sed 's/\.py$//' | tr '\n' ' ')
-      ( cd "$RUNTIME_DIR" && PYTHONPATH=.:tests python3 -m unittest $MODS ) >"$SUITE_LOG" 2>&1
+      ( cd "$RUNTIME_DIR" && TMPDIR="$SCRATCH" PYTHONPATH=.:tests python3 -m unittest $MODS ) >"$SUITE_LOG" 2>&1
       ;;
     *)
       echo "BASELINE CHECK ERROR: unknown runner: $RUNNER" >&2

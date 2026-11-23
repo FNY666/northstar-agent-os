@@ -31,6 +31,34 @@ here are the **fallback** for a machine that does not have it.  The
 order is pinned by tests that read the *selected* path, not by a
 string comparison against the source.
 
+## The rule these copies exist to satisfy
+
+> **A check whose artifact is a measurement must RUN on a runner.**
+
+A check that reads one of these files and *skips* on a runner has
+stopped checking anything — a skip leaves the check unrun, and an
+unrun check looks exactly like a passing one.  `tests/test_ci_runner_artifacts.py`
+enforces this: it simulates a runner (the coordinator's directory
+absent), runs the files that read these artifacts, and **fails** if any
+of them skipped **while their artifact is one of the copies below** —
+a copy that is present but unused is the failure this catches.  Checks
+whose artifact is live state are expected to skip, and the guard
+distinguishes the two kinds.
+
+This is why the distinction matters between the two kinds of artifact
+the coordinator holds:
+
+| kind | example | copy? | on a runner |
+|---|---|---|---|
+| **a measurement** | these six files | **yes** | the check **runs** |
+| **live state** | `b173-accept.sh`, `b173-mutant.sh`, the taskbooks, the slice manifests, the session JSONLs | no | the check **skips** |
+
+Live state is the coordinator's *moving* state; a copy of it would be a
+copy of a moving target, and a stale copy is worse than no copy
+because it would make the check assert against a referee that no longer
+exists.  A measurement is a snapshot of a named tree, and a snapshot is
+still a true claim.
+
 ## Provenance
 
 Each artifact is a byte-for-byte copy of the coordinator's file of the

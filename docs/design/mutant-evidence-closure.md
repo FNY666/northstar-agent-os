@@ -1499,6 +1499,204 @@ train everyone to ignore red.  This section keeps finding the same
 class: 9.1b found a check that accepted a comment as a proof; this one
 found a check that could not execute.
 
+### 9.1d AMENDED 2026-11-23 (m) -- the guard that pinned 9.1c had four holes of its own
+
+§9.1c landed a guard -- `tests/test_ci_runner_artifacts.py` -- that
+simulates a runner and runs the files that read the coordinator's
+directory.  The guard was itself defective in four ways, and each was
+found by **using** it rather than by reading it.
+
+**Hole 1: the wrong runner, and a vacuous pass because of it.**  The
+guard ran BOTH suites under `pytest`.  But the `documentation` CI job
+installs **no dependencies** -- so `pytest` does not exist there at
+all.  A group run with a missing runner exits non-zero with a
+traceback that carries **no** `FAILED` line, so the guard's "no
+failures" assertion **passed on a run that collected nothing at all**.
+
+This is the same shape as the "unittest's exit 5 is not a kill" defect
+in this batch, one level up: a runner that cannot see the suite
+produces an exit code, and a check that reads an exit code as a verdict
+is reading the code, not the suite.
+
+The resolution is **measured, not assumed**.  CI runs the component
+suite with `pytest -q tests` and the repository suite with `python -m
+unittest discover -s tests`, and the two runners do not collect the
+same tests -- pytest also collects the standalone module-level `test_*`
+functions that unittest's loader never sees.  So the runner matters.
+
+But **all 23** files that read the coordinator's directory are
+`TestCase`-based, with **zero** standalone module-level test functions
+(verified by AST over all 23).  So unittest's loader collects exactly
+the same tests pytest does -- measured 263 against 262, and the one
+difference is a pytest *subtest*, not a test.  The guard therefore runs
+**unittest** for both groups, which is in the standard library and
+therefore present in **every** CI job.  The guard now runs on the
+`documentation` job as well as the `agent-runtime` one, and "the runner
+is missing" stops being a thing that can happen.
+
+That also removes the last way the guard could pass vacuously: with the
+runner always present, "no group ran" can only mean the guard itself is
+broken.
+
+**Hole 2: a skip was invisible.**  pytest prints skip *counts* under
+`-q` and skip *reasons* only under `-rs`.  The guard read the counts,
+so a check that had **silently stopped running** looked like a check
+that ran.  The runner now prints the reasons, and the guard names the
+tests that skipped.
+
+**Hole 3: "Ran 6 tests" was read as six passes.**  unittest's "Ran N"
+counts every test it collected, **passed and skipped alike**.  The
+guard's own counter subtracted nothing, so a run in which all six tests
+skipped was counted as six checks that checked something.  This is the
+defect the whole slice is about, in a new costume: **a count is not a
+verdict**.  The count is now `Ran N` minus the skipped.
+
+**Hole 4: the guard could not tell a legitimate skip from a lost
+copy.**  Seven of the twenty-one files that read the coordinator's
+directory are **100% skipped** on a runner, and that is **correct**:
+their artifact is the coordinator's *live state* -- the referee
+`b173-accept.sh`, the mutant probe `b173-mutant.sh`, the watch script,
+the taskbooks, the slice manifests, the session JSONLs.  A copy of a
+moving target is not evidence, so those files have nothing to copy and
+skipping is the honest answer.
+
+The files whose artifact is a **measurement** -- the census files and
+the re-measurements -- are different: a snapshot of a measurement of a
+named tree is still a true claim, so the repository holds a copy and
+those checks **must RUN** on a runner.  The guard now distinguishes the
+two kinds and **fails when a measurement-backed check skips**.
+
+**Hole 5: "no tests ran" was read as a substring.**  The guard
+decided that a run had collected nothing by looking for the phrase
+"no tests ran" in the output.  But **two of the files it runs talk
+about unittest's "NO TESTS RAN" exit code in their docstrings** --
+`test_judge_hygiene.py` and `test_unittest_blind_slices.py` -- so the
+phrase was in the output of a run that collected **204 tests**.  The
+empty collection is now read **structurally**, from the runner's own
+summary line (`Ran 0 tests`, `collected 0 items`), never from a
+substring.
+
+**Measured, by planting each defect and re-running:**
+
+| planted defect | the guard | what it says |
+|---|---|---|
+| `k3-remeasure.txt` deleted | FAILS | `missing checkout-local re-measurement` |
+| `_first_present` always `None` in the repo group (so five checks skip while the copy is still present) | FAILS | `skipped, but its artifact is a measurement with a checkout-local copy, so the check should have run` |
+| the unguarded `None` unpack in the component group, no local copy | FAILS | the group errors; three of the guard's four tests fail |
+
+**The baseline check, end to end.**  §A-7 wired
+`scripts/b173-baseline-check.sh` into CI, and it prefers the
+coordinator's pointer over the checkout-local copy.  On a runner the
+pointer is absent, so the local copy is used -- measured under the
+simulation, with the coordinator's directory pointed at a path that does
+not exist:
+
+    baseline file: <repo>/docs/baseline/current.failures.txt
+    suite runner: pytest
+    suite: 33507 passed, 20 skipped, 7 warnings, 1501 subtests passed
+    BASELINE MATCH: 0 failure item(s) identical to <repo>/docs/baseline/current.failures.txt
+
+Without the `B173_BASELINE_DIR` override the simulation leaks the real
+coordinator directory, because the script's `-f` test is a **shell
+builtin** that no Python-level `Path.exists` patch can hide.  That is
+worth stating: a simulation of a runner that only patches Python sees a
+different machine than the one CI runs.
+
+**The shape, again.**  Every hole above is the same hole: **the guard
+measured the wrong thing and read the measurement as a verdict.**  A
+missing runner, a skip, a count, a skip that was legitimate -- each is
+a fact about the *measurement* rather than about the *tree*, and a
+guard that cannot tell them apart reports coverage that does not
+exist.  The rule this section keeps arriving at:
+
+> A guard must be able to **fail**, and it must fail when the thing it
+> measures is **not measured**.  A guard that passes because it looked
+> in the wrong place is worse than no guard, because it is trusted.
+
+### 9.1e AMENDED 2026-11-23 (n) -- the check deleted a concurrent run's scratch
+
+§9.1d measured the baseline check **end to end** and the measurement
+turned up a defect that had nothing to do with the check's own logic:
+the check was **destroying a concurrently-running test suite**.
+
+**The defect.**  Both `scripts/b173-baseline-check.sh` and
+`scripts/b173-baseline-gen.sh` swept the shared temp root before running
+the suite:
+
+```bash
+find /tmp -maxdepth 1 -type d -name "nsar-*" -exec rm -rf {} +
+```
+
+The reason was sound and the mechanism was not.  The sweep was there so
+that a **nearly-full tmpfs** would not make three unrelated cases report
+a spurious `Disk quota exceeded` -- which reads as "the code
+regressed" (the defect §9.1d's `baseline-attribution.md` A-7c/A-7d
+already covers).  But the sweep **cannot tell residue from a LIVE
+directory**:
+
+* the runtime's own test scratch uses the prefix `nsar-test-`
+  (`tests/support.py`: `tempfile.mkdtemp(prefix="nsar-test-")`);
+* **65** distinct `nsar-*` prefixes are in use across the suite
+  (measured by AST over `tests/` and `components/northstar-agent-runtime/tests/`).
+
+So a baseline taken while any suite was running deleted that suite's
+scratch **out from under it**.
+
+**The measured damage.**  Two failures, both in files this slice did
+not touch, both attributable to the sweep:
+
+| what the sweep did | what it broke |
+|---|---|
+| deleted the offload file the run had just written, between the write and the assertion | `test_the_offloaded_bytes_are_still_on_disk_with_the_qualifier` FAILED -- the offload's whole promise is "the bytes are still there, at this path" |
+| deleted the source tree of a parallel copy **mid-copy** | `OSError: [Errno 122] Disk quota exceeded` inside `copytree` -- a failure that reads as a quota problem and is not one |
+
+Neither is a defect in the runtime.  **Both are the check corrupting a
+concurrent run.**  The first is the sharper one: the test that failed
+was the one that asserts an on-disk promise, and the tool that broke it
+was the tool that deletes directories.
+
+**The fix.**  `tempfile` honours `TMPDIR`, and the runtime hardcodes no
+`/tmp` path (measured: no `/tmp` literal outside test fixtures and
+strings).  So the suite is given a **private** `TMPDIR` under the
+script's own `$WORK`, and the sweep is deleted outright:
+
+```bash
+SCRATCH="$WORK/scratch"
+mkdir -p "$SCRATCH"
+export TMPDIR="$SCRATCH"
+```
+
+Both runners (pytest and unittest) inherit it.  The rule it adds:
+
+> **A cleanup must only ever remove what it created.**
+
+The old sweep was not a cleanup -- it was a deletion with a justification
+attached, and the justification (a nearly-full tmpfs) was about a
+*different* problem than the one the deletion caused.  The same
+"measurement of the wrong thing" shape as §9.1d: the sweep was there to
+make an *environmental* failure go away, and it introduced a *real* one.
+
+**The tests, and why they can fail.**  Two new guards, one per script:
+
+| test | what it pins |
+|---|---|
+| `test_generator_does_not_delete_a_concurrent_runs_scratch` | a live `nsar-test-*` directory **with a file in it** survives a generator run |
+| `test_the_check_does_not_sweep_the_shared_temp_root` | no executable line of the check matches `find /tmp ... nsar-*` |
+| `test_the_check_runs_the_suite_under_a_private_tmpdir` / `test_generator_runs_the_suite_under_a_private_tmpdir` | the private `TMPDIR` is set, and it lives under the script's own `$WORK` (so the `trap` that removes `$WORK` removes it too) |
+| `test_the_both_runners_inherit_the_private_tmpdir` | **both** runner invocations carry `TMPDIR="$SCRATCH"` -- a guard that only pins the export pins a variable that one runner does not use |
+
+Each was verified by **planting the old line back** and re-running: the
+sweep's return makes the relevant test FAIL, and restoring the fix makes
+it pass.  The `find` is checked against the script's **executable lines
+only** -- the header documents the old `find` in prose, and a comment is
+not a command.
+
+**A note on the pre-flight refusal.**  The check still REFUSES to
+measure when `/tmp` is nearly full (exit 2).  That refusal is right and
+stays: "the disk is full" and "the code broke" are different facts.  The
+fix does not weaken it -- it removes a deletion that was *causing* the
+quota errors it was meant to prevent.
+
 ### 9.2 Two pitfalls, both measured
 
 **A control that asserts the SOURCE TEXT is a false kill.**  The first
