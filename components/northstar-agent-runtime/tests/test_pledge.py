@@ -195,6 +195,8 @@ class FilesystemRulesTest(RuntimeTestCase):
 
         missing = "/lib64"
         real_isdir = os.path.isdir
+        from unittest.mock import patch
+        from tools.sandbox import _runtime_read_paths
         with patch("os.path.isdir", side_effect=lambda path: False if path == missing else real_isdir(path)):
             filtered = _runtime_read_paths()
         self.assertNotIn(missing, filtered)

@@ -101,7 +101,7 @@ class SpawnArgvTests(unittest.TestCase):
         with mock.patch.object(mcp_client, "landlock_abi_version", return_value=1):
             argv = client._apply_network_policy(["echo", "hi"])
         import base64, json
-        spec = json.loads(base64.b64decode(argv[3]).decode())
+        spec = json.loads(base64.b64decode(argv[4]).decode())
         self.assertEqual(argv[0], sys.executable)
         self.assertEqual(argv[-2:], ["echo", "hi"])
         self.assertEqual(spec["mode"], "on")
@@ -121,7 +121,7 @@ class SpawnArgvTests(unittest.TestCase):
         with mock.patch.object(mcp_client, "landlock_abi_version", return_value=10):
             argv = client._apply_network_policy(["echo", "hi"])
         import base64, json
-        spec = json.loads(base64.b64decode(argv[3]).decode())
+        spec = json.loads(base64.b64decode(argv[4]).decode())
         self.assertTrue(spec["handle_network"])
         self.assertFalse(spec["network"])
         self.assertTrue(spec["deny_unix_sockets"])
