@@ -308,6 +308,19 @@ class SeedRegistryTests(unittest.TestCase):
         self.assertEqual(before + 1, len(reg))
         self.assertEqual(before, len(load_seed_registry()))
 
+    def test_the_registry_reports_its_size(self):
+        reg = FrontierRegistry()
+        self.assertEqual(0, len(reg))
+        reg.add(_entry())
+        self.assertEqual(1, len(reg))
+
+    def test_the_registry_answers_whether_it_holds_a_source(self):
+        reg = FrontierRegistry()
+        reg.add(_entry())
+        self.assertIn("https://github.com/AgentMem/agentmem", reg)
+        self.assertNotIn("https://github.com/AgentMem/never-seen", reg)
+        self.assertNotIn(None, reg)
+
 
 if __name__ == "__main__":
     unittest.main()
