@@ -6,6 +6,7 @@ Run: python3 -m unittest discover -s tests -p 'test_paxos_interface.py'
 from __future__ import annotations
 
 import importlib.util
+from pathlib import Path
 import sys
 import unittest
 from pathlib import Path

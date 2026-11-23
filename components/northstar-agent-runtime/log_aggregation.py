@@ -345,10 +345,14 @@ class LogAggregation:
         seq = _check_seq(seq)
         with self._lock:
             if seq <= self._last_seq:
-                raise SeqOrderError(
-                    f"seq must strictly increase "
+                reason = (
+                    "seq must strictly increase "
                     f"(last={self._last_seq}, got={seq})"
                 )
+                # Record the rejected caller attempt without mutating the
+                # logical sequence or any business state.
+                self._emit(KIND_REJECTED, seq, reason=reason)
+                raise SeqOrderError(reason)
             self._last_seq = seq
         return seq
 

@@ -7,6 +7,8 @@
 [English](../README.md) · [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md) · [日本語](README.ja.md) · [Español](README.es.md) · [한국어](README.ko.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Português (Brasil)](README.pt-BR.md) · [Italiano](README.it.md) · [Türkçe](README.tr.md) · [Tiếng Việt](README.vi.md)
 
 **一句话说明：** Northstar 是仍在打磨中的受治理编程 Agent 运行时：`northstar code` 在隔离 Git worktree 中完成仓库任务，交付补丁、宿主声明的验证回执和审计轨迹；`agent` 与 `run` 继续承载通用受治理任务。
+
+落盘会话会把成功读取且通过 SHA-256 校验的 `SKILL.md` 记为 `skill_loaded` 审计事件；记录包含路径和摘要，不包含技能指令正文。
 > English is the canonical project entry. Translations mirror its scope and security claims; update them when the canonical README changes.
 
 ## 它是什么

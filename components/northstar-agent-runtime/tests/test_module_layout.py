@@ -65,6 +65,31 @@ class PackagingCompletenessTests(unittest.TestCase):
             "add the missing module(s) to [tool.setuptools] py-modules in pyproject.toml",
         )
 
+    def test_probe_batch_of_20261007_stays_registered(self):
+        # Snapshot of the 32 top-level probe modules that landed without a
+        # py-modules entry; the generic test above catches *any* drift, this
+        # one names the batch so a deliberate removal is still visible in review.
+        pyproject = tomllib.loads((COMPONENT / "pyproject.toml").read_text(encoding="utf-8"))
+        declared = set(pyproject["tool"]["setuptools"]["py-modules"])
+        batch = [
+            "approval_fatigue_probes", "argument_smuggling_probes", "artifact_graph_probes",
+            "ask_or_solve_probes", "benchmark_retirement_probes", "commerce_mandate_probes",
+            "constraint_synthesis_probes", "counterfactual_explanation_probes",
+            "destructive_prefix_probes", "enforcement_gap_probes", "evidence_aging_probes",
+            "evidence_compaction_probes", "history_deviation_probes", "memory_admission_probes",
+            "monitor_channel_probes", "monitor_deafness_probes", "multi_axis_autonomy_probes",
+            "negotiation_corpus_probes", "per_action_autonomy_probes", "plan_injection_probes",
+            "planner_executor_seam_probes", "pre_completion_signal_probes",
+            "privilege_at_recall_probes", "refusal_pattern_probes", "run_assert_eval_probes",
+            "self_modification_probes", "self_referential_trust_probes", "sleeper_agent_probes",
+            "stale_plan_probes", "tool_schema_digest_probes", "trace_tamper_probes",
+            "trust_inversion_probes",
+        ]
+        self.assertEqual(set(batch) - declared, set(),
+                         "a probe module was dropped from py-modules")
+        for name in batch:
+            self.assertTrue((COMPONENT / f"{name}.py").is_file(), f"{name}.py missing")
+
     def test_no_packaged_module_is_missing_from_disk(self):
         pyproject = tomllib.loads((COMPONENT / "pyproject.toml").read_text(encoding="utf-8"))
         declared = set(pyproject["tool"]["setuptools"]["py-modules"])

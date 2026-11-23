@@ -163,12 +163,21 @@ def _runtime_read_paths() -> tuple[str, ...]:
     import os
     import sysconfig
 
+    system_paths = [path for path in _SYSTEM_READ_PATHS if os.path.isdir(path)]
     candidates = [os.path.dirname(os.path.realpath(sys.executable))]
     for prefix in {sys.prefix, sys.base_prefix}:
         candidates.extend(os.path.join(prefix, part) for part in ("bin", "lib", "lib64"))
+    if sys.prefix != sys.base_prefix:
+        # Inside a venv, site.py reads <venv>/pyvenv.cfg at start-up. That file
+        # sits in the venv root, not in bin/ or lib/, so without this the
+        # interpreter dies with PermissionError under the Landlock allowlist.
+        # Only the venv's own root (never its parent) and only when actually in
+        # a venv: for a plain install sys.prefix is /usr or an /opt/home tree
+        # that must NOT be widened.
+        candidates.append(sys.prefix)
     candidates.extend(sysconfig.get_path(key) for key in ("stdlib", "platstdlib"))
     extra = [os.path.realpath(path) for path in candidates if path and os.path.isdir(path)]
-    return tuple(dict.fromkeys([*_SYSTEM_READ_PATHS, *extra]))
+    return tuple(dict.fromkeys([*system_paths, *extra]))
 
 
 class LandlockError(ValueError):
@@ -359,6 +368,36 @@ def default_profile(workspace: str) -> dict:
     return spec
 
 
+def _mcp_workspace_profile(workspace: str, *, network: str = "denied") -> dict:
+    """Landlock profile for a local MCP server restricted to one workspace.
+
+    Runtime and system hierarchies are readable/executable, the selected workspace
+    is writable, and other filesystem trees are denied except the standard profile's
+    read-only /etc and /proc and minimal device-node grants. Network policy remains
+    independently selected: denied also scopes Unix sockets; allowed leaves IP
+    networking unconfined while preserving the filesystem boundary.
+    """
+    import os
+
+    normalized = str(network or "").strip().lower()
+    if normalized not in {"denied", "allowed"}:
+        raise LandlockError("MCP network mode must be denied or allowed")
+    if not isinstance(workspace, str) or not os.path.isabs(workspace):
+        raise LandlockError("MCP workspace scope requires an absolute workspace directory")
+    root = os.path.realpath(workspace)
+    _check_dir(root, "workspace")
+
+    spec = default_profile(root)
+    spec["mode"] = "on"
+    # Landlock's network rights are handled by default. Leave them unhandled
+    # when the operator explicitly selected full network access.
+    spec["handle_network"] = normalized == "denied"
+    if normalized == "denied":
+        spec["deny_unix_sockets"] = True
+        spec["scoped"] = ["ABSTRACT_UNIX_SOCKET"]
+    return spec
+
+
 def network_deny_profile() -> dict:
     """Network and cross-domain Unix-socket denial without FS confinement.
 
@@ -425,7 +464,7 @@ _handled_fs_names = ("EXECUTE","WRITE_FILE","READ_FILE","READ_DIR","REMOVE_DIR",
 if _spec.get("deny_unix_sockets"):
     _handled_fs_names += ("RESOLVE_UNIX",)
 _handled_fs = _mask(_handled_fs_names, _FSR)
-_handled_net = _mask(("BIND_TCP","CONNECT_TCP","BIND_UDP","CONNECT_SEND_UDP"), _NETR)
+_handled_net = _mask(("BIND_TCP","CONNECT_TCP","BIND_UDP","CONNECT_SEND_UDP"), _NETR) if _spec.get("handle_network", True) else 0
 _handled_scope = _mask(_spec.get("scoped", ()), _SCOPE)
 if _abi >= 6:
     _attr = _st.pack("<QQQ", _handled_fs, _handled_net, _handled_scope)
@@ -494,7 +533,9 @@ def landlock_loader_argv(
 ) -> list[str]:
     """Wrap ``inner_argv`` so the Landlock allowlist is installed before exec.
 
-    Returns ``[python, "-c", LOADER, b64(spec), *inner_argv]``. ``inner_argv``
+    Returns ``[python, "-S", "-c", LOADER, b64(spec), *inner_argv]``. ``-S``
+    skips site startup: this stdlib-only loader may run under an existing
+    Landlock boundary, where a venv's ``pyvenv.cfg`` is not readable. ``inner_argv``
     is normally the seccomp prctl wrapper's argv, giving the syscall layer
     (seccomp denylist) inside the path layer (Landlock allowlist). A Landlock
     failure exits 126 in mode ``on``; in mode ``auto`` it warns and execs the
@@ -503,7 +544,7 @@ def landlock_loader_argv(
     if not inner_argv:
         raise LandlockError("inner_argv must not be empty")
     encoded = base64.b64encode(json.dumps(spec, sort_keys=True).encode("utf-8")).decode("ascii")
-    return [python, "-c", _LANDLOCK_LOADER, encoded, *inner_argv]
+    return [python, "-S", "-c", _LANDLOCK_LOADER, encoded, *inner_argv]
 
 
 __all__ = [

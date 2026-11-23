@@ -123,6 +123,66 @@ class ParallelDispatchTests(RuntimeTestCase):
         self.assertLess(elapsed, 0.5, f"handlers did not overlap (elapsed={elapsed:.3f}s)")
         self.assertEqual(sorted(started), ["a", "b", "c"])
 
+    def test_parallel_authorization_evidence_is_present_before_handlers_run(self):
+        workspace = self.workspace()
+        bundle = self.temp_dir() / "evidence"
+        runtime_ref = []
+        observed = {}
+        lock = threading.Lock()
+
+        def read(_payload, context):
+            runtime = runtime_ref[0]
+            entries = runtime._evidence_sink._store.entries
+            event_kinds = {
+                entry.kind
+                for entry in entries
+                if entry.source_id and entry.source_id.endswith(context.call_id)
+            }
+            with lock:
+                observed[context.call_id] = event_kinds
+            return ToolResult.ok("read")
+
+        registry = ToolRegistry()
+        registry.register(
+            ToolSpec(
+                name="EvidenceRead",
+                description="",
+                input_schema={"type": "object", "properties": {}},
+                handler=read,
+                kind="read",
+                is_mutating=False,
+            )
+        )
+        provider = self.provider(
+            [
+                {
+                    "tools": [
+                        {"name": "EvidenceRead", "input": {}, "id": "call-a"},
+                        {"name": "EvidenceRead", "input": {}, "id": "call-b"},
+                    ]
+                },
+                text_turn("done"),
+            ]
+        )
+        runtime = self.runtime(
+            provider=provider,
+            tools=registry,
+            workspace=workspace,
+            parallel_tools=2,
+            evidence_dir=str(bundle),
+            evidence_required=True,
+            max_turns=4,
+        )
+        runtime_ref.append(runtime)
+
+        report = self.drive(runtime)
+
+        self.assertEqual(report.subtype, "success")
+        self.assertEqual(set(observed), {"call-a", "call-b"})
+        for event_kinds in observed.values():
+            self.assertIn("runtime.permission.allowed", event_kinds)
+            self.assertIn("runtime.governance.authorized", event_kinds)
+
     def test_parallel_batch_reserves_tool_call_ceiling_in_provider_order(self):
         executed: list[str] = []
         registry = ToolRegistry()

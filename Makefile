@@ -1,4 +1,4 @@
-.PHONY: help demo test ts-test install bench install-smoke security-test security-lab
+.PHONY: help demo test ts-test install bench install-smoke security-test security-lab code-security-lab
 
 help:
 	@echo "northstar-agent-os targets:"
@@ -12,6 +12,7 @@ help:
 	@echo "  make install-smoke  clean-venv wheel install + northstar --version + bench"
 	@echo "  make security-test  host evidence and native adapter contract regression"
 	@echo "  make security-lab   fixed local paired evidence attack-defense lab"
+	@echo "  make code-security-lab  local coding attacks + paired benign controls (fixture-only)"
 	@echo ""
 	@echo "product entry (checkout, no pip):"
 	@echo "  bin/northstar --version"
@@ -33,6 +34,9 @@ help:
 
 demo:
 	sh examples/demo/run_offline.sh
+
+code-security-lab:
+	python3 scripts/run-code-security-lab.py run
 
 test:
 	@set -e; \
