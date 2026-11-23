@@ -70,6 +70,43 @@ BASIS_ALLOW = "allow"
 BASIS_TRIGGERED = "kill-switch-triggered"
 
 
+def _strict_json_loads(raw: str) -> Any:
+    """Parse persisted state without duplicate keys or non-standard numbers."""
+    depth = 0
+    in_string = False
+    escaped = False
+    for character in raw:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            continue
+        if character == '"':
+            in_string = True
+        elif character in "[{":
+            depth += 1
+            if depth > 128:
+                raise ValueError("JSON depth limit exceeded (128 containers)")
+        elif character in "]}":
+            depth -= 1
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON key {key!r}")
+            result[key] = value
+        return result
+
+    def reject_constant(value: str):
+        raise ValueError(f"non-standard JSON constant {value}")
+
+    return json.loads(raw, object_pairs_hook=unique_object, parse_constant=reject_constant)
+
+
 def _canonical_json(obj: Any) -> bytes:
     """Canonical JSON bytes: sorted keys, no whitespace, UTF-8.
 
@@ -300,8 +337,8 @@ class KillSwitch:
             self._fail_closed("state file unreadable")
             return
         try:
-            state = json.loads(raw.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            state = _strict_json_loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError, RecursionError) as exc:
             warnings.warn(f"kill-switch state corrupt ({exc}); treating as TRIGGERED", UserWarning, stacklevel=3)
             self._fail_closed("state file corrupt")
             return

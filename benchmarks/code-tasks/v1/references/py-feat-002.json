@@ -1,0 +1,3 @@
+{
+  "config.py": "\"\"\"Merge defaults < file < environment < explicit overrides.\"\"\"\nimport copy\n\ndef merge_config(defaults, file_values=None, env=None, overrides=None):\n    result = copy.deepcopy(defaults)\n    allowed = set(defaults)\n    for layer in (file_values, env, overrides):\n        if layer is None:\n            continue\n        unknown = set(layer) - allowed\n        if unknown:\n            raise ValueError(\"unknown configuration keys: \" + \", \".join(sorted(unknown)))\n        result.update(copy.deepcopy(layer))\n    return result\n"
+}

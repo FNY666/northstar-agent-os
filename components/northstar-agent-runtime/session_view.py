@@ -13,6 +13,8 @@ import argparse
 import json
 import re
 import sys
+import stat
+import time
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -63,6 +65,14 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     listing = sub.add_parser("list", help="list transcripts in a session directory")
     _add_session_location(listing)
     listing.add_argument("--json", action="store_true", help="emit one JSON object per transcript")
+
+    retention = sub.add_parser(
+        "retention",
+        help="report transcripts older than a policy age that are safe candidates for host-managed retention",
+    )
+    _add_session_location(retention)
+    retention.add_argument("--older-than-days", type=int, required=True, metavar="DAYS")
+    retention.add_argument("--json", action="store_true", help="emit one JSON object per transcript")
 
     showing = sub.add_parser("show", help="print one transcript as a human-readable timeline")
     _add_session_location(showing)
@@ -196,6 +206,12 @@ def run_sessions(args: argparse.Namespace) -> int:
     try:
         if args.session_command == "list":
             return _list_sessions(directory, json_out=bool(getattr(args, "json", False)))
+        if args.session_command == "retention":
+            days = getattr(args, "older_than_days", 0)
+            if isinstance(days, bool) or not isinstance(days, int) or days < 1:
+                print("sessions retention: --older-than-days must be a positive integer", file=sys.stderr)
+                return USAGE_ERROR
+            return _retention_report(directory, older_than_days=days, json_out=bool(getattr(args, "json", False)))
         if args.session_command == "show":
             try:
                 session_id = _resolve_session_arg(args.session_id, directory)
@@ -278,7 +294,7 @@ def run_sessions(args: argparse.Namespace) -> int:
     except (OSError, SessionIntegrityError) as error:
         print(f"sessions: {error}", file=sys.stderr)
         return 1
-    print("sessions: pass a subcommand: list, show, export, checkpoints, replay, search or ui (--help for flags)", file=sys.stderr)
+    print("sessions: pass a subcommand: list, retention, show, export, checkpoints, replay, search or ui (--help for flags)", file=sys.stderr)
     return USAGE_ERROR
 
 
@@ -339,6 +355,98 @@ def _list_sessions(directory: Path, *, json_out: bool) -> int:
                   # problem than one that ended badly.
                   f"{path.stat().st_size} bytes"
                   + (f"  *{claim}" if claim else ""))
+    return 0
+
+
+def _retention_report(directory: Path, *, older_than_days: int, json_out: bool) -> int:
+    """Read-only retention inventory; deletion remains an explicit host operation.
+
+    A candidate must be old, a completed transcript, have a valid sealed chain,
+    and have a probeable, currently-unlocked session lease. The result is advisory:
+    a host that later deletes a candidate must recheck the lease at deletion time.
+    """
+    if not directory.is_dir():
+        print(f"sessions: no such directory: {directory}", file=sys.stderr)
+        return 1
+    cutoff = time.time() - older_than_days * 86_400
+    reports: list[dict[str, Any]] = []
+    from audit_chain import verify_lines
+    from session_lease import LeaseError, inspect_lease, lease_path_for
+
+    for path in sorted(directory.glob(f"*{SESSION_FILE_SUFFIX}")):
+        session_id = path.name[: -len(SESSION_FILE_SUFFIX)]
+        report: dict[str, Any] = {
+            "session_id": session_id,
+            "eligible": False,
+            "reason": "unknown",
+        }
+        try:
+            validate_session_id(session_id)
+            info = path.lstat()
+            if not stat.S_ISREG(info.st_mode):
+                report["reason"] = "not_regular_file"
+                reports.append(report)
+                continue
+            report["bytes"] = info.st_size
+            report["age_days"] = round(max(0.0, time.time() - info.st_mtime) / 86_400, 3)
+            if info.st_mtime > cutoff:
+                report["reason"] = "within_retention_window"
+                reports.append(report)
+                continue
+            records, dropped = load_jsonl(path)
+            if dropped:
+                report["reason"] = "torn_transcript"
+                reports.append(report)
+                continue
+            if not records or records[-1].get("type") != "session_end":
+                report["reason"] = "incomplete_transcript"
+                reports.append(report)
+                continue
+            start = next((record for record in records if record.get("type") == "session_start"), None)
+            data = start.get("data") if isinstance(start, dict) else None
+            lease_claim = data.get("session_lease") if isinstance(data, dict) else None
+            if not isinstance(lease_claim, dict) or lease_claim.get("locked") is not True or lease_claim.get("kernel_lock_available") is not True:
+                report["reason"] = "lease_not_proven"
+                reports.append(report)
+                continue
+            if not any(any(key in record for key in ("chain_hash", "prev_hash", "genesis")) for record in records):
+                report["reason"] = "unsealed_transcript"
+                reports.append(report)
+                continue
+            chain = verify_lines(
+                (json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str) for record in records),
+                expect_session_id=session_id,
+            )
+            if not chain.ok:
+                report["reason"] = "invalid_chain"
+                reports.append(report)
+                continue
+            lease_path = lease_path_for(directory, session_id)
+            if lease_path.is_symlink() or not lease_path.is_file():
+                report["reason"] = "lease_missing_or_unsafe"
+                reports.append(report)
+                continue
+            lease = inspect_lease(lease_path, probe=True)
+            if not lease.probed or not lease.kernel_lock_available or not lease.metadata_readable:
+                report["reason"] = "lease_unverifiable"
+            elif lease.locked:
+                report["reason"] = "active_session"
+            else:
+                report["eligible"] = True
+                report["reason"] = "expired_complete_sealed_unlocked"
+        except (OSError, ValueError, SessionIntegrityError, LeaseError):
+            report["reason"] = "unreadable_or_malformed"
+        reports.append(report)
+    if json_out:
+        for report in reports:
+            print(json.dumps(report, sort_keys=True))
+    else:
+        print(f"session retention inventory (older than {older_than_days} days; no files changed)")
+        for report in reports:
+            state = "CANDIDATE" if report["eligible"] else "KEEP"
+            age = f" age={report['age_days']:.3f}d" if "age_days" in report else ""
+            size = f" bytes={report['bytes']}" if "bytes" in report else ""
+            print(f"{state:<9} {report['session_id']}{age}{size} reason={report['reason']}")
     return 0
 
 
@@ -589,6 +697,14 @@ def _blocks_preview(content: Iterable[Any]) -> str:
             pieces.append(f"\u2192 {block.get('name')} {brief}")
         elif kind == "tool_result":
             body = str(block.get("content", ""))
+            if body.startswith("[Northstar tool result metadata: "):
+                _, separator, body = body.partition("]\n")
+                if not separator:
+                    body = str(block.get("content", ""))
+            elif body.startswith("[Northstar tool result trust="):
+                _, separator, body = body.partition("]\n")
+                if not separator:
+                    body = str(block.get("content", ""))
             marker = "error" if block.get("is_error") else "ok"
             pieces.append(f"\u2190 {marker}: {body}")
         else:

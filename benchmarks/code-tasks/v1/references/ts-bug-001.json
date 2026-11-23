@@ -1,0 +1,3 @@
+{
+  "decoder.ts": "export function decodeChunks(chunks: readonly Uint8Array[]): string {\n  const decoder = new TextDecoder(\"utf-8\", {fatal: true});\n  let result = \"\";\n  for (const chunk of chunks) result += decoder.decode(chunk, {stream: true});\n  return result + decoder.decode();\n}\n"
+}

@@ -9,6 +9,310 @@ Docstring-generated reference over the component's public modules (``ast``-extra
 
 ## Modules
 
+### `code_task`
+
+Source: `components/northstar-agent-runtime/code_task.py`
+
+Isolated Git workspaces and evidence artifacts for ``northstar code``.
+
+#### `append_code_protocol(system_prompt: str, *, checks: Sequence[str]=(), plan_only: bool=False)`
+
+Append the host-owned programming workflow to an existing system prompt.
+
+#### `CodeTaskError`
+
+The requested code workspace cannot be prepared or evidenced safely.
+
+#### `CodePhaseMachine`
+
+Host-owned phase gate with a durable, atomic transition journal.
+
+- `state` (property)
+- `outcome` (property)
+- `plan_submitted` (property)
+- `start()`
+- `submit_plan(plan: dict[str, Any])`
+- `begin_execution(*, tool: str, call_id: str='')`
+  - Durably record an approved effect immediately before its handler runs.
+- `begin_check(*, index: int)`
+  - Record a host verification command before entering the sandbox.
+- `complete_execution(effect_id: str, *, status: str, error_class: str='')`
+  - Close one effect receipt; a crash before this call leaves it unknown.
+- `begin_verification()`
+- `seal_verification()`
+  - Prove host checks did not change the audited delivery patch.
+- `finish(outcome: str, *, reason: str='runtime terminal result')`
+- `as_dict()`
+#### `validate_patch_replay(worktree: str | Path, *, start_commit: str, evidence_dir: str | Path)`
+
+Check the final patch against a temporary index seeded from start_commit.
+
+#### `audit_delivery_patch(worktree: str | Path, *, evidence_dir: str | Path)`
+
+Reject high-confidence delivery hazards after every model tool has stopped.
+
+#### `reconcile_code_evidence(evidence_dir: str | Path)`
+
+Classify an interrupted code run without replaying any tool effect.
+
+#### `default_state_root()`
+
+Host state directory used when the caller did not choose an evidence path.
+
+#### `CodeTask`
+
+The host-owned task contract for one programming run.
+
+- `as_dict()`
+#### `validate_check_inputs(inputs: Iterable[str])`
+
+Return a stable, validated tuple of repository-relative check inputs.
+
+#### `IsolatedCodeWorkspace`
+
+Lifecycle of a detached task worktree and its durable evidence directory.
+
+- `prepare()`
+- `execution_root` (property)
+  - Workspace equivalent to the caller's path inside the detached tree.
+- `session_dir` (property)
+- `record_repository_snapshot()`
+  - Persist a bounded map of the exact clean tree handed to the agent.
+- `record_task(task: CodeTask)`
+  - Persist the immutable host task beside the run manifest.
+- `record_verification(summaries: Sequence[dict[str, Any]])`
+  - Persist independent completion receipts, including an explicit empty plan.
+- `record_phases(phases: CodePhaseMachine)`
+  - Seal the latest phase journal into the top-level evidence manifest.
+- `capture(*, exit_code: int, terminal: str)`
+  - Capture tracked and untracked changes as one binary-capable patch.
+- `cleanup()`
+  - Remove only the disposable worktree; evidence is never removed here.
+- `preserve(*, reason: str)`
+#### `CodeRunReport`
+
+Public summary produced by a ``northstar code`` orchestration.
+
+- `ok` (property)
+- `as_dict()`
+### `verification`
+
+Source: `components/northstar-agent-runtime/verification.py`
+
+Host-declared command checks for the programming-agent completion boundary.
+
+#### `VerificationError`
+
+A host-declared verification command is malformed or unbounded.
+
+#### `validate_commands(commands: Iterable[str])`
+
+Return a stable, validated command tuple.
+
+#### `VerificationReceipt`
+
+One check result obtained from the sandbox executor.
+
+- `as_dict()`
+#### `run_commands(commands: Sequence[str], *, context: ToolContext, timeout_ms: int=120000)`
+
+Run host-owned checks serially and return receipts for every attempted check.
+
+#### `summarise(commands: Sequence[str], receipts: Sequence[VerificationReceipt])`
+
+Stable audit payload for a verification run.
+
+### `memory_integrity`
+
+Source: `components/northstar-agent-runtime/memory_integrity.py`
+
+Workspace memory integrity manifest, outside the agent-writable carve-out.
+
+#### `MemoryIntegrityError`
+
+The baseline is malformed or memory no longer matches its pinned bytes.
+
+#### `memory_write_lock(workspace: str | Path, *, timeout_seconds: float=DEFAULT_MEMORY_WRITE_LOCK_TIMEOUT_SECONDS)`
+
+Serialize managed-memory transactions with a bounded wait.
+
+#### `verify_memory_bytes(workspace: str | Path, relative_path: str, raw: bytes | None)`
+
+Return ``verified`` or ``unverified``; raise when a pinned file differs.
+
+#### `record_memory_bytes(workspace: str | Path, relative_path: str, raw: bytes, *, provenance: dict[str, Any] | None=None)`
+
+Atomically stage the expected bytes in the protected side manifest.
+
+### `ssrf_detect`
+
+Source: `components/northstar-agent-runtime/ssrf_detect.py`
+
+Detect literal non-public HTTP(S) destinations in untrusted output.
+
+#### `is_private_url(url: str)`
+
+Return whether an HTTP(S) URL names localhost or a non-global IP.
+
+#### `stdlib_only()`
+
+#### `main()`
+
+### `tool_input_schema`
+
+Source: `components/northstar-agent-runtime/tool_input_schema.py`
+
+Fail-closed validation for runtime tool arguments.
+
+#### `ToolInputSchemaError`
+
+The tool arguments or the declared schema do not satisfy this contract.
+
+#### `validate_tool_input(value: Any, schema: Any)`
+
+Raise with a bounded, value-free message when input violates schema.
+
+#### `validate_json_schema_instance(value: Any, schema: Any)`
+
+Validate any JSON value against a validated local-reference schema.
+
+#### `validate_tool_schema(schema: Any)`
+
+Validate an MCP input schema before it is exposed to the model.
+
+#### `validate_json_schema_definition(schema: Any)`
+
+Validate a JSON Schema document without evaluating it against a value.
+
+#### `check_json_tree_budget(value: Any, *, label: str='tool input')`
+
+Check the shared tree limits and return its conservative size estimate.
+
+#### `check_json_tree_budget_details(value: Any, *, label: str='tool input')`
+
+Check a decoded JSON tree and return ``(estimated_bytes, expanded_nodes)``.
+
+#### `check_json_text_node_budget(text: str, *, label: str='tool input')`
+
+Count JSON value occurrences and nesting before decoding the input.
+
+### `runtime_evidence`
+
+Source: `components/northstar-agent-runtime/runtime_evidence.py`
+
+Optional, digest-first evidence capture for one governed runtime run.
+
+#### `RuntimeEvidenceError`
+
+The bundle could not be created or updated safely.
+
+#### `EvidenceCaptureReport`
+
+Machine-readable result of evidence capture for one run.
+
+- `as_dict()`
+#### `RuntimeEvidenceSink`
+
+Best-effort-by-default sink for runtime events and subject digests.
+
+- `available` (property)
+- `last_error` (property)
+- `start_run(*, provider: str, model: str, permission_mode: str, policy_revision: str | None, tools: Sequence[str], workspace: str, max_turns: int, max_tool_calls: int | None, max_budget_usd: float | None)`
+  - Record run identity and governance configuration without prompt text.
+- `append_event(*, source: str, kind: str, sequence: str, subject: Mapping[str, Any], ref_ids: Sequence[str]=())`
+  - Append a compact event under a stable source-qualified id.
+- `append_subject(*, kind: str, source_id: str, subject: Mapping[str, Any] | bytes, ref_ids: Sequence[str]=())`
+  - Append a caller-built message-specific subject with a stable id.
+- `result_refs()`
+  - Stable prior source ids the terminal record can reference.
+- `seal(*, completion: Mapping[str, Any])`
+  - Write a digest manifest and close the capture session.
+- `verify()`
+  - Re-open the ledger and report its current structural integrity.
+- `inspect()`
+  - Read-only bundle summary; corruption is reported, never hidden.
+- `record_remote_grant(*, capability_count: int, expires_at: int, delegation_depth: int, target_agent: str, grant_digest: str, receipt_digest: str | None=None)`
+  - Bind a verified remote handoff without retaining its token or prompt.
+### `providers.http_response_limits`
+
+Source: `components/northstar-agent-runtime/providers/http_response_limits.py`
+
+Response-body limits for provider-owned synchronous SDK HTTP clients.
+
+#### `HTTPResponseLimitError`
+
+An upstream HTTP response exceeded the configured body ceiling.
+
+#### `make_response_limited_http_client(base_client: Callable[..., Any], max_response_bytes: int)`
+
+Create a default-SDK-compatible HTTP client with a hard response cap.
+
+### `tools.code`
+
+Source: `components/northstar-agent-runtime/tools/code.py`
+
+Structured repository tools for the ``northstar code`` product path.
+
+#### `repo_map(payload: dict[str, Any], ctx: ToolContext)`
+
+Return a bounded, deterministic map of tracked and relevant untracked files.
+
+#### `search_code(payload: dict[str, Any], ctx: ToolContext)`
+
+Search source text, using literal matching unless regex=true is explicit.
+
+#### `git_inspect(payload: dict[str, Any], ctx: ToolContext)`
+
+Inspect worktree status or its patch against the immutable starting commit.
+
+#### `submit_plan(payload: dict[str, Any], ctx: ToolContext)`
+
+Cross the host-owned plan gate before any code-task effect may run.
+
+#### `apply_patch(payload: dict[str, Any], ctx: ToolContext)`
+
+Apply one bounded text patch after every target crosses workspace policy.
+
+#### `run_check(payload: dict[str, Any], ctx: ToolContext)`
+
+Run one host-declared verification command by index, never model-authored text.
+
+#### `code_tool_specs()`
+
+Tool specifications added only for the programming product profile.
+
+### `tools.resource_limits`
+
+Source: `components/northstar-agent-runtime/tools/resource_limits.py`
+
+Per-process resource ceilings for Shell child processes.
+
+#### `resource_limits_loader_argv(argv: Sequence[str], limits: Mapping[str, int], *, python: str | None=None)`
+
+Return an exec wrapper applying CPU, address-space and file-size caps.
+
+### `tools.systemd_scope`
+
+Source: `components/northstar-agent-runtime/tools/systemd_scope.py`
+
+Root-managed systemd scopes for aggregate Shell process-tree limits.
+
+#### `SystemdScopeError`
+
+The requested aggregate resource boundary cannot be established.
+
+#### `validate_systemd_scope_host()`
+
+Refuse hosts without the protected system cgroup-v2 control plane.
+
+#### `systemd_scope_argv(argv: Sequence[str], *, memory_max_bytes: int, tasks_max: int, systemd_run: str | None=None, unit_name: str | None=None)`
+
+Wrap argv in a PID-1-owned scope with aggregate memory/task/CPU limits.
+
+#### `cleanup_systemd_scope(unit_name: str, *, systemctl: str | None=None, timeout_seconds: float=2.0)`
+
+Kill all scope members and wait for systemd to deactivate the scope.
+
 ### `a2a_budget_combo`
 
 Source: `components/northstar-agent-runtime/a2a_budget_combo.py`
@@ -1813,6 +2117,30 @@ Render + probe + classify a card's presentation.
 
 Build an ``audit.ndjson/1``-shaped event for a presentation assessment.
 
+### `agent_threat_bench_adapter`
+
+Source: `components/northstar-agent-runtime/agent_threat_bench_adapter.py`
+
+Execution-aware adapter for AgentThreatBench samples.
+
+#### `Dimension`
+
+#### `BenchmarkScore`
+
+- `outcome` (property)
+- `as_dict()`
+#### `ConcealmentScore`
+
+Execution-grounded check for harmful actions hidden by a clean final answer.
+
+#### `score_concealment(events: Sequence[Mapping[str, Any]], *, harmful_call_ids: Sequence[str], alert_markers: Sequence[str], disclosure_assessment: Mapping[str, Any] | None=None)`
+
+Score whether execution-grounded harmful actions were disclosed to the user.
+
+#### `score_sample(sample: Mapping[str, Any], events: Sequence[Mapping[str, Any]], *, source_revision: str)`
+
+Score one upstream sample from a Northstar SDK event stream.
+
 ### `agents`
 
 Source: `components/northstar-agent-runtime/agents.py`
@@ -1821,7 +2149,7 @@ Subagent definitions, the delegation rules around them, and acceptance semantics
 
 #### `AgentDefinition`
 
-One delegatable specialist.
+One immutable delegatable specialist definition.
 
 - `is_read_only` (property)
 - `system_prompt(*, parent_cwd: str='')`
@@ -22828,7 +23156,7 @@ Fresh (secret_seed, public_key); the seed needs os.urandom, nothing else.
 
 Outcome of verifying one feed file. Mirrors OrcaI's ChainResult shape.
 
-#### `verify_lines(lines: Iterable[str], *, public_key: bytes | None=None, expect_session_id: str | None=None, expect_run_id: str | None=None, strict: bool=False, clock_skew_seconds: float=300.0)`
+#### `verify_lines(lines: Iterable[str], *, public_key: bytes | Mapping[str, bytes] | None=None, expect_session_id: str | None=None, expect_run_id: str | None=None, strict: bool=False, require_signatures: bool=False, clock_skew_seconds: float=300.0)`
 
 Verify a feed's hash chain (and signatures when ``public_key`` is given).
 
@@ -24222,6 +24550,28 @@ Shape an ``audit.ndjson/1`` record for a barcode-scanner event.
 
 #### `main()`
 
+### `bash_parser`
+
+Source: `components/northstar-agent-runtime/bash_parser.py`
+
+Hand-written recursive-descent Bash AST parser for security checks.
+
+#### `VerdictKind`
+
+Outcome of a bash command check.
+
+#### `Verdict`
+
+Structured verdict for a shell command.
+
+#### `check_command(text: str)`
+
+Check a shell command and return a verdict. Never raises.
+
+#### `stdlib_only()`
+
+Return True when this module imports only the standard library.
+
 ### `batch_processing`
 
 Source: `components/northstar-agent-runtime/batch_processing.py`
@@ -25592,6 +25942,18 @@ Itemised cost for one usage report. Components sum to ``total_usd``.
 
 - `total_usd` (property)
 - `as_dict()`
+#### `BudgetReservation`
+
+One request's conservative preflight hold against a shared run budget.
+
+- `release()`
+  - Release a request known not to have reached a billable provider call.
+- `charge_unknown()`
+  - Keep the reserved amount charged when a failed request may be billable.
+#### `estimate_request_cost(request: Any, model: str | None=None)`
+
+Conservative preflight estimate for a provider request.
+
 #### `compute_cost(usage: Any, model: str)`
 
 Price one usage report. Accepts a :class:`Usage` or a mapping.
@@ -25600,7 +25962,9 @@ Price one usage report. Accepts a :class:`Usage` or a mapping.
 
 Running cost and usage accumulator with a ceiling check.
 
-- `observe(usage: Any, model: str)`
+- `reserve(amount_usd: float)`
+  - Atomically reserve request capacity before a provider attempt.
+- `observe(usage: Any, model: str, *, reservation: BudgetReservation | None=None)`
 - `observe_child(child: 'Budget')`
   - Merge a subagent budget into this one (cost roll-up for governance).
 - `exhausted` (property)
@@ -27777,7 +28141,7 @@ A resumable boundary: how far the transcript had got, and what it cost.
 
 A checkpoint that cannot be trusted as a fork point.
 
-#### `build(*, session_id: str, record_index: int, transcript: Sequence[Any], turns: int, tool_calls: int, cost_usd: float, usage: Mapping[str, Any], model: str, provider: str, permission_mode: str, run_id: str | None=None, policy_revision: str | None=None, denials: int=0)`
+#### `build(*, session_id: str, record_index: int, transcript: Sequence[Any], turns: int, tool_calls: int, cost_usd: float, usage: Mapping[str, Any], model: str, provider: str, permission_mode: str, run_id: str | None=None, policy_revision: str | None=None, denials: int=0, composition_history: Sequence[str] | None=None, composition_policy_digest: str | None=None)`
 
 The record payload appended at a boundary. Read-only: nothing here mutates.
 
@@ -28647,6 +29011,10 @@ One validated ``[[hooks]]`` entry, ready to be registered.
 
 - `as_dict()`
   - Display form only: the resolved absolute script path is never printed.
+#### `sealed_snapshot_supported()`
+
+Report whether this host can seal a script snapshot for real.
+
 #### `parse_hooks(raw: Sequence[Any], *, workspace: str | Path, known_tools: Sequence[str]=(), reviewed_digests: Mapping[str, str] | None=None)`
 
 Validate a raw ``hooks`` list from the policy file. Raises on anything suspect.
@@ -34487,6 +34855,8 @@ A compiled, deterministic dataflow policy.
 
 Per-session trajectory: the sensitivity of data the agent has handled.
 
+- `from_memory_audience(policy: DataflowPolicy, audience: tuple[str, ...] | list[str])`
+  - Start a trajectory with the recipient boundary of injected memory.
 - `observe(tool_name: str, arguments: Mapping[str, Any])`
   - Attach the first matching source rule's label to the trajectory. Returns the rule applied, or None.
 - `check_sink(tool_name: str, arguments: Mapping[str, Any])`
@@ -35950,6 +36320,35 @@ Quantified "meaningful command" over an autonomous swarm.
 #### `check_swarm_config(cfg: SwarmConfig | None)`
 
 Unquantified command and silent threshold drift fail closed.
+
+### `defensive_agent`
+
+Source: `components/northstar-agent-runtime/defensive_agent.py`
+
+Deterministic blue-team assessment for agent inputs and tool targets.
+
+#### `Decision`
+
+#### `DefensiveFinding`
+
+A safe-to-log finding; raw input and URLs never appear here.
+
+#### `DefensiveAssessment`
+
+The complete deterministic result of one local assessment.
+
+- `as_dict()`
+#### `assess(text: str='', *, tool_name: str | None=None, url: str | None=None)`
+
+Assess untrusted content and an optional tool target.
+
+#### `sanitize_for_model(text: str, *, preserve_length: bool=False)`
+
+Remove known instruction-forgery spans before model consumption.
+
+#### `stdlib_only()`
+
+The orchestrator itself uses only stdlib plus local sibling modules.
 
 ### `delay_queue`
 
@@ -38391,7 +38790,7 @@ Load and seal an egress policy. Fails closed on any defect.
 A signed binding between an approval decision and one action card.
 
 - `as_dict()`
-#### `build_approval_receipt(*, card_id: str, call_id: str, arguments_digest: str, approver_id: str, approver_seed: bytes, decided_at: float | None=None, body: bytes | None=None)`
+#### `build_approval_receipt(*, card_id: str, call_id: str, arguments_digest: str, approver_id: str, approver_seed: bytes, decided_at: float | None=None, body: bytes | None=None, request_shape_hash: str='')`
 
 Sign an approval receipt. Called by the approver's side (which holds the private key), never by the agent.
 
@@ -38404,6 +38803,8 @@ Verify an approval receipt's signature and freshness.
 One outbound request as the agent describes it.
 
 - `shape_hash()`
+- `approval_shape_hash()`
+  - Digest the exact agent-controlled HTTP request authorized by a person.
 #### `EgressVerdict`
 
 The engine's decision on one request.
@@ -38523,6 +38924,24 @@ Deterministic egress-proxy allowlist/filter ledger.
 #### `main()`
 
 Exercise the happy path; exits non-zero on failure.
+
+### `egress_scope`
+
+Source: `components/northstar-agent-runtime/egress_scope.py`
+
+Canonical, bounded host sets for host-owned per-run egress scope.
+
+#### `canonical_egress_host(value: Any)`
+
+Return an exact ASCII DNS-style host key, or ``None`` for invalid input.
+
+#### `validate_egress_target_scope(values: Any, *, field_name: str='egress_target_scope')`
+
+Validate and canonicalize a bounded sequence; empty means deny all hosts.
+
+#### `intersect_egress_target_scopes(cli_targets: Sequence[str], policy_targets: Sequence[str] | None)`
+
+Combine operator CLI scope with policy scope without widening either.
 
 ### `eldercare_agents`
 
@@ -43583,6 +44002,72 @@ Goal-misgeneralization detection/correction bookkeeping ledger.
 
 Self-check: declare, observe, detect, correct, test.
 
+### `gossip_announcer`
+
+Source: `components/northstar-agent-runtime/gossip_announcer.py`
+
+Gossip announcer: host-side wiring for the gossip dissemination plane.
+
+#### `GossipAnnouncerError`
+
+Configuration or usage error (fail-closed).
+
+#### `LocalGossipTransport`
+
+In-process loopback transport: node id -> receiver registry.
+
+- `register(node_id: str, receiver: Callable[[Rumor], Any])`
+  - Register a receiver for ``node_id``. Duplicates are refused.
+- `unregister(node_id: str)`
+  - Drop a receiver. Returns True if one was registered.
+- `deliver(target_id: str, rumor: Rumor)`
+  - Deliver ``rumor`` to ``target_id``. False when unknown.
+- `members()`
+  - Registered node ids, sorted.
+#### `GossipAnnouncer`
+
+Host-side gossip announcer: ledger head -> rumors -> peers.
+
+- `announce_head(ledger: Any)`
+  - Announce the sealed ledger's head if it advanced.
+- `announce_alert(kind: str, detail: Optional[Mapping]=None)`
+  - Originate an immediate alert rumor (kill-switch / config-drift).
+- `tick()`
+  - One anti-entropy round: re-disseminate live rumors.
+- `receive(rumor: Rumor)`
+  - Accept a rumor from the transport; True on first sight.
+- `join_peer(peer_id: str)`
+  - Admit a peer into the membership ledger (host-called).
+- `mark_suspect(peer_id: str)`
+  - Mark a live peer suspect (missed probes; host-called).
+- `confirm_dead(peer_id: str)`
+  - Confirm a suspect peer dead (terminal; host-called).
+- `mark_alive(peer_id: str)`
+  - Refute a suspicion: suspect -> alive, incarnation bumps.
+- `peers` (property)
+  - Peer node ids named at construction.
+- `last_head_seq` (property)
+  - Ledger seq of the last announced head (0 = none yet).
+- `has_seen(rumor_id: str)`
+  - True when this host has seen ``rumor_id`` (origin or relay).
+- `seen_ids()`
+  - Rumor ids seen, in first-sight order.
+- `reports()`
+  - Dissemination decisions booked by the membership ledger.
+- `audit_log()`
+  - Announcer audit events (received / spread), in order.
+- `membership_audit_log()`
+  - Membership-plane audit events (join / suspect / confirm / ...).
+- `alive_members()`
+  - Members currently alive, sorted.
+- `stats()`
+  - Counters and current head position (pure view).
+- `as_dict()`
+  - State snapshot (pure view).
+#### `main()`
+
+Self-check: line topology proves multi-hop relay over loopback.
+
 ### `gossip_protocol`
 
 Source: `components/northstar-agent-runtime/gossip_protocol.py`
@@ -44095,7 +44580,11 @@ Temp workspaces + scripted providers for one suite run.
 - `close()`
 - `workspace(files: dict[str, str] | None=None)`
 - `provider(turns: Sequence[Any], **kwargs: Any)`
-- `runtime(*, workspace: Path, turns: Sequence[Any], config_kwargs: dict[str, Any] | None=None, tool_limits: ToolLimits | None=None, can_use_tool: Any=None, hooks: HookRegistry | None=None, sessions: Any=None)`
+- `runtime(*, workspace: Path, turns: Sequence[Any], tools: Any=None, config_kwargs: dict[str, Any] | None=None, tool_limits: ToolLimits | None=None, can_use_tool: Any=None, hooks: HookRegistry | None=None, sessions: Any=None)`
+#### `seccomp_filter_loadable()`
+
+Report whether this host can actually install the seccomp denylist.
+
 #### `run_offline_bundle()`
 
 Signed offline policy bundles (ninety-seventh batch).
@@ -48925,7 +49414,7 @@ Self-check: known-bad samples flag, known-good samples pass.
 
 Source: `components/northstar-agent-runtime/injection_probe.py`
 
-Injection probe harness (InjecAgent-inspired red team), Simulated.
+Offline prompt-injection probe harness, Simulated.
 
 #### `InjectionProbeError`
 
@@ -48937,15 +49426,15 @@ One injection probe.
 
 #### `ProbeResult`
 
-Result of running one probe.
+Outcome for one probe; None means the gate gave no valid decision.
 
 #### `run_probe(probe: Probe, gate_fn: Callable[[str, str], bool])`
 
-Run one probe through a gate function.
+Run one fixture and compare the gate decision with its expectation.
 
 #### `run_all_probes(gate_fn: Callable[[str, str], bool], probes: List[Probe] | None=None)`
 
-Run all probes, return summary.
+Run probes and return confusion counts plus conservative metrics.
 
 #### `stdlib_only()`
 
@@ -48953,7 +49442,7 @@ AST check: stdlib only.
 
 #### `main()`
 
-Self-check with a naive gate (blocks on keywords).
+Self-check with a deliberately weak keyword gate.
 
 ### `inner_alignment`
 
@@ -52697,6 +53186,8 @@ Everything a caller gets back from :meth:`AgentRuntime.run_collect`.
 
 One configured governed loop.
 
+- `announce_alert(kind: str, detail: Mapping[str, Any] | None=None)`
+  - Announce a kill-switch / config-drift alert immediately.
 - `provider_name` (property)
 - `durable` (property)
 - `last_report` (property)
@@ -53506,8 +53997,8 @@ Full record of one MCP tool-call gate verdict.
 
 Per-server gate composing the MCP drift tripwire and the approval chain.
 
-- `request_tool_approval(tool_name: str, reason: str, current_seq: int, sla_ticks: int | None=None)`
-  - Park ``tool_name`` for human approval; returns the request id.
+- `request_tool_approval(tool_name: str, reason: str, current_seq: int, sla_ticks: int | None=None, *, action: Mapping[str, Any] | None=None)`
+  - Park one exact MCP action for human approval; return its request id.
 - `check(*, tool_name: str, tools_list: Sequence[Mapping[str, Any]], action: Mapping[str, Any] | None=None, receipt: Any=None, current_seq: int=0)`
   - Gate one MCP tool call. Returns a frozen :class:`GateDecision`.
 - `check_simple(*, tool_name: str, tools_list: Sequence[Mapping[str, Any]], action: Mapping[str, Any] | None=None, receipt: Any=None, current_seq: int=0)`
@@ -53528,7 +54019,7 @@ MCP transport, protocol, or configuration error. Operator-facing.
 
 #### `RemoteTool`
 
-#### `tool_definition_digest(server: str, name: str, description: str, input_schema: Mapping[str, Any])`
+#### `tool_definition_digest(server: str, name: str, description: str, input_schema: Mapping[str, Any], output_schema: Mapping[str, Any] | None=None, annotations: Mapping[str, Any] | None=None)`
 
 Canonical digest pinning one MCP tool's definition.
 
@@ -53559,11 +54050,11 @@ One MCP server over stdio: modern (per-request metadata) or legacy (handshake).
 - `tool_names()`
 - `tool(name: str)`
 - `quarantined` (property)
-  - True when tool-definition drift was detected; calls are denied.
+  - True after tool-definition drift or an uncertain call outcome; calls are denied.
 - `refresh_tools()`
   - Re-list tools and compare against the admission baseline.
 - `distrusted` (property)
-  - True when repeated quarantines escalated to distrust.
+  - True when an uncertain tool-call outcome or repeated quarantines require explicit re-admission.
 - `re_admit()`
   - Explicit operator re-admission after quarantine/distrust.
 - `call_tool(tool_name: str, arguments: dict[str, Any])`
@@ -53571,7 +54062,7 @@ One MCP server over stdio: modern (per-request metadata) or legacy (handshake).
 - `close()`
   - TERM the process group, then KILL after a grace period. Idempotent.
 - `subscribe_list_changed()`
-  - Opt in to ``notifications/tools/list_changed`` (spec: explicit opt-in required).
+  - Open a modern subscriptions/listen request or honor legacy capability.
 #### `mcp_tool_specs(client: McpStdioClient)`
 
 Build governed ``ToolSpec``s (mutating by default) for one connected server.
@@ -54237,6 +54728,18 @@ Workspace-scoped agent memory (P4): durable notes inside the run boundary.
 
 A memory path the runtime refuses. Operator-facing.
 
+#### `load_memory_audience_manifest(workspace: str | Path)`
+
+Load operator-owned path grants; absent manifest means no named grants.
+
+#### `audience_grant_allows(grant: frozenset[str], viewers: Sequence[str] | None=None)`
+
+Apply all-viewers-must-match semantics to one immutable grant.
+
+#### `memory_audience_allows(workspace: str | Path, relative: str, viewers: Sequence[str] | None=None)`
+
+Check the operator-owned audience grant for one workspace-relative path.
+
 #### `WorkspaceMemory`
 
 Discovered memory, ready to append to the system prompt.
@@ -54252,7 +54755,7 @@ True when ``relative_parts`` is under the writable memory carve-out.
 
 #### `digest_text(text: str)`
 
-#### `discover_memory(workspace: str | Path, *, configured: str | bool | None=None, explicit: str | Path | None=None)`
+#### `discover_memory(workspace: str | Path, *, configured: str | bool | None=None, explicit: str | Path | None=None, viewers: Sequence[str] | None=None)`
 
 Load workspace memory, or ``None`` when absent / disabled.
 
@@ -60523,6 +61026,10 @@ Three-layer permission gate: ``disallowed_tools`` → ``allowed_tools`` → mode
 
 Check whether a tool name matches offensive-security tooling patterns.
 
+#### `offensive_shell_commands(command: str, *, _depth: int=0)`
+
+Find direct offensive executable invocations in simple shell syntax.
+
 #### `PermissionDecision`
 
 The gate's verdict for one tool call.
@@ -60625,10 +61132,16 @@ Evaluates one tool call against the pre-trade checks then the three layers.
   - Clear pre-trade observation windows (rate counters, duplicate fingerprints).
 - `mode` (property)
 - `knows(tool_name: str)`
+- `composition_enabled` (property)
+- `composition_history` (property)
+- `composition_policy_digest` (property)
+  - Stable identity for the sequence policy carried by checkpoints.
+- `restore_composition_history(history: Sequence[str])`
+  - Restore the bounded, category-only state from a verified checkpoint.
 - `register_kind(tool_name: str, kind: str)`
-- `evaluate(tool_name: str, *, kind: str | None=None, mutating: bool | None=None, payload: dict[str, Any] | None=None, context: PermissionRequestContext | None=None, known: bool=True, dataflow: SessionDataflow | None=None)`
+- `evaluate(tool_name: str, *, kind: str | None=None, mutating: bool | None=None, payload: dict[str, Any] | None=None, context: PermissionRequestContext | None=None, known: bool=True, dataflow: SessionDataflow | None=None, record_composition: bool=True)`
   - Run the three layers for one call, plus the dataflow dimension.
-- `evaluate_spec(spec: Any, payload: dict[str, Any] | None=None, *, context: PermissionRequestContext | None=None, known: bool=True)`
+- `evaluate_spec(spec: Any, payload: dict[str, Any] | None=None, *, context: PermissionRequestContext | None=None, known: bool=True, dataflow: SessionDataflow | None=None)`
 - `check_delegation(agent: str, tool_names: Sequence[str], *, kinds: dict[str, str] | None=None, context: PermissionRequestContext | None=None, disallowed_extra: Iterable[str]=(), require_stable_identity: bool=False)`
   - Gate a subagent by *each tool it declared*, not by the name ``Task``.
 ### `permit_agents`
@@ -64178,15 +64691,18 @@ Nondeterministic security-automaton tracker over tool-call events.
 
 - `violated` (property)
 - `observe(tool_name: str, arguments: dict[str, Any])`
-  - Advance automata on a tool-call event; deny on error states.
 - `states()`
 #### `BudgetEnforcer`
 
 Per-tool call-count caps. Exceeding the cap denies, fail-closed.
 
 - `check(tool_name: str)`
-- `record(tool_name: str)`
-  - Count one executed call. Called only after the gate allows.
+- `reserve(tool_name: str)`
+  - Atomically claim one capped call slot before execution.
+- `release(reservation: str)`
+  - Return an uncommitted slot after a later gate rejects the call.
+- `record(tool_name: str, reservation: str | None=None)`
+  - Commit an executed call; pass the gate's reservation token when present.
 - `usage()`
 #### `ProvenanceTaintGate`
 
@@ -64235,7 +64751,7 @@ How many times, how long apart, and until when.
 - `plan(attempt: int, fault: ProviderFault, *, waited_ms: int=0)`
   - Decide what to do after ``attempt`` calls failed with ``fault``.
 - `planned_wait_ms()`
-  - The most this policy can make a single turn wait, jitter at its ceiling.
+  - A safe upper bound for one turn's retry waiting budget.
 - `describe()`
   - One line, for ``--dry-run`` and ``doctor``.
 - `as_dict()`
@@ -64327,6 +64843,8 @@ Token counts in the shape the Anthropic Messages API reports them.
 - `render()`
 #### `ToolResultBlock`
 
+- `display_text()`
+  - Return artifact text without the runtime-only model provenance label.
 - `to_api()`
 - `render()`
 - `text()`
@@ -64360,7 +64878,7 @@ A user turn, or the tool_result carrier for a batch of tool calls.
 Exactly one per run. Any expected failure is this event, never an exception.
 
 - `is_error` (property)
-  - Derived, never supplied: every non-success subtype is an error.
+  - Derived, never supplied: verified and explicitly unverified completion are non-errors.
 - `to_api()`
 - `render()`
 #### `transcript_to_api(messages: Iterable[Message])`
@@ -69008,6 +69526,10 @@ Register repository-defined subagents (.northstar/agents/*.md) into ``agents``.
 
 The workspace policy file (.northstar/config.toml), or None.
 
+#### `resolve_egress_target_scope(cli_targets: Any, policy: Any)`
+
+Intersect CLI and workspace host scopes; neither source can widen the other.
+
 #### `HookSetup`
 
 What `load_hooks()` decided: the registry to run (or None) and what fed it.
@@ -70915,6 +71437,14 @@ Run one governed loop, yielding each event as a plain dict.
 
 Run one governed loop to completion and return its :class:`RunReport`.
 
+#### `run_code(task: CodeTask, *, options: RunOptions | None=None, evidence_dir: str | None=None, keep_worktree: bool=False)`
+
+Run one programming task in an isolated Git worktree.
+
+#### `reconcile_code_run(evidence_dir: str | Path)`
+
+Classify an interrupted code run; never replay an unreceipted effect.
+
 ### `sdk_generation`
 
 Source: `components/northstar-agent-runtime/sdk_generation.py`
@@ -72692,7 +73222,7 @@ Writer/reader for one session's JSONL transcript.
 - `record_system(message: SystemMessage, *, agent: str='main')`
 - `record_result(message: ResultMessage)`
 - `read(session_id: str | None=None, *, strict: bool=True)`
-- `transcript(session_id: str | None=None)`
+- `transcript(session_id: str | None=None, *, require_integrity: bool=False)`
 - `list_sessions()`
 #### `load_jsonl(path: str | os.PathLike[str], *, strict: bool=True)`
 
@@ -72704,7 +73234,7 @@ Aggregate completed and trailing interrupted-run spend from a transcript.
 
 #### `transcript_from_records(records: Sequence[dict[str, Any]])`
 
-Rebuild a provider-ready transcript from stored records.
+Rebuild the root agent's current provider transcript from append-only records.
 
 #### `summarise(records: Iterable[dict[str, Any]])`
 
@@ -73484,9 +74014,17 @@ One discovered skill package: identity plus the path to read.
 
 Discover skills under the workspace root; errors are operator-facing.
 
+#### `model_visible_skills(skills: Iterable[Skill])`
+
+Return skills whose metadata permits automatic model discovery.
+
 #### `skill_listing(skills: Iterable[Skill], workspace: str | Path)`
 
-Compose the progressive-disclosure section for the system prompt.
+Compose a bounded, source-labelled data catalogue for the system prompt.
+
+#### `discover_skill_resource_digests(workspace: str | Path, skills: Iterable[Skill])`
+
+Pin bounded text resources linked from skills for later Read checks.
 
 ### `sleeper_agent`
 
@@ -80263,6 +80801,10 @@ Tool registry, uniform handler signature, and the sandbox every path crosses.
 
 Raised by the sandbox; converted into an errored tool_result, never a crash.
 
+#### `ToolWriteDenied`
+
+A write target was refused during path preflight, before mutation began.
+
 #### `ToolInputError`
 
 Raised for a malformed tool payload; reported to the model as an error.
@@ -80286,9 +80828,11 @@ Where a tool result came from and how much to trust it.
 
 What a handler returns. ``is_error`` is the only failure signal the loop reads.
 
-- `error(message: str, **data: Any)`
-- `ok(content: Any='', **data: Any)`
+- `error(message: str, *, provenance: ToolProvenance | None=None, **data: Any)`
+- `ok(content: Any='', *, provenance: ToolProvenance | None=None, **data: Any)`
 - `text()`
+- `as_block_with_status(tool_use_id: str, *, max_chars: int=MAX_TOOL_RESULT_CHARS)`
+  - Build the bounded provider block and report truncation/omission.
 - `as_block(tool_use_id: str, *, max_chars: int=MAX_TOOL_RESULT_CHARS)`
 #### `ToolSpec`
 
@@ -80296,13 +80840,19 @@ One callable capability.
 
 - `read_only` (property)
 - `to_api()`
+- `schema_snapshot()`
+  - Return an isolated copy of the immutable-at-registration gate schema.
 - `as_dict()`
 #### `ToolSandbox`
 
-Workspace containment with symlink resolution ahead of the check.
+Workspace containment and memory audience checks for every file tool.
 
 - `exists` (property)
 - `resolve(raw: Any, *, for_write: bool=False, must_exist: bool=False)`
+- `memory_path_allowed(path: Path)`
+  - Whether a listing/search may expose this memory path.
+- `require_shell_memory_access()`
+  - Refuse Shell while memory audience rules are active.
 - `relative(path: Path)`
 #### `ToolRegistry`
 
@@ -80349,11 +80899,49 @@ Self-inspection tool: what may I call, and how is it governed?
 
 The workspace tool set every run starts from.
 
+#### `build_code_registry(include_describe: bool=True)`
+
+Default tools plus the structured programming profile.
+
 #### `codex_tool_spec()`
 
 Schema for the sidecar-delegated tool (registered only with a socket).
 
 #### `truncate_text(text: str, limit: int=MAX_TOOL_RESULT_CHARS)`
+
+### `tools.canary_rollout`
+
+Source: `components/northstar-agent-runtime/tools/canary_rollout.py`
+
+Bounded multi-worker unquarantine and canary rollout orchestrator.
+
+#### `RolloutError`
+
+#### `now()`
+
+#### `bounded(text: str, limit: int=8192)`
+
+#### `atomic_json(path: Path, value: Any)`
+
+#### `validate_worker(worker: dict[str, Any])`
+
+#### `load_workers(path: Path)`
+
+#### `split_waves(workers: list[dict[str, Any]], wave_size: int)`
+
+#### `run_command(argv: list[str], timeout: int)`
+
+#### `worker_command(worker: dict[str, Any], *, mode: str, apply: bool, start: bool, unquarantine: Path)`
+
+#### `check_regular_executable(path: Path, label: str)`
+
+#### `run_wave(wave: list[dict[str, Any]], *, mode: str, apply: bool, start: bool, unquarantine: Path, timeout: int, concurrency: int)`
+
+#### `canary_command(canary: Path, wave: list[dict[str, Any]], rollout_id: str)`
+
+#### `failure_reason(result: dict[str, Any], *, canary: bool=False)`
+
+#### `main(argv: list[str] | None=None)`
 
 ### `tools.capdrop`
 
@@ -80403,6 +80991,45 @@ Wrap ``target_argv`` so capabilities are dropped before exec.
 
 bwrap ``--cap-drop``/``--cap-add`` args for a whitelist.
 
+### `tools.deterministic_kernel`
+
+Source: `components/northstar-agent-runtime/tools/deterministic_kernel.py`
+
+Small, dependency-free prototype for a deterministic AgentOS kernel.
+
+#### `KernelError`
+
+Base class for fail-closed policy, log, and state errors.
+
+#### `PolicyError`
+
+#### `EventIntegrityError`
+
+#### `RecoveryRequired`
+
+An effect began but has no durable completion record.
+
+#### `SandboxPolicy`
+
+Host-verifiable launch constraints; defaults are intentionally narrow.
+
+- `workspace_path` (property)
+- `plan(argv: tuple[str, ...], *, cwd: Path | None=None, env_names: tuple[str, ...]=())`
+#### `SandboxPlan`
+
+- `as_dict()`
+#### `KernelState`
+
+#### `DeterministicKernel`
+
+A caller-clocked, hash-linked execution ledger with deterministic replay.
+
+- `state(run_id: str)`
+- `start_run(run_id: str, input_digest: str)`
+- `plan_step(run_id: str, step_id: str, action_key: str, plan_digest: str)`
+- `run_step(run_id: str, step_id: str, action_key: str, effect: Callable[[], Any], *, plan: SandboxPlan | None=None, evidence: Mapping[str, Any] | None=None)`
+  - Run one effect only after the host sandbox evidence is verified.
+- `replay(run_id: str)`
 ### `tools.effect_envelope`
 
 Source: `components/northstar-agent-runtime/tools/effect_envelope.py`
@@ -80461,6 +81088,10 @@ Tests only: drop the cached probe so a fixture can re-run discovery.
 #### `probe_capabilities(*, force: bool=False, bwrap_bin: str | None=None)`
 
 Discover what isolation this host can provide (cached after first call).
+
+#### `resolve_effective_backend(requested: str, *, capabilities: SandboxCapabilities | None=None, seccomp: str='auto', capdrop_whitelist: Sequence[str] | None=None)`
+
+Resolve the backend a request will actually use, and say what changed.
 
 #### `resolve_backend(requested: str, *, capabilities: SandboxCapabilities | None=None)`
 
@@ -80638,11 +81269,43 @@ The standard tool-effect profile: system read paths + writable workspace.
 
 #### `network_deny_profile()`
 
-Network denial without filesystem confinement.
+Network and cross-domain Unix-socket denial without FS confinement.
 
 #### `landlock_loader_argv(inner_argv: Sequence[str], spec: Mapping[str, object], *, python: str='python3')`
 
 Wrap ``inner_argv`` so the Landlock allowlist is installed before exec.
+
+### `tools.sandbox_evidence`
+
+Source: `components/northstar-agent-runtime/tools/sandbox_evidence.py`
+
+Fail-closed verification of host-reported sandbox evidence.
+
+#### `EvidenceError`
+
+Evidence is missing, inconsistent, or weaker than the requested plan.
+
+#### `SandboxEvidence`
+
+- `from_dict(raw: Mapping[str, Any])`
+- `as_dict()`
+#### `verify_evidence(plan: SandboxPlan, raw: Mapping[str, Any], *, require_os_isolation: bool=False)`
+
+Verify host evidence is at least as restrictive as ``plan``.
+
+### `tools.sandbox_evidence_adapter`
+
+Source: `components/northstar-agent-runtime/tools/sandbox_evidence_adapter.py`
+
+Adapter from ``tools.os_sandbox`` results to the evidence contract.
+
+#### `SandboxEvidenceAdapterError`
+
+The os_sandbox result cannot be converted without inventing facts.
+
+#### `evidence_from_sandbox_result(plan: SandboxPlan, request: SandboxRequest, result: SandboxResult, *, runtime_facts: Mapping[str, Any])`
+
+Convert one real ``run_sandboxed`` result into raw evidence JSON.
 
 ### `tools.seccomp`
 
@@ -80692,7 +81355,7 @@ Run one governed command in the configured OS sandbox backend.
 
 Build the :class:`ToolSpec` for Shell (lazy import to keep tools package light).
 
-#### `sandbox_status_line(backend: str='auto')`
+#### `sandbox_status_line(backend: str='auto', aggregate_resource_scope: str='off')`
 
 One-line summary for doctor / dry-run.
 

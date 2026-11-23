@@ -237,6 +237,16 @@ class EnvironmentTests(WorkspaceCase):
 
 
 class BoundaryTests(WorkspaceCase):
+    def test_duplicate_json_keys_are_refused(self):
+        self.declare('{"mcpServers":{"demo":{"command":"x"}},"mcpServers":{}}')
+        with self.assertRaisesRegex(McpConfigError, "duplicate JSON key"):
+            self.report()
+
+    def test_non_standard_json_constants_are_refused(self):
+        self.declare('{"mcpServers":{"demo":{"command":NaN}}}')
+        with self.assertRaisesRegex(McpConfigError, "non-standard JSON constant"):
+            self.report()
+
     def test_cwd_stays_inside_the_workspace(self):
         self.declare(document({"demo": {"command": "x", "cwd": "../outside"}}))
         with self.assertRaises(McpConfigError) as caught:
@@ -370,7 +380,7 @@ class CliImportTests(WorkspaceCase):
         )
         code, _, _ = run_cli(
             "run", "--workspace", str(self.ws), "--prompt", "call", "--script", str(script),
-            "--mcp-config", "auto", "--halt-on-denial", "--quiet",
+            "--mcp-config", "auto", "--mcp-network", "allowed", "--halt-on-denial", "--quiet",
         )
         self.assertEqual(code, 5, "an imported tool is denied by default like any other MCP tool")
 
@@ -394,7 +404,7 @@ class CliImportTests(WorkspaceCase):
         )
         code, out, err = run_cli(
             "run", "--workspace", str(self.ws), "--prompt", "call", "--script", str(script),
-            "--mcp-config", "auto", "--allow-tool", "mcp__demo__echo", "--json",
+            "--mcp-config", "auto", "--mcp-network", "allowed", "--allow-tool", "mcp__demo__echo", "--json",
         )
         self.assertEqual(code, 0, err)
         self.assertIn("echo:hi", out)
