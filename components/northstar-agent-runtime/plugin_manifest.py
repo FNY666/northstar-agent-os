@@ -49,6 +49,7 @@ import hmac
 import json
 import os
 import re
+import stat
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -89,6 +90,9 @@ MAX_DESCRIPTION_CHARS = 2_000
 #: keeps `verify` bounded on a hostile directory.
 MAX_FILES = 200
 MAX_FILE_BYTES = 1 << 20  # 1 MiB per file
+MAX_BUNDLE_ENTRIES = 4_096
+MAX_BUNDLE_TOTAL_BYTES = 64 << 20
+MAX_MANIFEST_BYTES = 1 << 20
 #: A plugin hook is not a new hook mechanism: it is a ``[[hooks]]`` table, validated by
 #: :func:`command_hooks.parse_hooks` against the *same* bounds a repository's own hooks must
 #: satisfy. So the event set and the limits are imported from where they are defined instead
@@ -239,27 +243,79 @@ def _canonical_bundle_digest(manifest: Mapping[str, Any], files: Sequence[Bundle
 
 def _collect_files(root: Path) -> tuple[BundleFile, ...]:
     found: list[BundleFile] = []
-    for path in sorted(root.rglob("*")):
-        if path.is_symlink():
-            raise _fail(f"{path.relative_to(root)}: a plugin may not contain symlinks")
-        if not path.is_file():
-            continue
-        relative = path.relative_to(root).as_posix()
-        if relative == MANIFEST_NAME:
-            continue  # the manifest is digested from its parsed content, not its bytes
-        size = path.stat().st_size
-        if size > MAX_FILE_BYTES:
-            raise _fail(
-                f"{relative}: {size} bytes exceeds the {MAX_FILE_BYTES}-byte per-file limit for plugins"
-            )
+    pending = [root]
+    scanned_entries = 0
+    total_bytes = 0
+    while pending:
+        directory = pending.pop()
         try:
-            payload = path.read_bytes()
-        except OSError as error:  # pragma: no cover - unreadable file on a live disk
-            raise _fail(f"{relative}: cannot read ({error})") from error
-        found.append(BundleFile(relative, size, _digest_payload(payload).removeprefix("sha256:")))
-    if len(found) > MAX_FILES:
-        raise _fail(f"{root.name}: {len(found)} files exceeds the {MAX_FILES}-file limit for plugins")
-    return tuple(found)
+            names: list[str] = []
+            with os.scandir(directory) as iterator:
+                for entry in iterator:
+                    scanned_entries += 1
+                    if scanned_entries > MAX_BUNDLE_ENTRIES:
+                        raise _fail(
+                            f"{root.name}: bundle exceeds the {MAX_BUNDLE_ENTRIES}-entry scan limit"
+                        )
+                    names.append(entry.name)
+        except PluginError:
+            raise
+        except OSError as error:
+            raise _fail(f"{directory.relative_to(root)}: cannot scan ({error})") from error
+        for name in sorted(names):
+            path = directory / name
+            relative = path.relative_to(root).as_posix()
+            if path.is_symlink():
+                raise _fail(f"{relative}: a plugin may not contain symlinks")
+            if path.is_dir():
+                pending.append(path)
+                continue
+            if not path.is_file():
+                continue
+            if relative == MANIFEST_NAME:
+                continue  # the manifest is digested from its parsed content, not its bytes
+            if len(found) >= MAX_FILES:
+                raise _fail(f"{root.name}: bundle exceeds the limit of {MAX_FILES} files")
+            try:
+                payload = _read_regular_bounded(path, MAX_FILE_BYTES, label=relative)
+            except OSError as error:
+                raise _fail(f"{relative}: cannot safely read ({error})") from error
+            total_bytes += len(payload)
+            if total_bytes > MAX_BUNDLE_TOTAL_BYTES:
+                raise _fail(
+                    f"{root.name}: bundle exceeds the {MAX_BUNDLE_TOTAL_BYTES}-byte total size limit"
+                )
+            found.append(
+                BundleFile(relative, len(payload), _digest_payload(payload).removeprefix("sha256:"))
+            )
+    return tuple(sorted(found, key=lambda item: item.relative_path))
+
+
+def _read_regular_bounded(path: Path, limit: int, *, label: str) -> bytes:
+    """Read one single-link regular file without following a swapped symlink."""
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    fd = os.open(path, flags)
+    try:
+        metadata = os.fstat(fd)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise OSError(f"{label} is not a regular file")
+        if metadata.st_nlink > 1:
+            raise OSError(f"{label} has multiple hard links")
+        if metadata.st_size > limit:
+            raise OSError(f"{metadata.st_size} bytes exceeds the {limit}-byte limit")
+        parts: list[bytes] = []
+        total = 0
+        while total <= limit:
+            chunk = os.read(fd, min(64 * 1024, limit + 1 - total))
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > limit:
+                raise OSError(f"file grew beyond the {limit}-byte limit while being read")
+            parts.append(chunk)
+        return b"".join(parts)
+    finally:
+        os.close(fd)
 
 
 def load_bundle(root: str | Path) -> Bundle:
@@ -268,10 +324,10 @@ def load_bundle(root: str | Path) -> Bundle:
     if not directory.is_dir():
         raise _fail(f"{directory}: not a directory")
     manifest_path = directory / MANIFEST_NAME
-    if not manifest_path.is_file():
-        raise _fail(f"{manifest_path}: a plugin directory needs a {MANIFEST_NAME}")
     try:
-        raw = manifest_path.read_bytes()
+        raw = _read_regular_bounded(manifest_path, MAX_MANIFEST_BYTES, label=MANIFEST_NAME)
+    except FileNotFoundError as error:
+        raise _fail(f"{manifest_path}: a plugin directory needs a {MANIFEST_NAME}") from error
     except OSError as error:
         raise _fail(f"{manifest_path}: cannot read ({error})") from error
     try:
@@ -307,6 +363,7 @@ class HookClaim:
     script: str
     interpreter: str = ""
     timeout_ms: int = DEFAULT_TIMEOUT_MS
+    execution: str = "path"
     tool: str = ""
     agent: str = ""
     description: str = ""
@@ -322,6 +379,7 @@ class HookClaim:
         table: dict[str, Any] = {"event": self.event, "script": script_path or self.script, "timeout_ms": self.timeout_ms}
         for key, value in (
             ("interpreter", self.interpreter),
+            ("execution", self.execution if self.execution != "path" else ""),
             ("tool", self.tool),
             ("agent", self.agent),
             ("description", self.description),
@@ -509,7 +567,7 @@ def parse_manifest(bundle: Bundle, *, workspace_policy: Mapping[str, Any] | None
             raise _fail(f"components.hooks[{index}] must be a table")
         _require_exact_keys(
             entry,
-            frozenset({"event", "script", "interpreter", "tool", "agent", "timeout_ms", "description"}),
+            frozenset({"event", "script", "interpreter", "execution", "tool", "agent", "timeout_ms", "description"}),
             f"components.hooks[{index}]",
         )
         event = entry.get("event")
@@ -532,6 +590,11 @@ def parse_manifest(bundle: Bundle, *, workspace_policy: Mapping[str, Any] | None
                 f"components.hooks[{index}]: 'interpreter' must be one of {', '.join(ALLOWED_INTERPRETERS)} "
                 "(no paths, no absolute interpreters)"
             )
+        execution = entry.get("execution", "path")
+        if not isinstance(execution, str) or execution not in {"path", "snapshot"}:
+            raise _fail(f"components.hooks[{index}]: 'execution' must be 'path' or 'snapshot'")
+        if execution == "snapshot" and interpreter not in {"python", "python3", "node", "sh", "bash"}:
+            raise _fail(f"components.hooks[{index}]: snapshot execution requires an explicit supported interpreter")
         timeout = entry.get("timeout_ms", DEFAULT_TIMEOUT_MS)
         if isinstance(timeout, bool) or not isinstance(timeout, int) or not MIN_TIMEOUT_MS <= timeout <= MAX_TIMEOUT_MS:
             raise _fail(f"components.hooks[{index}]: 'timeout_ms' must be between {MIN_TIMEOUT_MS} and {MAX_TIMEOUT_MS}")
@@ -545,6 +608,7 @@ def parse_manifest(bundle: Bundle, *, workspace_policy: Mapping[str, Any] | None
                 script=script.strip(),
                 interpreter=str(interpreter or "").strip(),
                 timeout_ms=int(timeout),
+                execution=str(execution),
                 tool=str(entry.get("tool") or "").strip(),
                 agent=str(entry.get("agent") or "").strip(),
                 description=str(entry.get("description") or "").strip(),

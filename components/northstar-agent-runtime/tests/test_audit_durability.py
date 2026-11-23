@@ -16,9 +16,12 @@ from unittest import mock
 import support  # noqa: F401
 
 from audit_chain import (
+    CHAIN_VERSION_V2,
     DurableAuditWriter,
     _verify_prefix,
     _write_all,
+    chain_record,
+    chain_records,
     verify_file,
 )
 
@@ -176,6 +179,17 @@ class CorruptTailTests(unittest.TestCase):
         finally:
             writer.close()
 
+    def test_recovery_scans_a_feed_without_materializing_read_bytes(self):
+        """Restart verification must stream the append-only feed."""
+        with mock.patch.object(Path, "read_bytes", side_effect=AssertionError("whole-file read")):
+            writer, caught = self._reopen()
+        try:
+            self.assertEqual(writer.records, 3)
+            self.assertEqual(writer.prev_hash, self.good_hash)
+            self.assertEqual(caught, [])
+        finally:
+            writer.close()
+
 
 class RestartContinuityTests(unittest.TestCase):
     def setUp(self):
@@ -192,6 +206,33 @@ class RestartContinuityTests(unittest.TestCase):
         result = verify_file(self.tmp)
         self.assertTrue(result.ok)
         self.assertEqual(result.chained, 2)
+
+    def test_reopen_legacy_v2_feed_without_per_record_markers(self):
+        records = chain_records(
+            [sample_record(1), sample_record(2)],
+            component="c",
+            session_id="s",
+            chain_version=CHAIN_VERSION_V2,
+        )
+        previous = records[0]["chain_hash"]
+        for index in range(1, len(records)):
+            body = {
+                key: value for key, value in records[index].items()
+                if key not in {"chain", "prev_hash", "chain_hash"}
+            }
+            records[index] = chain_record(body, previous, chain_version=CHAIN_VERSION_V2)
+            previous = records[index]["chain_hash"]
+        self.tmp.write_text(
+            "".join(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n" for record in records),
+            encoding="utf-8",
+        )
+        with DurableAuditWriter(self.tmp, component="c", session_id="s") as writer:
+            self.assertEqual(writer.records, 2)
+            third = writer.append(sample_record(3))
+            self.assertEqual(third["chain"], CHAIN_VERSION_V2)
+        result = verify_file(self.tmp)
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual(result.chained, 3)
 
     def test_genesis_minted_once(self):
         """The genesis anchor is created on first append and never repeated."""

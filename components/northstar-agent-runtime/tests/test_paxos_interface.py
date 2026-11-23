@@ -14,6 +14,7 @@ _SPEC = importlib.util.spec_from_file_location(
     "paxos_interface",
     Path(__file__).resolve().parents[1] / "paxos_interface.py",
 )
+assert _SPEC is not None and _SPEC.loader is not None
 _mod = importlib.util.module_from_spec(_SPEC)
 sys.modules["paxos_interface"] = _mod
 _SPEC.loader.exec_module(_mod)
