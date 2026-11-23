@@ -8,14 +8,13 @@ still passes the sandbox's protected-var filter).
 """
 from __future__ import annotations
 
-import re
 import sys
 
 sys.path.insert(0, ".")
 sys.path.insert(0, "tests")
 
 from support import RuntimeTestCase
-from providers.base import TextBlock, ToolUseBlock, UserMessage
+from providers.base import TextBlock, ToolResultBlock, ToolUseBlock, UserMessage
 from providers.scripted import ScriptedTurn
 
 
@@ -25,24 +24,35 @@ def _stdouts(report):
     for ev in report.events:
         if not isinstance(ev, UserMessage):
             continue
-        c = str(ev.content)
-        # c is str() of a repr'd block: tool_use_id=\'t1\', content="...\\n--- stdout ---\\nhi\"..."
-        for m in re.finditer(r"tool_use_id='(\w+)'", c):
-            tid = m.group(1)
-            seg = c[m.start():m.start() + 4000]
-            sm = re.search(r"--- stdout ---(.*?)\", is_error", seg, re.S)
-            if sm:
-                out[tid] = sm.group(1).replace("\\n", "\n").strip()
-            elif "(no output)" in seg:
-                out[tid] = ""
+        for block in ev.content:
+            if not isinstance(block, ToolResultBlock):
+                continue
+            text = block.display_text()
+            if "--- stdout ---" in text:
+                out[block.tool_use_id] = text.split("--- stdout ---", 1)[1].strip()
+            elif "(no output)" in text:
+                out[block.tool_use_id] = ""
     return out
 
 
 class ShellSessionTests(RuntimeTestCase):
-    def _drive(self, turns):
+    def _drive(self, turns, *, capdrop: str = "on"):
         def approve(tool, args, context):
             return True
-        rt = self.runtime(turns, can_use_tool=approve, allowed_tools=["Shell"])
+        # Session semantics, not sandbox isolation. Pin the backend and the
+        # syscall filter so a host that cannot enforce them still exercises
+        # what these tests are about; capability drop stays on because it is
+        # the default and works on an ordinary Linux host. A caller that
+        # wants the session semantics alone on a host without
+        # /proc/self/status can turn the launcher off.
+        rt = self.runtime(
+            turns,
+            can_use_tool=approve,
+            allowed_tools=["Shell"],
+            shell_backend="process",
+            shell_seccomp="off",
+            shell_capdrop=capdrop,
+        )
         return self.drive(rt)
 
     def _turn(self, tid, tool_input, text="x"):
