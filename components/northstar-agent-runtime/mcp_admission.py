@@ -147,9 +147,9 @@ KNOWN_VULNERABLE_PACKAGE_RANGES: dict[str, tuple[tuple[int, int, tuple[str, ...]
 #: Exact later stable releases reported to retain parts of the same OAuth
 #: discovery behavior. This is a review-only range from bounded public tests,
 #: not an extension of the published CVE ranges. The upper bound is the latest
-#: checked upstream release, v0.15.1; revisit it when new evidence appears.
-#: Evidence: https://github.com/playb0t/mcp-remote-oauth-security/blob/main/docs/research-2026-10-15/README.md
-MCP_REMOTE_REVIEW_VERSION_RANGE = ((0, 1, 39), (0, 15, 1))
+#: checked upstream release, v0.16.7; revisit it when new evidence appears.
+#: Evidence: https://github.com/playb0t/mcp-remote-oauth-security/blob/main/docs/research-2026-11-19/README.md
+MCP_REMOTE_REVIEW_VERSION_RANGE = ((0, 1, 39), (0, 16, 7))
 
 #: Env var names that look like forwarded credentials (same shape as
 #: supply-chain-guard's CREDENTIAL_ENV_REGEX).
@@ -423,7 +423,7 @@ def scan_server(name: str, settings: Mapping[str, Any]) -> tuple[AdmissionFindin
                         server=name,
                         message=(
                             f'server "{name}" pins mcp-remote@{spec.version}; published research '
-                            "reports that OAuth discovery behavior remains in releases through v0.15.1. "
+                            "reports that OAuth discovery behavior remains in releases through v0.16.7. "
                             "This does not extend the official CVE affected ranges."
                         ),
                         recommendation=(
