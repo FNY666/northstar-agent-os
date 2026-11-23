@@ -1661,3 +1661,163 @@ difference is the defect.
 * The bound itself is unchanged: `MAX_HOLD_ENTRIES` is still 256, and
   it is still enforced -- it is now enforced **before** the write, and a
   duplicate no longer consumes a slot.
+
+---
+
+## 15. AMENDED 2026-11-23 — `dequeue()` handed out a refused action
+
+### 15.1 The defect
+
+§10 landed the gate **inside** `JobQueue`, so a host cannot forget to
+install it, and §11 landed the lease side's `claim()` guard.  But the
+queue side guarded **one** of the two re-dispatch routes.
+
+`job_queue.py` has two operations that constitute a re-dispatch:
+
+| operation | what it does | is it a re-dispatch? | guarded? |
+|---|---|---|---|
+| `retry()` | puts a **reserved** job back to `ready` | **yes** -- the action is offered again | **yes** (§10) |
+| `dequeue()` | takes a **ready** job out and hands it to a worker | **yes** -- the action is *issued* | **no** |
+
+`dequeue()` consults no gate.  Measured on this branch, 2026-11-23,
+with the refusal recorded in the queue namespace
+(`queue:job-1:send_email`) and the gate installed **in the queue**:
+
+```
+check job-1/send_email: blocked_by_refusal
+DEQUEUE RESULT: ('job-1', 'send_email', 'w-1')
+job state: reserved
+audit kinds: ['job.enqueued', 'job.dequeued']
+```
+
+The refusal was on the books, the gate could answer it, and the action
+was handed to a worker anyway.  And the audit trail recorded the
+hand-out as a fact.
+
+**What exposed it: the asymmetry with the lease side.**  The lease side
+guards **both** routes -- `fail()`/`release()`/`reap()` (back to
+`ready`) and `claim()` (out of `ready` into a lease).  §11 closed the
+`claim()` hole there.  The queue side guarded only one, and the one it
+did not guard is the **more direct** one: `dequeue()` is the ordinary
+call a dispatcher writes.
+
+A gate that guards one route is a gate with a door next to it, and
+this door was the front door.
+
+### 15.2 The fix
+
+`dequeue()` asks the gate **inside the queue's own lock**, immediately
+before the entry is flipped to `reserved`:
+
+```python
+self._require_refusal_allows_dequeue(job_id, str(entry["task"]), now)
+```
+
+A refusal raises, so the job stays `ready`, no worker holds it, no
+attempt is booked, and no `job.dequeued` audit row is written.
+
+**The check is raised, not boolean.**  `dequeue()` reports ONE job for
+ONE call, and the caller asked about that job and nothing else --
+exactly like `retry()`.  There is no batch sweep over dequeues, so
+there is no boolean form, and inventing one would create a second
+question with a different answer.
+
+**Which jobs are asked about.**  The gate is asked about the job that
+is **about to be handed out** -- the head of the eligible list -- and
+not about the jobs behind it.  A refused head **blocks the whole
+dequeue**, because the queue's contract is FIFO-by-priority: skipping
+the refused job and handing out the next one would silently reorder
+the queue, and the refused job would sit at the head forever, blocking
+everything behind it.  The refused job stays `ready` and the caller is
+told.  (The lease side's `reap()` is the opposite case -- it sweeps a
+batch, so it skips one refused task rather than abandoning the sweep.
+Different shape, different answer: §13.4.)
+
+**The action identity** is the job's own `task` string -- the same
+identity §7 established and the same one `retry()` uses.  No schema
+change.
+
+**A new `now` parameter.**  `dequeue()` did not take one; it now does,
+because the gate takes `now=` and the queue's other two guarded paths
+(`retry()`, `retry_allowed()`) already take it.  It defaults to
+`None`, so **every existing call site is unchanged**.
+
+### 15.3 The guards, and why they can fail
+
+Eleven new guards: ten in `QueueDequeueGateTests`
+(`tests/test_refusal_hold_queue_wiring.py`) and one rewritten in
+`tests/test_job_queue.py`.
+
+| guard | what it pins |
+|---|---|
+| `test_a_refused_dequeue_does_not_hand_the_job_out` | the defect itself: a plain `dequeue()` is refused |
+| `test_a_refused_dequeue_leaves_no_worker_holding_the_job` | no worker, and no attempt booked |
+| `test_a_refused_dequeue_books_no_dequeued_audit_row` | the trail does not claim a hand-out that did not happen |
+| `test_an_allowed_dequeue_still_hands_the_job_out` | the control: no refusal, the dequeue works as before |
+| `test_a_refusal_against_a_different_action_is_not_refused` | the refusal covers one action, not the whole queue |
+| `test_a_broken_gate_refuses_the_dequeue` | a gate that cannot answer fails **closed** |
+| `test_a_gate_without_the_required_method_is_refused` | an unusable gate is refused, not ignored |
+| `test_no_gate_leaves_the_dequeue_path_unchanged` | the default is unchanged: no gate, no behaviour change |
+| `test_the_gate_is_asked_under_the_queue_lock` | the gate sees the job as `ready` -- it is asked BEFORE the write |
+| `test_a_refusal_recorded_concurrently_never_loses_to_a_dequeue` | "recorded but still handed out" must never happen |
+| `test_dead_does_not_consult_the_refusal_gate` (rewritten) | the withdrawal is still not gated -- and the count is now taken **after** the dequeue |
+
+**The last one is the interesting one.**  `dead()` must not consult the
+gate (a refusal must not be able to keep a finished work item in the
+queue forever -- §13.1), and the test counted the gate's asks.  But
+now `dequeue()` asks too, so the count included the dequeue and the
+guard could no longer tell "the withdrawal asked the gate" from "the
+hand-out asked the gate".  The guard now takes its **baseline after
+the dequeue**, and the dequeue is made with the gate out of the way
+(`_dequeue_around_the_gate`).
+
+That is the same lesson §9.1d's "a count is not a verdict" teaches, in
+a new costume: **a count that spans two questions cannot answer either
+of them.**
+
+**The mutation run.**  The defect was planted -- the gate call deleted
+from `dequeue()` -- and the suite re-run:
+
+```
+7 failed, 104 passed
+  test_a_broken_gate_refuses_the_dequeue
+  test_a_gate_without_the_required_method_is_refused
+  test_a_refusal_recorded_concurrently_never_loses_to_a_dequeue
+  test_a_refused_dequeue_books_no_dequeued_audit_row
+  test_a_refused_dequeue_does_not_hand_the_job_out
+  test_a_refused_dequeue_leaves_no_worker_holding_the_job
+  test_the_gate_is_asked_under_the_queue_lock
+```
+
+Seven of the eleven fail on the defect.  The four that do not are the
+**control** (`test_an_allowed_dequeue_still_hands_the_job_out`), the
+**scope** guard (`test_a_refusal_against_a_different_action_is_not_refused`),
+the **default** guard (`test_no_gate_leaves_the_dequeue_path_unchanged`)
+and the **withdrawal** guard (`test_dead_does_not_consult_the_refusal_gate`)
+-- each of which must pass on the defective version too, because each
+of them is about something the defect does not change.
+
+### 15.4 What this does NOT change
+
+* `job_queue.py`'s version and schema pins are unchanged
+  (`job-queue.v1` / `northstar.job-queue.v1`), and no audit kind is
+  added or changed.  `dequeue()`'s new `now` parameter is an
+  **optional** one: every existing call site is unchanged.
+* `ack()` and `dead()` still do not consult the gate -- a **withdrawal**
+  is not a re-dispatch (§13.1), and a refusal must not be able to keep
+  a finished work item in the queue forever.
+* `retry()` and `retry_allowed()` are unchanged, including the
+  "one check per job" count that §10 established.
+* The lease side is unchanged: `claim()`, `fail()`, `release()` and
+  `reap()` ask exactly what they asked before.
+* The queue's **ordering** is unchanged.  A refused head blocks the
+  dequeue; it does not reorder the queue.
+* The mirror composition question is unchanged: §13.1's decision --
+  the mirror's internal `retry()` is bookkeeping, not a re-dispatch --
+  is unaffected.  (The mirror's internal `dequeue()` is a
+  **reservation**, and it is the same operation as a hand-out; a host
+  that records a queue-namespace refusal against a mirror job will now
+  find that the mirror's own reservation is refused, which raises
+  `QueueMirrorError` through the lease transaction and rolls the lease
+  write back -- the safe direction.  That composition is the open
+  question §11.4 recorded, still open.)

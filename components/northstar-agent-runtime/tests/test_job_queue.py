@@ -46,6 +46,29 @@ def _enqueue(jq, job_id="j-1", queue="default", task="send_email",
     return jq.enqueue(job_id, queue, task, _digest(job_id), seq, **kw)
 
 
+def _dequeue_around_the_gate(jq):
+    """Reserve a job WITHOUT the gate in the way; return the ask count.
+
+    ``dequeue()`` consults the refusal gate -- it is the moment the
+    action is actually issued -- so a test that counts the gate's asks
+    around the RETRY path has to take the dequeue out of that count.
+    The gate is removed for the dequeue and put back afterwards, and the
+    ask count at that moment is the baseline the retry's count is
+    measured from.
+
+    Removing the gate is not a way of making a refusal disappear: the
+    refusal the tests are about is recorded in the hold, and the gate
+    is asked again by the path under test.
+    """
+    current = jq.refusal_gate
+    jq.set_refusal_gate(None)
+    try:
+        jq.dequeue("w-1", "default", 2)
+    finally:
+        jq.set_refusal_gate(current)
+    return getattr(current, "asked", 0)
+
+
 # ---------------------------------------------------------------------------
 # 1. pins
 # ---------------------------------------------------------------------------
@@ -438,6 +461,8 @@ def test_dead_does_not_consult_the_refusal_gate():
     ``ack()`` does not.
     """
     class RefusingGate:
+        """Counts the asks, and refuses every one of them."""
+
         def __init__(self):
             self.asked = 0
 
@@ -445,10 +470,18 @@ def test_dead_does_not_consult_the_refusal_gate():
             self.asked += 1
             raise AssertionError("the gate must not be asked by dead()")
 
-    jq = JobQueue(refusal_gate=RefusingGate())
+    gate = RefusingGate()
+    jq = JobQueue(refusal_gate=gate)
     _enqueue(jq, seq=1)
-    jq.dequeue("w-1", "default", 2)
+    # The dequeue DOES ask -- it is the moment the action is issued.
+    # So the dequeue is made with the gate out of the way, and the
+    # count the test reads is the one taken AFTER it.
+    asked_after_dequeue = _dequeue_around_the_gate(jq)
     jq.dead("j-1", 3)
+    assert gate.asked == asked_after_dequeue, (
+        "dead() asked the refusal gate: a refusal must not be able to "
+        "keep a finished work item in the queue forever"
+    )
     assert jq.job("j-1").state == "dead"
 
 
@@ -476,7 +509,7 @@ class _RefusingGate:
 def test_retry_allowed_returns_none_for_a_refused_job():
     jq = JobQueue(refusal_gate=_RefusingGate())
     _enqueue(jq, seq=1)
-    jq.dequeue("w-1", "default", 2)
+    _dequeue_around_the_gate(jq)
     assert jq.retry_allowed("j-1", 3) is None
     assert jq.job("j-1").state == "reserved"
 
@@ -485,7 +518,7 @@ def test_retry_allowed_does_not_raise_on_a_refusal():
     """The whole point: one refused job must not abandon the sweep."""
     jq = JobQueue(refusal_gate=_RefusingGate())
     _enqueue(jq, seq=1)
-    jq.dequeue("w-1", "default", 2)
+    _dequeue_around_the_gate(jq)
     jq.retry_allowed("j-1", 3)   # must not raise
 
 
@@ -505,13 +538,18 @@ def test_retry_allowed_asks_the_gate_exactly_once():
     The batch form and the raising form share one writer, so the
     gate is consulted once per job -- and the audit trail's event
     count equals the number of jobs the caller asked about.
+
+    The DEQUEUE counts for nothing here: the job is handed out
+    before the batch sweep asks about it, and that is a different
+    question.  So the count is taken from a baseline after the
+    dequeue -- see ``_dequeue_around_the_gate``.
     """
     gate = _RefusingGate()
     jq = JobQueue(refusal_gate=gate)
     _enqueue(jq, seq=1)
-    jq.dequeue("w-1", "default", 2)
+    asked_after_dequeue = _dequeue_around_the_gate(jq)
     jq.retry_allowed("j-1", 3)
-    assert gate.asked == 1
+    assert gate.asked - asked_after_dequeue == 1
 
 
 def test_retry_allowed_asks_the_gate_once_when_the_job_is_allowed():
@@ -525,10 +563,10 @@ def test_retry_allowed_asks_the_gate_once_when_the_job_is_allowed():
     gate = _CountingGate()
     jq = JobQueue(refusal_gate=gate)
     _enqueue(jq, seq=1)
-    jq.dequeue("w-1", "default", 2)
+    asked_after_dequeue = _dequeue_around_the_gate(jq)
     rec = jq.retry_allowed("j-1", 3)
     assert rec is not None
-    assert gate.asked == 1, (
+    assert gate.asked - asked_after_dequeue == 1, (
         "the gate was asked more than once for one job: a double ask "
         "books a double audit event and doubles the gate's own cost"
     )

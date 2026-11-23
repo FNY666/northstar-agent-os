@@ -673,6 +673,62 @@ class JobQueue:
             )
         require(job_id, action, now=now)
 
+    def _require_refusal_allows_dequeue(
+        self, job_id: str, action: str, now: Optional[float]
+    ) -> None:
+        """Ask the refusal gate before a job is HANDED OUT.
+
+        Called **inside** ``dequeue()``'s lock, immediately before the
+        entry is flipped to ``reserved`` and offered to a worker.
+
+        **Why ``dequeue`` asks at all.**  ``retry()`` puts a job back
+        into ``ready``; ``dequeue()`` takes it **out** and offers it to
+        somebody.  Both are the re-dispatch: the first makes the action
+        available again, the second is the moment it is actually
+        issued.  A refusal says "this action may not be issued", and a
+        gate that guards only ``retry()`` can be walked around by
+        dequeueing the job directly.
+
+        The lease side already had this seam -- ``leased_task_claim``'s
+        ``claim()`` asks the gate before it installs the lease, and it
+        was the ASYMMETRY that exposed this one: the lease side
+        guarded both ``fail()`` and ``claim()``, and the queue side
+        guarded only ``retry()``.  Measured 2026-11-23, before the fix:
+
+            check job-1/send_email: blocked_by_refusal
+            DEQUEUE RESULT: ('job-1', 'send_email', 'w-1')
+            job state: reserved
+
+        -- the refused action was handed to a worker while the refusal
+        was on the books.
+
+        **The check is raised, not boolean.**  ``dequeue()`` reports ONE
+        job for ONE call, and the caller asked about that job and
+        nothing else -- exactly like ``retry()``.  (The batch-safe form
+        is ``retry_allowed()``; there is no batch sweep over dequeues,
+        so inventing a boolean form here would create a second question
+        with a different answer.)
+
+        **Which jobs are asked about.**  The gate is asked about the
+        job that is **about to be handed out** -- the head of the
+        eligible list -- and not about the jobs behind it.  A refused
+        head blocks the whole dequeue, because the queue's contract is
+        FIFO-by-priority: skipping the refused job and handing out the
+        next one would silently reorder the queue, and a refused job
+        would sit at the head forever, blocking everything behind it.
+        The refused job stays ``ready``; the caller is told.
+        """
+        gate = self._refusal_gate
+        if gate is None:
+            return
+        require = getattr(gate, "require_queue_allowed", None)
+        if not callable(require):
+            raise TypeError(
+                "the refusal gate must offer require_queue_allowed(job_id, "
+                f"action, now=...), got {type(gate).__name__}"
+            )
+        require(job_id, action, now=now)
+
     def _refusal_allows(self, job_id: str, action: str,
                         now: Optional[float]) -> bool:
         """The **boolean** form of the refusal question.
@@ -912,7 +968,8 @@ class JobQueue:
             return record
 
     def dequeue(
-        self, worker_id: str, queue: str, seq: int
+        self, worker_id: str, queue: str, seq: int,
+        now: Optional[float] = None,
     ) -> Optional[DequeuedJob]:
         """Reserve the next eligible job in ``queue`` for a worker.
 
@@ -921,6 +978,13 @@ class JobQueue:
         job becomes ``reserved`` (invisible) and ``attempts`` increments
         as data. An empty queue or no eligible job returns ``None`` as
         data -- emptiness is not a failure. Unknown queues fail closed.
+
+        **A recorded refusal blocks the hand-out.**  When a refusal gate
+        is installed and a refusal covers the job's action, the job is
+        NOT handed to a worker: it stays ``ready`` and the call raises.
+        ``dequeue()`` is the moment the action is actually **issued**,
+        so it is a re-dispatch as much as ``retry()`` is -- see
+        :meth:`_require_refusal_allows_dequeue`.
         """
         with self._lock:
             self._claim(seq)
@@ -939,6 +1003,13 @@ class JobQueue:
                 return None
             job_id = eligible[0]
             entry = self._entries[job_id]
+            # The gate is asked BEFORE the entry is flipped to
+            # ``reserved``, so a refusal leaves the job exactly where it
+            # was -- still ``ready``, still eligible, and no worker
+            # holding it.
+            self._require_refusal_allows_dequeue(
+                job_id, str(entry["task"]), now
+            )
             entry["state"] = _STATE_RESERVED
             entry["worker_id"] = worker_id
             entry["attempts"] += 1

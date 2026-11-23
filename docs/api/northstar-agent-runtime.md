@@ -51721,7 +51721,7 @@ Deterministic Celery/Sidekiq-shaped job queue bookkeeping.
 - `audit_log()`
 - `enqueue(job_id: str, queue: str, task: str, payload_digest: str, seq: int, priority: int=0, max_retries: int=3, delay_seqs: int=0)`
   - Book a job into a named queue.
-- `dequeue(worker_id: str, queue: str, seq: int)`
+- `dequeue(worker_id: str, queue: str, seq: int, now: Optional[float]=None)`
   - Reserve the next eligible job in ``queue`` for a worker.
 - `ack(job_id: str, seq: int)`
   - Terminal success of a reserved job.

@@ -1645,5 +1645,202 @@ class MirrorTerminalStateTests(unittest.TestCase):
         manager.close()
 
 
+class QueueDequeueGateTests(unittest.TestCase):
+    """``dequeue()`` hands the action out, so it consults the gate.
+
+    THE DEFECT (measured 2026-11-23)
+    --------------------------------
+    The queue side's gate guarded ``retry()`` -- the path that puts a
+    job back to ``ready`` -- and NOT ``dequeue()``, which takes a job
+    **out** of ``ready`` and offers it to a worker.  A refusal says
+    "this action may not be issued", and ``dequeue()`` is the moment it
+    is issued.
+
+        check job-1/send_email: blocked_by_refusal
+        DEQUEUE RESULT: ('job-1', 'send_email', 'w-1')
+        job state: reserved
+        audit kinds: ['job.enqueued', 'job.dequeued']
+
+    The refusal was on the books, the gate could answer it, and the
+    action was handed to a worker anyway.
+
+    **What exposed it: the asymmetry with the lease side.**  The lease
+    side guards BOTH ``fail()`` (back to ``ready``) and ``claim()``
+    (out of ``ready`` into a lease) -- and §11 of the design doc
+    closed the ``claim()`` hole.  The queue side guarded only one of
+    the two.  A gate that guards one route is a gate with a door next
+    to it, and the door was the more direct one: ``dequeue()`` is the
+    ordinary call a dispatcher writes.
+
+    **Why this is not the same defect as §10's.**  §10's was "the gate
+    exists but the host must remember to install it"; this one is "the
+    gate IS installed and the path does not ask".  The fix is the same
+    shape as the lease side's ``claim()``: ask the gate inside the
+    object's own lock, immediately before the write.
+    """
+
+    def setUp(self):
+        self.registry = RefusalHoldRegistry()
+        self.gate = RefusalHoldQueueGate(self.registry)
+
+    def _queue(self, job_id="job-1", task="dispatch", gate=None):
+        queue = JobQueue()
+        queue.enqueue(job_id, "q", task, DIGEST, 1)
+        queue.set_refusal_gate(self.gate if gate is None else gate)
+        return queue
+
+    def test_a_refused_dequeue_does_not_hand_the_job_out(self):
+        """The defect itself: the plain ``dequeue()`` is refused.
+
+        No context manager and no wrapping -- the call a dispatcher
+        writes.  This is the guard that can fail on the defect.
+        """
+        queue = self._queue()
+        self.gate.record_queue("job-1", "dispatch", row=make_row())
+        with self.assertRaises(RefusalRefusedError):
+            queue.dequeue("worker-1", "q", 2)
+        self.assertEqual(
+            queue.job("job-1").state,
+            "ready",
+            "the job was handed out even though a refusal covers it",
+        )
+
+    def test_a_refused_dequeue_leaves_no_worker_holding_the_job(self):
+        """No worker, and no attempt booked."""
+        queue = self._queue()
+        self.gate.record_queue("job-1", "dispatch", row=make_row())
+        with self.assertRaises(RefusalRefusedError):
+            queue.dequeue("worker-1", "q", 2)
+        job = queue.job("job-1")
+        self.assertEqual(job.worker_id, "")
+        self.assertEqual(job.attempts, 0)
+
+    def test_a_refused_dequeue_books_no_dequeued_audit_row(self):
+        """The audit trail must not claim a hand-out that did not happen."""
+        queue = self._queue()
+        self.gate.record_queue("job-1", "dispatch", row=make_row())
+        with self.assertRaises(RefusalRefusedError):
+            queue.dequeue("worker-1", "q", 2)
+        kinds = [row["kind"] for row in queue.audit_log()]
+        self.assertNotIn("job.dequeued", kinds)
+        self.assertIn("job.enqueued", kinds)
+
+    def test_an_allowed_dequeue_still_hands_the_job_out(self):
+        """The control: no refusal, the dequeue works exactly as before."""
+        queue = self._queue()
+        got = queue.dequeue("worker-1", "q", 2)
+        self.assertIsNotNone(got)
+        self.assertEqual(got.job_id, "job-1")
+        self.assertEqual(got.worker_id, "worker-1")
+        self.assertEqual(queue.job("job-1").state, "reserved")
+
+    def test_a_refusal_against_a_different_action_is_not_refused(self):
+        """The refusal covers one action, not the whole queue."""
+        queue = self._queue(task="dispatch")
+        self.gate.record_queue("job-1", "other-action", row=make_row())
+        got = queue.dequeue("worker-1", "q", 2)
+        self.assertIsNotNone(got)
+
+    def test_a_broken_gate_refuses_the_dequeue(self):
+        """A gate that cannot answer fails CLOSED."""
+        class _Broken:
+            def require_queue_allowed(self, job_id, action, *, now=None):
+                raise RuntimeError("the gate cannot answer")
+
+        queue = self._queue(gate=_Broken())
+        with self.assertRaises(RuntimeError):
+            queue.dequeue("worker-1", "q", 2)
+        self.assertEqual(queue.job("job-1").state, "ready")
+
+    def test_a_gate_without_the_required_method_is_refused(self):
+        """An unusable gate is refused, not ignored."""
+        class _Mute:
+            pass
+
+        queue = self._queue(gate=_Mute())
+        with self.assertRaises(TypeError):
+            queue.dequeue("worker-1", "q", 2)
+        self.assertEqual(queue.job("job-1").state, "ready")
+
+    def test_no_gate_leaves_the_dequeue_path_unchanged(self):
+        """The default is unchanged: no gate, no behaviour change."""
+        queue = JobQueue()
+        queue.enqueue("job-1", "q", "dispatch", DIGEST, 1)
+        got = queue.dequeue("worker-1", "q", 2)
+        self.assertIsNotNone(got)
+        self.assertEqual(queue.job("job-1").state, "reserved")
+
+    def test_the_gate_is_asked_under_the_queue_lock(self):
+        """The gate's answer and the write are serialized.
+
+        The refused job must not be observable as ``reserved`` from
+        inside the gate's own call: the gate is asked BEFORE the
+        write, so a recording that races the dequeue cannot be lost.
+        """
+        seen = []
+
+        class _Watching:
+            def require_queue_allowed(self, job_id, action, *, now=None):
+                seen.append(queue.job(job_id).state)
+                return None
+
+        queue = self._queue(gate=_Watching())
+        queue.dequeue("worker-1", "q", 2)
+        self.assertEqual(
+            seen,
+            ["ready"],
+            "the gate was asked AFTER the job was reserved, so a refusal "
+            "recorded concurrently could be lost",
+        )
+
+    def test_a_refusal_recorded_concurrently_never_loses_to_a_dequeue(self):
+        """'Recorded but still handed out' must never happen.
+
+        The gate pauses inside the queue's lock just before it
+        answers, so the recording thread gets in.  The refusal is
+        recorded while the dequeue is in flight, and the dequeue must
+        still refuse the job.
+        """
+        order = []
+
+        class _Slow:
+            def __init__(self):
+                self.in_gate = threading.Event()
+                self.resume = threading.Event()
+
+            def require_queue_allowed(self, job_id, action, *, now=None):
+                order.append("dequeue:gate")
+                self.in_gate.set()
+                self.resume.wait(5.0)
+                order.append("dequeue:gate:done")
+                raise RefusalRefusedError("refused")
+
+        gate = _Slow()
+        queue = self._queue(gate=gate)
+
+        def record():
+            gate.in_gate.wait(5.0)
+            order.append("record")
+            self.gate.record_queue("job-1", "dispatch", row=make_row())
+            gate.resume.set()
+
+        worker = threading.Thread(target=record)
+        worker.start()
+        try:
+            with self.assertRaises(RefusalRefusedError):
+                queue.dequeue("worker-1", "q", 2)
+        finally:
+            gate.resume.set()
+            worker.join(5.0)
+
+        self.assertEqual(queue.job("job-1").state, "ready")
+        self.assertLess(
+            order.index("record"),
+            order.index("dequeue:gate:done"),
+            "the refusal was recorded after the gate answered, so the "
+            "dequeue had no way to see it",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
