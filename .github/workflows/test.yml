@@ -251,4 +251,4 @@ jobs:
       - name: Offline task fixture controls
         # Reject all 24 untouched fixtures, then replay every reference patch on
         # a clean initial commit. This proves fixtures, not real-model accuracy.
-        run: python3 scripts/check-code-task-pack.py --write /tmp/northstar-code-task-controls.json
+        run: python3 ../../scripts/check-code-task-pack.py --write /tmp/northstar-code-task-controls.json
