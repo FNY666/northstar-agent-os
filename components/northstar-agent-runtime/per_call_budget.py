@@ -34,6 +34,7 @@ never defaulting to the cheapest tier.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -125,17 +126,29 @@ class PerCallBudget:
             if isinstance(self.max_budget_usd, bool) or not isinstance(
                 self.max_budget_usd, (int, float)
             ):
-                raise ValueError("max_budget_usd must be a number or None")
-            if self.max_budget_usd <= 0:
-                raise ValueError("max_budget_usd must be positive when set")
+                raise ValueError("max_budget_usd must be a positive finite number or None")
+            try:
+                run_ceiling = float(self.max_budget_usd)
+            except OverflowError as error:
+                raise ValueError("max_budget_usd must be a positive finite number or None") from error
+            if not math.isfinite(run_ceiling) or run_ceiling <= 0:
+                raise ValueError("max_budget_usd must be a positive finite number or None")
+            self.max_budget_usd = run_ceiling
         unknown = set(self.per_call_ceilings) - set(CALL_TYPES)
         if unknown:
             raise ValueError(f"unknown call type(s) in per_call_ceilings: {sorted(unknown)}")
+        validated_ceilings: dict[str, float] = {}
         for call_type, ceiling in self.per_call_ceilings.items():
             if not isinstance(ceiling, (int, float)) or isinstance(ceiling, bool):
-                raise ValueError(f"per-call ceiling for {call_type!r} must be a number")
-            if ceiling < 0:
-                raise ValueError(f"per-call ceiling for {call_type!r} must be non-negative")
+                raise ValueError(f"per-call ceiling for {call_type!r} must be a finite number")
+            try:
+                ceiling_usd = float(ceiling)
+            except OverflowError as error:
+                raise ValueError(f"per-call ceiling for {call_type!r} must be finite") from error
+            if not math.isfinite(ceiling_usd) or ceiling_usd < 0:
+                raise ValueError(f"per-call ceiling for {call_type!r} must be finite and non-negative")
+            validated_ceilings[call_type] = ceiling_usd
+        self.per_call_ceilings = validated_ceilings
         # The wrapped run budget carries the same ceiling so its own
         # ``exhausted``/``remaining`` stay consistent with the gate.
         self._budget = Budget(max_budget_usd=self.max_budget_usd)
@@ -161,9 +174,12 @@ class PerCallBudget:
             estimated_cost_usd, (int, float)
         ):
             raise ValueError("estimated_cost_usd must be a number")
-        estimate = float(estimated_cost_usd)
-        if estimate < 0:
-            raise ValueError("estimated_cost_usd must be non-negative")
+        try:
+            estimate = float(estimated_cost_usd)
+        except OverflowError as error:
+            raise ValueError("estimated_cost_usd must be finite and non-negative") from error
+        if not math.isfinite(estimate) or estimate < 0:
+            raise ValueError("estimated_cost_usd must be finite and non-negative")
 
         # Per-call ceiling first: one runaway call is refused even when the
         # run budget could absorb it.

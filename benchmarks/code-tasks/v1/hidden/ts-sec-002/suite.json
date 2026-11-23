@@ -1,0 +1,9 @@
+{
+  "schema": "northstar.hidden-check.v1",
+  "command": [
+    "node",
+    "--test",
+    ".northstar_evaluator/test_hidden.ts"
+  ],
+  "timeout_seconds": 30
+}

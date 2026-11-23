@@ -61,7 +61,6 @@ from plugin_load import add_plugin_arguments
 from mcp_config import add_mcp_arguments
 from mcp_admission import add_admission_arguments
 from skill_check import add_skills_arguments
-from governance_bench import add_bench_arguments
 from run_setup import (  # noqa: F401 - MUTATING_TOOLS and checkpoint_usage stay importable from cli
     MUTATING_TOOLS,
     HookSetup,
@@ -76,6 +75,7 @@ from run_setup import (  # noqa: F401 - MUTATING_TOOLS and checkpoint_usage stay
     load_workspace_agents,
     resolve_agent,
     resolve_ceilings,
+    resolve_egress_target_scope,
     resolve_permission_mode,
     resolve_session,
     resolve_tool_access,
@@ -101,6 +101,8 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "examples:\n"
+            "  northstar code --workspace . 'fix the failing parser test' --check 'pytest -q'\n"
+            "  northstar code-reconcile ~/.local/state/northstar/code-runs/code-...\n"
             "  northstar agent --workspace . --prompt 'summarise README' --provider scripted --scripted-text ok\n"
             "  northstar resume latest --workspace . --prompt 'continue' --scripted-text ok\n"
             "  northstar resume ns-20260909T000000Z-abcd1234 --workspace . --prompt 'continue' --scripted-text ok\n"
@@ -110,6 +112,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  northstar doctor --workspace .\n"
             "  northstar sessions list --workspace .\n"
             "  northstar bench\n"
+            "  northstar security assess --text 'review this input'\n"
             "  northstar agent --workspace . 'summarise README' --provider scripted --scripted-text ok\n"
             "  northstar new my-project\n"
             "  northstar plugin install ./my-bundle --workspace . && northstar plugin verify --workspace .\n"
@@ -148,6 +151,76 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="product opt-out: do not write per-turn checkpoints (kernel `run` default)",
     )
+
+    code = sub.add_parser(
+        "code",
+        help="programming path: solve a repository task in an isolated Git worktree",
+        description=(
+            "Create a detached worktree from the exact current HEAD, run the governed "
+            "agent there, execute host-declared checks inside the Shell sandbox, and "
+            "deliver a patch plus evidence. The caller's checkout is never edited and "
+            "no commit or push is created."
+        ),
+    )
+    code.add_argument(
+        "task",
+        nargs="?",
+        default="",
+        help="software-engineering task (shorthand for --prompt)",
+    )
+    _add_run_arguments(code)
+    code_group = code.add_argument_group("code task")
+    code_group.add_argument(
+        "--check",
+        dest="checks",
+        action="append",
+        default=[],
+        metavar="COMMAND",
+        help=(
+            "host-declared test/build/lint command; repeatable. Runs after the model "
+            "stops, with network denied, and a failure demotes the run"
+        ),
+    )
+    code_group.add_argument(
+        "--check-input",
+        dest="check_inputs",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help=(
+            "repository-relative file a host-declared check reads (check script, "
+            "helper, fixture); repeatable. Each input is content-addressed at the "
+            "starting commit and sealed; a delivery patch touching a pinned input "
+            "fails verification"
+        ),
+    )
+    code_group.add_argument(
+        "--plan-only",
+        action="store_true",
+        help="understand and plan without allowing file edits or Shell execution",
+    )
+    code_group.add_argument(
+        "--evidence-dir",
+        default="",
+        metavar="PATH",
+        help="base directory for patches, sessions and manifests (default: XDG state directory)",
+    )
+    code_group.add_argument(
+        "--keep-worktree",
+        action="store_true",
+        help="keep the isolated worktree after a successful run (failed runs are always kept)",
+    )
+
+    code_reconcile = sub.add_parser(
+        "code-reconcile",
+        help="classify an interrupted code run without replaying tool effects",
+        description=(
+            "Inspect manifest.json and phases.json in a code evidence directory. "
+            "An effect with a start record but no completion record is reported "
+            "for manual review and is never executed again by this command."
+        ),
+    )
+    code_reconcile.add_argument("evidence_dir", help="one northstar code run evidence directory")
 
     resume = sub.add_parser(
         "resume",
@@ -204,6 +277,23 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     add_audit_arguments(audit)
+    evidence = sub.add_parser(
+        "evidence",
+        help="inspect, pack, seal, or verify run evidence (lazy optional dispatch)",
+        description=(
+            "Offline operations over a runtime evidence bundle. The run-evidence "
+            "component is imported only when this command runs; an install without "
+            "it gets an explicit installation message."
+        ),
+    )
+    evidence.add_argument(
+        "evidence_action",
+        nargs="?",
+        choices=("inspect", "pack", "verify", "seal"),
+        help="inspect/pack a runtime bundle, or use the evidence component's seal/verify commands",
+    )
+    evidence.add_argument("evidence_args", nargs=argparse.REMAINDER)
+    evidence.add_argument("--json", action="store_true", help="accepted by inspect (its output is always JSON)")
     mcp = sub.add_parser(
         "mcp",
         help="inspect the MCP servers this workspace declares (read-only; a run needs --mcp-config to start them)",
@@ -225,7 +315,27 @@ def build_parser() -> argparse.ArgumentParser:
             "Same cases CI and `make bench` run. Never loosens a ceiling."
         ),
     )
-    add_bench_arguments(bench)
+    # Keep the research benchmark out of the ordinary CLI import path.  These
+    # four options intentionally mirror ``governance_bench.add_bench_arguments``;
+    # the benchmark module is imported only when the command actually runs.
+    bench.add_argument("--list", action="store_true", help="list case ids and tracks without running them")
+    bench.add_argument("--json", action="store_true", help="emit one JSON object (machine-readable score)")
+    bench.add_argument("--only", action="append", default=[], metavar="ID", help="run only this case id or track prefix (repeatable)")
+    bench.add_argument("--track", action="append", default=[], metavar="NAME", help="run only this track (repeatable)")
+    security = sub.add_parser(
+        "security",
+        help="local defensive assessment (read-only; no network or command execution)",
+    )
+    security_actions = security.add_subparsers(dest="security_action")
+    assess = security_actions.add_parser(
+        "assess",
+        help="assess text and an optional tool URL with deterministic local detectors",
+    )
+    assess.add_argument("--text", default="", help="untrusted text to inspect")
+    assess.add_argument("--text-file", default="", metavar="PATH", help="read text from a file, or '-' for stdin")
+    assess.add_argument("--tool-name", default=None, metavar="NAME", help="declared tool name for URL inspection")
+    assess.add_argument("--url", default=None, help="declared tool URL; inspected locally and never fetched")
+    assess.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     new_proj = sub.add_parser("new", help="scaffold a governed project (config, agents, hooks guide, CI recipe)")
     new_proj.add_argument("directory", help="directory to create (must not exist, or be empty unless --force)")
     new_proj.add_argument("--force", action="store_true", help="write the template files into a non-empty directory (never deletes)")
@@ -304,6 +414,12 @@ def _add_limits_transport_arguments(parser: argparse.ArgumentParser) -> None:
 def _add_policy_arguments(parser: argparse.ArgumentParser) -> None:
         policy = parser.add_argument_group("policy")
         policy.add_argument("--workspace", default=".", help="directory the tools are confined to")
+        policy.add_argument(
+            "--dataflow-policy",
+            default=None,
+            metavar="PATH|default",
+            help="opt in to sensitivity source/sink enforcement using a strict TOML policy (use 'default' for the shipped policy)",
+        )
         policy.add_argument("--permission-mode", choices=("default", "acceptEdits", "plan", "bypassPermissions"), default="default")
         policy.add_argument("--allow-tool", action="append", default=[], metavar="NAME", help="auto-approve a tool (repeatable)")
         policy.add_argument("--deny-tool", action="append", default=[], metavar="NAME", help="always refuse a tool, and remove it from the allow list (repeatable)")
@@ -363,6 +479,13 @@ def _add_policy_arguments(parser: argparse.ArgumentParser) -> None:
             help="inject this memory file instead of the default (must live inside the workspace; no global MEMORY)",
         )
         policy.add_argument(
+            "--memory-viewer",
+            action="append",
+            default=[],
+            metavar="IDENTITY",
+            help="trusted current viewer identity for memory audience checks (repeat for group members; absent means public-only)",
+        )
+        policy.add_argument(
             "--no-plugins",
             action="store_true",
             help="ignore .northstar/plugins/ entirely (installed bundles contribute skills, agents, hooks, MCP servers and ceilings)",
@@ -411,6 +534,7 @@ def _add_mcp_arguments(parser: argparse.ArgumentParser) -> None:
         mcp.add_argument("--mcp-max-rounds", type=int, default=3, help="how many times one tool call may be re-asked for input before the client gives up")
         mcp.add_argument("--mcp-seccomp", choices=("auto", "on", "off"), default="auto", help="seccomp-BPF denylist for MCP server processes on Linux (same escape-primitive denylist as the Shell process backend): auto applies it where loadable, on refuses to start where it is not, off runs the server command as-is")
         mcp.add_argument("--mcp-network", choices=("denied", "allowed"), default="denied", help="network for MCP server processes: denied (default) confines the server with Landlock TCP denial like the Shell process backend and refuses to start where that cannot be enforced; allowed runs the server with full host network (explicit opt-in for servers that need it)")
+        mcp.add_argument("--mcp-filesystem", choices=("unconfined", "workspace"), default="unconfined", help="filesystem for MCP server processes: unconfined preserves compatibility; workspace applies a fail-closed Landlock boundary granting system/runtime paths read/execute, /etc and /proc read-only, minimal device access, and the current workspace read/write")
 
 def _add_execution_arguments(parser: argparse.ArgumentParser) -> None:
         execution = parser.add_argument_group("execution delegation")
@@ -418,6 +542,7 @@ def _add_execution_arguments(parser: argparse.ArgumentParser) -> None:
         execution.add_argument("--sidecar-timeout-ms", type=int, default=30_000, help="sidecar execution deadline")
         execution.add_argument("--egress-socket", default="", help="Unix socket of northstar-egress-sidecar; enables the Fetch tool (the agent's only network path)")
         execution.add_argument("--egress-timeout-ms", type=int, default=30_000, help="egress sidecar request deadline")
+        execution.add_argument("--egress-target", "--network-target", dest="egress_targets", action="append", default=[], metavar="HOST", help="narrow this run's Fetch calls to an exact hostname; repeatable and inherited by subagents")
         execution.add_argument("--probe-sidecar", action="store_true", help="send one health-check prompt to the sidecar and exit")
         execution.add_argument(
             "--sandbox",
@@ -460,6 +585,16 @@ def _add_execution_arguments(parser: argparse.ArgumentParser) -> None:
                 "A per-call Shell payload may only tighten this, never loosen it."
             ),
         )
+        execution.add_argument(
+            "--shell-aggregate-resource-scope",
+            choices=("off", "systemd"),
+            default="off",
+            help=(
+                "Require aggregate process-tree memory/task/CPU limits in a PID-1-owned systemd "
+                "scope (Linux, non-root runtime, seccomp required); refuse instead of falling "
+                "back when the system manager cannot enforce them."
+            ),
+        )
 
 def _add_output_arguments(parser: argparse.ArgumentParser) -> None:
         output = parser.add_argument_group("output")
@@ -467,6 +602,17 @@ def _add_output_arguments(parser: argparse.ArgumentParser) -> None:
         output.add_argument("--quiet", action="store_true", help="print only the final result line")
         output.add_argument("--trace", action="store_true", help="print the span tree afterwards")
         output.add_argument("--session-dir", default="", help="append an auditable JSONL transcript here")
+        output.add_argument(
+            "--run-evidence-dir",
+            default="",
+            metavar="PATH",
+            help="write the generic run's digest-first evidence bundle here (opt-in)",
+        )
+        output.add_argument(
+            "--require-evidence",
+            action="store_true",
+            help="fail the run with error_evidence_incomplete (exit 8) if required evidence cannot be captured",
+        )
         output.add_argument(
             "--session-lease-seconds",
             type=int,
@@ -493,7 +639,20 @@ def _add_output_arguments(parser: argparse.ArgumentParser) -> None:
             metavar="INDEX",
             help="with --resume-from: resume from the checkpoint at this transcript record index (default: the latest)",
         )
+        output.add_argument(
+            "--allow-checkpoint-tool-replay",
+            action="store_true",
+            help=(
+                "acknowledge that tools after the selected checkpoint may be called again; "
+                "their effects are not rolled back and calls still pass current policy"
+            ),
+        )
         output.add_argument("--redact-tool-output", action="store_true", help="record tool results in the session without output bodies")
+        output.add_argument(
+            "--redact-session-content",
+            action="store_true",
+            help="omit prompts, assistant content, and tool bodies from the chained session; this session cannot be resumed",
+        )
         output.add_argument("--stream", action="store_true", help="print (and, with --json, emit) assistant text as it arrives instead of at end of turn. Presentation only: the transcript, the permission gate, the ceilings and the single result event are unchanged, and a provider that cannot stream is refused rather than silently degraded")
         output.add_argument("--show-pricing", action="store_true", help="print the pricing decision and exit")
         output.add_argument("--dry-run", action="store_true", help="validate the configuration and print what a run would do, then exit without sending any request (provider, model, and sidecar are not touched)")
@@ -637,12 +796,26 @@ def _print_dry_run(
     try:
         from tools.shell import sandbox_status_line
 
-        sandbox_note = sandbox_status_line(getattr(config, "shell_backend", "auto"))
+        sandbox_note = sandbox_status_line(
+            getattr(config, "shell_backend", "auto"),
+            getattr(config, "shell_aggregate_resource_scope", "off"),
+        )
     except Exception:  # noqa: BLE001
         sandbox_note = f"sandbox={getattr(config, 'shell_backend', 'auto')}"
     print(f"sidecar={'on' if config.sidecar_socket else 'off'} "
           f"session_dir={args.session_dir or 'off'} "
           f"halt_on_denial={config.halt_on_denial}")
+    print(
+        f"run_evidence={config.evidence_dir or 'off'} "
+        f"required={getattr(config, 'evidence_required', False)}"
+    )
+    target_scope = config.egress_target_scope
+    target_scope_note = (
+        "sidecar policy only" if target_scope is None else
+        "none (Fetch denied)" if not target_scope else
+        ",".join(target_scope)
+    )
+    print(f"egress={'on' if config.egress_socket else 'off'} target_scope={target_scope_note}")
     print(sandbox_note)
     print(
         "shell=registered, denied until --allow-tool Shell "
@@ -688,6 +861,169 @@ def _product_argv(command: str, argv: Sequence[str]) -> list[str]:
         session_id, rest = body[0], body[1:]
         return apply_resume_defaults(rest, session_id=session_id)
     raise ValueError(f"unknown product command {command!r}")
+
+
+def _run_code(args: argparse.Namespace) -> int:
+    """Run the programming product path in a detached worktree.
+
+    The generic runtime remains the only agent loop. This wrapper owns the
+    repository lifecycle and evidence artifacts, then delegates to :func:`_run`.
+    """
+    from code_task import CodePhaseMachine, CodeTask, IsolatedCodeWorkspace, validate_check_inputs
+    from verification import validate_commands
+
+    task_text = _read_prompt(args)
+    if not task_text.strip():
+        print(
+            "no code task: pass a task string, --prompt, or --prompt-file",
+            file=sys.stderr,
+        )
+        return USAGE_ERROR
+    checks = validate_commands(tuple(getattr(args, "checks", ()) or ()))
+    check_inputs = validate_check_inputs(tuple(getattr(args, "check_inputs", ()) or ()))
+    task = CodeTask(
+        goal=task_text.strip(),
+        workspace=args.workspace,
+        checks=checks,
+        plan_only=bool(getattr(args, "plan_only", False)),
+        network_targets=tuple(getattr(args, "egress_targets", ()) or ()),
+        check_inputs=check_inputs,
+    )
+
+    # Dry-run is intentionally read-only: validate the generic configuration
+    # against the source checkout and describe isolation without creating Git
+    # worktree metadata or an evidence directory.
+    if args.dry_run:
+        args.prompt = task.goal
+        args.checks = list(task.checks)
+        args._code_requires_verification = not task.plan_only
+        args._code_default_accept_edits = not task.plan_only
+        if task.plan_only:
+            args.plan = True
+            args.read_only = True
+            args.permission_mode = "plan"
+        print("code_workspace=isolated Git worktree (not created in dry-run)")
+        return _run(args)
+
+    workspace = IsolatedCodeWorkspace(
+        task.workspace,
+        evidence_root=(args.evidence_dir or None),
+    ).prepare()
+    assert workspace.worktree is not None
+    assert workspace.evidence_dir is not None
+    workspace.record_task(task)
+    phases = CodePhaseMachine(
+        run_id=workspace.run_id,
+        evidence_dir=workspace.evidence_dir,
+        plan_only=task.plan_only,
+        worktree=workspace.worktree,
+        start_commit=workspace.start_commit,
+        check_inputs=task.check_inputs,
+    )
+    phases.start()
+
+    args.prompt = task.goal
+    args.task = ""
+    args.workspace = str(workspace.execution_root)
+    args.checks = list(task.checks)
+    args._code_requires_verification = not task.plan_only
+    args._code_default_accept_edits = not task.plan_only
+    args._code_phase_machine = phases
+    if not args.session_dir:
+        args.session_dir = str(workspace.session_dir)
+    if not args.checkpoint_turns:
+        args.checkpoint_turns = 1
+
+    if task.plan_only:
+        args.plan = True
+        args.read_only = True
+        args.permission_mode = "plan"
+        args.checks = []
+    else:
+        # Invoking the programming product is the host's authorization to edit
+        # its disposable worktree and execute sandboxed build/test commands. It
+        # does not grant network, policy writes, or access outside the sandbox.
+        for tool_name in ("Shell", "RunCheck"):
+            if tool_name not in args.allow_tool and tool_name not in args.deny_tool:
+                args.allow_tool.append(tool_name)
+
+    exit_code = USAGE_ERROR
+    patch_path: Path | None = None
+    try:
+        exit_code = _run(args)
+        workspace.record_verification(
+            tuple(getattr(args, "_verification_summaries", ()) or ())
+        )
+        terminal = str(
+            getattr(
+                args,
+                "_terminal_subtype",
+                "success" if exit_code == 0 else "failed",
+            )
+        )
+        phases.finish(terminal)
+        workspace.record_phases(phases)
+        patch_path = workspace.capture(exit_code=exit_code, terminal=terminal)
+        if exit_code == 0 and not args.keep_worktree:
+            workspace.cleanup()
+        else:
+            workspace.preserve(
+                reason=("operator requested --keep-worktree" if exit_code == 0 else "run did not succeed")
+            )
+    except Exception:
+        if phases.outcome is None:
+            phases.finish("error_during_execution", reason="CLI orchestration raised")
+        workspace.record_phases(phases)
+        workspace.preserve(reason="orchestration or evidence capture failed")
+        raise
+
+    destination = sys.stderr if args.json else sys.stdout
+    print(
+        f"[code] evidence={workspace.evidence_dir} patch={patch_path} "
+        f"start={workspace.start_commit[:12]} "
+        + (
+            "worktree=removed"
+            if exit_code == 0 and not args.keep_worktree
+            else f"worktree={workspace.worktree}"
+        ),
+        file=destination,
+    )
+    return exit_code
+
+
+def _run_code_reconcile(args: argparse.Namespace) -> int:
+    from code_task import reconcile_code_evidence
+
+    receipt = reconcile_code_evidence(args.evidence_dir)
+    print(json.dumps(receipt, ensure_ascii=False, sort_keys=True, indent=2))
+    return 0 if receipt["classification"] in {
+        "terminal", "interrupted_before_effects", "interrupted_after_receipted_effects"
+    } else 2
+
+
+def _run_security_assess(args: argparse.Namespace) -> int:
+    from defensive_agent import assess
+
+    try:
+        if args.text and args.text_file:
+            raise ValueError("use either --text or --text-file, not both")
+        text = args.text
+        if args.text_file:
+            if args.text_file == "-":
+                text = sys.stdin.read()
+            else:
+                text = Path(args.text_file).read_text(encoding="utf-8")
+        result = assess(text, tool_name=args.tool_name, url=args.url)
+    except (ValueError, OSError) as error:
+        print(f"configuration error: {error}", file=sys.stderr)
+        return USAGE_ERROR
+    if args.json:
+        print(json.dumps(result.as_dict(), ensure_ascii=False, sort_keys=True))
+    else:
+        print(f"decision: {result.decision.value}")
+        for finding in result.findings:
+            print(f"{finding.rule_id} severity={finding.severity} category={finding.category} {finding.detail}")
+    return 0 if result.decision.value != "block" else 5
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -745,6 +1081,24 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"created {path}")
         print(f"governed project scaffolded; start with `{PROG_NAME} doctor --workspace <dir>`")
         return 0
+    if args.command == "code":
+        try:
+            return _run_code(args)
+        except ValueError as error:
+            print(f"configuration error: {error}", file=sys.stderr)
+            return USAGE_ERROR
+        except FileNotFoundError as error:
+            print(f"file not found: {error}", file=sys.stderr)
+            return USAGE_ERROR
+        except OSError as error:  # pragma: no cover - host-level failure
+            print(f"cannot run: {error}", file=sys.stderr)
+            return USAGE_ERROR
+    if args.command == "code-reconcile":
+        try:
+            return _run_code_reconcile(args)
+        except (ValueError, OSError) as error:
+            print(f"cannot reconcile: {error}", file=sys.stderr)
+            return USAGE_ERROR
     if args.command != "run":
         if args.command == "doctor":
             return run_doctor(args)
@@ -756,6 +1110,28 @@ def main(argv: Sequence[str] | None = None) -> int:
             from audit_cli import run_audit
 
             return run_audit(args)
+        if args.command == "evidence":
+            try:
+                import importlib
+                import sys as _sys
+
+                component = Path(__file__).resolve().parents[1] / "northstar-run-evidence"
+                if component.is_dir() and str(component) not in _sys.path:
+                    _sys.path.append(str(component))
+                module = importlib.import_module("evidence_cli")
+            except ImportError:
+                print(
+                    "configuration error: northstar-run-evidence is not installed; "
+                    "install that component to inspect or verify evidence bundles",
+                    file=sys.stderr,
+                )
+                return USAGE_ERROR
+            argv = list(args.evidence_args)
+            if args.evidence_action:
+                argv.insert(0, args.evidence_action)
+            elif "--json" in argv:
+                argv.remove("--json")
+            return module.main(argv)
         if args.command == "mcp":
             handler = getattr(args, "handler", None)
             if handler is None:
@@ -787,6 +1163,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
                 return run_bench_command(args)
             return handler(args)
+        if args.command == "security":
+            if args.security_action != "assess":
+                parser.parse_args(["security", "assess", "--help"])
+                return 0
+            return _run_security_assess(args)
         parser.print_help()
         return USAGE_ERROR
 
@@ -978,6 +1359,8 @@ def _mcp_stance_note(args: argparse.Namespace) -> str:
             f"roots={'on' if getattr(args, 'mcp_allow_roots', False) else 'off'}",
             f"sensitive_input={'on' if getattr(args, 'mcp_allow_sensitive_input', False) else 'off'}",
             f"rounds={getattr(args, 'mcp_max_rounds', 3)}",
+            f"network={getattr(args, 'mcp_network', 'denied')}",
+            f"filesystem={getattr(args, 'mcp_filesystem', 'unconfined')}",
         ]
     )
 
@@ -1034,6 +1417,7 @@ def _connect_mcp_clients(
             "max_input_rounds": getattr(args, "mcp_max_rounds", 3),
             "seccomp": getattr(args, "mcp_seccomp", "auto"),
             "network": getattr(args, "mcp_network", "denied"),
+            "filesystem": getattr(args, "mcp_filesystem", "unconfined"),
             "workspace_root": Path(args.workspace).resolve(),
         }
     clients: list[Any] = []
@@ -1197,12 +1581,13 @@ def _setup_notes(
 def _stream_events(args: argparse.Namespace, runtime: Any, store: Any, prompt: str) -> int:
     """Run the prompt, print every event as it arrives, then the one-line summary; return the exit code."""
     if args.resume_from:
-        resume = store.transcript(args.resume_from)
+        resume = store.transcript(args.resume_from, require_integrity=True)
     else:
-        resume = store.transcript(args.resume) if args.resume else None
+        resume = store.transcript(args.resume, require_integrity=True) if args.resume else None
     exit_code = 0
     result = None
     stream_open = False
+    args._verification_summaries = []
     for event in runtime.run(prompt, resume=resume):
         if args.json:
             print(json.dumps(event_to_dict(event), ensure_ascii=False, sort_keys=True))
@@ -1213,8 +1598,11 @@ def _stream_events(args: argparse.Namespace, runtime: Any, store: Any, prompt: s
         # "did the previous event stream" is the whole rule, and it lives here rather
         # than in the printer so the printer stays a pure function of one event.
         stream_open = type(event).__name__ == "StreamDelta"
+        if type(event).__name__ == "SystemMessage" and event.subtype == "verification":
+            args._verification_summaries.append(dict(event.data or {}))
         if isinstance(event, ResultMessage):
             result = event
+            args._terminal_subtype = event.subtype
             exit_code = EXIT_CODES.get(event.subtype, 1)
     if args.trace:
         print(runtime.tracer.tree())
@@ -1242,7 +1630,7 @@ def _stream_events(args: argparse.Namespace, runtime: Any, store: Any, prompt: s
 def _run(args: argparse.Namespace) -> int:
     from agents import builtin_registry
     from loop import AgentRuntime, RuntimeConfig, RuntimeConfigurationError
-    from tools import ToolLimits, build_default_registry
+    from tools import ToolLimits, build_code_registry, build_default_registry
 
     try:
         args.model = resolve_model(args.provider, args.model)
@@ -1273,7 +1661,11 @@ def _run(args: argparse.Namespace) -> int:
         )
         return USAGE_ERROR
 
-    registry = build_default_registry()
+    registry = (
+        build_code_registry()
+        if getattr(args, "command", "") == "code"
+        else build_default_registry()
+    )
     agents = builtin_registry()
     plugins = load_plugins(args, registry)
     workspace_agents = load_workspace_agents(args, agents, registry, plugins)
@@ -1282,6 +1674,11 @@ def _run(args: argparse.Namespace) -> int:
     postconditions = load_postconditions(args, policy)
 
     mode = resolve_permission_mode(args, policy, plugins)
+    # `acceptEdits` is a product default, not an explicit operator override.
+    # Apply it only after workspace policy and plugins have had the chance to
+    # tighten the run to plan mode.
+    if bool(getattr(args, "_code_default_accept_edits", False)) and mode == "default":
+        mode = "acceptEdits"
     allowed, denied = resolve_tool_access(args, registry, policy, plugins)
     definition, registry, allowed = resolve_agent(args, policy, agents, registry, allowed)
     mcp_servers, mcp_launch, mcp_report = _resolve_mcp_servers(args, plugins, definition)
@@ -1312,11 +1709,27 @@ def _run(args: argparse.Namespace) -> int:
         "tool_limits": ToolLimits(
             # The agent's own governance is unwritable unless a human explicitly
             # says otherwise for this run (see tools.ToolLimits for why).
-            protected_prefixes=(".git",) if args.allow_policy_writes else (".git", ".northstar")
+            protected_prefixes=(".git",) if args.allow_policy_writes else (".git", ".northstar"),
+            memory_viewers=tuple(getattr(args, "memory_viewer", ()) or ()),
         ),
         "record_tool_output_in_session": not args.redact_tool_output,
+        "redact_session_content": args.redact_session_content,
         "stream": args.stream,
+        "verification_commands": tuple(getattr(args, "checks", ()) or ()),
+        "require_verification": bool(getattr(args, "_code_requires_verification", False)),
+        "code_phase_machine": getattr(args, "_code_phase_machine", None),
     }
+    if args.dataflow_policy:
+        try:
+            from dataflow_policy import DataflowPolicy, DataflowPolicyError
+
+            config_kwargs["dataflow_policy"] = (
+                DataflowPolicy.default()
+                if args.dataflow_policy == "default"
+                else DataflowPolicy.from_toml_file(args.dataflow_policy)
+            )
+        except (DataflowPolicyError, OSError) as error:
+            raise RunConfigurationError(f"invalid dataflow policy: {error}") from error
     if postconditions:
         config_kwargs["postconditions"] = postconditions
     if args.run_id:
@@ -1327,19 +1740,38 @@ def _run(args: argparse.Namespace) -> int:
         config_kwargs["agent"] = definition.name
         config_kwargs["allow_delegation"] = definition.allow_delegation and args.max_subagent_depth > 0
     prompt_setup = compose_system_prompt(args, definition, policy, plugins)
+    config_kwargs["skill_digests"] = prompt_setup.skill_digests
     if prompt_setup.system_prompt is not None:
         config_kwargs["system_prompt"] = prompt_setup.system_prompt
+    if getattr(args, "command", "") == "code":
+        from code_task import append_code_protocol
+        from loop import DEFAULT_SYSTEM_PROMPT
+
+        config_kwargs["system_prompt"] = append_code_protocol(
+            str(config_kwargs.get("system_prompt", DEFAULT_SYSTEM_PROMPT)),
+            checks=tuple(getattr(args, "checks", ()) or ()),
+            plan_only=bool(getattr(args, "plan_only", False)),
+        )
     if args.sidecar_socket:
         config_kwargs["sidecar_socket"] = args.sidecar_socket
         config_kwargs["sidecar_timeout_ms"] = args.sidecar_timeout_ms
     if args.egress_socket:
         config_kwargs["egress_socket"] = args.egress_socket
         config_kwargs["egress_timeout_ms"] = args.egress_timeout_ms
+    egress_target_scope = resolve_egress_target_scope(args.egress_targets, policy)
+    if egress_target_scope is not None:
+        config_kwargs["egress_target_scope"] = egress_target_scope
     config_kwargs["shell_backend"] = getattr(args, "sandbox", "auto") or "auto"
     config_kwargs["shell_seccomp"] = getattr(args, "seccomp", "auto") or "auto"
     config_kwargs["shell_capdrop"] = getattr(args, "capdrop", "on") or "on"
     config_kwargs["shell_landlock"] = getattr(args, "landlock", "auto") or "auto"
+    config_kwargs["shell_aggregate_resource_scope"] = getattr(args, "shell_aggregate_resource_scope", "off") or "off"
     config_kwargs["parallel_tools"] = int(getattr(args, "parallel_tools", 1) or 1)
+    if getattr(args, "run_evidence_dir", ""):
+        config_kwargs["evidence_dir"] = args.run_evidence_dir
+        config_kwargs["evidence_required"] = bool(getattr(args, "require_evidence", False))
+    elif getattr(args, "require_evidence", False):
+        raise RunConfigurationError("--require-evidence needs --run-evidence-dir")
 
     validate_session_flags(args, ceilings)
     session = resolve_session(args, ceilings)
@@ -1361,6 +1793,13 @@ def _run(args: argparse.Namespace) -> int:
     )
 
     provider = _build_provider(args)
+    inherited_dataflow = None
+    if config.dataflow_policy is not None and prompt_setup.memory_audience:
+        from dataflow_policy import SessionDataflow
+
+        inherited_dataflow = SessionDataflow.from_memory_audience(
+            config.dataflow_policy, prompt_setup.memory_audience
+        )
     runtime = AgentRuntime(
         provider=provider,
         config=config,
@@ -1369,6 +1808,7 @@ def _run(args: argparse.Namespace) -> int:
         agents=agents,
         hooks=hooks.registry,
         budget=session.resume_budget,
+        dataflow=inherited_dataflow,
     )
 
     if args.show_pricing:
@@ -1450,7 +1890,7 @@ def _print_event(event: Any, *, quiet: bool = False, stream_open: bool = False) 
         for block in event.content:
             if type(block).__name__ == "ToolResultBlock":
                 marker = "error" if block.is_error else "ok"
-                text = " ".join(block.text().split())
+                text = " ".join(block.display_text().split())
                 print(f"← {marker}: {text[:160]}" + ("..." if len(text) > 160 else ""))
         return
     if kind == "ResultMessage":

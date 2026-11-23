@@ -126,6 +126,14 @@ class TestRegister(unittest.TestCase):
                 {"properties": {"x": {"score": 1.5}}}, seq=4,
             )  # floats refused
 
+    def test_register_rejects_ambiguous_schema_json(self):
+        for seq, raw in enumerate((
+            '{"properties":{},"properties":{}}',
+            '{"properties":{"x":{"type":NaN}}}',
+        ), 1):
+            with self.subTest(raw=raw), self.assertRaises(BadSchemaError):
+                self.reg.register("ambiguous", "json-schema", raw, seq=seq)
+
 
 class TestEvolve(unittest.TestCase):
     def setUp(self):

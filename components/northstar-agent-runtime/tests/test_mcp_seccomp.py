@@ -35,8 +35,14 @@ class ModeValidationTests(unittest.TestCase):
 
 
 class SpawnArgvTests(unittest.TestCase):
+    def test_seccomp_bootstrap_uses_runtime_interpreter_not_path(self):
+        client = McpStdioClient("t", ["echo", "hi"], seccomp="on", network="allowed")
+        with mock.patch.object(mcp_client.shutil, "which", return_value="/tmp/untrusted/python3"):
+            self.assertEqual(client._spawn_argv()[0], sys.executable)
+
     def _popen_argv(self, **kwargs):
         """Capture the argv connect() hands to Popen (server never starts)."""
+        kwargs.setdefault("network", "allowed")
         client = McpStdioClient("t", ["echo", "hi"], timeout_ms=5000, **kwargs)
         with mock.patch.object(
             mcp_client.subprocess, "Popen", side_effect=OSError("boom")
@@ -54,7 +60,7 @@ class SpawnArgvTests(unittest.TestCase):
             self.skipTest("wrapping needs Linux")
         argv = self._popen_argv(seccomp="auto")
         self.assertEqual(argv[-2:], ["echo", "hi"])
-        self.assertEqual(argv[1], "-c")
+        self.assertEqual(argv[1:3], ["-S", "-c"])
         self.assertTrue(argv[0].endswith("python3") or "python" in argv[0])
 
     def test_on_wraps_on_linux(self):
@@ -132,7 +138,7 @@ class RealKernelTests(unittest.TestCase):
         if not sys.platform.startswith("linux"):
             self.skipTest("prctl seccomp needs Linux")
         client = McpStdioClient(
-            "demo", ["python3", str(FIXTURE)], timeout_ms=8000, seccomp="auto"
+            "demo", ["python3", str(FIXTURE)], timeout_ms=8000, seccomp="auto", network="allowed"
         )
         try:
             client.connect()

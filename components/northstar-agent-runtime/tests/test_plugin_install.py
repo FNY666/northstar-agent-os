@@ -16,7 +16,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 import support  # noqa: F401  (bootstraps sys.path)
-from support import RuntimeTestCase
+import command_hooks
+from support import RuntimeTestCase, doctor_capability_skip_reason
 
 import plugin_load as pl
 import plugin_manifest as pm
@@ -106,6 +107,16 @@ class LockfileTests(unittest.TestCase):
                 with self.assertRaises(pl.PluginInstallError) as caught:
                     pl.read_lock(self.root)
                 self.assertIn(expected, str(caught.exception))
+
+    def test_ambiguous_lock_json_is_refused(self):
+        path = pl.lock_path(self.root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            '{"schema_version":"northstar.plugins-lock.v1","schema_version":"other","plugins":{}}',
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(pl.PluginInstallError, "duplicate JSON key"):
+            pl.read_lock(self.root)
 
     def test_broken_json_is_reported_with_the_path(self):
         path = pl.lock_path(self.root)
@@ -708,6 +719,38 @@ class InstallRecoveryTests(BundleTestCase):
 
 
 class LoadAndPinTests(BundleTestCase):
+    def test_plugin_root_symlink_is_refused_without_scanning_outside_workspace(self):
+        outside = self.root / "outside-plugins"
+        outside.mkdir()
+        write_tree(outside / "foreign", bundle_files())
+        plugin_root = self.workspace / pm.PLUGINS_DIRECTORY
+        plugin_root.parent.mkdir(parents=True, exist_ok=True)
+        plugin_root.symlink_to(outside, target_is_directory=True)
+        found, problems = pl.load_installed(self.workspace)
+        self.assertEqual(found, [])
+        self.assertTrue(any("plugin root" in item and "refusing" in item for item in problems))
+        self.assertTrue(pl.load_contributions(self.workspace).blocked)
+
+    def test_symlinked_installed_plugin_is_reported_invalid(self):
+        outside = self.root / "outside-plugin"
+        write_tree(outside, bundle_files())
+        plugin_root = self.workspace / pm.PLUGINS_DIRECTORY
+        plugin_root.mkdir(parents=True, exist_ok=True)
+        (plugin_root / "demo").symlink_to(outside, target_is_directory=True)
+        found, problems = pl.load_installed(self.workspace)
+        self.assertEqual([item.status for item in found], ["invalid"])
+        self.assertTrue(any("plugin directory is a symlink" in item for item in problems))
+
+    def test_plugin_root_entry_limit_refuses_partial_scan(self):
+        plugin_root = self.workspace / pm.PLUGINS_DIRECTORY
+        plugin_root.mkdir(parents=True, exist_ok=True)
+        for name in ("one", "two", "three"):
+            (plugin_root / name).mkdir()
+        with patch.object(pl, "MAX_INSTALLED_PLUGIN_ENTRIES", 2):
+            found, problems = pl.load_installed(self.workspace)
+        self.assertEqual(found, [])
+        self.assertTrue(any("refusing partial scan" in item for item in problems))
+
     def test_an_unpinned_bundle_loads_nothing(self):
         self.install(pin=False)
         contributions = pl.load_contributions(self.workspace)
@@ -726,6 +769,31 @@ class LoadAndPinTests(BundleTestCase):
         self.assertEqual(table["script"], f"{pm.PLUGINS_DIRECTORY}/demo/guard.py")
         self.assertEqual(table["event"], "PreToolUse")
         self.assertEqual(contributions.context_blocks[0][1].strip(), NOTES.strip())
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "sealed hook snapshots are Linux-only")
+    @unittest.skipUnless(
+        command_hooks.sealed_snapshot_supported(),
+        "this host cannot seal script snapshots",
+    )
+    def test_plugin_snapshot_mode_and_reviewed_digest_reach_runtime_hook(self):
+        source = self.variant(
+            "snapshot",
+            manifest=MANIFEST.replace('name = "demo"', 'name = "snapshot"') + 'execution = "snapshot"\n',
+        )
+        pl.install(source, self.workspace)
+        contributions = pl.load_contributions(self.workspace, known_tools=["Read", "Write"])
+        self.assertFalse(contributions.blocked)
+        _plugin, table = contributions.hook_tables[0]
+        self.assertEqual(table["execution"], "snapshot")
+        from command_hooks import parse_hooks
+
+        hooks = parse_hooks(
+            [table],
+            workspace=self.workspace,
+            known_tools=["Read", "Write"],
+            reviewed_digests=contributions.hook_digests,
+        )
+        self.assertEqual(hooks[0].execution_mode, "snapshot")
 
     def test_a_tampered_bundle_is_refused_until_it_is_reviewed_again(self):
         self.install()
@@ -1013,15 +1081,18 @@ class CliTests(RuntimeTestCase):
         self.assertIn("no plugin installed", err)
 
     def test_doctor_tells_the_truth_about_installed_bundles(self):
-        code, out, err = self._invoke(["doctor", "--workspace", str(self.workspace)])
+        reason = doctor_capability_skip_reason()
+        if reason:
+            self.skipTest(reason)
+        code, out, err = self._invoke(["doctor", "--workspace", str(self.workspace), "--mcp-network", "allowed"])
         self.assertIn("plugins", out)
         self.assertIn("none", out)
         self._install()
-        code, out, err = self._invoke(["doctor", "--workspace", str(self.workspace)])
+        code, out, err = self._invoke(["doctor", "--workspace", str(self.workspace), "--mcp-network", "allowed"])
         self.assertIn("demo@0.1.0", out)
         self.assertIn("0 fail", out)
         (self.workspace / pm.PLUGINS_DIRECTORY / "demo" / "NOTES.md").write_text("changed\n", encoding="utf-8")
-        code, out, err = self._invoke(["doctor", "--workspace", str(self.workspace)])
+        code, out, err = self._invoke(["doctor", "--workspace", str(self.workspace), "--mcp-network", "allowed"])
         self.assertIn("plugins", out)
         self.assertIn("drift", out)
         self.assertIn("fail", out)
