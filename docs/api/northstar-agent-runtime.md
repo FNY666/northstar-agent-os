@@ -74014,6 +74014,10 @@ One discovered skill package: identity plus the path to read.
 
 Discover skills under the workspace root; errors are operator-facing.
 
+#### `model_visible_skills(skills: Iterable[Skill])`
+
+Return skills whose metadata permits automatic model discovery.
+
 #### `skill_listing(skills: Iterable[Skill], workspace: str | Path)`
 
 Compose a bounded, source-labelled data catalogue for the system prompt.
