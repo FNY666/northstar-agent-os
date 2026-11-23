@@ -249,7 +249,14 @@ The tests do not only assert the parts:
   raises a non-throttle: the hook says "do not retry", the attempt counter
   stays at zero, and the provider is called once.
 
-32 new test methods in total.
+55 new test methods in total: 32 for the rules above, plus 17 more that
+drive the second half of every guard in the module (`_require_int`'s boolean
+half, `max_attempts`' bound, the `ResumePlan.resumes` conjunction) - the
+mutant-lift work that follows this slice's first commit - plus 6 that name
+every public function of the module (`RetryDecision.as_dict`,
+`ModelRetryStrategy.reset`, `ModelRetryStrategy.register_callback`,
+`CheckpointSnapshotHook.last_marker`, `ResumePlan.as_dict`), so that no
+public name is exercised only indirectly.
 
 ---
 

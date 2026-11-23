@@ -573,5 +573,84 @@ class SecondHalfGuardTests(unittest.TestCase):
         self.assertTrue(plan.resumes)
 
 
+class PublicSurfaceTests(RuntimeTestCase):
+    """Every public function of the module is named by a test here.
+
+    The rule-coverage sweep found five public functions that the rest of
+    the file never mentions by name: `RetryDecision.as_dict`,
+    `ModelRetryStrategy.reset`, `ModelRetryStrategy.register_callback`,
+    `CheckpointSnapshotHook.last_marker` and `ResumePlan.as_dict`.  Each
+    one gets a test below, so that no public name is exercised only
+    indirectly.
+    """
+
+    def test_the_retry_decision_reports_itself_as_a_dict(self):
+        decision = ModelRetryStrategy().after_model_call({"error": ThrottledError("slow")})
+        self.assertEqual(
+            decision.as_dict(),
+            {
+                "retry": True,
+                "attempt": 1,
+                "wait_seconds": 4.0,
+                "reason": decision.reason,
+            },
+        )
+
+    def test_the_retry_decision_counts_the_attempt_it_actually_made(self):
+        """The attempt number in the dict is the REAL one.
+
+        The first guard above pins ``attempt: 1``, and the FIRST attempt
+        is 1 -- so a dict that hard-codes 1 would satisfy it.  This
+        guard reads the number from a LATER attempt, where the two
+        differ.
+        """
+        strategy = ModelRetryStrategy()
+        strategy.after_model_call({"error": ThrottledError("slow")})
+        decision = strategy.after_model_call({"error": ThrottledError("slow")})
+        self.assertEqual(decision.attempt, 2)
+        self.assertEqual(decision.as_dict()["attempt"], 2)
+
+    def test_the_strategy_reset_forgets_the_attempt_history(self):
+        strategy = ModelRetryStrategy()
+        strategy.after_model_call({"error": ThrottledError("slow")})
+        self.assertEqual(strategy.attempts, 1)
+        strategy.reset()
+        self.assertEqual(strategy.attempts, 0)
+
+    def test_a_callback_can_be_registered_for_one_event(self):
+        strategy = ModelRetryStrategy()
+        seen: list[object] = []
+
+        def callback(event):
+            seen.append(event)
+            return "done"
+
+        strategy.register_callback(sc.EVENT_AFTER_MODEL, callback)
+        self.assertEqual(strategy.callbacks_for(sc.EVENT_AFTER_MODEL), (callback,))
+        self.assertEqual(strategy.callbacks_for(sc.EVENT_AFTER_INVOCATION), ())
+        strategy.after_model_call({"error": ThrottledError("slow")})
+        # The registered callback is stored, not called by `register_callback`.
+        self.assertEqual(seen, [])
+
+    def test_the_snapshot_hook_reports_its_last_marker(self):
+        hook = CheckpointSnapshotHook()
+        self.assertIsNone(hook.last_marker)
+        marker = hook.after_tools({"cycle_index": 2})
+        self.assertEqual(hook.last_marker, marker)
+
+    def test_the_resume_plan_reports_itself_as_a_dict(self):
+        marker = Checkpoint(position=sc.POSITION_AFTER_MODEL, cycle_index=3)
+        plan = sc.ResumePlan(outcome=sc.OUTCOME_CHECKPOINT, marker=marker, reason="r")
+        self.assertEqual(
+            plan.as_dict(),
+            {"outcome": "checkpoint", "marker": marker.to_dict(), "reason": "r"},
+        )
+        cancelled = sc.ResumePlan(outcome=sc.OUTCOME_CANCELLED, reason="revoked")
+        self.assertEqual(
+            cancelled.as_dict(),
+            {"outcome": "cancelled", "marker": None, "reason": "revoked"},
+        )
+
+
 if __name__ == "__main__":  # pragma: no cover - manual run
     unittest.main()
