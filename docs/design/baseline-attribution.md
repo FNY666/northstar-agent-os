@@ -858,6 +858,29 @@ fixes **A-5**'s items, and turns **A-6**'s claim from false to true.
   and the sweep is deleted outright.  The pre-flight refusal on a
   nearly-full `/tmp` stays -- that part was right.
 
+  **The fixed check, run end to end** (2026-11-23, on the real tree,
+  with the real coordinator's baseline in force):
+
+  ```
+  baseline file: /home/muse-newapi/b173-baseline-2db42e939477bc2ceca9f20d35384dfc7731e972.failures.txt
+  suite runner: pytest
+  suite: 4 failed, 33509 passed, 20 skipped, 7 warnings, 1501 subtests passed in 533.61s
+  BASELINE DRIFT: expected 26 item(s), found 4 item(s)
+  ```
+
+  The **4** are all the `strands` slice's report, and the cause is not
+  in this branch: the coordinator's `b173-watch.sh` replaced the real
+  19,909-byte report with a 1,025-byte **STUB** at 03:05 on 2026-11-23
+  (the original is still on disk as
+  `b173-strands-cc-final.txt.stale.20261123T024502Z`).  A stub carries
+  none of the canary, full-suite or bench lines the artifact-completion
+  checks read, so all four fail.  The same 4 failures appear in a direct
+  `pytest` run of the same tree, so the check is reporting the tree
+  faithfully.
+
+  Note what the run does **not** show: no "Disk quota exceeded", and no
+  needle-test failure.  Before the fix, the same machine produced both.
+
   The rule it adds:
 
   > **A cleanup must only ever remove what it created.**
