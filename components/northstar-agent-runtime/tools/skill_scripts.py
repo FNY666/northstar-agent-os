@@ -61,6 +61,7 @@ class SkillScript:
     relative: str  # workspace-relative path the model can pass to Shell
     path: Path
     digest: str
+    model_invocable: bool = True
 
     def as_dict(self) -> dict[str, str]:
         return {"skill": self.skill, "name": self.name, "path": self.relative}
@@ -146,6 +147,7 @@ def discover_skill_scripts(
                     relative=relative,
                     path=resolved,
                     digest=hashlib.sha256(script_bytes).hexdigest(),
+                    model_invocable=skill.model_invocable,
                 )
             )
             count += 1
@@ -154,7 +156,7 @@ def discover_skill_scripts(
 
 def skill_scripts_listing(scripts: Iterable[SkillScript]) -> str:
     """Compose the progressive-disclosure section for skill scripts."""
-    items = list(scripts)
+    items = [script for script in scripts if script.model_invocable]
     if not items:
         return ""
     bullets: list[str] = []

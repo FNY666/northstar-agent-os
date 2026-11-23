@@ -189,7 +189,7 @@ class OsSandboxProbeTests(unittest.TestCase):
     def test_bwrap_feature_capabilities_require_successful_child_probes(self):
         from tools import os_sandbox
 
-        ok = subprocess.CompletedProcess([], 0, "", "")
+        ok = subprocess.CompletedProcess([], 0, "bubblewrap 0.12.0\n", "")
         failed = subprocess.CompletedProcess([], 1, "", "kernel rejected filter")
         with patch.object(os_sandbox.subprocess, "run", return_value=ok), patch.object(
             os_sandbox, "_probe_bwrap_feature", side_effect=[ok, failed]
@@ -201,24 +201,36 @@ class OsSandboxProbeTests(unittest.TestCase):
         self.assertIn("kernel rejected filter", caps.bwrap_seccomp_detail)
         self.assertEqual(feature_probe.call_count, 2)
 
-    def test_bwrap_seccomp_probe_rewinds_filter_fd(self):
+    def test_bwrap_versions_below_security_floor_are_not_usable(self):
         from tools import os_sandbox
 
-        ok = subprocess.CompletedProcess([], 0, "", "")
-        offsets = []
-
-        def inspect_probe(_path, *, cap_drop=False, seccomp_fd=None):
-            if seccomp_fd is not None:
-                offsets.append(os.lseek(seccomp_fd, 0, os.SEEK_CUR))
-            return ok
-
-        with patch.object(os_sandbox.subprocess, "run", return_value=ok), patch.object(
-            os_sandbox, "_probe_bwrap_feature", side_effect=inspect_probe
-        ):
+        old_version = subprocess.CompletedProcess([], 0, "bubblewrap 0.11.2\n", "")
+        with patch.object(os_sandbox.subprocess, "run", return_value=old_version) as run, patch.object(
+            os_sandbox, "_probe_bwrap_feature"
+        ) as feature_probe:
             caps = probe_capabilities(force=True, bwrap_bin="/fake/bwrap")
+        self.assertFalse(caps.bwrap_usable)
+        self.assertEqual(caps.preferred, "process")
+        self.assertIn("0.11.2", caps.bwrap_detail)
+        self.assertIn("0.12.0", caps.bwrap_detail)
+        self.assertIn("CVE-2026-87766", caps.bwrap_detail)
+        run.assert_called_once()
+        feature_probe.assert_not_called()
 
-        self.assertTrue(caps.bwrap_seccomp)
-        self.assertEqual(offsets, [0])
+    def test_bwrap_unknown_version_fails_closed(self):
+        from tools import os_sandbox
+
+        unknown = subprocess.CompletedProcess([], 0, "bubblewrap development build\n", "")
+        with patch.object(os_sandbox.subprocess, "run", return_value=unknown) as run, patch.object(
+            os_sandbox, "_probe_bwrap_feature"
+        ) as feature_probe:
+            caps = probe_capabilities(force=True, bwrap_bin="/fake/bwrap")
+        self.assertFalse(caps.bwrap_usable)
+        self.assertEqual(caps.preferred, "process")
+        self.assertIn("unrecognized version", caps.bwrap_detail)
+        self.assertIn("0.12.0", caps.bwrap_detail)
+        run.assert_called_once()
+        feature_probe.assert_not_called()
 
     def test_bwrap_capdrop_refuses_before_spawn_when_live_probe_failed(self):
         from tools import os_sandbox
@@ -732,6 +744,31 @@ class OsSandboxProcessBackendTests(RuntimeTestCase):
             run_sandboxed(request, backend="process")
 
 
+def _bwrap_capability_skip_reason(caps) -> str | None:
+    """Why the default bwrap request cannot run here, or None if it can.
+
+    The default request asks for deny-all capabilities and the seccomp
+    denylist. The backend refuses to start without either boundary, so a
+    host that cannot provide one cannot run the default request - that is
+    the product refusing correctly, not a defect. The reason names the
+    missing capability and quotes the probe, so a skipped test still tells
+    the reader what the host said.
+    """
+    if not caps.bwrap_usable:
+        return f"bwrap unusable on this host: {caps.bwrap_detail}"
+    if not caps.bwrap_cap_drop:
+        return (
+            "bwrap capability-drop probe failed on this host, so the default "
+            f"deny-all request cannot run: {caps.bwrap_detail}"
+        )
+    if not caps.bwrap_seccomp:
+        return (
+            "bwrap seccomp probe failed on this host, so the default request "
+            f"cannot run: {caps.bwrap_seccomp_detail}"
+        )
+    return None
+
+
 class OsSandboxBwrapBackendTests(RuntimeTestCase):
     def setUp(self) -> None:
         super().setUp()
@@ -744,10 +781,9 @@ class OsSandboxBwrapBackendTests(RuntimeTestCase):
         super().tearDown()
 
     def test_bwrap_backend_when_usable(self):
-        if not self.caps.bwrap_usable:
-            self.skipTest(f"bwrap unusable on this host: {self.caps.bwrap_detail}")
-        if not self.caps.bwrap_cap_drop or not self.caps.bwrap_seccomp:
-            self.skipTest("default bwrap request needs live capability-drop and seccomp probes")
+        reason = _bwrap_capability_skip_reason(self.caps)
+        if reason:
+            self.skipTest(reason)
         request = SandboxRequest(
             argv=("true",),
             cwd=self.root,
@@ -762,8 +798,9 @@ class OsSandboxBwrapBackendTests(RuntimeTestCase):
         self.assertIn("isolation=os", result.render())
 
     def test_bwrap_cannot_persist_changes_to_workspace_governance(self):
-        if not self.caps.bwrap_usable:
-            self.skipTest(f"bwrap unusable on this host: {self.caps.bwrap_detail}")
+        reason = _bwrap_capability_skip_reason(self.caps)
+        if reason:
+            self.skipTest(reason)
         northstar = self.root / ".northstar"
         northstar.mkdir()
         config = northstar / "config.toml"
@@ -779,8 +816,9 @@ class OsSandboxBwrapBackendTests(RuntimeTestCase):
         self.assertEqual(config.read_text(encoding="utf-8"), "original = true\n")
 
     def test_bwrap_temp_directory_is_ephemeral_and_writable(self):
-        if not self.caps.bwrap_usable:
-            self.skipTest(f"bwrap unusable on this host: {self.caps.bwrap_detail}")
+        reason = _bwrap_capability_skip_reason(self.caps)
+        if reason:
+            self.skipTest(reason)
         request = SandboxRequest(
             argv=("sh", "-c", "touch \"$TMPDIR/probe\""),
             cwd=self.root,

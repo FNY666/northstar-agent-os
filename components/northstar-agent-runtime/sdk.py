@@ -79,6 +79,7 @@ class RunOptions:
     workspace_agents: bool = True  # register .northstar/agents/*.md definitions
     checkpoint_turns: int = 0  # append a resumable boundary record every N turns (0 = off)
     resume_from: str | None = None  # session id to fork from its latest checkpoint; the parent file is never written
+    allow_checkpoint_tool_replay: bool = False  # acknowledge possible replay of tools after the selected checkpoint
     verification_commands: Sequence[str] = ()  # host-owned checks run after the model stops
     require_verification: bool = False  # report success_unverified when no host-owned check exists
     code_tools: bool = False  # add the structured repository tool profile
@@ -86,6 +87,9 @@ class RunOptions:
     postconditions: Sequence[Any] = ()  # validated host-owned workspace checks evaluated after the run
     evidence_dir: str | None = None  # write a digest-first evidence bundle for this run
     evidence_required: bool = False  # evidence capture failure changes the terminal subtype
+    shell_backend: str = "auto"  # auto (host-chosen) | process | bwrap; the sandbox backend the Shell tool uses
+    shell_seccomp: str = "auto"  # auto (apply when supported) | on (require) | off
+    shell_capdrop: str = "on"  # on (deny-all) | off; the capability-drop launcher the Shell tool uses
 
 
 @dataclass
@@ -201,6 +205,9 @@ def _build(options: RunOptions, resume: str | None = None) -> tuple[Any, Any, li
         "code_phase_machine": options.code_phase_machine,
         "evidence_dir": options.evidence_dir,
         "evidence_required": options.evidence_required,
+        "shell_backend": options.shell_backend,
+        "shell_seccomp": options.shell_seccomp,
+        "shell_capdrop": options.shell_capdrop,
     }
     if options.system_prompt is not None:
         config_kwargs["system_prompt"] = options.system_prompt
@@ -214,6 +221,9 @@ def _build(options: RunOptions, resume: str | None = None) -> tuple[Any, Any, li
             plan_only=options.permission_mode == "plan" or options.read_only,
         )
     provider = _build_provider(options)
+
+    if options.allow_checkpoint_tool_replay and not options.resume_from:
+        raise ValueError("allow_checkpoint_tool_replay requires resume_from")
 
     # A checkpoint resume forks: new session id, new file, counters and cost carried
     # over from the parent, and the parent transcript never opened for writing.
@@ -239,6 +249,7 @@ def _build(options: RunOptions, resume: str | None = None) -> tuple[Any, Any, li
                 f"session {options.resume_from!r} has no checkpoints: run it with checkpoint_turns=N first"
             )
         config_kwargs["resume_from"] = checkpoint
+        config_kwargs["allow_checkpoint_tool_replay"] = options.allow_checkpoint_tool_replay
         config_kwargs["parent_session"] = options.resume_from
         config_kwargs["max_turns"] = max(int(options.max_turns), checkpoint.turns)
         budget = Budget(

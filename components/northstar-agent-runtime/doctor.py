@@ -353,14 +353,26 @@ def _check_sandbox(args: argparse.Namespace, findings: list[Finding]) -> str | N
     not be resolved — the seccomp check reuses it so the probe runs once.
     """
     try:
-        from tools.os_sandbox import SandboxError, probe_capabilities, resolve_backend
+        from tools.os_sandbox import (
+            SandboxError,
+            probe_capabilities,
+            resolve_effective_backend,
+        )
 
         caps = probe_capabilities()
         requested = getattr(args, "sandbox", "auto") or "auto"
+        capdrop_setting = getattr(args, "capdrop", "on") or "on"
+        seccomp_setting = getattr(args, "seccomp", "auto") or "auto"
         try:
-            chosen = resolve_backend(requested, capabilities=caps)
+            chosen, backend_notes = resolve_effective_backend(
+                requested,
+                capabilities=caps,
+                seccomp=seccomp_setting,
+                capdrop_whitelist=None if capdrop_setting == "off" else (),
+            )
+            for note in backend_notes:
+                findings.append(Finding("sandbox", "warn", note))
             if chosen == "bwrap":
-                capdrop_setting = getattr(args, "capdrop", "on") or "on"
                 if capdrop_setting == "off":
                     findings.append(Finding("capdrop", "warn", "bwrap capability drop disabled by operator choice"))
                 elif caps.bwrap_cap_drop:
@@ -492,6 +504,16 @@ def _check_seccomp(args: argparse.Namespace, findings: list[Finding], backend: s
             findings.append(Finding("seccomp", "fail", f"cannot verify bwrap seccomp support: {error}"))
             return
         if not caps.bwrap_seccomp:
+            if (getattr(args, "sandbox", "auto") or "auto").strip().lower() == "auto":
+                # auto falls back to the process backend, which applies the
+                # same denylist through its own prctl wrapper.
+                findings.append(Finding(
+                    "seccomp", "warn",
+                    f"mode={mode}, backend=bwrap: {caps.bwrap_seccomp_detail}; "
+                    "auto falls back to the process backend, which applies the same "
+                    "denylist through its own prctl wrapper",
+                ))
+                return
             findings.append(Finding(
                 "seccomp", "fail",
                 f"mode={mode}, backend=bwrap: {caps.bwrap_seccomp_detail}; Shell would refuse to run",
@@ -681,7 +703,7 @@ def _check_mcp_network(args: argparse.Namespace, findings: list[Finding]) -> Non
             Finding(
                 "mcp-network",
                 "warn",
-                "mode=allowed - MCP server processes run with full host network by operator choice",
+                "mode=allowed - MCP server processes have full host network by operator choice, including loopback/private destinations; stdio-to-HTTP OAuth bridges can follow server-supplied discovery URLs (SSRF risk)",
             )
         )
         return

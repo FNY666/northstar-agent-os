@@ -13,7 +13,7 @@ Two backends, one contract:
   absolute paths. Doctor and the Shell tool both say so out loud.
 
 The runtime never invents a third, quieter mode. ``auto`` picks bwrap when the
-binary exists and can start a throwaway probe; otherwise process. An operator
+binary is at least 0.12.0 and can start a throwaway probe; otherwise process. An operator
 who asks for bwrap on a host without it gets a configuration error, not a
 silent downgrade — a run advertised as sandboxed that quietly is not would be
 the exact lie this project refuses to tell.
@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import selectors
 import shutil
 import signal
@@ -80,6 +81,9 @@ MAX_CPU_SECONDS = MAX_TIMEOUT_MS // 1000
 MAX_TASKS = 128
 
 BACKENDS = ("auto", "bwrap", "process")
+
+# Bubblewrap releases before 0.12.0 are affected by CVE-2026-87766.
+_MIN_BWRAP_VERSION = (0, 12, 0)
 
 
 class SandboxError(RuntimeError):
@@ -161,6 +165,10 @@ class SandboxResult:
     capdrop: dict[str, Any] | None = None
     aggregate_setup_failed: bool = False
     aggregate_cleanup_failed: bool = False
+    #: Loud, human-readable notices about decisions the runtime took on the
+    #: operator behalf (e.g. auto backend fallback). Empty when nothing had
+    #: to be decided for the operator.
+    warnings: tuple[str, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -186,6 +194,7 @@ class SandboxResult:
             "capdrop": self.capdrop,
             "aggregate_cleanup_failed": self.aggregate_cleanup_failed,
             "aggregate_setup_failed": self.aggregate_setup_failed,
+            "warnings": list(self.warnings),
         }
 
     def render(self) -> str:
@@ -197,6 +206,8 @@ class SandboxResult:
         ]
         if self.detail:
             lines.append(f"note: {self.detail}")
+        for warning in self.warnings:
+            lines.append(f"warning: {warning}")
         if self.stdout:
             lines.append("--- stdout ---")
             lines.append(self.stdout if not self.stdout.endswith("\n") else self.stdout.rstrip("\n"))
@@ -211,6 +222,39 @@ class SandboxResult:
 
 
 _CAP_CACHE: SandboxCapabilities | None = None
+
+
+def _probe_bwrap_version(path: str) -> tuple[tuple[int, int, int] | None, str | None]:
+    """Require a parseable, security-supported bubblewrap version."""
+    try:
+        completed = subprocess.run(
+            [path, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return None, f"bwrap at {path} version could not be checked: {error}"
+    if completed.returncode != 0:
+        output = (completed.stderr or completed.stdout or "").strip().splitlines()
+        reason = output[-1] if output else f"exit {completed.returncode}"
+        return None, f"bwrap at {path} version check failed: {reason[:200]}"
+    output = "\n".join(part for part in (completed.stdout, completed.stderr) if part)
+    match = re.search(r"\b(?:bubblewrap|bwrap)\s+(\d+)\.(\d+)\.(\d+)\b", output)
+    if match is None:
+        return None, (
+            f"bwrap at {path} returned an unrecognized version; "
+            "require bubblewrap >=0.12.0"
+        )
+    version = tuple(int(part) for part in match.groups())
+    version_text = ".".join(str(part) for part in version)
+    if version < _MIN_BWRAP_VERSION:
+        return version, (
+            f"bwrap at {path} version {version_text} is below required 0.12.0 "
+            "(CVE-2026-87766)"
+        )
+    return version, None
 
 
 def _probe_bwrap_feature(
@@ -264,41 +308,46 @@ def probe_capabilities(*, force: bool = False, bwrap_bin: str | None = None) -> 
     usable = False
     detail = "bwrap not found on PATH"
     if path:
-        try:
-            # A real, empty sandbox is the only honest probe: --version alone does
-            # not prove user namespaces or seccomp work on this kernel.
-            completed = subprocess.run(
-                [
-                    path,
-                    "--die-with-parent",
-                    "--unshare-pid",
-                    "--unshare-net",
-                    "--ro-bind",
-                    "/",
-                    "/",
-                    "--tmpfs",
-                    "/tmp",
-                    "--dev",
-                    "/dev",
-                    "--proc",
-                    "/proc",
-                    "--chdir",
-                    "/",
-                    "true",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=5,
-                check=False,
-            )
-            if completed.returncode == 0:
-                usable = True
-                detail = f"bwrap usable at {path}"
-            else:
-                err = (completed.stderr or completed.stdout or "").strip().splitlines()
-                detail = f"bwrap at {path} failed probe: {(err[-1] if err else 'exit ' + str(completed.returncode))[:200]}"
-        except (OSError, subprocess.TimeoutExpired) as error:
-            detail = f"bwrap at {path} could not be probed: {error}"
+        version, version_error = _probe_bwrap_version(path)
+        if version_error is not None:
+            detail = version_error
+        else:
+            assert version is not None
+            try:
+                # A real, empty sandbox is the only honest probe: a supported version
+                # still does not prove user namespaces or seccomp work on this kernel.
+                completed = subprocess.run(
+                    [
+                        path,
+                        "--die-with-parent",
+                        "--unshare-pid",
+                        "--unshare-net",
+                        "--ro-bind",
+                        "/",
+                        "/",
+                        "--tmpfs",
+                        "/tmp",
+                        "--dev",
+                        "/dev",
+                        "--proc",
+                        "/proc",
+                        "--chdir",
+                        "/",
+                        "true",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    check=False,
+                )
+                if completed.returncode == 0:
+                    usable = True
+                    detail = f"bwrap {'.'.join(map(str, version))} usable at {path}"
+                else:
+                    err = (completed.stderr or completed.stdout or "").strip().splitlines()
+                    detail = f"bwrap at {path} failed probe: {(err[-1] if err else 'exit ' + str(completed.returncode))[:200]}"
+            except (OSError, subprocess.TimeoutExpired) as error:
+                detail = f"bwrap at {path} could not be probed: {error}"
     cap_drop = False
     seccomp_usable = False
     seccomp_detail = "bwrap unavailable; not probed"
@@ -343,6 +392,56 @@ def probe_capabilities(*, force: bool = False, bwrap_bin: str | None = None) -> 
     )
     _CAP_CACHE = caps
     return caps
+
+
+def resolve_effective_backend(
+    requested: str,
+    *,
+    capabilities: SandboxCapabilities | None = None,
+    seccomp: str = "auto",
+    capdrop_whitelist: Sequence[str] | None = None,
+) -> tuple[str, tuple[str, ...]]:
+    """Resolve the backend a request will actually use, and say what changed.
+
+    ``resolve_backend`` answers "which backend does *auto* prefer"; it does
+    not know whether that backend can enforce the controls the request asks
+    for. On a host where bubblewrap is present but its own BPF filter is
+    rejected by the kernel, auto picks bwrap and every shell request is
+    refused. The process backend applies the same denylist through its own
+    prctl wrapper, so auto falls back to it — and says so.
+
+    An operator who names a backend explicitly never gets a fallback: they
+    asked for it by name, and a refusal is the honest answer.
+
+    Returns the backend that will run plus the warnings that must be shown.
+    """
+    caps = capabilities or probe_capabilities()
+    choice = (requested or "auto").strip().lower()
+    if choice not in BACKENDS:
+        raise SandboxError(
+            f"unknown sandbox backend {requested!r}; choose one of {', '.join(BACKENDS)}"
+        )
+    chosen = resolve_backend(choice, capabilities=caps)
+    if choice != "auto" or chosen != "bwrap":
+        return chosen, ()
+    seccomp_mode = (seccomp or "auto").strip().lower()
+    if seccomp_mode != "off" and not caps.bwrap_seccomp:
+        return "process", (
+            "auto backend fell back from bwrap to process: bwrap could not enforce "
+            f"the seccomp denylist on this host ({caps.bwrap_seccomp_detail}); "
+            "the process backend applies the same denylist through its own prctl "
+            "wrapper, but the host filesystem stays reachable (process isolation, "
+            "not OS isolation)",
+        )
+    if capdrop_whitelist is not None and not caps.bwrap_cap_drop:
+        return "process", (
+            "auto backend fell back from bwrap to process: bwrap could not enforce "
+            f"the capability drop on this host ({caps.bwrap_detail}); "
+            "the process backend applies the same capability drop through its own "
+            "launcher, but the host filesystem stays reachable (process isolation, "
+            "not OS isolation)",
+        )
+    return chosen, ()
 
 
 def resolve_backend(requested: str, *, capabilities: SandboxCapabilities | None = None) -> str:
@@ -944,6 +1043,13 @@ def run_sandboxed(
         except (PledgeError, PledgeViolation) as error:
             raise SandboxError(f"pledge refused: {error}") from error
 
+    chosen, fallback_warnings = resolve_effective_backend(
+        backend,
+        capabilities=caps,
+        seccomp=seccomp_mode,
+        capdrop_whitelist=request.capdrop_whitelist,
+    )
+
     if chosen == "bwrap":
         assert caps.bwrap_path  # resolve_backend guaranteed usable
         if request.capdrop_whitelist is not None and not caps.bwrap_cap_drop:
@@ -1011,6 +1117,8 @@ def run_sandboxed(
             try:
                 seccomp_file.write(build_default_filter())
                 seccomp_file.flush()
+                # bwrap reads the filter from the inherited descriptor's
+                # *current* offset; rewind or it sees 0 bytes and refuses to start.
                 seccomp_file.seek(0)
                 seccomp_fd = seccomp_file.fileno()
                 pass_fds.append(seccomp_fd)
@@ -1264,7 +1372,13 @@ def run_sandboxed(
     else:
         final_detail = result.detail
     # The audit trail records what the caller asked for, not the wrapper.
-    return replace(result, argv=request.argv, capdrop=capdrop_report, detail=final_detail)
+    return replace(
+        result,
+        argv=request.argv,
+        capdrop=capdrop_report,
+        detail=final_detail,
+        warnings=tuple(fallback_warnings),
+    )
 
 
 __all__ = [
@@ -1282,5 +1396,6 @@ __all__ = [
     "probe_capabilities",
     "reset_capabilities_cache",
     "resolve_backend",
+    "resolve_effective_backend",
     "run_sandboxed",
 ]

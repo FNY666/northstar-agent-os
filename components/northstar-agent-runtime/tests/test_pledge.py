@@ -164,15 +164,34 @@ class FilesystemRulesTest(RuntimeTestCase):
         from tools.sandbox import _SYSTEM_READ_PATHS, _runtime_read_paths
 
         rules = filesystem_rules(frozenset({"stdio"}), workspace="/ws", tmpdir="/t")
-        roots = _runtime_read_paths()
-        self.assertEqual(
-            set(roots) & set(_SYSTEM_READ_PATHS),
-            {path for path in _SYSTEM_READ_PATHS if os.path.isdir(path)},
-        )
-        for root in roots:
+        # Host-relative: only roots that exist here may (and must) carry a rule.
+        # /lib64 exists on x86_64 distros but not on aarch64 ones; asserting it
+        # unconditionally made this test (and the Landlock setup) host-specific.
+        for root in ("/usr", "/bin", "/lib", "/lib64", "/sbin"):
             rule = [r for r in rules if r.path == root]
-            self.assertEqual(len(rule), 1)
-            self.assertTrue(rule[0].access & 0x1)  # EXECUTE
+            if os.path.exists(root):
+                self.assertEqual(len(rule), 1, root)
+                self.assertTrue(rule[0].access & 0x1)  # EXECUTE
+            else:
+                self.assertEqual(rule, [], f"{root} is absent on this host but got a rule")
+
+    def test_no_rule_targets_a_system_root_that_does_not_exist(self):
+        # Landlock opens each rule path before restricting; a missing one aborts the
+        # whole sandbox setup (FileNotFoundError), which is a hard failure, not a skip.
+        rules = filesystem_rules(frozenset({"stdio"}), workspace="/ws", tmpdir="/t")
+        system_roots = {"/usr", "/bin", "/lib", "/lib64", "/sbin"}
+        absent = [r.path for r in rules if r.path in system_roots and not os.path.exists(r.path)]
+        self.assertEqual(absent, [])
+
+    def test_missing_runtime_root_is_skipped_when_roots_are_injected(self):
+        # Deterministic on every host: inject one real and one missing root.
+        rules = filesystem_rules(
+            frozenset({"stdio"}), workspace="/ws", tmpdir="/t",
+            runtime_roots=("/usr", "/definitely-not-a-real-root-r2524"),
+        )
+        paths = [r.path for r in rules]
+        self.assertIn("/usr", paths)
+        self.assertNotIn("/definitely-not-a-real-root-r2524", paths)
 
         missing = "/lib64"
         real_isdir = os.path.isdir
