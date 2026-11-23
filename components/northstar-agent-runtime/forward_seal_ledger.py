@@ -201,12 +201,181 @@ def _is_refusal_registry(registry: Any) -> bool:
     The test is made on the *declared* surface of the object, not on its
     class name, so a host that writes its own registry is classified by
     what it actually returns rather than by what it is called.
+
+    WHAT THIS FUNCTION DECIDES, AND WHAT IT DOES NOT
+    -------------------------------------------------
+    This function decides **which SLOT** a registry is installed into:
+    the refusal slot or the cancellation slot.  It does **not** decide
+    what a block MEANS.  Those are two different questions, and they
+    are answered at two different moments.
+
+    THE DEFECT THIS DOCSTRING ALREADY DESCRIBED (measured 2026-11-23)
+    ------------------------------------------------------------------
+    The docstring above says the two families are *"told apart by what
+    they return when they block"*, and that a host's registry is
+    *"classified by what it actually returns"*.  But **filing** cannot
+    be done by what a registry returns, because the return value only
+    exists once the registry has been **asked** -- and asking has side
+    effects.  The house registry's ``check`` records an **audit event**,
+    so probing it at install time would write a phantom event into the
+    trail.  A registration is therefore read from what the registry
+    **DECLARES**:
+
+    * the explicit ``is_refusal_registry`` flag, or
+    * a refusal row carried on the registry itself (``row``/
+      ``row_digest``).
+
+    So the original implementation of this function was **already
+    declaration-based**, and its ordering was a no-op -- confirmed by a
+    mutation run (reverting the order to the original killed nothing).
+
+    THE REAL DEFECT WAS ONE LEVEL DOWN
+    -----------------------------------
+    Filing is only half the rule.  The other half is what the ANSWER
+    MEANS, and that is decided at the seal, by the shape of what the
+    registry RETURNS:
+
+        a result carrying ``row``/``row_digest``  ->  a REFUSAL
+        a ``Tombstone``                            ->  a CANCELLATION
+
+    And the distinction is not cosmetic: **a cancellation can be lifted
+    by a named tombstone-lift, and a refusal cannot.**  The seal path
+    consulted the cancellation slot's answer and, finding a block,
+    lifted it -- so a host's own registry, answering with a refusal row,
+    had its refusal **LIFTED**.  Measured 2026-11-23, before the fix:
+
+        ledger.set_tombstones(host_refusal_registry)
+        ledger.append_grant(..., lift=some_lift)
+        -> SUCCEEDED      the refusal was lifted
+
+    The house registry, filed correctly, refuses the same seal.
+
+    So the defect was not "a host's registry is filed in the wrong
+    drawer".  It was "a host's refusal is liftable", which is the one
+    thing the refusal gate exists to prevent.
+
+    THE RULE, IN TWO PARTS
+    ----------------------
+    1. **Filing** (here, at install time): by **declaration** --
+       ``is_refusal_registry``, or a row carried on the registry.
+    2. **Meaning** (at every seal, in
+       :meth:`ForwardSealLedger._authorize_under_tombstone_locked`): by
+       the **shape of the answer**.
+
+    Part 2 is the security rule, and it holds for an **undeclared** host
+    registry too: a host that installs a registry which answers with a
+    refusal row without declaring itself still gets its refusal
+    honoured, and still cannot have it lifted by a tombstone-lift.
+    Part 1 only decides the slot, and a host that declares itself into
+    the wrong slot loses its liftability -- which fails closed, in the
+    safe direction.  A host that wants its refusal registry in the
+    refusal slot declares ``is_refusal_registry = True``.
     """
     if getattr(registry, "row", None) is not None:
         return True
     if getattr(registry, "row_digest", None) is not None:
         return True
     return bool(getattr(registry, "is_refusal_registry", False))
+
+
+def _looks_like_a_refusal(result: Any) -> bool:
+    """Does this answer carry a **refusal row** rather than a tombstone?
+
+    The refusal family's answer carries the row that refused
+    (``row``/``row_digest``); the cancellation family's answer is a
+    ``Tombstone``, which carries neither.  The test is made on the
+    attribute's **presence**, not on its value: a refusal that could not
+    name its row (an unreadable store) still refuses, so a
+    ``row``/``row_digest`` that is present but ``None`` is still the
+    refusal family's shape.
+
+    This is the rule that makes an **undeclared** host registry safe.
+    Filing is by declaration (see :func:`_is_refusal_registry`), but the
+    MEANING of an answer is by shape, and the meaning is what decides
+    whether the block can be lifted.
+    """
+    return hasattr(result, "row") or hasattr(result, "row_digest")
+
+
+def _query_refusal(
+    registry: Any,
+    grant_id: str,
+    action: str,
+    subject: str,
+    *,
+    now: Optional[float] = None,
+) -> Tuple[Any, bool]:
+    """Ask a refusal registry whether it refuses this action.
+
+    Returns ``(answer, via_check)``:
+
+    * ``via_check`` is True when the registry was asked through its
+      ``check`` method, and False when it was asked through the
+      ``TombstoneSet``-shaped ``blocked``.
+
+    The two methods have **different contracts**, and the difference
+    matters:
+
+    * ``check`` answers with a **result object** carrying a ``blocked``
+      flag.  The house registry's contract is that it NEVER returns
+      ``None`` -- "the caller always gets a reason, whether the action
+      is refused, allowed, or the gate was unusable".  A ``None`` from a
+      ``check`` is therefore an **anomalous answer**: the gate did not
+      say "allowed", it said nothing, and nothing is not consent.
+
+    * ``blocked`` answers with ``None`` for *not blocked* and an object
+      for *blocked*.  That is the ``TombstoneSet`` contract, and there
+      ``None`` genuinely means "no block".
+
+    A registry that can answer NEITHER is a gate that cannot be
+    consulted, and that fails **closed**: the seal is refused, because
+    "the gate could not answer" is not "the gate allowed it".  A
+    registry that raises while answering is the same case.
+    """
+    checker = getattr(registry, "check", None)
+    blocker = getattr(registry, "blocked", None)
+    if not callable(checker) and not callable(blocker):
+        raise ForwardSealError(
+            "the installed refusal registry can answer neither 'check' nor "
+            "'blocked', so the refusal gate cannot be consulted and the seal "
+            "is refused"
+        )
+    try:
+        if callable(checker):
+            return checker(grant_id, action, subject, now=now), True
+        return blocker(grant_id, action, subject, now=now), False
+    except ForwardSealError:
+        raise
+    except Exception as error:
+        raise ForwardSealError(
+            "the installed refusal registry could not answer "
+            f"({error}); a gate that cannot answer does not allow, so the "
+            "seal is refused"
+        ) from error
+
+
+def _refusal_blocks(result: Any, *, via_check: bool) -> bool:
+    """Does this answer from the **refusal** slot mean "blocked"?
+
+    The rules, one per contract:
+
+    * an answer carrying a ``blocked`` flag answers by that flag -- this
+      is the house registry's ``RefusalHoldResult``;
+    * an answer that is ``None`` and came from ``blocked`` means *not
+      blocked* -- that is the ``TombstoneSet`` contract;
+    * an answer that is ``None`` and came from ``check`` is an
+      **anomalous answer** -- ``check`` owes the caller a reason, and a
+      missing reason is not permission, so it **blocks**;
+    * **any other answer means blocked** -- an answer the gate could not
+      express as "not blocked" is read as a block, because "the gate
+      could not answer" is not "the gate allowed it".
+    """
+    if result is None:
+        return via_check
+    flag = getattr(result, "blocked", None)
+    if flag is not None:
+        return bool(flag)
+    return True
 
 
 class ForwardSealError(Exception):
@@ -634,8 +803,10 @@ class ForwardSealLedger:
         # own terms and never through the lift path below.
         refusal = self._refusals
         if refusal is not None:
-            result = refusal.check(pin.grant_id, action, subject_value, now=now)
-            if getattr(result, "blocked", False):
+            result, via_check = _query_refusal(
+                refusal, pin.grant_id, action, subject_value, now=now
+            )
+            if _refusal_blocks(result, via_check=via_check):
                 raise ForwardSealError(
                     f"action {pin.grant_id!r}/{action!r} is refused: a recorded "
                     f"refusal covers it ({getattr(result, 'reason', 'blocked')}); "
@@ -659,6 +830,31 @@ class ForwardSealLedger:
                     f"the offered lift does not name a live tombstone for {pin.grant_id!r}/{action!r}"
                 )
             return rendered
+        # THE BACKSTOP FOR AN UNDECLARED HOST REGISTRY.
+        #
+        # A registry is FILED into the cancellation family by what it
+        # DECLARES (see ``_is_refusal_registry``).  But a host that
+        # installs a registry which answers with a **refusal row** --
+        # without declaring itself -- would otherwise have its refusal
+        # lifted here, by the lift call two lines down.  The two families
+        # are told apart by what they RETURN, so the ANSWER's own shape
+        # decides what the block MEANS, whatever slot the registry sits
+        # in:
+        #
+        #     a refusal row  ->  a refusal       ->  refused, NOT liftable
+        #     a tombstone    ->  a cancellation  ->  liftable by a lift
+        #
+        # This is what makes the mis-filing harmless instead of
+        # dangerous.  Measured 2026-11-23: before this line, a host's own
+        # refusal registry was lifted by a named tombstone-lift -- the one
+        # thing the refusal gate exists to prevent.
+        if _looks_like_a_refusal(tombstone):
+            raise ForwardSealError(
+                f"action {pin.grant_id!r}/{action!r} is refused: the installed "
+                "registry answers with a refusal row, and a refusal is not a "
+                "cancellation and cannot be lifted by a tombstone lift; "
+                "the seal is refused and no record lands"
+            )
         if lift is None:
             raise ForwardSealError(
                 f"action {pin.grant_id!r}/{action!r} is cancelled by a live tombstone: "

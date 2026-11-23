@@ -1338,6 +1338,418 @@ class TwoGateFamiliesTests(unittest.TestCase):
         self.assertEqual(len(restored), before)
 
 
+class HostRegistryFamilyTests(unittest.TestCase):
+    """A host's OWN registry must be filed by what it DOES.
+
+    THE DEFECT (measured 2026-11-23)
+    --------------------------------
+    ``_is_refusal_registry`` is documented as classifying the two gate
+    families by *"what they return when they block"*:
+
+        the two families are told apart by what they return when they
+        block: a **refusal** comes back with the row that refused
+        (``row`` and ``row_digest``), a **cancellation** comes back
+        with the tombstone that cancelled (neither).
+
+        The test is made on the *declared* surface of the object, not on
+        its class name, so a host that writes its own registry is
+        classified by what it actually returns rather than by what it
+        is called.
+
+    But the implementation reads the **registry's** attributes:
+
+        if getattr(registry, "row", None) is not None:
+            return True
+        if getattr(registry, "row_digest", None) is not None:
+            return True
+        return bool(getattr(registry, "is_refusal_registry", False))
+
+    A registry that *returns* a row does not *have* a ``row``
+    attribute, so the check reads ``None`` and the registry is filed
+    into the **cancellation** family.  Measured on the tree before the
+    fix:
+
+        "returns a row"      -> refusal? False     <-- wrong
+        "carries .row attr"  -> refusal? True
+        "pure cancellation"  -> refusal? False
+
+    The classification is **inverted** with respect to the
+    documentation: the two cases are exactly swapped.
+
+    WHY IT MATTERS -- AND IT IS NOT COSMETIC
+    ------------------------------------------
+    The two families differ in whether the block can be **lifted**.  A
+    cancellation can be lifted by a named tombstone-lift; a refusal
+    cannot, because "a refusal is not a cancellation".  So a host's own
+    refusal registry, filed into the cancellation family, has its
+    refusal **lifted**:
+
+        ledger.set_tombstones(host_refusal_registry)
+        ledger.append_grant(..., lift=some_lift)
+        -> SUCCEEDED      the refusal was lifted
+
+    The house registry, filed correctly, refuses the same seal:
+
+        -> ForwardSealError: a lift was offered but this ledger holds no
+           tombstone registry, so nothing can be lifted
+
+    So the defect is not "a host's registry is filed in the wrong
+    drawer".  It is "a host's refusal is liftable", which is the one
+    thing the refusal gate exists to prevent.
+
+    THE RULE, IN TWO PARTS
+    ----------------------
+    The fix separates two questions that the old code conflated into
+    one:
+
+    1. **Which slot does the registry go in?**  By what it **DECLARES**
+       (``is_refusal_registry``, or a row carried on the registry
+       itself).  A declaration can be read without asking the registry a
+       question, and asking it a question at install time would have
+       side effects -- the house registry's ``check`` records an
+       **audit event**, so a probe at install time would write a
+       phantom event into the trail.
+
+    2. **What does its answer MEAN?**  By the shape of what it
+       **RETURNS**.  A result carrying ``row``/``row_digest`` is a
+       refusal, and a refusal is refused and is NOT liftable.
+
+    Question 2 is the security question and it holds for an **undeclared**
+    host registry too: the seal path reads the ANSWER's shape, so a
+    host that installs a registry returning a refusal row without
+    declaring itself still cannot have its refusal lifted.  Question 1
+    only decides the slot, and declaring into the wrong slot loses
+    liftability -- which fails closed, in the safe direction.
+    """
+
+    class _HostRefusalRegistry:
+        """A host's own registry: TombstoneSet-shaped, returns a row.
+
+        This is exactly the shape ``_is_refusal_registry``'s docstring
+        says it classifies by.
+        """
+
+        def __init__(self):
+            self.lifted = []
+
+        def blocked(self, grant_id, action, subject=None, *, now=None):
+            class _Result:
+                row = "a-refusal-row"
+                row_digest = "sha256:" + "a" * 64
+
+            return _Result()
+
+        def lift(self, lift):
+            self.lifted.append(lift)
+
+    class _HostCancellationRegistry:
+        """A host's own cancellation registry: returns nothing."""
+
+        def __init__(self):
+            self.lifted = []
+
+        def blocked(self, grant_id, action, subject=None, *, now=None):
+            return None
+
+        def lift(self, lift):
+            self.lifted.append(lift)
+
+    def test_a_declared_refusal_registry_is_filed_into_the_refusal_slot(self):
+        """Question 1: the slot comes from the DECLARATION."""
+        ledger = make_ledger()
+        host = self._HostRefusalRegistry()
+        host.is_refusal_registry = True
+        ledger.set_tombstones(host)
+        self.assertIs(ledger.refusals, host)
+        self.assertIsNone(ledger.cancellations)
+
+    def test_a_host_registry_that_returns_nothing_is_the_cancellation_family(self):
+        """The control: the fix must not file everything as a refusal."""
+        ledger = make_ledger()
+        host = self._HostCancellationRegistry()
+        ledger.set_tombstones(host)
+        self.assertIs(ledger.cancellations, host)
+        self.assertIsNone(ledger.refusals)
+
+    def test_an_undeclared_host_registry_is_filed_by_its_declaration(self):
+        """An UNDECLARED registry lands in the cancellation slot.
+
+        Filing needs a declaration, because a declaration is the only
+        thing readable without asking the registry a question -- and
+        asking the house registry a question writes an audit event.
+
+        The undeclared registry is still SAFE: the seal path reads the
+        ANSWER's shape, which is the security rule.  That is asserted
+        separately, in the tests below.
+        """
+        ledger = make_ledger()
+        host = self._HostRefusalRegistry()
+        ledger.set_tombstones(host)
+        self.assertIs(ledger.cancellations, host)
+        self.assertIsNone(ledger.refusals)
+
+    def test_a_hosts_refusal_cannot_be_lifted(self):
+        """The consequence, and the reason the family matters.
+
+        A cancellation can be lifted by a named tombstone-lift.  A
+        refusal cannot: "a refusal is not a cancellation and it cannot
+        be lifted by a tombstone-lift".  If the family is wrong, the
+        refusal becomes liftable -- which is exactly what the refusal
+        gate exists to prevent.
+
+        This is the guard that can fail: before the fix, this seal
+        SUCCEEDED and ``host.lifted`` held the lift.
+        """
+        ledger = make_ledger()
+        host = self._HostRefusalRegistry()
+        ledger.set_tombstones(host)
+
+        class _Lift:
+            declarer = "ops"
+            declarer_channel = "ops-channel"
+            grant_id = "grant-1"
+            action = "checkout"
+
+        before = len(ledger)
+        with self.assertRaises(ForwardSealError):
+            seal(ledger, grant_id="grant-1", action="checkout", subject="order-7",
+                 lift=_Lift())
+        self.assertEqual(
+            len(ledger),
+            before,
+            "the seal landed even though the refusal covers it",
+        )
+        self.assertEqual(
+            host.lifted,
+            [],
+            "the host's refusal was LIFTED: a refusal is not a cancellation "
+            "and cannot be lifted by a tombstone lift",
+        )
+
+    def test_a_declared_refusal_cannot_be_lifted_either(self):
+        """The same, for the registry that declared itself.
+
+        The control for the test above: the house path already refused
+        this, and the fix must not have changed it.
+        """
+        ledger = make_ledger()
+        host = self._HostRefusalRegistry()
+        host.is_refusal_registry = True
+        ledger.set_tombstones(host)
+
+        class _Lift:
+            declarer = "ops"
+            declarer_channel = "ops-channel"
+            grant_id = "grant-1"
+            action = "checkout"
+
+        with self.assertRaises(ForwardSealError):
+            seal(ledger, grant_id="grant-1", action="checkout", subject="order-7",
+                 lift=_Lift())
+        self.assertEqual(host.lifted, [])
+
+    def test_a_hosts_refusal_is_consulted_before_the_lift_path(self):
+        """The refusal family is checked first, on its own terms.
+
+        A host's registry must be asked through the same ``check`` the
+        house registry is asked through, so the refusal is refused
+        rather than cancelled -- and so the lift path is never reached.
+        """
+        ledger = make_ledger()
+        host = self._HostRefusalRegistry()
+        host.is_refusal_registry = True
+        ledger.set_tombstones(host)
+
+        with self.assertRaises(ForwardSealError) as caught:
+            seal(ledger, grant_id="grant-1", action="checkout", subject="order-7")
+        message = str(caught.exception)
+        self.assertIn(
+            "refused",
+            message,
+            "the host's refusal was reported as a cancellation",
+        )
+
+    def test_the_two_families_stay_distinguishable(self):
+        """Both installed at once, each in its own slot."""
+        ledger = make_ledger()
+        cancellation = self._HostCancellationRegistry()
+        refusal = self._HostRefusalRegistry()
+        refusal.is_refusal_registry = True
+        ledger.set_tombstones(cancellation)
+        ledger.set_tombstones(refusal)
+        self.assertIs(ledger.cancellations, cancellation)
+        self.assertIs(ledger.refusals, refusal)
+
+    def test_a_check_that_answers_nothing_blocks(self):
+        """An anomalous ``None`` from ``check`` is a block, not consent.
+
+        ``check`` owes the caller a **reason**: "the caller always gets
+        a reason, whether the action is refused, allowed, or the gate
+        was unusable".  A ``None`` answer is therefore the gate saying
+        *nothing*, and nothing is not permission.
+
+        This guard exists because a mutation that read ``None`` as
+        "allowed" SURVIVED the first version of this slice's guards --
+        the defect was only found by planting the mutation and re-running.
+        """
+        ledger = make_ledger()
+
+        class _SilentRegistry:
+            """A declared refusal registry that answers with nothing."""
+
+            is_refusal_registry = True
+
+            def check(self, grant_id, action, subject=None, *, now=None):
+                return None
+
+            def blocked(self, grant_id, action, subject=None, *, now=None):
+                return None
+
+        ledger.set_tombstones(_SilentRegistry())
+        before = len(ledger)
+        with self.assertRaises(ForwardSealError):
+            seal(ledger, grant_id="grant-1", action="checkout", subject="order-7")
+        self.assertEqual(
+            len(ledger),
+            before,
+            "a gate that answered nothing was read as a gate that allowed it",
+        )
+
+    def test_a_blocked_that_answers_none_does_not_block(self):
+        """The control for the test above: ``blocked``'s ``None`` means no block.
+
+        ``blocked`` answers ``None`` for *not blocked* -- that is the
+        ``TombstoneSet`` contract, and it must keep working.
+        """
+        ledger = make_ledger()
+
+        class _QuietRegistry:
+            """A declared refusal registry whose ``blocked`` says 'no block'."""
+
+            is_refusal_registry = True
+
+            def blocked(self, grant_id, action, subject=None, *, now=None):
+                return None
+
+        ledger.set_tombstones(_QuietRegistry())
+        seal(ledger, grant_id="grant-1", action="checkout", subject="order-7")
+        self.assertEqual(len(ledger), 1)
+
+    def test_a_gate_that_raises_blocks(self):
+        """A gate that cannot answer blocks -- it does not allow.
+
+        "The gate could not answer" is not "the gate allowed it".  A
+        registry whose ``check`` raises has not said anything about
+        this action, so the seal is refused.
+
+        This guard exists because a mutation that swallowed the raising
+        gate's exception SURVIVED the first version of this slice's
+        guards: the swallowed exception was read as "not blocked", and
+        the seal was ALLOWED.  A mutation run that produces
+        ``78 passed`` where the defect is planted is a hole in the
+        guard, not a pass.
+        """
+        ledger = make_ledger()
+
+        class _BrokenRegistry:
+            """A declared refusal registry that cannot answer."""
+
+            is_refusal_registry = True
+
+            def check(self, grant_id, action, subject=None, *, now=None):
+                raise RuntimeError("the store is unreadable")
+
+            def blocked(self, grant_id, action, subject=None, *, now=None):
+                raise RuntimeError("the store is unreadable")
+
+        ledger.set_tombstones(_BrokenRegistry())
+        before = len(ledger)
+        with self.assertRaises(ForwardSealError):
+            seal(ledger, grant_id="grant-1", action="checkout", subject="order-7")
+        self.assertEqual(
+            len(ledger),
+            before,
+            "a gate that could not answer was read as a gate that allowed it",
+        )
+
+    def test_a_gate_that_answers_neither_method_blocks(self):
+        """A registry with no way to answer blocks.
+
+        The refusal family answers through ``check`` or ``blocked``.  A
+        registry that offers neither cannot be consulted, and a gate
+        that cannot be consulted must not be read as a gate that allowed
+        the action.
+        """
+        ledger = make_ledger()
+
+        class _MuteRegistry:
+            """A declared refusal registry with no query method."""
+
+            is_refusal_registry = True
+
+        ledger.set_tombstones(_MuteRegistry())
+        before = len(ledger)
+        with self.assertRaises(ForwardSealError) as caught:
+            seal(ledger, grant_id="grant-1", action="checkout", subject="order-7")
+        self.assertEqual(
+            len(ledger),
+            before,
+            "a gate that could not be consulted was read as a gate that "
+            "allowed it",
+        )
+        # The MESSAGE is the assertion that makes this guard
+        # load-bearing.  Without the explicit "can answer neither"
+        # branch, the registry falls through to calling a missing
+        # method, and the resulting ``TypeError`` is caught by the
+        # generic handler -- which fails closed BY ACCIDENT, with a
+        # different message ("could not answer").  That accidental
+        # safety is exactly what a mutation run exposes: the guard
+        # would be deleted and every test would still pass.
+        self.assertIn(
+            "can answer neither",
+            str(caught.exception),
+            "the seal was refused for the wrong reason: the gate could not "
+            "be consulted, and that must be said rather than inferred "
+            "from a TypeError",
+        )
+
+    def test_a_cancellation_is_still_liftable(self):
+        """The control for the backstop: a real tombstone still lifts.
+
+        The backstop refuses a block whose answer carries a refusal
+        row.  A ``Tombstone`` carries neither ``row`` nor
+        ``row_digest``, so a genuine cancellation is unaffected -- and
+        this test is what proves the backstop did not simply refuse
+        every lift.
+        """
+        from cancellation_tombstone import Lift, Tombstone, TombstoneSet
+
+        ledger = make_ledger()
+        tombstones = TombstoneSet(
+            [
+                Tombstone(
+                    grant_id="grant-1",
+                    action="checkout",
+                    subject="order-7",
+                    declarer="ops",
+                    declarer_channel="ops-channel",
+                )
+            ]
+        )
+        ledger.set_tombstones(tombstones)
+
+        lift = Lift(
+            declarer="ops",
+            declarer_channel="ops-channel",
+            grant_id="grant-1",
+            action="checkout",
+            subject="order-7",
+        )
+        seal(ledger, grant_id="grant-1", action="checkout", subject="order-7",
+             lift=lift)
+        self.assertEqual(len(ledger), 1, "a genuine cancellation must still lift")
+
+
 def _legacy_ledger(state):
     """A ledger rebuilt from a legacy (pre-split) pickle state.
 

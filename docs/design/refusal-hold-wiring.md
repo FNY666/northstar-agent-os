@@ -392,6 +392,10 @@ protection is assumed rather than measured.
    the cancellation family. The classification is made on the *declared
    surface* of the object, so a host's own registry is filed by what it
    actually is rather than by what it is called.
+   **AMENDED by §9:** this decides which *slot* a registry is installed
+   into.  What a block *means* is decided separately, by the shape of
+   the answer at the seal — and that half was missing, which is how a
+   host's refusal became liftable.
 3. **A second install is refused, not silently applied.** Installing a
    *different* object into a family that already holds one raises
    `ForwardSealError` rather than dropping the first. Installing the
@@ -661,3 +665,160 @@ original defect.
 * The **open items** are unchanged: 2 (the subject layer) and 3 (no lift
   path) are still open.  This section closes neither; it fixes an
   asymmetry in the auditing of a gate that already existed.
+
+## 9. AMENDED 2026-11-23 — a host's refusal was LIFTABLE
+
+### 9.1 The defect
+
+Section 6.2 (2) says:
+
+> The family is decided by shape, not by name.  A registry is the
+> refusal family when it declares `is_refusal_registry` … or when it
+> carries a `row`/`row_digest`; otherwise it is the cancellation family.
+
+And `_is_refusal_registry`'s own docstring says:
+
+> They are told apart by what they return when they block: a **refusal**
+> comes back with the row that refused (`row` and `row_digest`), a
+> **cancellation** comes back with the tombstone that cancelled (neither).
+> … a host that writes its own registry is classified by what it actually
+> returns rather than by what it is called.
+
+**A host's own registry was lifted.**  Measured on this branch before the
+fix, with a registry that is exactly the shape the docstring describes —
+`TombstoneSet`-shaped, answering `blocked()` with an object that carries
+`row` and `row_digest`:
+
+```python
+ledger.set_tombstones(host_refusal_registry)
+ledger.append_grant(..., lift=some_lift)
+# -> SUCCEEDED      the refusal was lifted
+# host.lift called: [<Lift object ...>]
+```
+
+The house `RefusalHoldRegistry`, filed correctly, refuses the same seal:
+
+```text
+ForwardSealError: a lift was offered but this ledger holds no tombstone
+registry, so nothing can be lifted
+```
+
+So the defect was not "a host's registry is filed in the wrong drawer".
+It was **"a host's refusal is liftable"** — the one thing the refusal
+gate exists to prevent.  A cancellation can be lifted by a named
+tombstone-lift; a refusal cannot, because "a refusal is not a
+cancellation".  That distinction is the entire reason the two families
+are kept apart, and the lift path did not honour it.
+
+### 9.2 Why the two halves of the rule live at different moments
+
+The docstring's rule is right, and the code was wrong — but the rule
+cannot be implemented where the docstring says, and saying so is the
+first half of the fix.
+
+**Filing** (which slot does the registry go in?) cannot be decided by
+what the registry *returns*.  The return value only exists once the
+registry has been **asked**, and asking has side effects: the house
+registry's `check` records an **audit event** (see §8), so probing it at
+install time would write a phantom event into the trail.  So filing is
+read from what the registry **declares** — `is_refusal_registry`, or a
+row carried on the registry itself.
+
+**Meaning** (what does a block mean?) is decided by the shape of what
+the registry **returns**, and it is available at every seal:
+
+| the answer carries | it is a | and therefore |
+|---|---|---|
+| `row` / `row_digest` | a **refusal** | refused, and **NOT** liftable |
+| neither (a `Tombstone`) | a **cancellation** | liftable by a named lift |
+
+The old code consulted the cancellation slot's answer and, finding a
+block, lifted it — without ever asking what kind of block it was.
+
+**A measured no-op.**  The first attempt at this slice reordered
+`_is_refusal_registry` so that the declaration check came first.  That
+reorder is a **no-op**: the original was already declaration-based, and
+the reordering killed nothing in the mutation run (MUT-A below
+survived).  The function's *body* is unchanged in this commit — only
+its docstring, which now says what the function actually decides and
+what it does not.
+
+### 9.3 The fix
+
+1. **`_looks_like_a_refusal(result)`** — the answer's shape decides what
+   it means.  The test is on the attribute's **presence**, not its
+   value: a refusal that could not name its row (an unreadable store)
+   still refuses, so a `row` that is present but `None` is still the
+   refusal family's shape.
+2. **The backstop in `_authorize_under_tombstone_locked`** — a block in
+   the cancellation slot whose answer carries a refusal row is **refused**,
+   and refused before the lift call, so no tombstone-lift can undo it.
+3. **`_query_refusal` / `_refusal_blocks`** — the two query methods have
+   **different contracts**, and the seal path now honours both:
+   * `check` answers with a result carrying a `blocked` flag, and owes
+     the caller a **reason** ("the caller always gets a reason, whether
+     the action is refused, allowed, or the gate was unusable").  A
+     `None` from `check` is therefore an **anomalous answer** — the gate
+     said nothing, and nothing is not consent, so it **blocks**.
+   * `blocked` answers `None` for *not blocked*, and there `None`
+     genuinely means "no block".
+   * A registry that can answer **neither** method, or that **raises**,
+     is a gate that cannot be consulted — and a gate that cannot be
+     consulted **blocks**.  "The gate could not answer" is not "the gate
+     allowed it".
+
+### 9.4 The guards, and why they can fail
+
+Every guard below was checked by planting the defect and re-running.  A
+guard that was not killed was **fixed**, not waived; two of them
+survived their first version and are recorded here because that is the
+part that matters.
+
+| guard | what it pins | killed |
+|---|---|---|
+| `test_a_hosts_refusal_cannot_be_lifted` | the security consequence: an **undeclared** host registry's refusal is not liftable, and the lift is never consumed | MUT-B |
+| `test_a_declared_refusal_cannot_be_lifted_either` | the same for a **declared** registry (the house path) | — |
+| `test_a_hosts_refusal_is_consulted_before_the_lift_path` | the refusal is reported as a **refusal**, not as a cancellation | — |
+| `test_an_undeclared_host_registry_is_filed_by_its_declaration` | filing is by declaration; the safety comes from the answer's shape | MUT-A (survives — by design) |
+| `test_a_cancellation_is_still_liftable` | the control: a genuine `Tombstone` still lifts, so the backstop did not refuse every lift | — |
+| `test_a_check_that_answers_nothing_blocks` | an anomalous `None` from `check` **blocks** | MUT-D |
+| `test_a_blocked_that_answers_none_does_not_block` | the control: `blocked`'s `None` still means "no block" | — |
+| `test_a_gate_that_raises_blocks` | a gate that raises **blocks** | MUT-G |
+| `test_a_gate_that_answers_neither_method_blocks` | a gate with no query method **blocks**, and says so | MUT-H |
+
+**Two survivors, and what they cost.**
+
+* **MUT-D survived the first version of the guards.**  Reading `None`
+  as "allowed" killed nothing, because the house registry's `check`
+  never returns `None` — the path was unreachable from the house code.
+  The guard was added by planting the mutation and re-running, and it
+  now kills it.  A guard that cannot be reached is not a guard.
+* **MUT-H survived the first version too, and for a worse reason.**  With
+  the explicit "can answer neither" branch deleted, the registry fell
+  through to calling a missing method; the resulting `TypeError` was
+  caught by the generic handler, which **failed closed by accident**, with
+  a different message.  Every test still passed.  The guard now asserts
+  the **message**, so the branch is load-bearing rather than
+  accidentally-necessary.  A guard that fails for the wrong reason is a
+  guard that can be deleted without anyone noticing.
+
+### 9.5 Measured
+
+| measurement | result |
+|---|---|
+| targeted suites (`refusal_hold`, `refusal_hold_wiring`, `refusal_hold_queue_wiring`, `forward_seal_ledger`, `cancellation_gate`) | 316 passed, 10 subtests passed |
+| the two refusal-wiring files alone | 141 passed |
+| mutants planted and re-run | MUT-B, MUT-C, MUT-D, MUT-E, MUT-F, MUT-G, MUT-H, MUT-I, MUT-J, MUT-K all **killed**; MUT-A **survives**, and the no-op it exposes is why `_is_refusal_registry`'s body is unchanged |
+| the ORIGINAL (pre-fix) ledger against the new guards | 3 guards fail — the defect is caught by the guards, not assumed |
+
+### 9.6 What this does NOT change
+
+* The house `RefusalHoldRegistry` path is **untouched**: it declares
+  `is_refusal_registry`, and it was already refusing correctly.
+* The **lift** path for genuine tombstones is untouched — a real
+  `Tombstone` carries neither `row` nor `row_digest`, and
+  `test_a_cancellation_is_still_liftable` pins that it still lifts.
+* The **open items** are unchanged: 2 (the subject layer) and 3 (no lift
+  path) are still open.  This section closes neither.
+* The gate's **answers** are unchanged.  Only the *meaning* of an
+  answer, and what the ledger does with it, changed.
