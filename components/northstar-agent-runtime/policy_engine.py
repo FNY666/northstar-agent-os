@@ -50,6 +50,14 @@ trace for every rule, so a denied request can name the exact rule and
 condition that failed. Both records pin the policy digest that produced
 them, making the deciding rule set auditable.
 
+Spec API: ``rule()`` appends one rule to a loaded policy and re-pins the
+policy digest; ``evaluate()`` is the spec-named alias of ``eval()``;
+``enforce()`` evaluates and raises ``DeniedActionError`` when the verdict
+is deny, returning the ``DecisionReport`` when allowed. ``enforce()`` is a
+fail-closed program boundary: it cannot stop a host that never calls it
+or ignores the raise -- the engine books decisions, it does not seize
+control of a non-cooperating host.
+
 House style: frozen dataclasses, fail-closed validation (``TypeError`` on
 wrong types -- bool is not a number, ``ValueError`` on bad values),
 stdlib-only, version/schema pins, ``main()`` self-check. No wall-clock;
@@ -119,6 +127,14 @@ class InvalidPolicyError(PolicyEngineError):
 
 class InvalidInputError(PolicyEngineError):
     """The input document is malformed (fail-closed)."""
+
+
+class DuplicateRuleError(PolicyEngineError):
+    """A rule id already exists in the policy."""
+
+
+class DeniedActionError(PolicyEngineError):
+    """Raised by enforce() when the policy verdict is deny."""
 
 
 def _check_str(name: str, value: object, allow_empty: bool = False) -> str:
@@ -298,6 +314,33 @@ class PolicyEngine:
         self._policies: Dict[str, Tuple[PolicyRecord, List[Tuple[str, str, Any]]]] = {}
         # name -> (record, [(rule_id, decision, when_clause)])
 
+    @staticmethod
+    def _pin_record(
+        name: str,
+        default_allow: bool,
+        normalized: List[Tuple[str, str, Any]],
+        seq: int,
+    ) -> PolicyRecord:
+        """Pin a PolicyRecord over the canonical (name, default_allow, rules)."""
+        canon = _canonicalize(
+            {
+                "name": name,
+                "default_allow": default_allow,
+                "rules": [
+                    {"id": r, "decision": d, "when": w} for r, d, w in normalized
+                ],
+            },
+            "policy",
+        )
+        return PolicyRecord(
+            name=name,
+            version=POLICY_ENGINE_VERSION,
+            default_allow=default_allow,
+            rule_count=len(normalized),
+            digest=_digest(_encode(canon)),
+            seq=seq,
+        )
+
     # -- validation -------------------------------------------------------
 
     def _validate_condition(self, cond: Any, where: str) -> Any:
@@ -405,6 +448,44 @@ class PolicyEngine:
         """Sorted names of loaded policies."""
         with self._lock:
             return tuple(sorted(self._policies))
+
+    # -- spec API: rule ----------------------------------------------------
+
+    def rule(
+        self,
+        name: str,
+        rule_id: str,
+        decision: str,
+        when: Mapping[str, Any],
+        seq: int,
+    ) -> PolicyRecord:
+        """Append one rule to a loaded policy and re-pin its digest.
+
+        The digest is recomputed over the full (name, default_allow,
+        rules) canonical body, so any verdict booked after this call pins
+        the enlarged rule set. Duplicate rule ids refused fail-closed;
+        unknown policies refused. Returns the new ``PolicyRecord``.
+        """
+        _check_str("name", name)
+        _check_str("rule_id", rule_id)
+        _check_seq(seq)
+        if decision not in _DECISIONS:
+            raise InvalidPolicyError("rule: decision must be 'allow' or 'deny'")
+        validated_when = self._validate_condition(when, "rule.when")
+        with self._lock:
+            if name not in self._policies:
+                raise UnknownPolicyError(f"unknown policy {name!r}")
+            record, rules = self._policies[name]
+            if any(rid == rule_id for rid, _, _ in rules):
+                raise DuplicateRuleError(
+                    f"policy {name!r} already has rule {rule_id!r}"
+                )
+            updated = list(rules) + [(rule_id, decision, validated_when)]
+            new_record = self._pin_record(
+                name, record.default_allow, updated, seq
+            )
+            self._policies[name] = (new_record, updated)
+        return new_record
 
     # -- evaluation -------------------------------------------------------
 
@@ -599,10 +680,43 @@ class PolicyEngine:
             )
         return names[0]
 
+    # -- spec API: evaluate / enforce --------------------------------------
+
+    def evaluate(
+        self,
+        input_doc: Mapping[str, Any],
+        seq: int,
+        policy_name: Optional[str] = None,
+    ) -> DecisionReport:
+        """Spec-named alias of :meth:`eval`."""
+        return self.eval(input_doc, seq, policy_name)
+
+    def enforce(
+        self,
+        input_doc: Mapping[str, Any],
+        seq: int,
+        policy_name: Optional[str] = None,
+    ) -> DecisionReport:
+        """Evaluate and fail-closed on deny.
+
+        Returns the ``DecisionReport`` when the verdict is allow; raises
+        ``DeniedActionError`` otherwise. This is a fail-closed program
+        boundary for callers that respect it -- a host that ignores the
+        raise cannot be stopped by this ledger.
+        """
+        report = self.eval(input_doc, seq, policy_name)
+        if not report.allowed:
+            raise DeniedActionError(
+                f"policy {report.policy_name!r} denied: reason={report.reason}; "
+                f"fired_deny={list(report.fired_deny)}; "
+                f"fired_allow={list(report.fired_allow)}"
+            )
+        return report
+
 
 def policy_engine_audit_event(kind: str, seq: int, **fields: Any) -> dict:
     """Shape an ``audit.ndjson/1`` record for a policy-engine event."""
-    allowed = {"policy-loaded", "evaluated", "explained", "rejected"}
+    allowed = {"policy-loaded", "evaluated", "explained", "rejected", "ruled", "enforced"}
     if kind not in allowed:
         raise PolicyEngineError(
             f"unknown audit kind {kind!r}; allowed: {sorted(allowed)}"
@@ -668,7 +782,44 @@ def main() -> None:
 
     evt = policy_engine_audit_event("evaluated", 6, policy="rbac", allowed=False)
     assert evt["schema"] == "audit.ndjson/1"
+
+    # Spec API: rule() appends a rule and re-pins the policy digest.
+    rec2 = eng.rule(
+        "rbac",
+        "guests-may-read",
+        "allow",
+        {"path": "action", "op": "eq", "value": "read"},
+        seq=7,
+    )
+    assert rec2.rule_count == 3 and rec2.digest != rec.digest
+
+    rep4 = eng.evaluate(guest, seq=8)
+    assert rep4.allowed and rep4.reason == "allow", rep4
+    assert rep4.policy_digest == rec2.digest
+
+    rep5 = eng.enforce(admin, seq=9)
+    assert rep5.allowed and rep5.policy_digest == rec2.digest
+
+    try:
+        eng.enforce(
+            {
+                "subject": {"role": "guest", "status": "active"},
+                "action": "write",
+            },
+            seq=10,
+        )
+    except DeniedActionError as exc:
+        assert "rbac" in str(exc) and "reason=default" in str(exc)
+    else:
+        raise AssertionError("enforce should have denied")
+
+    evt2 = policy_engine_audit_event("ruled", 11, policy="rbac", rule="guests-may-read")
+    assert evt2["kind"] == "policy-engine.ruled"
+    evt3 = policy_engine_audit_event("enforced", 12, policy="rbac", allowed=True)
+    assert evt3["kind"] == "policy-engine.enforced"
+
     print("policy-engine OK: load, eval, deny-overrides, default-deny, explain")
+    print("policy-engine OK: rule, evaluate, enforce")
 
 
 if __name__ == "__main__":

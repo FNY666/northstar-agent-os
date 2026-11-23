@@ -22,6 +22,11 @@ and must not double-apply a message the receiver already processed.
 * **Dead-letter, not infinite retry** — after ``max_attempts`` failed
   attempts a message moves to FAILED and is no longer dispatched. The
   operator inspects it; the outbox never spins forever on poison.
+* **Spec entry points** — :meth:`Outbox.write` stores a message (same
+  operation as :meth:`publish`); :meth:`Outbox.mark` records the send
+  outcome for a message the host transported itself — only PENDING
+  messages can be marked, and re-marking a terminal message is refused
+  fail-closed.
 * **No wall-clock** — all seqs are caller-supplied ints (the host's own
   monotonic counter), so the module is deterministic and replayable.
 * **Fail-closed** — malformed messages raise at publish time; unknown
@@ -199,6 +204,57 @@ class Outbox:
                         seq=seq, attempts=0)
         )
         return message
+
+    # -- spec entry points ----------------------------------------------
+
+    def write(self, message: OutboxMessage, *, seq: int) -> OutboxMessage:
+        """Store a message in the outbox. Alias of :meth:`publish`.
+
+        This is the *store* half of store-then-send: the host writes the
+        message in the same logical transaction as its business record,
+        then :meth:`dispatch` or :meth:`mark` handles the send half.
+        """
+        return self.publish(message, seq=seq)
+
+    def mark(self, message_id: str, *, seq: int,
+             outcome: str = "sent", reason: str = "") -> MessageState:
+        """Record the send outcome when the host transported a message itself.
+
+        ``outcome`` is ``"sent"`` (the host's transport reported success) or
+        ``"failed"`` (poison — dead-lettered immediately, no retry). Only
+        PENDING messages can be marked; re-marking a terminal message is
+        refused fail-closed. Returns the new :class:`MessageState`.
+        """
+        _check_non_empty_str(message_id, "message_id")
+        _check_seq(seq, "seq")
+        if outcome not in ("sent", "failed"):
+            raise OutboxError(
+                f"outcome must be 'sent' or 'failed', got {outcome!r}"
+            )
+        if not isinstance(reason, str):
+            raise OutboxError("reason must be a str")
+        try:
+            stored = self._messages[message_id]
+        except KeyError:
+            raise KeyError(f"unknown message_id: {message_id!r}") from None
+        if stored.state is not MessageState.PENDING:
+            raise OutboxError(
+                f"cannot mark message {message_id!r}: already "
+                f"{stored.state.value}"
+            )
+        if outcome == "sent":
+            stored.state = MessageState.SENT
+            self._events.append(
+                OutboxEvent(kind="sent", message_id=message_id,
+                            seq=seq, attempts=stored.attempts)
+            )
+        else:
+            stored.state = MessageState.FAILED
+            self._events.append(
+                OutboxEvent(kind="failed", message_id=message_id,
+                            seq=seq, attempts=stored.attempts, reason=reason)
+            )
+        return stored.state
 
     # -- views ----------------------------------------------------------
 

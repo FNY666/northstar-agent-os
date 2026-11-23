@@ -50,7 +50,13 @@ not publish packages — see *Publishing* below.
 
 `RunReport` carries `subtype`, `sessionId`, `numTurns`, `durationMs`, `totalCostUsd`, `totalUsage`,
 `pricingEstimated`, `errors`, `permissionDenials`, `toolCalls`, `exitCode`, `processExitCode`,
-`isError`, `events`, `result`, `stderr`.
+`toolCallReports`, `isError`, `events`, `result`, `stderr`. Each tool-call report is keyed by the
+assistant event's `call_id` and carries the runtime's `execution_status`, gate and permission
+source, plus a digest of the governed input. It does not duplicate raw arguments; use the matching
+assistant `tool_use` block for proposed arguments, and the report to determine whether execution
+completed, failed, was blocked, or never started.
+`subagents` carries the same bounded, transcript-free summaries recursively, so delegated child
+calls and nested delegations keep their own execution reports and agent identities.
 
 Two rules are what make this embeddable in a service:
 
@@ -108,7 +114,8 @@ The traps a reader of the type alone would not guess, all of them inherited from
 
 ## Exit codes
 
-`EXIT_CODES` mirrors `events.EXIT_CODES`: `0` success, `1` error during execution, `2` max turns,
+`EXIT_CODES` mirrors `events.EXIT_CODES`: `0` success (including `success_unverified`, where the run
+finished without an independent verification result), `1` error during execution, `2` max turns,
 `3` max tool calls, `4` max budget, `5` permission denied, `6` postconditions failed, `7` session
 busy (another live process holds the transcript — wait and retry), plus `USAGE_ERROR = 64` for a
 command that was refused before anything ran. `report.exitCode` is the code the subtype implies —
@@ -119,7 +126,7 @@ They should agree; when they do not, the report is telling you the CLI is misbeh
 
 ```sh
 cd components/northstar-agent-runtime/sdk-ts
-node --test "test/*.test.ts"        # 57 tests, no install, no network
+node --test "test/*.test.ts"        # 60 tests, no install, no network
 make -C ../../.. ts-test            # the same, guarded: skipped, not failed, where node is old
 ```
 

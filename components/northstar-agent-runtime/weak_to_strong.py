@@ -39,6 +39,11 @@ Or the pure function::
 
     generalization_gap(weak_labels, strong_predictions, ground_truth)
 
+Spec-facing alias: :class:`WeakToStrong` subclasses
+:class:`WeakToStrongMonitor` and adds ``generalize()`` (the full
+generalization analysis) and ``measure()`` (headline scalars as a
+digest-pinned :class:`GeneralizationMeasure`).
+
 No wall-clock anywhere: ``seq`` is a caller-supplied integer ordering.
 Everything is deterministic (intersection analyzed in sorted item-id
 order; findings in that order).
@@ -467,6 +472,114 @@ class WeakToStrongMonitor:
         return self.gap_report(ground_truth).alerts
 
 
+@dataclass(frozen=True)
+class GeneralizationMeasure:
+    """Headline scalars from one weak-to-strong measurement run.
+
+    ``measure()`` collapses a :class:`GapReport` to the scalars a
+    gate cares about; the full taxonomy stays on the report. Fields
+    are ``None`` when ground truth is absent (agreement needs none).
+    """
+
+    supervisor_id: str
+    n_items: int
+    agreement: Optional[float]
+    weak_accuracy: Optional[float]
+    strong_accuracy: Optional[float]
+    error_recovery: Optional[float]
+    alerts: Tuple[str, ...]
+    digest: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        _require_str("supervisor_id", self.supervisor_id)
+        if isinstance(self.n_items, bool) or not isinstance(self.n_items, int):
+            raise TypeError("n_items must be an int")
+        if self.n_items < 0:
+            raise ValueError("n_items must be >= 0")
+        for name in ("agreement", "weak_accuracy", "strong_accuracy",
+                     "error_recovery"):
+            v = getattr(self, name)
+            if v is not None:
+                if isinstance(v, bool) or not isinstance(v, (int, float)):
+                    raise TypeError(f"{name} must be a number or None")
+                if not 0.0 <= float(v) <= 1.0:
+                    raise ValueError(f"{name} must be in [0, 1]")
+        if not isinstance(self.alerts, tuple):
+            raise TypeError("alerts must be a tuple of str")
+        for a in self.alerts:
+            _require_str("alerts entry", a)
+        object.__setattr__(self, "digest", self._compute_digest())
+
+    def _compute_digest(self) -> str:
+        return _digest(
+            "generalize-measure",
+            self.supervisor_id,
+            self.n_items,
+            self.agreement,
+            self.weak_accuracy,
+            self.strong_accuracy,
+            self.error_recovery,
+            list(self.alerts),
+        )
+
+    def verify_digest(self) -> bool:
+        """True iff the digest matches the measurement's fields."""
+        return hmac.compare_digest(self._compute_digest(), self.digest)
+
+    def as_dict(self) -> dict:
+        return {
+            "schema": SCHEMA_PIN,
+            "version": WEAK_TO_STRONG_VERSION,
+            "supervisor_id": self.supervisor_id,
+            "n_items": self.n_items,
+            "agreement": self.agreement,
+            "weak_accuracy": self.weak_accuracy,
+            "strong_accuracy": self.strong_accuracy,
+            "error_recovery": self.error_recovery,
+            "alerts": list(self.alerts),
+            "digest": self.digest,
+        }
+
+
+class WeakToStrong(WeakToStrongMonitor):
+    """Spec-facing name for the weak-to-strong supervision ledger.
+
+    Inherits :class:`WeakToStrongMonitor` — ``supervise()`` (weak
+    labels), ``observe()`` (strong predictions), ``gap_report()``,
+    ``alerts()`` — and adds the spec API:
+
+    * ``generalize()`` — the full generalization analysis: agreement,
+      error recovery (strong generalizes *past* weak mistakes),
+      regression, and alerts.
+    * ``measure()`` — the same run collapsed to headline scalars as a
+      digest-pinned :class:`GeneralizationMeasure`.
+
+    Without ground truth only agreement is knowable; the taxonomy
+    fields are ``None`` (see :func:`generalization_gap`).
+    """
+
+    def generalize(
+        self, ground_truth: Optional[Mapping[str, str]] = None
+    ) -> GapReport:
+        """Run the weak-to-strong generalization analysis."""
+        return self.gap_report(ground_truth)
+
+    def measure(
+        self, ground_truth: Optional[Mapping[str, str]] = None
+    ) -> GeneralizationMeasure:
+        """Book one measurement run's headline scalars (digest-pinned)."""
+        rep = self.gap_report(ground_truth)
+        return GeneralizationMeasure(
+            supervisor_id=self._supervisor.supervisor_id,
+            n_items=rep.n_items,
+            agreement=rep.agreement,
+            weak_accuracy=rep.weak_accuracy,
+            strong_accuracy=rep.strong_accuracy,
+            error_recovery=rep.error_recovery,
+            alerts=rep.alerts,
+        )
+
+
 def weak_to_strong_audit_event(
     report: GapReport, supervisor_id: str, seq: object
 ) -> dict:
@@ -522,10 +635,24 @@ def main() -> None:
                  for n, (i, lab, _) in enumerate(labels)]
     bad = generalization_gap(list(mon.labels()), bad_preds, truth, sup)
     assert "high-error-distillation" in bad.alerts, bad.alerts
+    # Spec API smoke: WeakToStrong.generalize()/measure().
+    spec = WeakToStrong(sup)
+    for n, (i, lab, conf) in enumerate(labels):
+        spec.supervise(WeakLabel(item_id=i, label=lab, confident=conf, seq=n))
+    for n, (i, p) in enumerate(sorted(preds.items())):
+        spec.observe(StrongPrediction(item_id=i, prediction=p, seq=n))
+    g = spec.generalize(truth)
+    assert g.error_recovery == 1.0, g.error_recovery
+    m = spec.measure(truth)
+    assert m.verify_digest(), "measure digest mismatch"
+    assert m.n_items == 5 and m.agreement == 0.4, (m.n_items, m.agreement)
+    assert m.error_recovery == 1.0, m.error_recovery
+    assert m.as_dict()["schema"] == SCHEMA_PIN
     print(
         "weak-to-strong OK: recovery measured, distillation alerted "
         f"(schema {SCHEMA_PIN})"
     )
+    print(f"weak-to-strong spec OK: generalize, measure (schema {SCHEMA_PIN})")
 
 
 if __name__ == "__main__":

@@ -274,6 +274,39 @@ class RegressionReport:
     version: str = BENCHMARK_RUNNER_VERSION
 
 
+@dataclass(frozen=True)
+class LeaderboardEntry:
+    """One ranked benchmark row: latest run plus its board position."""
+
+    rank: int
+    name: str
+    run_id: str
+    median_us: int
+    mean_us: int
+    min_us: int
+    max_us: int
+    p90_us: int
+    entry_pin: str
+    schema: str = SCHEMA_PIN
+    version: str = BENCHMARK_RUNNER_VERSION
+
+
+@dataclass(frozen=True)
+class LeaderboardReport:
+    """leaderboard(): benchmarks ranked fastest-first by a pinned metric."""
+
+    metric: str  # "median_us" | "mean_us" | "min_us" | "max_us" | "p90_us"
+    entries: Tuple[LeaderboardEntry, ...]
+    report_pin: str
+    seq: int
+    schema: str = SCHEMA_PIN
+    version: str = BENCHMARK_RUNNER_VERSION
+
+
+#: Metrics a leaderboard may rank by (exact field names on BenchmarkRun).
+LEADERBOARD_METRICS = ("median_us", "mean_us", "min_us", "max_us", "p90_us")
+
+
 class BenchmarkRunner:
     """Hyperfine-shaped benchmark ledger: record, compare, regress.
 
@@ -504,6 +537,13 @@ class BenchmarkRunner:
         except KeyError:
             raise UnknownBenchmarkError(f"benchmark {name!r} not registered")
 
+    def task(self, name: Any) -> BenchmarkSpec:
+        """Spec alias: return the registered benchmark task for ``name``.
+
+        Pure read view -- same shape, errors, and pins as ``spec()``.
+        """
+        return self.spec(name)
+
     def run(self, run_id: Any) -> BenchmarkRun:
         if not isinstance(run_id, str):
             raise ValidationError("run_id must be str")
@@ -524,6 +564,57 @@ class BenchmarkRunner:
         if run_id is None:
             raise NoRunError(f"benchmark {name!r} has no recorded run")
         return self._runs[run_id]
+
+    def leaderboard(
+        self, seq: Any, metric: str = "median_us"
+    ) -> LeaderboardReport:
+        """Rank registered benchmarks fastest-first by a pinned metric.
+
+        Pure read view: validates the seq shape, consumes nothing, writes no
+        audit row. Only benchmarks with a recorded latest run appear; a
+        benchmark with no run is skipped as data, never raised. An empty
+        board (no runs recorded at all) returns ``entries == ()`` as data.
+        Sort is by (metric value, name): lower is faster, ties break by
+        name, so the board is deterministic across instances.
+        """
+        _check_seq(seq)
+        if not isinstance(metric, str) or metric not in LEADERBOARD_METRICS:
+            raise ValidationError(
+                f"metric must be one of {LEADERBOARD_METRICS}"
+            )
+        with self._lock:
+            rows = []
+            for name in self._specs:
+                run_id = self._latest.get(name)
+                if run_id is None:
+                    continue
+                run = self._runs[run_id]
+                rows.append((getattr(run, metric), name, run))
+            rows.sort(key=lambda r: (r[0], r[1]))
+            entries: List[LeaderboardEntry] = []
+            for rank, (_value, name, run) in enumerate(rows, start=1):
+                body = {
+                    "rank": rank, "name": name, "run_id": run.run_id,
+                    "metric": metric, "value_us": getattr(run, metric),
+                }
+                entries.append(
+                    LeaderboardEntry(
+                        rank=rank, name=name, run_id=run.run_id,
+                        median_us=run.median_us, mean_us=run.mean_us,
+                        min_us=run.min_us, max_us=run.max_us,
+                        p90_us=run.p90_us, entry_pin=_pin(body),
+                    )
+                )
+            body = {
+                "metric": metric,
+                "entries": [e.entry_pin for e in entries],
+            }
+            return LeaderboardReport(
+                metric=metric,
+                entries=tuple(entries),
+                report_pin=_pin(body),
+                seq=seq,
+            )
 
     def baseline(self, name: Any) -> BaselineRecord:
         name = _check_name(name)

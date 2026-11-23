@@ -29,5 +29,10 @@ Picking the right starting point:
   working as the components evolve; the repository's own CI smoke runs the
   demo script on every push (see [packaging-and-ci](../docs/guides/packaging-and-ci.md)).
 
+Local packaging check: `make install-smoke` builds the five Python wheels and
+installs them into a temporary target without an index. This does not install or
+enable the systemd Sidecar. Build prerequisites and isolation limits are in the
+[packaging guide](../docs/guides/packaging-and-ci.md).
+
 Structure expectation (enforced by `tests/test_docbuild.py`): every directory
 under `examples/` with a `README.md` must be listed on this page.

@@ -216,6 +216,62 @@ class TestAuditEvent(unittest.TestCase):
             merkle_tree_audit_event(root, 3, audit_seq=False)
 
 
+class TestBuildAndVerifyMethods(unittest.TestCase):
+    """Spec entry points: MerkleTree.build() and MerkleTree.verify()."""
+
+    def test_build_is_constructor_alias(self):
+        leaves = _leaves(6)
+        a = MerkleTree.build(leaves)
+        b = MerkleTree(leaves)
+        self.assertIsInstance(a, MerkleTree)
+        self.assertEqual(a.root(), b.root())
+        self.assertEqual(a.leaf_count, 6)
+
+    def test_build_rejects_bad_input(self):
+        with self.assertRaises(ValueError):
+            MerkleTree.build([])
+        with self.assertRaises(TypeError):
+            MerkleTree.build([b"ok", 42])
+
+    def test_verify_method_all_leaves(self):
+        leaves = _leaves(8)
+        t = MerkleTree.build(leaves)
+        for i in range(8):
+            self.assertTrue(t.verify(i, leaves[i]), f"index {i}")
+
+    def test_verify_method_odd_count(self):
+        leaves = _leaves(5)
+        t = MerkleTree.build(leaves)
+        for i in range(5):
+            self.assertTrue(t.verify(i, leaves[i]), f"index {i}")
+
+    def test_verify_method_tampered_is_false(self):
+        t = MerkleTree.build(_leaves(4))
+        self.assertFalse(t.verify(0, b"tampered"))
+        self.assertFalse(t.verify(2, b"leaf-3"))
+
+    def test_verify_method_explicit_proof(self):
+        leaves = _leaves(4)
+        t = MerkleTree.build(leaves)
+        p = t.proof(1)
+        self.assertTrue(t.verify(1, leaves[1], proof=p))
+        self.assertFalse(t.verify(1, b"wrong", proof=p))
+
+    def test_verify_method_bad_index(self):
+        t = MerkleTree.build(_leaves(4))
+        with self.assertRaises(ValueError):
+            t.verify(4, b"leaf-0")
+        with self.assertRaises(ValueError):
+            t.verify(-1, b"leaf-0")
+        with self.assertRaises(TypeError):
+            t.verify(True, b"leaf-0")
+
+    def test_verify_method_single_leaf(self):
+        t = MerkleTree.build([b"solo"])
+        self.assertTrue(t.verify(0, b"solo"))
+        self.assertFalse(t.verify(0, b"other"))
+
+
 class TestMain(unittest.TestCase):
     def test_main(self):
         import merkle_tree as mt

@@ -137,3 +137,348 @@ Remote/hosted-worker readiness scorecard (P3-3) — evidence-based, runnable.
 Per-area (met, total, unmet explanations).
 
 #### `total_score()`
+
+### `remote_transport`
+
+Source: `components/northstar-agent-interop/remote_transport.py`
+
+SSH forwarding for a private Northstar Sidecar Unix socket.
+
+#### `SSHForwardError`
+
+Base error for the SSH channel lifecycle.
+
+#### `SSHForwardStartError`
+
+The SSH process could not be started or exited during startup.
+
+#### `SSHForwardTimeout`
+
+The local forwarded socket did not become ready in time.
+
+#### `SSHForwardUnavailable`
+
+The SSH forward exited or became unavailable after startup.
+
+#### `SSHForwardConfig`
+
+Validated configuration for one private SSH Unix-socket forward.
+
+- `local_socket` (property)
+- `control_socket` (property)
+- `argv()`
+  - Return the SSH argv; callers must pass it with ``shell=False``.
+#### `SSHSocketForward`
+
+Manage one SSH process forwarding a remote Sidecar Unix socket.
+
+- `local_socket` (property)
+- `process` (property)
+- `start()`
+- `is_alive()`
+- `wait_ready(*, timeout_seconds: float | None=None)`
+- `close()`
+### `backend_router`
+
+Source: `components/northstar-agent-interop/backend_router.py`
+
+Deterministic backend selection above backend-specific adapters.
+
+#### `RouteRequest`
+
+- `from_dict(value: Any)`
+- `to_dict()`
+- `canonical_json()`
+#### `RouteDecision`
+
+- `from_dict(value: Any)`
+- `to_dict()`
+- `canonical_json()`
+#### `BackendRouter`
+
+- `register(profile: AgentProfile, adapter: Any, *, priority: int=100)`
+- `register_process_spec(spec: ProcessBackendSpec, adapter: Any, *, priority: int=100)`
+- `set_enabled(agent_id: str, enabled: bool)`
+- `set_health(agent_id: str, health: str, *, now: int, cooldown_seconds: int=0)`
+- `select(request: RouteRequest, *, now: int, current_policy_revision: str | None=None)`
+- `adapter_for(decision: RouteDecision, *, current_policy_revision: str | None=None)`
+#### `assert_route_matches_handoff(decision: RouteDecision, request: HandoffRequest)`
+
+### `causal_store`
+
+Source: `components/northstar-agent-interop/causal_store.py`
+
+Persistent, tamper-evident storage for typed causal edges.
+
+#### `EvidenceCursor`
+
+#### `CausalEvidenceRecord`
+
+- `create(edge: CausalEdge, *, sequence: int, prev_record_digest: str | None)`
+- `from_dict(value: Any)`
+- `to_dict()`
+#### `EvidenceRecovery`
+
+#### `CausalEvidenceStore`
+
+- `append(edge: CausalEdge)`
+- `recover(*, expected_cursor: EvidenceCursor | None=None)`
+### `experience_layering`
+
+Source: `components/northstar-agent-interop/experience_layering.py`
+
+Experience Layering - Three-Layer Memory Architecture
+
+#### `OwnershipLostError`
+
+Raised when fencing token validation fails (stale token)
+
+#### `ExperienceRecord`
+
+Single experience record
+
+- `to_dict()`
+- `from_dict(data: dict)`
+#### `ArchiveBatch`
+
+A stable, idempotent handoff unit for one Recall shard.
+
+#### `LostEvent`
+
+Single lost event (Phase C v2 - stored in LostEventStream)
+
+- `to_dict()`
+- `from_dict(data: Dict[str, Any])`
+#### `LostEventStream`
+
+Lost Event Stream - Independent storage for lost runs (Phase C v2)
+
+- `add(event: LostEvent)`
+  - Add lost event with dedup (run_id, goal_fingerprint, reason)
+- `query(goal_fingerprint: str, limit: int=100)`
+  - Query lost events by fingerprint
+- `count(goal_fingerprint: str)`
+  - Count lost events
+#### `WorkingLayer`
+
+Working Layer - Recent 100 runs, in-memory cache + JSONL persistence.
+
+- `add(record: ExperienceRecord)`
+  - Add a record to the Working Layer.
+- `query(fingerprint: str, limit: Optional[int]=None)`
+  - Query records by fingerprint.
+- `query_recent(fingerprint: str, seconds: int)`
+  - Query recent records within time window.
+- `evict(count: int=10)`
+  - Evict oldest records (FIFO).
+- `has_prefix(records: List[ExperienceRecord])`
+  - Whether an outbox batch is still the exact oldest Working prefix.
+- `evict_records(records: List[ExperienceRecord])`
+  - Remove an exact oldest prefix after a durable handoff has completed.
+#### `RecallLayer`
+
+Recall Layer - Recent 30 days, date-sharded JSONL + index.
+
+- `add_batch(records: List[ExperienceRecord])`
+  - Add batch of records to Recall Layer.
+- `has_records(records: List[ExperienceRecord])`
+  - Return whether every record identity is durably present in Recall.
+- `query(fingerprint: str, limit: Optional[int]=None)`
+  - Query records by fingerprint across date shards.
+- `find_older_than(cutoff_date: datetime)`
+  - Find all records older than cutoff date.
+- `archive_old_data(cutoff_date: datetime, archive=None)`
+  - Archive old shards, deleting each source only after durable handoff.
+- `corrupt_lines` (property)
+  - Distinct unreadable lines found so far in recall shards.
+- `structure_problems()`
+  - Where the index and shard contents on disk disagree.
+- `rebuild_index()`
+  - Rebuild the fingerprint -> dates index from the shards on disk. Returns shards scanned.
+#### `ArchivalLayer`
+
+Archival Layer - Compressed historical data.
+
+- `archive(batch: ArchiveBatch)`
+  - Durably store one stable Recall shard batch.
+- `query(fingerprint: str, limit: Optional[int]=None)`
+  - Query records by fingerprint from compressed archive.
+- `get_summary(fingerprint: str)`
+  - Get aggregated summary for fingerprint.
+#### `ExperienceLayering`
+
+Coordinator for three-layer memory architecture.
+
+- `forecast(fingerprint: str)`
+  - Forecast outcome for a goal (uses Working Layer only).
+- `query_statistics(fingerprint: str)`
+  - Query statistics for a goal (routes across layers).
+- `record_lost(fingerprint: str, reason: str, timestamp: Optional[int]=None, run_id: Optional[str]=None, fencing_token: Optional[str]=None, metadata: Optional[Dict[str, Any]]=None)`
+  - Record a lost run (called by Reaper via AdmissionLedger).
+- `query_lost_events(goal_fingerprint: str, limit: int=100)`
+  - Query lost events from LostEventStream (Phase C v2).
+- `settle(record: ExperienceRecord)`
+  - Record experience settlement (existing API compatibility).
+- `history_status()`
+  - Whether the recorded history is known to be complete.
+- `health()`
+  - Counters that make silent damage visible. All zero / empty on a healthy store.
+#### `PolicyEvaluation`
+
+Result of an experience-based policy evaluation.
+
+- `execution_authorized` (property)
+  - True when the decision does not forbid execution.
+- `to_dict()`
+#### `evaluate_policy(fingerprint: str, total_runs: int, success_count: int, lost_count: int, policy: Optional[dict]=None)`
+
+Evaluate an experience-based admission policy for one fingerprint.
+
+### `experience_middleware`
+
+Source: `components/northstar-agent-interop/experience_middleware.py`
+
+Experience Middleware for BackendRouter Integration.
+
+#### `PolicyDeniedError`
+
+Raised when Experience policy denies admission.
+
+#### `AdmissionResult`
+
+Result of an admission check.
+
+#### `ExperienceMiddleware`
+
+Middleware connecting BackendRouter with Experience Layering.
+
+- `generate_fingerprint(context: dict[str, Any])`
+  - Derive the goal fingerprint from request/event context.
+- `check_admission(fingerprint: str, context: dict[str, Any])`
+  - Check admission before a routing decision. Never raises.
+- `record_success(fingerprint: str, context: dict[str, Any])`
+  - Record a successful outcome. Never raises.
+- `record_lost(fingerprint: str, reason: str, context: dict[str, Any])`
+  - Record a lost/failed outcome. Never raises.
+- `error_counts` (property)
+  - Swallowed-error tally per call site (empty means none).
+- `recent_errors(limit: Optional[int]=None)`
+  - Most recent swallowed errors as (where, type, message).
+#### `create_middleware(experience: Optional[Any]=None)`
+
+Convenience constructor.
+
+### `graph_store`
+
+Source: `components/northstar-agent-interop/graph_store.py`
+
+Atomic persistence for admitted, verified causal graph commitments.
+
+#### `GraphEvidenceCursor`
+
+#### `GraphEvidenceRecord`
+
+- `create(graph: CausalGraph, *, sequence: int, prev_record_digest: str | None)`
+- `from_dict(value: Any)`
+- `to_dict()`
+#### `GraphEvidenceRecovery`
+
+#### `GraphEvidenceStore`
+
+- `admit(graph: CausalGraph)`
+- `recover(*, expected_cursor: GraphEvidenceCursor | None=None)`
+### `route_causality`
+
+Source: `components/northstar-agent-interop/route_causality.py`
+
+Typed causal edges derived from verified Route Lineage events.
+
+#### `canonical_graph_commitment(*, segment_lengths: Sequence[int], event_digests: Sequence[str], edges: Sequence['CausalEdge'], handoffs: Sequence['HandoffLink'])`
+
+#### `HandoffLink`
+
+- `to_dict()`
+- `from_dict(value: Any)`
+#### `CausalEdge`
+
+- `create(relation: str, parent_event_digest: str, child_event_digest: str, *, handoff_id: str | None=None)`
+- `to_dict()`
+- `from_dict(value: Any)`
+#### `CausalGraph`
+
+- `graph_digest` (property)
+- `from_events(events: Sequence[LineageEvent], *, handoffs: Sequence[HandoffLink]=())`
+- `from_segments(segments: Sequence[Sequence[LineageEvent]], *, handoffs: Sequence[HandoffLink]=())`
+- `verify()`
+### `route_ledger`
+
+Source: `components/northstar-agent-interop/route_ledger.py`
+
+Append-only RouteDecision/Receipt ledger with deterministic replay.
+
+#### `RouteDecisionRecord`
+
+- `from_decision(decision: RouteDecision, *, attempt: int, idempotency_key: str, recorded_at: int)`
+- `from_dict(value: Any)`
+- `to_dict()`
+#### `RouteReceipt`
+
+- `from_decision(decision: RouteDecision, *, status: str, attempt: int, latency_ms: int, failure_class: str | None, error_code: str | None, retryable: bool, idempotency_key: str, recorded_at: int)`
+- `from_dict(value: Any)`
+- `to_dict()`
+#### `RouteEvent`
+
+- `from_decision(decision: RouteDecision, *, event_type: str, attempt: int, idempotency_key: str, recorded_at: int)`
+- `from_receipt(receipt: RouteReceipt, *, sequence: int)`
+- `from_dict(value: Any)`
+- `to_dict()`
+#### `RouteReplay`
+
+#### `RouteLedger`
+
+- `append_decision(decision: RouteDecision, *, attempt: int, idempotency_key: str, recorded_at: int)`
+- `append_receipt(receipt: RouteReceipt)`
+- `read_history(run_id: str)`
+- `replay(run_id: str)`
+### `route_lineage`
+
+Source: `components/northstar-agent-interop/route_lineage.py`
+
+Versioned, tamper-evident persistence for bounded RouteEvent records.
+
+#### `LineageCursor`
+
+- `to_dict()`
+- `from_dict(value: Any)`
+#### `LineageEvent`
+
+- `create(route_event: RouteEvent, *, sequence: int, prev_event_digest: str | None)`
+- `from_dict(value: Any)`
+- `to_dict()`
+#### `LineageRecovery`
+
+#### `ReplayVerdict`
+
+#### `RouteLineage`
+
+- `append(route_event: RouteEvent)`
+- `recover(*, expected_cursor: LineageCursor | None=None)`
+- `replay_verdict(*, expected_cursor: LineageCursor | None=None)`
+- `causal_graph(*, handoffs=())`
+#### `migrate_v1_to_v2(source_path: str | Path, target_path: str | Path)`
+
+Copy a validated v1 RouteEvent JSONL into a new v2 lineage file.
+
+### `route_state`
+
+Source: `components/northstar-agent-interop/route_state.py`
+
+Pure RouteEvent state-machine validation and bounded replay summary.
+
+#### `RouteState`
+
+#### `RouteStateMachine`
+
+Validate and replay a complete bounded route event sequence.
+
+- `replay(events: Sequence[RouteEvent])`

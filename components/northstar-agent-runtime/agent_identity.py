@@ -69,6 +69,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping, Sequence
 
 import ed25519
@@ -100,6 +101,25 @@ def _raw(hexed: str, length: int) -> bytes | None:
     except (TypeError, ValueError):
         return None
     return raw if len(raw) == length else None
+
+
+def _parse_aware_datetime(value: Any) -> datetime | None:
+    """Parse an ISO 8601 instant and normalize it to UTC.
+
+    Delegation expiry is security-sensitive: naive local timestamps are
+    ambiguous, and comparing timestamp strings gives incorrect answers when
+    offsets differ. ``Z`` is normalized explicitly for Python 3.10 support.
+    """
+    if not isinstance(value, str) or not value:
+        return None
+    normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
+    try:
+        parsed = datetime.fromisoformat(normalized)
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
+            return None
+        return parsed.astimezone(timezone.utc)
+    except (ValueError, OverflowError):
+        return None
 
 
 def did_of(public_key: bytes) -> str:
@@ -404,9 +424,10 @@ def verify_delegation_chain(
        ``max_depth`` (AstraCipher-style depth ceiling);
     4. the hop's permission set is a subset of the *effective* permissions
        so far (attenuation: a child never holds more than its parent);
-    5. the hop has not expired (``expires_at`` is ISO-8601; an empty
-       ``expires_at`` means no expiry — the verifier never reads a clock,
-       ``time_iso`` is caller-supplied like everywhere else in this repo).
+    5. the hop has not expired (``expires_at`` is a timezone-aware ISO-8601
+       instant; an empty ``expires_at`` means no expiry — the verifier never
+       reads a clock, ``time_iso`` is caller-supplied like everywhere else in
+       this repo).
 
     One failure denies the whole chain. ``max_depth`` must be a positive
     integer; anything else fails closed.
@@ -482,7 +503,17 @@ def verify_delegation_chain(
                     "expiry_uncheckable",
                     depth=index,
                 )
-            if not time_iso < hop.expires_at:
+            expiry = _parse_aware_datetime(hop.expires_at)
+            reference_time = _parse_aware_datetime(time_iso)
+            if expiry is None or reference_time is None:
+                return IdentityVerdict(
+                    False,
+                    f"hop {index}: delegation expiry and reference time must be "
+                    "valid timezone-aware ISO-8601 instants",
+                    "expiry_malformed",
+                    depth=index,
+                )
+            if reference_time >= expiry:
                 return IdentityVerdict(
                     False,
                     f"hop {index}: delegation expired at {hop.expires_at}",

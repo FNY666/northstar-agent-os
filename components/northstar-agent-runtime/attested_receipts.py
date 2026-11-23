@@ -87,6 +87,7 @@ SOFTWARE_EMULATOR_VERIFIER_ID = "northstar.software-attestor.v1"
 _DEFAULT_MAX_AGE_SECONDS = 300
 _MIN_SECRET_BYTES = 32
 _HEX64_RE_LENGTH = 64
+_MAX_QUOTE_JSON_DEPTH = 64
 
 
 class AttestedReceiptError(ValueError):
@@ -99,6 +100,43 @@ class AttestedReceiptError(ValueError):
     caller decides what to do with a denied attestation, but a
     malformed one is a bug and fails loudly.
     """
+
+
+def _strict_json_loads(raw: str) -> Any:
+    """Parse an emulated quote without duplicate fields or non-standard values."""
+    depth = 0
+    in_string = False
+    escaped = False
+    for character in raw:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            continue
+        if character == '"':
+            in_string = True
+        elif character in "[{":
+            depth += 1
+            if depth > _MAX_QUOTE_JSON_DEPTH:
+                raise ValueError(f"JSON depth limit exceeded ({_MAX_QUOTE_JSON_DEPTH} containers)")
+        elif character in "]}":
+            depth -= 1
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON key {key!r}")
+            result[key] = value
+        return result
+
+    def reject_constant(value: str):
+        raise ValueError(f"non-standard JSON constant {value}")
+
+    return json.loads(raw, object_pairs_hook=unique_object, parse_constant=reject_constant)
 
 
 # ---------------------------------------------------------------------------
@@ -274,8 +312,8 @@ class SoftwareAttestor:
 
         def _verify(quote_bytes: bytes, *, expected_binding: str) -> str:
             try:
-                quote = json.loads(quote_bytes.decode("utf-8"))
-            except (ValueError, UnicodeDecodeError) as error:
+                quote = _strict_json_loads(quote_bytes.decode("utf-8"))
+            except (ValueError, UnicodeDecodeError, RecursionError) as error:
                 raise AttestedReceiptError("emulated quote is not valid JSON") from error
             if not isinstance(quote, dict):
                 raise AttestedReceiptError("emulated quote must be a JSON object")

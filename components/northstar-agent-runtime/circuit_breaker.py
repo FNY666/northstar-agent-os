@@ -194,6 +194,22 @@ class CircuitBreaker:
         self._record("reset", seq)
         return self._state
 
+    def open(self, seq: int) -> CircuitState:
+        """Manual trip: force the breaker open from closed or half-open.
+
+        The operator's override for "this subsystem is bad" — trips even
+        when ``consecutive_failures`` is below ``failure_threshold``.
+        Records an ``"opened"`` event only on an actual transition and
+        starts the cooldown window at the trip seq. Calling ``open()``
+        on an already-open breaker is a no-op returning
+        ``CircuitState.OPEN`` (idempotent, mirroring ``reset()``).
+        """
+        seq = _check_seq(seq)
+        if self._state is CircuitState.OPEN:
+            return self._state
+        self._trip(seq)
+        return self._state
+
     def _maybe_half_open(self, seq: int) -> None:
         if (
             self._state is CircuitState.OPEN

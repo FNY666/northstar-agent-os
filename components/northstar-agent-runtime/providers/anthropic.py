@@ -11,6 +11,7 @@ normalisation against a fake client is verified.
 """
 from __future__ import annotations
 
+import copy
 from typing import Any, Sequence
 
 from providers.base import (
@@ -28,6 +29,12 @@ from providers.base import (
 # Model families the adapter knows how to talk to. Unknown models are still
 # accepted - only the pricing table refuses to guess (see budget.py).
 CACHE_CONTROL_EPHEMERAL = {"type": "ephemeral"}
+MAX_PROVIDER_TEXT_CHARS = 1_048_576
+MAX_PROVIDER_CONTENT_BLOCKS = 256
+MAX_TOOL_CALLS_PER_RESPONSE = 128
+MAX_TOOL_ARGUMENTS_TOTAL_BYTES = 4_194_304
+MAX_PROVIDER_IDENTIFIER_CHARS = 1_024
+DEFAULT_MAX_HTTP_RESPONSE_BYTES = 8_388_608
 
 
 class AnthropicProvider(Provider):
@@ -53,15 +60,19 @@ class AnthropicProvider(Provider):
         max_retries: int = 0,
         timeout: float | None = None,
         extra_headers: dict[str, str] | None = None,
+        max_response_bytes: int = DEFAULT_MAX_HTTP_RESPONSE_BYTES,
     ) -> None:
         if max_tokens <= 0:
             raise ValueError("max_tokens must be positive")
+        if isinstance(max_response_bytes, bool) or not isinstance(max_response_bytes, int) or max_response_bytes <= 0:
+            raise ValueError("max_response_bytes must be a positive integer")
         self.model = model
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.prompt_cache = prompt_cache
         self._client = client
         self._owns_client = client is None
+        self.max_response_bytes = max_response_bytes
         self._client_kwargs: dict[str, Any] = {
             "max_retries": max_retries,
         }
@@ -76,13 +87,21 @@ class AnthropicProvider(Provider):
     def client(self) -> Any:
         if self._client is None:
             try:
-                from anthropic import Anthropic
+                import anthropic as anthropic_sdk
             except ImportError as error:  # pragma: no cover - depends on host
                 raise ProviderError(
                     "the 'anthropic' package is required for AnthropicProvider; "
                     "install requirements.txt, or use provider='scripted'"
                 ) from error
-            self._client = Anthropic(**self._client_kwargs)
+            from providers.http_response_limits import make_response_limited_http_client
+
+            default_http_client = getattr(anthropic_sdk, "DefaultHttpx2Client", None)
+            if default_http_client is None:
+                default_http_client = getattr(anthropic_sdk, "DefaultHttpxClient", None)
+            if not callable(default_http_client):
+                raise ProviderError("the installed anthropic SDK does not expose a supported synchronous HTTP client")
+            http_client = make_response_limited_http_client(default_http_client, self.max_response_bytes)
+            self._client = anthropic_sdk.Anthropic(http_client=http_client, **self._client_kwargs)
         return self._client
 
     # -- request building --------------------------------------------------
@@ -105,7 +124,7 @@ class AnthropicProvider(Provider):
             else:
                 payload["system"] = request.system
         if request.tools:
-            tools = [dict(tool) for tool in request.tools]
+            tools = copy.deepcopy([dict(tool) for tool in request.tools])
             if self.prompt_cache and tools:
                 tools[-1]["cache_control"] = dict(CACHE_CONTROL_EPHEMERAL)
             payload["tools"] = tools
@@ -160,23 +179,88 @@ class AnthropicProvider(Provider):
         dict without pretending to be an SDK object.
         """
         content_blocks: list[Any] = []
-        for block in _field(response, "content", ()) or ():
+        raw_blocks = _field(response, "content", ()) or ()
+        if isinstance(raw_blocks, (str, bytes)):
+            raise ProviderError("Anthropic response content must be a block sequence")
+        try:
+            blocks = iter(raw_blocks)
+        except TypeError as error:
+            raise ProviderError("Anthropic response content must be a block sequence") from error
+        total_text_chars = 0
+        total_argument_bytes = 0
+        total_argument_nodes = 0
+        tool_calls = 0
+        for block_index, block in enumerate(blocks):
+            if block_index >= MAX_PROVIDER_CONTENT_BLOCKS:
+                raise ProviderError(
+                    f"Anthropic response exceeds the {MAX_PROVIDER_CONTENT_BLOCKS}-block limit"
+                )
             kind = _field(block, "type", "")
             if kind == "text":
-                content_blocks.append(TextBlock(text=str(_field(block, "text", "") or "")))
+                text = _field(block, "text", "") or ""
+                if not isinstance(text, str):
+                    raise ProviderError("Anthropic text block content must be a string")
+                total_text_chars += len(text)
+                if total_text_chars > MAX_PROVIDER_TEXT_CHARS:
+                    raise ProviderError(
+                        f"Anthropic response text exceeds the {MAX_PROVIDER_TEXT_CHARS}-character limit"
+                    )
+                content_blocks.append(TextBlock(text=text))
             elif kind == "thinking":
+                text = _field(block, "thinking", _field(block, "text", "")) or ""
+                signature = _field(block, "signature", "") or ""
+                if not isinstance(text, str) or not isinstance(signature, str):
+                    raise ProviderError("Anthropic thinking and signature fields must be strings")
+                total_text_chars += len(text) + len(signature)
+                if total_text_chars > MAX_PROVIDER_TEXT_CHARS:
+                    raise ProviderError(
+                        f"Anthropic response text exceeds the {MAX_PROVIDER_TEXT_CHARS}-character limit"
+                    )
                 content_blocks.append(
                     ThinkingBlock(
-                        text=str(_field(block, "thinking", _field(block, "text", "")) or ""),
-                        signature=str(_field(block, "signature", "") or ""),
+                        text=text,
+                        signature=signature,
                     )
                 )
             elif kind == "tool_use":
+                tool_calls += 1
+                if tool_calls > MAX_TOOL_CALLS_PER_RESPONSE:
+                    raise ProviderError(
+                        f"Anthropic response exceeds the {MAX_TOOL_CALLS_PER_RESPONSE}-tool-call limit"
+                    )
                 raw_input = _field(block, "input", {}) or {}
+                from tool_input_schema import (
+                    MAX_SCHEMA_TREE_NODES,
+                    ToolInputSchemaError,
+                    check_json_tree_budget_details,
+                )
+
+                try:
+                    tree_bytes, tree_nodes = check_json_tree_budget_details(
+                        raw_input, label="Anthropic tool input"
+                    )
+                except ToolInputSchemaError as error:
+                    raise ProviderError("Anthropic tool arguments exceed runtime tree limits") from error
+                total_argument_nodes += tree_nodes
+                if total_argument_nodes > MAX_SCHEMA_TREE_NODES:
+                    raise ProviderError(
+                        f"Anthropic tool arguments exceed the {MAX_SCHEMA_TREE_NODES}-node per-response limit"
+                    )
+                total_argument_bytes += tree_bytes
+                if total_argument_bytes > MAX_TOOL_ARGUMENTS_TOTAL_BYTES:
+                    raise ProviderError(
+                        f"Anthropic tool arguments exceed the {MAX_TOOL_ARGUMENTS_TOTAL_BYTES}-byte per-response limit"
+                    )
+                identifier = _field(block, "id", "") or ""
+                name = _field(block, "name", "") or ""
+                if not isinstance(identifier, str) or not isinstance(name, str):
+                    raise ProviderError("Anthropic tool id and name must be strings")
+                if len(identifier) > MAX_PROVIDER_IDENTIFIER_CHARS or len(name) > MAX_PROVIDER_IDENTIFIER_CHARS:
+                    raise ProviderError("Anthropic tool id or name exceeds the identifier limit")
                 content_blocks.append(
                     ToolUseBlock(
-                        id=str(_field(block, "id", "") or ""),
-                        name=str(_field(block, "name", "") or ""),
+                        id=identifier,
+                        name=name,
                         input=dict(raw_input) if isinstance(raw_input, dict) else {"value": raw_input},
                     )
                 )

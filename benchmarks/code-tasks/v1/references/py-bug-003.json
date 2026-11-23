@@ -1,0 +1,3 @@
+{
+  "csv_summary.py": "\"\"\"Summarize CSV text with columns name and amount.\"\"\"\nimport csv\nimport io\n\ndef summarize(text):\n    count = 0\n    total = 0.0\n    for row in csv.DictReader(io.StringIO(text)):\n        if not any(str(value or \"\").strip() for value in row.values()):\n            continue\n        count += 1\n        total += float(row[\"amount\"])\n    return {\"count\": count, \"total\": total}\n"
+}

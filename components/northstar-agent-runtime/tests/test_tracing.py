@@ -121,7 +121,7 @@ class TimingTests(RuntimeTestCase):
         self.assertTrue(report.ok)
 
     def test_the_subagent_cost_is_visible_on_the_delegation_span(self):
-        parent = self.provider([tool_turn("Task", {"agent": "explorer", "prompt": "look", "usage": None})])
+        parent = self.provider([tool_turn("Task", {"agent": "explorer", "prompt": "look"})])
         child = self.provider([tool_turn("Read", {"path": "a"}, usage={"input_tokens": 500_000})], on_exhausted="stop")
         from agents import AgentRegistry, explorer_agent
 
