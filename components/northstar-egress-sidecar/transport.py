@@ -19,8 +19,24 @@ def encode_response(value: dict[str, Any]) -> str:
 def decode_request(line: str) -> dict[str, Any] | None:
     if not isinstance(line, str) or len(line) > MAX_LINE_CHARS:
         return None
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate JSON key")
+            result[key] = value
+        return result
+
+    def reject_constant(value: str):
+        raise ValueError(f"non-standard JSON constant {value}")
+
     try:
-        value = json.loads(line)
-    except (TypeError, json.JSONDecodeError):
+        value = json.loads(
+            line,
+            object_pairs_hook=unique_object,
+            parse_constant=reject_constant,
+        )
+    except (TypeError, ValueError, RecursionError):
         return None
     return value if isinstance(value, dict) else None

@@ -86,9 +86,11 @@ class Checkpoint:
     policy_revision: str | None = None
     denials: int = 0
     tool_limit_prefix: tuple[str, ...] = ()
+    composition_history: tuple[str, ...] | None = None
+    composition_policy_digest: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "session_id": self.session_id,
             "record_index": self.record_index,
             "transcript_len": self.transcript_len,
@@ -104,6 +106,11 @@ class Checkpoint:
             "policy_revision": self.policy_revision,
             "denials": self.denials,
         }
+        if self.composition_history is not None:
+            payload["composition_history"] = list(self.composition_history)
+        if self.composition_policy_digest is not None:
+            payload["composition_policy_digest"] = self.composition_policy_digest
+        return payload
 
     @property
     def label(self) -> str:
@@ -129,8 +136,21 @@ def build(
     run_id: str | None = None,
     policy_revision: str | None = None,
     denials: int = 0,
+    composition_history: Sequence[str] | None = None,
+    composition_policy_digest: str | None = None,
 ) -> dict[str, Any]:
     """The record payload appended at a boundary. Read-only: nothing here mutates."""
+    if composition_history is not None and (
+        len(composition_history) > 32
+        or any(not isinstance(item, str) or len(item) > 256 for item in composition_history)
+    ):
+        raise CheckpointError("composition_history must contain at most 32 category labels of at most 256 characters")
+    if composition_policy_digest is not None and (
+        not isinstance(composition_policy_digest, str)
+        or len(composition_policy_digest) != 64
+        or any(ch not in "0123456789abcdef" for ch in composition_policy_digest)
+    ):
+        raise CheckpointError("composition_policy_digest must be a lowercase SHA-256 hex digest")
     payload = Checkpoint(
         session_id=session_id,
         record_index=record_index,
@@ -151,6 +171,8 @@ def build(
         run_id=run_id,
         policy_revision=policy_revision,
         denials=denials,
+        composition_history=tuple(composition_history) if composition_history is not None else None,
+        composition_policy_digest=composition_policy_digest,
     )
     return {"agent": "main", **payload.as_dict()}
 
@@ -169,6 +191,20 @@ def from_record(record: Mapping[str, Any]) -> Checkpoint | None:
     missing = [name for name in required if record.get(name) is None]
     if missing:
         raise CheckpointError(f"checkpoint record #{record.get('index')} is missing {', '.join(missing)}")
+    history_raw = record.get("composition_history")
+    if "composition_history" in record and (
+        not isinstance(history_raw, list)
+        or len(history_raw) > 32
+        or any(not isinstance(item, str) or len(item) > 256 for item in history_raw)
+    ):
+        raise CheckpointError("checkpoint composition_history is malformed")
+    policy_digest = record.get("composition_policy_digest")
+    if policy_digest is not None and (
+        not isinstance(policy_digest, str)
+        or len(policy_digest) != 64
+        or any(ch not in "0123456789abcdef" for ch in policy_digest)
+    ):
+        raise CheckpointError("checkpoint composition_policy_digest is malformed")
     return Checkpoint(
         session_id=str(record.get("session_id", "") or ""),
         record_index=int(record.get("index", -1)),
@@ -184,6 +220,8 @@ def from_record(record: Mapping[str, Any]) -> Checkpoint | None:
         run_id=record.get("run_id"),
         policy_revision=record.get("policy_revision"),
         denials=int(record.get("denials", 0) or 0),
+        composition_history=tuple(history_raw) if history_raw is not None else None,
+        composition_policy_digest=policy_digest,
     )
 
 
@@ -201,6 +239,35 @@ def select(records: Sequence[Mapping[str, Any]], *, record_index: int | None = N
             return checkpoint
     available = ", ".join(f"#{item.record_index}" for item in found) or "(none)"
     raise CheckpointError(f"no checkpoint at record #{record_index}; this session has {available}")
+
+
+def _post_checkpoint_tool_call_count(checkpoint: Checkpoint, transcript: Sequence[Any]) -> int:
+    """Count tool calls a checkpoint fork would discard from its parent transcript.
+
+    Replaying one can repeat an external effect that already happened after the
+    checkpoint. The runtime uses this count to require explicit operator
+    acknowledgement before it starts a fork from an older boundary.
+    """
+    from providers.base import AssistantMessage, ToolUseBlock
+
+    count = 0
+    for message in transcript[checkpoint.transcript_len:]:
+        if isinstance(message, AssistantMessage):
+            blocks = message.content
+        elif isinstance(message, Mapping) and (
+            message.get("type") == "assistant" or message.get("role") == "assistant"
+        ):
+            blocks = message.get("content", ())
+        else:
+            continue
+        if not isinstance(blocks, Sequence) or isinstance(blocks, (str, bytes)):
+            continue
+        for block in blocks:
+            if isinstance(block, ToolUseBlock):
+                count += 1
+            elif isinstance(block, Mapping) and block.get("type") == "tool_use":
+                count += 1
+    return count
 
 
 def prepare_resume(

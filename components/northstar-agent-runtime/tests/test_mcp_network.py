@@ -1,10 +1,10 @@
-"""MCP server network confinement: Landlock TCP denial by default.
+"""MCP server network confinement: Landlock TCP and UDP denial by default.
 
 The invariant under test: an MCP server spawned with ``network="denied"``
-(the default) cannot open a TCP connection -- the Landlock loader denies it
-at the kernel level. ``network="allowed"`` is the explicit opt-in to full
-host network. Where the denial cannot be enforced (no Landlock ABI 4+), the
-server refuses to start rather than running unconfined.
+(the default) cannot use TCP or UDP -- the Landlock loader denies both at the
+kernel level. ``network="allowed"`` is the explicit opt-in to full host
+network. Where the denial cannot be enforced for both (below ABI 10), the
+server refuses to start rather than running partially confined.
 """
 import socket
 import subprocess
@@ -24,7 +24,7 @@ from mcp_client import McpError, McpStdioClient
 from tools.sandbox import landlock_abi_version
 
 LINUX = sys.platform.startswith("linux")
-LANDLOCK_TCP = LINUX and landlock_abi_version() >= 4
+LANDLOCK_IP = LINUX and landlock_abi_version() >= 10
 
 
 def _workspace():
@@ -45,8 +45,27 @@ class ModeValidationTests(unittest.TestCase):
         client = McpStdioClient("t", ["echo"])
         self.assertEqual(client.network, "denied")
 
+    def test_filesystem_scope_defaults_to_unconfined(self):
+        self.assertEqual(McpStdioClient("t", ["echo"]).filesystem, "unconfined")
+
+    def test_bad_filesystem_scope_is_rejected(self):
+        with self.assertRaises(ValueError):
+            McpStdioClient("t", ["echo"], filesystem="host")
+
+    def test_filesystem_scope_is_normalized(self):
+        self.assertEqual(
+            McpStdioClient("t", ["echo"], filesystem="WORKSPACE").filesystem,
+            "workspace",
+        )
+
 
 class SpawnArgvTests(unittest.TestCase):
+    def test_landlock_bootstrap_uses_runtime_interpreter_not_path(self):
+        client = McpStdioClient("t", ["echo", "hi"], network="denied", seccomp="off")
+        with mock.patch.object(mcp_client, "landlock_abi_version", return_value=10), \
+             mock.patch.object(mcp_client.shutil, "which", return_value="/tmp/untrusted/python3"):
+            self.assertEqual(client._apply_network_policy(["echo", "hi"])[0], sys.executable)
+
     def _popen_argv(self, **kwargs):
         """Capture the argv connect() hands to Popen (server never starts)."""
         client = McpStdioClient("t", ["echo", "hi"], timeout_ms=5000, workspace_root=_workspace(), **kwargs)
@@ -60,24 +79,166 @@ class SpawnArgvTests(unittest.TestCase):
         self.assertEqual(argv, ["echo", "hi"])
 
     def test_denied_wraps_with_landlock_on_linux(self):
-        if not LANDLOCK_TCP:
-            self.skipTest("needs Linux with Landlock ABI 4+")
-        argv = self._popen_argv(network="denied", seccomp="off")
-        # Landlock loader outside: [python3, -c, LOADER, b64spec, echo, hi]
+        with mock.patch.object(mcp_client, "landlock_abi_version", return_value=10):
+            argv = self._popen_argv(network="denied", seccomp="off")
+        # Landlock loader outside: [python3, -S, -c, LOADER, b64spec, echo, hi]
         self.assertEqual(argv[-2:], ["echo", "hi"])
-        self.assertEqual(argv[1], "-c")
+        self.assertEqual(argv[1:3], ["-S", "-c"])
         import base64, json
 
-        spec = json.loads(base64.b64decode(argv[3]).decode())
-        self.assertFalse(spec["network"], "TCP must be denied")
+        spec = json.loads(base64.b64decode(argv[4]).decode())
+        self.assertFalse(spec["network"], "all handled IP protocols must be denied")
+        self.assertTrue(spec["deny_unix_sockets"])
+        self.assertEqual(spec["scoped"], ["ABSTRACT_UNIX_SOCKET"])
         self.assertEqual(spec["mode"], "on", "fail-closed, not graceful")
 
-    def test_denied_refuses_without_landlock_tcp(self):
-        client = McpStdioClient("t", ["echo"], timeout_ms=5000, workspace_root=_workspace(), network="denied")
+    def test_workspace_scope_wraps_with_fail_closed_filesystem_profile(self):
+        workspace = _workspace()
+        client = McpStdioClient(
+            "t", ["echo", "hi"], timeout_ms=5000, workspace_root=workspace,
+            network="allowed", filesystem="workspace", seccomp="off",
+        )
+        with mock.patch.object(mcp_client, "landlock_abi_version", return_value=1):
+            argv = client._apply_network_policy(["echo", "hi"])
+        import base64, json
+        spec = json.loads(base64.b64decode(argv[4]).decode())
+        self.assertEqual(argv[0], sys.executable)
+        self.assertEqual(argv[-2:], ["echo", "hi"])
+        self.assertEqual(spec["mode"], "on")
+        self.assertFalse(spec["handle_network"], "filesystem confinement must preserve explicit network access")
+        self.assertTrue(any(
+            rule["path"] == workspace and "WRITE_FILE" in rule["rights"]
+            for rule in spec["rules"]
+        ))
+        self.assertFalse(any(rule["path"] == "/" for rule in spec["rules"]))
+
+    def test_workspace_scope_preserves_network_denial_when_selected(self):
+        workspace = _workspace()
+        client = McpStdioClient(
+            "t", ["echo", "hi"], workspace_root=workspace,
+            network="denied", filesystem="workspace", seccomp="off",
+        )
+        with mock.patch.object(mcp_client, "landlock_abi_version", return_value=10):
+            argv = client._apply_network_policy(["echo", "hi"])
+        import base64, json
+        spec = json.loads(base64.b64decode(argv[4]).decode())
+        self.assertTrue(spec["handle_network"])
+        self.assertFalse(spec["network"])
+        self.assertTrue(spec["deny_unix_sockets"])
+        self.assertEqual(spec["scoped"], ["ABSTRACT_UNIX_SOCKET"])
+
+    def test_workspace_scope_refuses_when_landlock_is_unavailable(self):
+        client = McpStdioClient(
+            "t", ["echo"], workspace_root=_workspace(),
+            network="allowed", filesystem="workspace",
+        )
         with mock.patch.object(mcp_client, "landlock_abi_version", return_value=0):
             with self.assertRaises(McpError) as caught:
-                client.connect()
-        self.assertIn("Landlock ABI 4+", str(caught.exception))
+                client._apply_network_policy(["echo"])
+        self.assertIn("Landlock ABI 1+", str(caught.exception))
+
+    def test_workspace_scope_requires_an_existing_workspace(self):
+        client = McpStdioClient(
+            "t", ["echo"], network="allowed", filesystem="workspace",
+        )
+        with mock.patch.object(mcp_client, "landlock_abi_version", return_value=1):
+            with self.assertRaises(McpError) as caught:
+                client._apply_network_policy(["echo"])
+        self.assertIn("absolute workspace directory", str(caught.exception))
+
+    def test_denied_refuses_without_full_tcp_udp_landlock(self):
+        client = McpStdioClient("t", ["echo"], timeout_ms=5000, workspace_root=_workspace(), network="denied")
+        for abi in (0, 4, 9):
+            with self.subTest(abi=abi), mock.patch.object(mcp_client, "landlock_abi_version", return_value=abi):
+                with self.assertRaises(McpError) as caught:
+                    client.connect()
+            self.assertIn("Landlock ABI 10+", str(caught.exception))
+
+
+class LiveFilesystemTests(unittest.TestCase):
+    """Real kernel test that MCP workspace scope denies paths outside the workspace."""
+
+    def test_workspace_scope_denies_outside_reads_and_writes(self):
+        if not LINUX or landlock_abi_version() < 1:
+            self.skipTest("needs Linux with Landlock ABI 1+")
+        import json
+        import textwrap
+
+        with tempfile.TemporaryDirectory(prefix="northstar-mcp-fs-") as temp_root:
+            root = Path(temp_root)
+            workspace = root / "workspace"
+            outside = root / "outside"
+            workspace.mkdir()
+            outside.mkdir()
+            secret = outside / "secret.txt"
+            secret.write_text("must stay outside", encoding="utf-8")
+            out_file = outside / "write.txt"
+            probe = [
+                sys.executable,
+                "-c",
+                textwrap.dedent(
+                    """
+                    import json
+                    import pathlib
+                    import sys
+
+                    workspace, secret, outside_write = map(pathlib.Path, sys.argv[1:])
+                    read_link = workspace / "outside-read-link"
+                    write_link = workspace / "outside-write-link"
+                    read_link.symlink_to(secret)
+                    write_link.symlink_to(outside_write)
+                    try:
+                        secret.read_text(encoding="utf-8")
+                        read_outside = True
+                    except OSError:
+                        read_outside = False
+                    try:
+                        read_link.read_text(encoding="utf-8")
+                        read_symlink_outside = True
+                    except OSError:
+                        read_symlink_outside = False
+                    try:
+                        outside_write.write_text("blocked", encoding="utf-8")
+                        write_outside = True
+                    except OSError:
+                        write_outside = False
+                    try:
+                        write_link.write_text("blocked", encoding="utf-8")
+                        write_symlink_outside = True
+                    except OSError:
+                        write_symlink_outside = False
+                    (workspace / "inside.txt").write_text("allowed", encoding="utf-8")
+                    print(json.dumps({
+                        "read_outside": read_outside,
+                        "read_symlink_outside": read_symlink_outside,
+                        "write_outside": write_outside,
+                        "write_symlink_outside": write_symlink_outside,
+                        "write_workspace": (workspace / "inside.txt").read_text(encoding="utf-8") == "allowed",
+                    }))
+                    """
+                ),
+                str(workspace),
+                str(secret),
+                str(out_file),
+            ]
+            client = McpStdioClient(
+                "fs-probe", probe, workspace_root=str(workspace),
+                network="allowed", filesystem="workspace", seccomp="off",
+            )
+            completed = subprocess.run(
+                client._apply_network_policy(probe),
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            result = json.loads(completed.stdout.strip())
+            self.assertFalse(result["read_outside"])
+            self.assertFalse(result["read_symlink_outside"])
+            self.assertFalse(result["write_outside"])
+            self.assertFalse(result["write_symlink_outside"])
+            self.assertTrue(result["write_workspace"])
+            self.assertFalse(out_file.exists())
 
 
 class LiveDenialTests(unittest.TestCase):
@@ -125,15 +286,96 @@ class LiveDenialTests(unittest.TestCase):
         finally:
             server.close()
 
+    def _try_udp_send(self, network: str) -> bool:
+        receiver = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        receiver.bind(("127.0.0.1", 0))
+        receiver.settimeout(2)
+        port = receiver.getsockname()[1]
+        try:
+            probe = [
+                sys.executable,
+                "-c",
+                "import socket; s=socket.socket(socket.AF_INET, socket.SOCK_DGRAM); "
+                f"s.sendto(b'northstar', ('127.0.0.1', {port}))",
+            ]
+            client = McpStdioClient(
+                "t", probe, timeout_ms=15000, workspace_root=_workspace(),
+                network=network, seccomp="off",
+            )
+            proc = subprocess.run(client._apply_network_policy(probe), capture_output=True, timeout=30)
+            try:
+                received, _ = receiver.recvfrom(128)
+            except TimeoutError:
+                received = b""
+            return proc.returncode == 0 and received == b"northstar"
+        finally:
+            receiver.close()
+
+    def _try_unix_connect(self, network: str, *, abstract: bool) -> bool:
+        with tempfile.TemporaryDirectory(prefix="northstar-unix-") as directory:
+            address = (
+                "\0northstar-" + directory.rsplit("-", 1)[-1]
+                if abstract
+                else f"{directory}/server.sock"
+            )
+            server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            server.bind(address)
+            server.listen(1)
+            server.settimeout(5)
+            probe = [
+                sys.executable,
+                "-c",
+                f"import socket; s=socket.socket(socket.AF_UNIX); s.connect({address!r})",
+            ]
+            try:
+                client = McpStdioClient(
+                    "t", probe, timeout_ms=15000, workspace_root=_workspace(),
+                    network=network, seccomp="off",
+                )
+                proc = subprocess.run(client._apply_network_policy(probe), capture_output=True, timeout=30)
+                try:
+                    conn, _ = server.accept()
+                except TimeoutError:
+                    self.assertNotEqual(proc.returncode, 0, proc.stderr.decode(errors="replace"))
+                    self.assertRegex(
+                        proc.stderr.decode(errors="replace"),
+                        r"PermissionError|Operation not permitted",
+                    )
+                    return False
+                conn.close()
+                return proc.returncode == 0
+            finally:
+                server.close()
+
     def test_denied_blocks_tcp_connect(self):
-        if not LANDLOCK_TCP:
-            self.skipTest("needs Linux with Landlock ABI 4+")
+        if not LANDLOCK_IP:
+            self.skipTest("needs Linux with Landlock ABI 10+")
         self.assertFalse(self._try_connect("denied"), "a denied server must not complete a TCP connect")
 
     def test_allowed_permits_tcp_connect(self):
         if not LINUX:
             self.skipTest("spawn path needs Linux")
         self.assertTrue(self._try_connect("allowed"), "an allowed server keeps working")
+
+    def test_denied_blocks_udp_send(self):
+        if not LANDLOCK_IP:
+            self.skipTest("needs Linux with Landlock ABI 10+")
+        self.assertFalse(self._try_udp_send("denied"), "a denied server must not send UDP")
+
+    def test_allowed_permits_udp_send(self):
+        if not LINUX:
+            self.skipTest("spawn path needs Linux")
+        self.assertTrue(self._try_udp_send("allowed"), "an allowed server keeps working")
+
+    def test_denied_blocks_external_abstract_unix_socket(self):
+        if not LANDLOCK_IP:
+            self.skipTest("needs Linux with Landlock ABI 10+")
+        self.assertFalse(self._try_unix_connect("denied", abstract=True))
+
+    def test_denied_blocks_pathname_unix_socket(self):
+        if not LANDLOCK_IP:
+            self.skipTest("needs Linux with Landlock ABI 10+")
+        self.assertFalse(self._try_unix_connect("denied", abstract=False))
 
 
 if __name__ == "__main__":

@@ -59,6 +59,21 @@ _ESCALATE_PY = (
 )
 
 
+def _unheld_capability():
+    """Return a capability name this process does not hold, or None."""
+    if not LINUX:
+        return None
+    try:
+        sets = read_capability_sets()
+    except Exception:
+        return None
+    permitted = int(sets.get("permitted", 0))
+    for name, bit in sorted(CAPABILITIES.items(), key=lambda kv: kv[1]):
+        if not permitted & (1 << int(bit)):
+            return name
+    return None
+
+
 def _run_loader(whitelist, child_py, timeout=30):
     """Run ``child_py`` under the capdrop loader; return (proc, report)."""
     read_fd, write_fd = os.pipe()
@@ -155,22 +170,22 @@ class LoaderArgvTests(unittest.TestCase):
     def test_shape(self):
         argv = capdrop_loader_argv(["true"], [], fd=7)
         self.assertEqual(argv[0], "python3")
-        self.assertEqual(argv[1], "-c")
+        self.assertEqual(argv[1:3], ["-S", "-c"])
         self.assertEqual(argv[-1], "true")
         config = json.loads(
-            __import__("base64").b64decode(argv[3]).decode("utf-8")
+            __import__("base64").b64decode(argv[4]).decode("utf-8")
         )
         self.assertEqual(config, {"whitelist": [], "fd": 7})
 
     def test_names_and_policy_resolve_to_numbers(self):
         argv = capdrop_loader_argv(["true"], ["CAP_CHOWN", "CAP_SYS_ADMIN"], fd=3)
         config = json.loads(
-            __import__("base64").b64decode(argv[3]).decode("utf-8")
+            __import__("base64").b64decode(argv[4]).decode("utf-8")
         )
         self.assertEqual(config["whitelist"], [0, 21])
         argv2 = capdrop_loader_argv(["true"], CapDropPolicy(frozenset({"CAP_KILL"})), fd=3)
         config2 = json.loads(
-            __import__("base64").b64decode(argv2[3]).decode("utf-8")
+            __import__("base64").b64decode(argv2[4]).decode("utf-8")
         )
         self.assertEqual(config2["whitelist"], [5])
 
