@@ -38,6 +38,9 @@ class PrepareCopiesTheWholeComponentsTree(unittest.TestCase):
         titles = {item[0] for item in tool.GUARDS}
         self.assertIn("plugin digest verification rejects drift", titles)
         self.assertIn("skills audit refuses symlink escapes", titles)
+        self.assertIn("untrusted tool input is bounded before deep copy", titles)
+        self.assertIn("oversized structured tool output is capped before serialization", titles)
+        self.assertIn("delegated tool calls retain the host approval callback", titles)
 
     def test_guard_registry_has_named_extensible_entries(self) -> None:
         self.assertGreaterEqual(len(tool.GUARDS), 6)

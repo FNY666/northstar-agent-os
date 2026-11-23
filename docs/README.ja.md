@@ -6,6 +6,8 @@
 
 **一言で言うと：** Northstar は小さな、まだ開発中の agent ランタイムです — 入口は `northstar agent` 一つ、可視の境界、監査可能性、復旧可能な実行。カーネルは明示的なサブシステム（runtime、contract、host、durable、sidecar、interop）で構成されています。完成したマルチエージェントプラットフォームでは**ありません**（ホスト型クラウドなし、並列フリートなし）。今日提供するのは、agent を安心して動かすための実用的な土台です：**デフォルト拒否のサンドボックス `Shell`**（使える場合は bubblewrap、そうでなければ正直な process フォールバック）、および制限付きローカル worker アダプターである Northstar Codex Sidecar。
 
+保存されたセッションでは、SHA-256 で検証済みの `SKILL.md` を正常に読み込むと、監査イベント `skill_loaded` を記録します。記録にはパスとダイジェストを含め、指示本文は含めません。
+
 > English is the canonical project entry. Translations mirror its scope and security claims; update them when the canonical README changes.
 
 ## これは何か

@@ -1,0 +1,5 @@
+{
+  "schema": "northstar.hidden-check.v1",
+  "command": ["python3", ".northstar_evaluator/test_hidden.py"],
+  "timeout_seconds": 20
+}

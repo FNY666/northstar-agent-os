@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from typing import Any
-from sidecar import MAX_PROMPT_CHARS, classify_request
+from sidecar import MAX_PROMPT_CHARS, _strict_json_loads, classify_request
 
 # Character cap for an already-decoded request line. Any request
 # classify_request accepts stays well below this (a 100,000-character prompt
@@ -38,7 +38,7 @@ def decode_request(line: str) -> dict[str, Any] | None:
     if not isinstance(line, str) or len(line) > MAX_LINE_CHARS:
         return None
     try:
-        value = json.loads(line)
-    except (TypeError, json.JSONDecodeError):
+        value = _strict_json_loads(line)
+    except (TypeError, ValueError, RecursionError):
         return None
     return value if isinstance(value, dict) else None
