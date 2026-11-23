@@ -14,7 +14,7 @@ sys.path.insert(0, ".")
 sys.path.insert(0, "tests")
 
 from support import RuntimeTestCase
-from providers.base import TextBlock, ToolUseBlock, UserMessage
+from providers.base import TextBlock, ToolResultBlock, ToolUseBlock, UserMessage
 from providers.scripted import ScriptedTurn
 
 
@@ -25,41 +25,36 @@ def _stdouts(report):
         # Only process UserMessage with ToolResultBlock content
         if not isinstance(ev, UserMessage):
             continue
-        if not hasattr(ev, 'content') or not hasattr(ev.content, '__iter__'):
-            continue
         for block in ev.content:
-            # Extract from ToolResultBlock
-            if not hasattr(block, 'tool_use_id') or not hasattr(block, 'content'):
+            if not isinstance(block, ToolResultBlock):
                 continue
-            tool_id = block.tool_use_id
-            content_str = block.content
-            # content is a string with "--- stdout ---\nOUTPUT\n--- stderr ---" structure
-            if not isinstance(content_str, str):
-                out[tool_id] = ''  # Negative control: wrong type
-                continue
-            # Extract stdout: from first "--- stdout ---" to next "--- stderr ---" or end
-            stdout_marker = '--- stdout ---'
-            stderr_marker = '--- stderr ---'
-            if stdout_marker in content_str:
-                start = content_str.index(stdout_marker) + len(stdout_marker)
-                # Find end: next stderr marker or end of string
-                if stderr_marker in content_str[start:]:
-                    end = content_str.index(stderr_marker, start)
-                    stdout_text = content_str[start:end]
-                else:
-                    stdout_text = content_str[start:]
-                out[tool_id] = stdout_text.strip()
+            text = block.display_text()
+            if "--- stdout ---" in text:
+                out[block.tool_use_id] = text.split("--- stdout ---", 1)[1].strip()
             else:
-                # No stdout marker: empty output or error-only
-                out[tool_id] = ''
+                # No stdout marker: empty output or error-only.
+                out[block.tool_use_id] = ""
     return out
 
 
 class ShellSessionTests(RuntimeTestCase):
-    def _drive(self, turns):
+    def _drive(self, turns, *, capdrop: str = "on"):
         def approve(tool, args, context):
             return True
-        rt = self.runtime(turns, can_use_tool=approve, allowed_tools=["Shell"])
+        # Session semantics, not sandbox isolation. Pin the backend and the
+        # syscall filter so a host that cannot enforce them still exercises
+        # what these tests are about; capability drop stays on because it is
+        # the default and works on an ordinary Linux host. A caller that
+        # wants the session semantics alone on a host without
+        # /proc/self/status can turn the launcher off.
+        rt = self.runtime(
+            turns,
+            can_use_tool=approve,
+            allowed_tools=["Shell"],
+            shell_backend="process",
+            shell_seccomp="off",
+            shell_capdrop=capdrop,
+        )
         return self.drive(rt)
 
     def _turn(self, tid, tool_input, text="x"):
