@@ -444,7 +444,8 @@ def capdrop_loader_argv(
 ) -> list[str]:
     """Wrap ``target_argv`` so capabilities are dropped before exec.
 
-    Returns ``[python, "-c", LOADER, b64(config), *target_argv]`` where the
+    Returns ``[python, "-S", "-c", LOADER, b64(config), *target_argv]``. ``-S``
+    avoids site startup in a loader that may be nested under Landlock. The
     config carries the whitelist as capability *numbers* and the report fd.
     ``whitelist`` accepts names, numbers, or a :class:`CapDropPolicy`.
     """
@@ -469,7 +470,7 @@ def capdrop_loader_argv(
     config = base64.b64encode(
         json.dumps({"whitelist": sorted(set(numbers)), "fd": fd}).encode("utf-8")
     ).decode("ascii")
-    return [python, "-c", _CAPDROP_LOADER, config, *target_argv]
+    return [python, "-S", "-c", _CAPDROP_LOADER, config, *target_argv]
 
 
 def bwrap_capability_args(whitelist: Sequence[str]) -> list[str]:

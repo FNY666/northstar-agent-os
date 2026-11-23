@@ -13742,10 +13742,10 @@ def _case_landlock_tables_and_spec(h: BenchHarness) -> BenchExpectation:
     spec = build_landlock_spec(paths_read=["/usr"], paths_write=[str(ws)], mode="on")
     argv = landlock_loader_argv(["/bin/true"], spec)
     shape_ok = (
-        len(argv) == 5
+        len(argv) == 6
         and argv[0] == "python3"
-        and argv[1] == "-c"
-        and argv[4:] == ["/bin/true"]
+        and argv[1:3] == ["-S", "-c"]
+        and argv[5:] == ["/bin/true"]
     )
     tighten_ok = resolve_mode("off", "on") == "on" and resolve_mode("on", "auto") == "on"
     # Wrap as a no-op runtime so the runner stays uniform.

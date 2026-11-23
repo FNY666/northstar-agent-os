@@ -260,7 +260,7 @@ class CodeTaskPackTests(unittest.TestCase):
                         ]),
                         evidence_dir=str(root / "evidence"),
                     )
-                self.assertTrue(report.ok)
+                self.assertTrue(report.ok, report.as_dict())
                 self.assertEqual((workspace / "retry.py").read_text(encoding="utf-8"), original)
                 evaluation = RUNNER.evaluate_patch("py-bug-001-bounded-retry", Path(report.patch_path).read_bytes())
                 self.assertTrue(evaluation["ok"])
