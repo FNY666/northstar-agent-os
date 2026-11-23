@@ -15,6 +15,7 @@ import sys
 import tempfile
 from pathlib import Path
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import support  # noqa: F401 — puts the runtime root on sys.path
@@ -839,6 +840,70 @@ class ShellToolTests(RuntimeTestCase):
             sandbox=ToolSandbox(self.root),
             services={"shell_backend": "process"},
         )
+
+    def test_model_payload_cannot_downgrade_operator_bwrap(self):
+        # No command is executed: the spy observes only backend selection. This
+        # self-contained regression protects operator authority on hosts where
+        # bwrap is mocked, absent, or unavailable in CI.
+        ctx = ToolContext(
+            session_id="test",
+            sandbox=ToolSandbox(self.root),
+            services={"shell_backend": "bwrap", "shell_seccomp": "on"},
+        )
+        observed = {}
+
+        def fake_run(request, *, backend):
+            observed["backend"] = backend
+            observed["request"] = request
+            return SimpleNamespace(
+                render=lambda: "exit=0\nbackend=bwrap isolation=os\n(no command executed)",
+                as_dict=lambda: {"backend": backend, "isolation": "os", "exit_code": 0},
+                timed_out=False,
+                truncated=False,
+                aggregate_setup_failed=False,
+                aggregate_cleanup_failed=False,
+            )
+
+        with patch("tools.shell.run_sandboxed", fake_run):
+            result = shell_handler(
+                {"argv": ["/bin/true"], "backend": "process"}, ctx
+            )
+
+        # The model-supplied extra field never reaches the privileged runner:
+        # the operator-selected backend is the one that is used.
+        self.assertFalse(result.is_error)
+        self.assertEqual(observed.get("backend"), "bwrap")
+        spec = build_default_registry().get("Shell")
+        self.assertIs(spec.input_schema.get("additionalProperties"), False)
+        # The same closed schema is sent on the OpenAI-compatible wire.
+        from providers.openai_compat import OpenAICompatProvider
+        wire = OpenAICompatProvider(model="test", client=object()).to_chat_tools([spec.to_api()])
+        self.assertIs(wire[0]["function"]["parameters"].get("additionalProperties"), False)
+
+    def test_operator_selected_process_backend_remains_available(self):
+        ctx = ToolContext(
+            session_id="test",
+            sandbox=ToolSandbox(self.root),
+            services={"shell_backend": "process"},
+        )
+        observed = {}
+
+        def fake_run(request, *, backend):
+            observed["backend"] = backend
+            return SimpleNamespace(
+                render=lambda: "exit=0\\nbackend=process isolation=process\\n(no command executed)",
+                as_dict=lambda: {"backend": backend, "isolation": "process", "exit_code": 0},
+                timed_out=False,
+                truncated=False,
+                aggregate_setup_failed=False,
+                aggregate_cleanup_failed=False,
+            )
+
+        with patch("tools.shell.run_sandboxed", fake_run):
+            result = shell_handler({"argv": ["/bin/true"]}, ctx)
+
+        self.assertFalse(result.is_error)
+        self.assertEqual(observed["backend"], "process")
 
     def test_registry_includes_shell_as_exec_mutating(self):
         registry = build_default_registry()
