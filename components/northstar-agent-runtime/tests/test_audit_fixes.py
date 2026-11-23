@@ -198,6 +198,11 @@ class ApprovalBodyBindingTests(unittest.TestCase):
             provenance=ActionProvenance(agent="main", session_id="s1"),
         )
         self.body = b'{"deploy": true}'
+        approved_request = EgressRequest(
+            request_id="r-1", agent_id="main", run_id="run1",
+            host="hook.internal.example.com", port=443, method="POST",
+            path="/x", body=self.body,
+        )
         self.receipt = build_approval_receipt(
             card_id=self.card.card_id,
             call_id="call-9",
@@ -206,6 +211,7 @@ class ApprovalBodyBindingTests(unittest.TestCase):
             approver_seed=self.seed,
             decided_at=NOW,
             body=self.body,
+            request_shape_hash=approved_request.approval_shape_hash(),
         )
         self.pol = _egress_policy(require_approval=True)
 

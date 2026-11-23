@@ -14,7 +14,7 @@ sys.path.insert(0, ".")
 sys.path.insert(0, "tests")
 
 from support import RuntimeTestCase
-from providers.base import TextBlock, ToolUseBlock, UserMessage
+from providers.base import TextBlock, ToolResultBlock, ToolUseBlock, UserMessage
 from providers.scripted import ScriptedTurn
 
 
@@ -24,35 +24,36 @@ def _stdouts(report):
     for ev in report.events:
         if not isinstance(ev, UserMessage):
             continue
-        for block in ev.tool_results:
-            content = block.text()
-            stdout_marker = "--- stdout ---\n"
-            stderr_marker = "\n--- stderr ---"
-            if stdout_marker in content:
-                stdout = content.split(stdout_marker, 1)[1]
-                if stderr_marker in stdout:
-                    stdout = stdout.split(stderr_marker, 1)[0]
-                out[block.tool_use_id] = stdout.strip()
+        for block in ev.content:
+            if not isinstance(block, ToolResultBlock):
+                continue
+            text = block.display_text()
+            if "--- stdout ---" in text:
+                out[block.tool_use_id] = text.split("--- stdout ---", 1)[1].strip()
             else:
+                # A failed or silent call carries neither marker; record
+                # it as empty so callers never guard a missing key.
                 out[block.tool_use_id] = ""
     return out
 
 
 class ShellSessionTests(RuntimeTestCase):
-    def _drive(self, turns):
+    def _drive(self, turns, *, capdrop: str = "on"):
         def approve(tool, args, context):
             return True
-        # These tests exercise cwd/env lifecycle, not kernel isolation. Use the
-        # portable process backend without optional kernel hardening so they
-        # also run on hosts whose kernels lack Landlock/seccomp support.
+        # Session semantics, not sandbox isolation. Pin the backend and the
+        # syscall filter so a host that cannot enforce them still exercises
+        # what these tests are about; capability drop stays on because it is
+        # the default and works on an ordinary Linux host. A caller that
+        # wants the session semantics alone on a host without
+        # /proc/self/status can turn the launcher off.
         rt = self.runtime(
             turns,
             can_use_tool=approve,
             allowed_tools=["Shell"],
             shell_backend="process",
             shell_seccomp="off",
-            shell_capdrop="off",
-            shell_landlock="off",
+            shell_capdrop=capdrop,
         )
         return self.drive(rt)
 
@@ -155,7 +156,7 @@ class ShellSessionTests(RuntimeTestCase):
                 self._turn(
                     "t1",
                     {
-                        "command": "pwd && (env | grep '^VALUE=' || echo VALUE=unset)",
+                        "command": "pwd && env | grep '^VALUE='",
                         "cwd": "previous-run",
                         "env": {"VALUE": "first-run"},
                         "session": "build",
@@ -165,7 +166,7 @@ class ShellSessionTests(RuntimeTestCase):
                 self._turn(
                     "t2",
                     {
-                        "command": "pwd && (env | grep '^VALUE=' || echo VALUE=unset)",
+                        "command": "pwd && env | grep '^VALUE='",
                         "session": "build",
                     },
                 ),
@@ -193,4 +194,4 @@ class ShellSessionTests(RuntimeTestCase):
         self.assertTrue(first_output.splitlines()[0].endswith("/previous-run"), first_output)
         self.assertIn("VALUE=first-run", first_output)
         self.assertFalse(second_output.splitlines()[0].endswith("/previous-run"), second_output)
-        self.assertIn("VALUE=unset", second_output)
+        self.assertNotIn("VALUE=", second_output)

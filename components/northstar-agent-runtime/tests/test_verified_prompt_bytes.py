@@ -1,5 +1,6 @@
 """Bind reviewed skill metadata and plugin context to the bytes actually consumed."""
 import contextlib
+import hashlib
 import io
 import unittest
 from unittest.mock import patch
@@ -26,6 +27,28 @@ class ReviewedSkillPromptTests(RuntimeTestCase):
 
     def test_replacing_lock_after_check_cannot_change_trusted_pins(self):
         self._check_replacement(repin=True)
+
+    def test_prompt_setup_captures_exact_skill_bytes_for_later_read(self):
+        root = self.workspace()
+        skill = root / '.northstar/skills/demo/SKILL.md'
+        skill.parent.mkdir(parents=True)
+        raw = b'---\nname: demo\ndescription: SAFE_DESCRIPTION\n---\nSafe body\n'
+        skill.write_bytes(raw)
+        guide = skill.parent / 'guide.md'
+        guide.write_text('Reviewed companion instructions.\n')
+        args = cli.build_parser().parse_args([
+            'run', '--workspace', str(root), '--prompt', 'x', '--no-project-context',
+            '--no-memory', '--no-plugins', '--no-workspace-agents',
+        ])
+        setup = cli.compose_system_prompt(args, None, None, None)
+        self.assertEqual(
+            setup.skill_digests['.northstar/skills/demo/SKILL.md'],
+            hashlib.sha256(raw).hexdigest(),
+        )
+        self.assertEqual(
+            setup.skill_digests['.northstar/skills/demo/guide.md'],
+            hashlib.sha256(guide.read_bytes()).hexdigest(),
+        )
 
     def _check_replacement(self, *, repin):
         root = self.workspace()

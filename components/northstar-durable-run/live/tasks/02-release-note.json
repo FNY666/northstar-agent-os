@@ -1,0 +1,13 @@
+{
+  "schema_version": "northstar.live-task.v1",
+  "task_id": "live-release-note-v2",
+  "goal": "Inspect the workspace, read CHANGELOG.md, then write out/release-note.md summarizing the latest release. Include the version, the release title, and the first listed change. Use workspace.list before repo.read, then use workspace.write.",
+  "rounds": 3,
+  "seed": {
+    "README.md": "Read the changelog and produce the requested release note at out/release-note.md.\n",
+    "CHANGELOG.md": "# Changelog\n\n## 2.4.0 - 2026-09-10\n\n- Add governed workspace exploration.\n- Improve recovery evidence.\n"
+  },
+  "expect": [
+    {"path": "out/release-note.md", "contains": ["2.4.0", "2026-09-10", "governed workspace exploration"]}
+  ]
+}
