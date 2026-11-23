@@ -393,7 +393,6 @@ def test_main_self_check():
         [sys.executable, "ida.py"],
         capture_output=True,
         text=True,
-        cwd=Path(__file__).resolve().parents[1],
         cwd=Path(__file__).resolve().parent.parent,
         timeout=30,
     )
