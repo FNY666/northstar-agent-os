@@ -21,10 +21,13 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from frontier_registry import (  # noqa: E402
+    SEED_ENTRIES,
+    SURVEY_ROUND,
     VERDICTS,
     FrontierEntry,
     FrontierRegistry,
     FrontierRegistryError,
+    load_seed_registry,
 )
 
 
@@ -227,6 +230,83 @@ class InvalidInputTests(unittest.TestCase):
 
     def test_the_verdict_vocabulary_is_the_documented_one(self):
         self.assertEqual(("absorb-now", "absorb-later", "reject"), VERDICTS)
+
+
+class SeedRegistryTests(unittest.TestCase):
+    """The seeded rows -- the survey's own data -- are checked here.
+
+    Without these, the registry would be machinery with nothing in it, and
+    the design document's claim that it "holds one entry per surveyed
+    approach" would be false.
+    """
+
+    def test_the_seed_holds_one_row_per_surveyed_source(self):
+        self.assertEqual(20, len(SEED_ENTRIES))
+
+    def test_the_seed_urls_are_all_distinct(self):
+        urls = [entry.source_url for entry in SEED_ENTRIES]
+        self.assertEqual(len(urls), len(set(urls)))
+
+    def test_the_seed_rows_are_all_well_formed(self):
+        for entry in SEED_ENTRIES:
+            self.assertIn(entry.verdict, VERDICTS)
+            self.assertTrue(entry.name.strip())
+            self.assertTrue(entry.category.strip())
+            self.assertTrue(entry.source_url.startswith("http"))
+
+    def test_every_seed_row_names_the_document_record_it_comes_from(self):
+        for entry in SEED_ENTRIES:
+            self.assertTrue(
+                entry.notes.startswith("Record S"),
+                "%s does not name its record" % entry.name,
+            )
+
+    def test_the_seed_has_both_absorbed_and_deferred_rows(self):
+        verdicts = {entry.verdict for entry in SEED_ENTRIES}
+        self.assertEqual({"absorb-now", "absorb-later"}, verdicts)
+
+    def test_the_three_follow_up_slices_are_linked_from_the_seed(self):
+        linked = {entry.linked_slice for entry in SEED_ENTRIES if entry.linked_slice}
+        self.assertEqual(
+            {
+                "memory-provenance-axis",
+                "agent-authorization-boundary",
+                "state-transfer-audit",
+            },
+            linked,
+        )
+
+    def test_loading_the_seed_gives_a_registry_of_the_surveyed_rows(self):
+        reg = load_seed_registry()
+        self.assertEqual(len(SEED_ENTRIES), len(reg))
+        self.assertIn("https://arxiv.org/abs/2606.30306", reg)
+
+    def test_the_loaded_seed_is_a_copy_and_does_not_mutate_the_constant(self):
+        reg = load_seed_registry()
+        reg.transition("https://arxiv.org/abs/2606.30306", "absorb-later")
+        self.assertEqual(
+            "absorb-now",
+            next(
+                e.verdict
+                for e in SEED_ENTRIES
+                if e.source_url == "https://arxiv.org/abs/2606.30306"
+            ),
+        )
+
+    def test_a_later_round_can_append_to_the_loaded_seed(self):
+        reg = load_seed_registry()
+        before = len(reg)
+        reg.add(
+            FrontierEntry(
+                name="a later source",
+                source_url="https://example.com/round-two",
+                category="memory",
+                verdict="absorb-later",
+                status="surveyed",
+            )
+        )
+        self.assertEqual(before + 1, len(reg))
+        self.assertEqual(before, len(load_seed_registry()))
 
 
 if __name__ == "__main__":

@@ -298,3 +298,291 @@ class FrontierRegistry:
     def source_urls(self) -> List[str]:
         """Return every source URL, in listing order."""
         return [entry.source_url for entry in self._entries]
+
+
+#: The survey round this registry holds.  A later round adds its own rows;
+#: it does not rewrite this one.
+SURVEY_ROUND = "2026-11-23"
+
+#: The seed rows: the twenty sources the first expansion round surveyed.
+#:
+#: These are the *data* of the survey, kept beside the machinery so the
+#: registry is usable without parsing the design document.  The document
+#: remains the place with the verbatim quotes; a row here carries the
+#: claim in short form, and ``notes`` names the record in the document
+#: that holds the full text.
+#:
+#: ``linked_slice`` names the follow-up slice for the sources that became
+#: one; ``None`` means the survey did not turn this source into a slice.
+SEED_ENTRIES: Tuple[FrontierEntry, ...] = (
+    FrontierEntry(
+        name="Always-On Agents survey (Ding et al., June 2026)",
+        source_url="https://arxiv.org/abs/2606.30306",
+        category="memory / state governance",
+        verdict="absorb-now",
+        status="proposed",
+        linked_slice="memory-provenance-axis",
+        notes=(
+            "Record S1. Names six diagnostic axes for persistent agent state and a "
+            "nine-step lifecycle; says the field can write and retrieve state but "
+            "not audit, roll back, or govern authority over it."
+        ),
+    ),
+    FrontierEntry(
+        name="sentinel-mem",
+        source_url="https://github.com/rajesamp/sentinel-mem",
+        category="memory / provenance",
+        verdict="absorb-now",
+        status="proposed",
+        linked_slice="memory-provenance-axis",
+        notes=(
+            "Record S2. Applies the Biba integrity model to the memory-write "
+            "boundary; says revocation is computable over a hash-chained ledger "
+            "that reaches transitively tainted memories."
+        ),
+    ),
+    FrontierEntry(
+        name="agent-guard",
+        source_url="https://github.com/agent-rails/agent-guard",
+        category="authorization / governance",
+        verdict="absorb-now",
+        status="proposed",
+        linked_slice="agent-authorization-boundary",
+        notes=(
+            "Record S3. Says policy is evaluated before the tool runs, denied "
+            "calls never reach the tool, approval-required calls fail closed "
+            "without an approver, and the decision is written to an audit sink."
+        ),
+    ),
+    FrontierEntry(
+        name="Steward",
+        source_url="https://github.com/Mohil-Ahuja/Steward",
+        category="authorization / red-team",
+        verdict="absorb-now",
+        status="proposed",
+        linked_slice="agent-authorization-boundary",
+        notes=(
+            "Record S4. Wraps tool results in an untrusted-tool-output envelope; "
+            "names scope_abuse as an open problem in its own scoreboard."
+        ),
+    ),
+    FrontierEntry(
+        name="State-Transfer Auditing (arXiv 2611.23346)",
+        source_url="https://arxiv.org/html/2611.23346v1",
+        category="observability / auditability",
+        verdict="absorb-now",
+        status="proposed",
+        linked_slice="state-transfer-audit",
+        notes=(
+            "Record S5. Says critical failures occur during state transfers, and "
+            "that current traces omit what crosses those boundaries, so failure "
+            "attribution and runtime monitors fail on multi-step trajectories."
+        ),
+    ),
+    FrontierEntry(
+        name="agentmem",
+        source_url="https://github.com/AgentMem/agentmem",
+        category="memory / evidence",
+        verdict="absorb-later",
+        status="surveyed",
+        linked_slice=None,
+        notes=(
+            "Record S6. Captures actions at the tool boundary rather than "
+            "scraping the agent's account of itself; checks every claim against "
+            "the repository and git, and flags what the record cannot confirm."
+        ),
+    ),
+    FrontierEntry(
+        name='Anthropic, "Effective harnesses for long-running agents"',
+        source_url="https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents",
+        category="harness / long-horizon",
+        verdict="absorb-later",
+        status="surveyed",
+        linked_slice=None,
+        notes=(
+            "Record S7. Uses an initializer agent to leave a progress log and an "
+            "initial commit, so a fresh context window can find the state of work."
+        ),
+    ),
+    FrontierEntry(
+        name='Anthropic, "Harness design for long-running application development"',
+        source_url="https://www.anthropic.com/engineering/harness-design-long-running-apps",
+        category="harness / evals",
+        verdict="absorb-later",
+        status="surveyed",
+        linked_slice=None,
+        notes=(
+            "Record S8. Says every harness component encodes an assumption about "
+            "what the model cannot do on its own, and that those assumptions go "
+            "stale as models improve."
+        ),
+    ),
+    FrontierEntry(
+        name='Anthropic, "How we contain Claude across products"',
+        source_url="https://www.anthropic.com/engineering/how-we-contain-claude",
+        category="blue-team / containment",
+        verdict="absorb-later",
+        status="surveyed",
+        linked_slice=None,
+        notes=(
+            "Record S9. Reports that users approved roughly 93% of permission "
+            "prompts, and argues for containing credentials in the sandbox so a "
+            "tight perimeter lets oversight relax."
+        ),
+    ),
+    FrontierEntry(
+        name='Anthropic, "Scaling Managed Agents: Decoupling the brain from the hands"',
+        source_url="https://www.anthropic.com/engineering/managed-agents",
+        category="harness / architecture",
+        verdict="absorb-later",
+        status="surveyed",
+        linked_slice=None,
+        notes=(
+            "Record S10. Separates the session, the harness and the sandbox, and "
+            "says the session is not the context window: long-horizon tasks "
+            "exceed it, and the usual fixes involve irreversible decisions."
+        ),
+    ),
+    FrontierEntry(
+        name='LangChain, "Better Harness: A Recipe for Harness Hill-Climbing with Evals"',
+        source_url="https://www.langchain.com/blog/better-harness-a-recipe-for-harness-hill-climbing-with-evals",
+        category="evals / continuous learning",
+        verdict="absorb-later",
+        status="surveyed",
+        linked_slice=None,
+        notes=(
+            "Record S11. Calls evals the training data for harness engineering, "
+            "and tags every eval to behavioural categories so holdout sets and "
+            "targeted experiments are possible."
+        ),
+    ),
+    FrontierEntry(
+        name='LangChain, "How we build evals for Deep Agents"',
+        source_url="https://www.langchain.com/blog/how-we-build-evals-for-deep-agents",
+        category="evals",
+        verdict="absorb-later",
+        status="surveyed",
+        linked_slice=None,
+        notes=(
+            "Record S12. Separates SDK unit and integration tests from model "
+            "capability evals, because any model passes the former, so they add "
+            "no signal to scoring."
+        ),
+    ),
+    FrontierEntry(
+        name='Google Developers Blog, "The Anatomy of Harness Engineering"',
+        source_url="https://developers.googleblog.com/en/the-anatomy-of-harness-engineering-how-to-evaluate-iterate-and-guard-ai-coding-agents/",
+        category="evals",
+        verdict="absorb-later",
+        status="surveyed",
+        linked_slice=None,
+        notes=(
+            "Record S13. Prefers behavioural evaluations over outcome metrics, "
+            "and separates assertions into fast deterministic unit-style checks "
+            "that run locally."
+        ),
+    ),
+    FrontierEntry(
+        name='Braintrust, "Behavior specs, an open standard for supervising long-horizon agents"',
+        source_url="https://www.braintrust.dev/blog/behavior-specs",
+        category="evals / process supervision",
+        verdict="absorb-later",
+        status="surveyed",
+        linked_slice=None,
+        notes=(
+            "Record S14. Says one trajectory makes hundreds of decisions, so it "
+            "cannot be reduced to one outcome metric, and that long-horizon "
+            "agents require supervising the process, not only the result."
+        ),
+    ),
+    FrontierEntry(
+        name='Arize, "Long-horizon agent benchmarks are fragmenting: a field guide"',
+        source_url="https://arize.com/blog/long-horizon-agent-benchmarks-field-guide",
+        category="evals / red-team",
+        verdict="absorb-later",
+        status="surveyed",
+        linked_slice=None,
+        notes=(
+            "Record S15. Reports reward-hacking in 30% or more of runs for some "
+            "models, and 14% across 1,300 rollouts -- the predictable result of "
+            "optimizing an agent against the environment that scores it."
+        ),
+    ),
+    FrontierEntry(
+        name="Reddit r/AI_Agents, memory revocation preprint discussion",
+        source_url="https://www.reddit.com/r/AI_Agents/comments/1xlmhkc/preprint_in_two_agent_memory_setups_revoked/",
+        category="memory / red-team",
+        verdict="absorb-now",
+        status="proposed",
+        linked_slice="memory-provenance-axis",
+        notes=(
+            "Record S16. Reports that only two setups returned a revoked record, "
+            "that it ranked first in every scenario, and that agents took the "
+            "unsafe action in more than two of every five trials."
+        ),
+    ),
+    FrontierEntry(
+        name='Reddit r/LocalLLaMA, "I ran 500 more agent memory experiments and the real problem was not recall. It was binding."',
+        source_url="https://www.reddit.com/r/LocalLLaMA/comments/1sk656i/i_ran_500_more_agent_memory_experiments_and_the/",
+        category="memory",
+        verdict="absorb-later",
+        status="surveyed",
+        linked_slice=None,
+        notes=(
+            "Record S17. Reports that of 250 tasks, recall was attempted in 51 "
+            "and the recalled skill was actually used in 0; argues a useful "
+            "memory is a bound structure, not a bare procedural pattern."
+        ),
+    ),
+    FrontierEntry(
+        name='Reddit r/LLMDevs, "Agent memory is a joke right now."',
+        source_url="https://www.reddit.com/r/LLMDevs/comments/1xcatnx/agent_memory_is_a_joke_right_now_how_are_you/",
+        category="memory / community",
+        verdict="absorb-now",
+        status="proposed",
+        linked_slice="memory-provenance-axis",
+        notes=(
+            "Record S18. Argues for keeping human approval before anything lands "
+            "in shared memory, because a poisoned page can be copied into a note "
+            "that every teammate's agent then reads at startup."
+        ),
+    ),
+    FrontierEntry(
+        name='Hacker News, "What Is a Harness?"',
+        source_url="https://news.ycombinator.com/item?id=49409092",
+        category="community / harness",
+        verdict="absorb-later",
+        status="surveyed",
+        linked_slice=None,
+        notes=(
+            "Record S19. A community thread reporting that frontier models "
+            "outperformed highly prescriptive skills, and pointing at provenance "
+            "delimiters for injection defence. Community opinion, not a "
+            "measured claim of Northstar's."
+        ),
+    ),
+    FrontierEntry(
+        name='Moltbook m/general, "Most agents authorize the tool, not the boundary"',
+        source_url="https://www.moltbook.com/",
+        category="authorization / community",
+        verdict="absorb-now",
+        status="proposed",
+        linked_slice="agent-authorization-boundary",
+        notes=(
+            "Record S20. Reports twelve experiments against four agent "
+            "frameworks where failures clustered at the seams, and argues the "
+            "re-check must fire at delegation time, not at call time."
+        ),
+    ),
+)
+
+
+def load_seed_registry() -> "FrontierRegistry":
+    """Return a registry holding the rows of the first expansion round.
+
+    The seed is *copied*, not shared: the returned registry is a fresh object
+    the caller may transition freely without touching the module-level
+    constant.  A later survey round appends to this registry rather than
+    replacing it, which is what makes the survey cumulative.
+    """
+    return FrontierRegistry(SEED_ENTRIES)

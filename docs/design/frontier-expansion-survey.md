@@ -322,6 +322,14 @@ the task book names — `name`, `source_url`, `category`, `verdict`, `status`,
 `linked_slice` — plus `notes`, so the registry itself carries the evidence rather than
 only a pointer to a document.
 
+The module ships the survey's own rows as `SEED_ENTRIES` (twenty entries, one per
+source record in section 2) and `load_seed_registry()` returns a fresh registry holding
+them. The seed is *copied*, not shared: a caller may transition its registry freely
+without touching the module constant. The rows carry each source's claim in short form
+and name the section-2 record that holds the full verbatim text; the document remains
+the authority for quotations. `SURVEY_ROUND` names the round the seed belongs to.
+
+
 The rules the module enforces, and why each matters for a *cumulative* survey:
 
 - **Identity is `source_url`.** The same upstream project is found through several
@@ -337,8 +345,12 @@ The rules the module enforces, and why each matters for a *cumulative* survey:
   comparable.
 
 **Round 2's protocol:** read this document, read the registry, and *do not re-read a
-source whose URL is already in the registry*. Add only new sources; if a source is
-re-found, `add()` returns the existing entry and the round's notes say so.
+source whose URL is already in the registry*. Start from `load_seed_registry()`, append
+only new sources; if a source is re-found, `add()` returns the existing entry and the
+round's notes say so. The three follow-up slices below find their source rows already
+present, with `linked_slice` already set — a follow-up slice updates its row's `status`
+to `implemented` rather than adding a duplicate.
+
 
 ---
 

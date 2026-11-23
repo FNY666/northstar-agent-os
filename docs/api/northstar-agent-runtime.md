@@ -43729,6 +43729,10 @@ The registry of surveyed approaches.
   - Return every entry as a plain dict, in listing order.
 - `source_urls()`
   - Return every source URL, in listing order.
+#### `load_seed_registry()`
+
+Return a registry holding the rows of the first expansion round.
+
 ### `frontmatter`
 
 Source: `components/northstar-agent-runtime/frontmatter.py`
