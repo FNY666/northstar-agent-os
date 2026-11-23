@@ -226,13 +226,19 @@ class Budget:
     _reservations: dict[int, float] = field(default_factory=dict, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        if self.max_budget_usd is not None and (
-            isinstance(self.max_budget_usd, bool)
-            or not isinstance(self.max_budget_usd, (int, float))
-            or not math.isfinite(float(self.max_budget_usd))
-            or self.max_budget_usd <= 0
+        if self.max_budget_usd is None:
+            return
+        if isinstance(self.max_budget_usd, bool) or not isinstance(
+            self.max_budget_usd, (int, float)
         ):
-            raise ValueError("max_budget_usd must be a finite positive number or None")
+            raise ValueError("max_budget_usd must be a positive finite number or None")
+        try:
+            ceiling = float(self.max_budget_usd)
+        except OverflowError as error:
+            raise ValueError("max_budget_usd must be a positive finite number or None") from error
+        if not math.isfinite(ceiling) or ceiling <= 0:
+            raise ValueError("max_budget_usd must be a positive finite number or None")
+        self.max_budget_usd = ceiling
 
     def reserve(self, amount_usd: float) -> BudgetReservation | None:
         """Atomically reserve request capacity before a provider attempt.
