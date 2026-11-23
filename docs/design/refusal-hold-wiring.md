@@ -1185,3 +1185,57 @@ about the claim path this section closes.  The honest statement is: the
 queue-side gate treats **every** `retry()` as a re-dispatch, including
 the mirror's internal ones, and that is a decision this slice has not
 yet made deliberately.
+
+## 12. OPEN 2026-11-23 — the strands slice's BENCH_DIFF is a baseline-pointer question, not a strands question
+
+`b173-accept.sh strands` reports `FAIL (10/11, 1 skipped)` with one failing
+item, `BENCH_DIFF`:
+
+```
+FAIL BENCH_DIFF 8 item(s) differ from baseline 2db42e939477bc2ceca9f20d35384dfc7731e972 set
+```
+
+**The mechanism, measured.**  `b173-accept.sh`'s `BENCH_DIFF` compares the
+slice's bench artifact's failing-item SET against the baseline file the
+pointer `b173-bench-baseline-CURRENT` names.  The pointer names
+
+    b173-bench-baseline-2db42e939477bc2ceca9f20d35384dfc7731e972.failures.txt
+
+which holds **8** failing items.  A newer baseline file exists on the
+machine and is **EMPTY** --
+`b173-bench-baseline-69578b51b45d823e106ea48b1ca4c31366c101f0.failures.txt`
+-- because A-1..A-3 (the seccomp fd rewind, the Landlock path filter, the
+bench command rewrites) turned all 8 green.  The pointer was never moved.
+
+**And no single pointer satisfies every slice.**  The bench failing-item set
+is **per-era**: an artifact run before the fixes carries the 8 items, and an
+artifact run after them carries 0.  Measured with the pointer moved to the
+new file, on two slices that sit on opposite sides of the fix:
+
+| slice | pointer at OLD (8 items) | pointer at NEW (0 items) |
+|---|---|---|
+| `strands` (artifact re-run 2026-11-23, after the fixes) | FAIL 10/11 | **PASS 11/11** |
+| `fable` (artifact run 2026-11-14, before the fixes) | PASS 12/12 | **FAIL 11/12** |
+
+**So re-pointing the bench baseline is not a fix -- it is a trade**, and it
+is the **coordinator's** call (`docs/design/r6-baseline-unify.md` §5.1: "a
+slice that legitimately fixes a pre-existing failure will show 'fewer items
+than the baseline', which is a real finding to report, not a reason to
+re-take the baseline").  This slice therefore reports it and does not do it.
+
+**The repo's own CI is not affected.**  `scripts/b173-baseline-check.sh`
+prefers the coordinator's file but falls back to
+`docs/baseline/current.failures.txt`, which is **EMPTY** and matches the
+current tree.  A CI runner has no `/home/muse-newapi`, so it selects the
+local copy and reports MATCH.  The full-suite pointer
+`b173-baseline-CURRENT` names the same retired 26-item baseline, and it is
+the same question.
+
+**A note on how this was measured.**  The pointer was moved and restored
+while the component suite was running in the background, and the
+`test_r8_tests_ran_ownership` test -- which shells out to `b173-accept.sh`
+-- read the moved pointer mid-run and failed.  That failure was **this
+measurement's interference**, not a defect: re-running the test clean gives
+9 passed.  A file in the coordinator's directory is shared state, and
+changing it while another job reads it is the same mistake as editing a
+file another agent is working in.
