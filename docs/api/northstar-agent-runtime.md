@@ -99521,9 +99521,11 @@ SQL injection detection in output (D-OUT-023), Simulated.
 
 Source: `components/northstar-agent-runtime/ssrf_detect.py`
 
-SSRF detection in output (D-OUT-027), Simulated.
+Detect literal non-public HTTP(S) destinations in untrusted output.
 
 #### `is_private_url(url: str)`
+
+Return whether an HTTP(S) URL names localhost or a non-global IP.
 
 #### `stdlib_only()`
 
