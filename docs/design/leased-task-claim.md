@@ -6,10 +6,10 @@
 
 Scope: this slice wires **the reaper and the fencing-token claim** between the
 existing queue ledger and a lease. It does **not** port the whole
-`agent-task-runtime` repository. `distributed_lock.py`, `job_queue.py`,
-`outbox_pattern.py`, `dead_letter_queue.py` and `checkpoints.py` are
-**read-only reused** — this module imports their public shapes and never
-edits them.
+`agent-task-runtime` repository. `distributed_lock.py`, `outbox_pattern.py`, `dead_letter_queue.py` and
+`checkpoints.py` are **read-only reused** — this module imports their public
+shapes and never edits them. `job_queue.py` was read-only reused at first and
+is **AMENDED 2026-11-23** to be edited — see §4.
 
 ---
 
@@ -126,8 +126,18 @@ LeasedTaskClaim(*, path=":memory:", queue=None, dead_letters=None,
 
 * It does not port `agent-task-runtime`. Only the reaper + the
   fencing-token claim are cut.
-* It does not change `distributed_lock.py`, `job_queue.py`,
-  `outbox_pattern.py`, `dead_letter_queue.py` or `checkpoints.py`.
+* It does not change `distributed_lock.py`, `outbox_pattern.py`,
+  `dead_letter_queue.py` or `checkpoints.py`.
+* **AMENDED 2026-11-23:** it now changes `job_queue.py`. The
+  original slice left it read-only, but the mirror turned out to need
+  two operations the queue ledger did not have: a **terminal failure**
+  (`JobQueue.dead()`, for a task whose failure budget is exhausted) and
+  a **batch-safe re-dispatch** (`JobQueue.retry_allowed()`, for the
+  reaper's sweep). Without them a *completed* task's mirror job went
+  back to `ready` -- the queue then handed out a finished task's job --
+  and a refused mirror release left the two ledgers out of step. The
+  queue's version and schema pins are unchanged; the reasoning is in
+  `docs/design/refusal-hold-wiring.md` §13.
 * It does not implement a delivery loop: the outbox rows are written and
   marked; *sending* them is the host's job (`outbox_pattern` has no
   dispatcher either).
@@ -147,6 +157,11 @@ LeasedTaskClaim(*, path=":memory:", queue=None, dead_letters=None,
    commit and the mirror update would leave the two out of step. The
    `QueueMirrorError` fails closed when the mirror disagrees, but the
    reconciliation is the host's job.
+   **AMENDED 2026-11-23 (`refusal-hold-wiring.md` §13):** the mirror
+   calls are now inside the transactions — a refused mirror release
+   rolls the lease write back, so the two ledgers cannot be left
+   disagreeing by a *refusal*. The crash window itself is narrowed,
+   not closed: the mirror is still an in-process ledger.
 2. **The clock is wall-clock.** A clock that jumps backwards can extend a
    lease; one that jumps forward can expire it early. The source has the
    same property. A monotonic clock would be better but cannot be persisted

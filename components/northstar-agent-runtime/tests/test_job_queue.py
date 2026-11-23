@@ -22,6 +22,7 @@ from job_queue import (
     BadTaskError,
     BadWorkerError,
     DequeuedJob,
+    DeadRecord,
     DuplicateJobError,
     EnqueueRecord,
     JobQueue,
@@ -345,6 +346,212 @@ def test_stats_and_queue_isolation():
     # dequeue from default does not touch critical's reservation
     got = jq.dequeue("w-2", "default", 4)
     assert got is not None and got.job_id == "a"
+
+
+# ---------------------------------------------------------------------------
+# 16. dead(): terminal FAILURE, distinct from ack() and retry()
+# ---------------------------------------------------------------------------
+#
+# WHY THIS OPERATION EXISTS (measured 2026-11-23)
+# ----------------------------------------------
+# ``ack()`` is terminal success and ``retry()`` is a re-dispatch.  A
+# work item that failed for good had NO terminal operation: the only
+# way to make a job terminal-failed was to exhaust its retry budget,
+# which also books a ``MaxRetriesExceededError``.
+#
+# The lease mirror needed the missing operation: a task whose failure
+# budget is exhausted is ``dead`` in the lease ledger, and its mirror
+# job was being put back to ``ready`` -- so the queue advertised a
+# finished work item as available.  See
+# ``docs/design/refusal-hold-wiring.md`` §13.
+
+
+def test_dead_moves_a_reserved_job_to_dead():
+    jq = JobQueue()
+    _enqueue(jq, seq=1)
+    assert jq.dequeue("w-1", "default", 2) is not None
+    rec = jq.dead("j-1", 3)
+    assert isinstance(rec, DeadRecord)
+    assert rec.attempts == 1 and rec.verify()
+    assert jq.job("j-1").state == "dead"
+    assert jq.reserved() == ()
+
+
+def test_a_dead_job_is_never_handed_out_again():
+    """The point of a terminal state: it is not eligible."""
+    jq = JobQueue()
+    _enqueue(jq, seq=1)
+    jq.dequeue("w-1", "default", 2)
+    jq.dead("j-1", 3)
+    assert jq.dequeue("w-2", "default", 4) is None
+    assert jq.ready("default") == ()
+
+
+def test_dead_is_terminal():
+    """Every other mutation fails closed on a dead job."""
+    jq = JobQueue()
+    _enqueue(jq, seq=1)
+    jq.dequeue("w-1", "default", 2)
+    jq.dead("j-1", 3)
+    with pytest.raises(JobStateError):
+        jq.dead("j-1", 4)
+    with pytest.raises(JobStateError):
+        jq.ack("j-1", 5)
+    with pytest.raises(JobStateError):
+        jq.retry("j-1", 6)
+
+
+def test_dead_of_a_job_that_is_not_reserved_fails_closed():
+    jq = JobQueue()
+    _enqueue(jq, seq=1)
+    with pytest.raises(JobStateError):
+        jq.dead("j-1", 2)
+    with pytest.raises(UnknownJobError):
+        jq.dead("ghost", 3)
+
+
+def test_dead_is_audited():
+    jq = JobQueue()
+    _enqueue(jq, seq=1)
+    jq.dequeue("w-1", "default", 2)
+    jq.dead("j-1", 3)
+    kinds = [row["kind"] for row in jq.audit_log()]
+    assert kinds == ["job.enqueued", "job.dequeued", "job.dead"]
+    row = jq.audit_log()[-1]
+    assert row["detail"] == {"job_id": "j-1", "attempts": 1}
+
+
+def test_dead_counts_in_the_stats():
+    jq = JobQueue()
+    _enqueue(jq, seq=1)
+    jq.dequeue("w-1", "default", 2)
+    jq.dead("j-1", 3)
+    assert jq.stats().dead == 1
+
+
+def test_dead_does_not_consult_the_refusal_gate():
+    """A refusal is about the RE-DISPATCH, not about the withdrawal.
+
+    A refusal must not be able to keep a finished work item in the
+    queue forever -- that would be the refusal's own denial of
+    service.  So ``dead()`` does not ask the gate, exactly as
+    ``ack()`` does not.
+    """
+    class RefusingGate:
+        def __init__(self):
+            self.asked = 0
+
+        def require_queue_allowed(self, job_id, action, *, now=None):
+            self.asked += 1
+            raise AssertionError("the gate must not be asked by dead()")
+
+    jq = JobQueue(refusal_gate=RefusingGate())
+    _enqueue(jq, seq=1)
+    jq.dequeue("w-1", "default", 2)
+    jq.dead("j-1", 3)
+    assert jq.job("j-1").state == "dead"
+
+
+# ---------------------------------------------------------------------------
+# 17. retry_allowed(): the batch-safe form of retry()
+# ---------------------------------------------------------------------------
+#
+# ``retry()`` RAISES when the refusal gate refuses the re-dispatch.
+# That is right for a caller that reports ONE job for ONE call, and
+# wrong for a caller that sweeps a BATCH: one refused job would
+# abandon the whole sweep.
+
+
+class _RefusingGate:
+    """A gate that refuses every job, and counts how often it was asked."""
+
+    def __init__(self):
+        self.asked = 0
+
+    def require_queue_allowed(self, job_id, action, *, now=None):
+        self.asked += 1
+        raise job_queue.JobQueueError("refused")
+
+
+def test_retry_allowed_returns_none_for_a_refused_job():
+    jq = JobQueue(refusal_gate=_RefusingGate())
+    _enqueue(jq, seq=1)
+    jq.dequeue("w-1", "default", 2)
+    assert jq.retry_allowed("j-1", 3) is None
+    assert jq.job("j-1").state == "reserved"
+
+
+def test_retry_allowed_does_not_raise_on_a_refusal():
+    """The whole point: one refused job must not abandon the sweep."""
+    jq = JobQueue(refusal_gate=_RefusingGate())
+    _enqueue(jq, seq=1)
+    jq.dequeue("w-1", "default", 2)
+    jq.retry_allowed("j-1", 3)   # must not raise
+
+
+class _CountingGate:
+    """A gate that ALLOWS every job, and counts how often it was asked."""
+
+    def __init__(self):
+        self.asked = 0
+
+    def require_queue_allowed(self, job_id, action, *, now=None):
+        self.asked += 1
+
+
+def test_retry_allowed_asks_the_gate_exactly_once():
+    """A batch of one job is ONE check, not two.
+
+    The batch form and the raising form share one writer, so the
+    gate is consulted once per job -- and the audit trail's event
+    count equals the number of jobs the caller asked about.
+    """
+    gate = _RefusingGate()
+    jq = JobQueue(refusal_gate=gate)
+    _enqueue(jq, seq=1)
+    jq.dequeue("w-1", "default", 2)
+    jq.retry_allowed("j-1", 3)
+    assert gate.asked == 1
+
+
+def test_retry_allowed_asks_the_gate_once_when_the_job_is_allowed():
+    """The same count on the ALLOWED path.
+
+    The refused path returns before the write, so a second ask would
+    not show up there -- the allowed path is where a double ask would
+    be visible, and it is the path that runs for every ordinary
+    re-dispatch.
+    """
+    gate = _CountingGate()
+    jq = JobQueue(refusal_gate=gate)
+    _enqueue(jq, seq=1)
+    jq.dequeue("w-1", "default", 2)
+    rec = jq.retry_allowed("j-1", 3)
+    assert rec is not None
+    assert gate.asked == 1, (
+        "the gate was asked more than once for one job: a double ask "
+        "books a double audit event and doubles the gate's own cost"
+    )
+
+
+def test_retry_allowed_requeues_an_allowed_job():
+    jq = JobQueue()
+    _enqueue(jq, seq=1)
+    jq.dequeue("w-1", "default", 2)
+    rec = jq.retry_allowed("j-1", 3)
+    assert rec is not None and rec.state == "ready"
+    assert jq.job("j-1").state == "ready"
+
+
+def test_retry_allowed_returns_none_for_an_unknown_job():
+    jq = JobQueue()
+    assert jq.retry_allowed("ghost", 3) is None
+
+
+def test_retry_allowed_returns_none_for_a_job_that_is_not_reserved():
+    jq = JobQueue()
+    _enqueue(jq, seq=1)
+    assert jq.retry_allowed("j-1", 2) is None
 
 
 # ---------------------------------------------------------------------------

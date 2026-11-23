@@ -105,6 +105,28 @@ def make_queue(job_id: str = "job-1", task: str = "dispatch"):
     return queue
 
 
+#: The correspondence between the two ledgers' vocabularies.
+#:
+#: The lease ledger says ``ready`` / ``leased`` / ``completed`` / ``dead``;
+#: the queue mirror says ``ready`` / ``reserved`` / ``done`` / ``dead``.
+#: A guard that compares the two states directly compares two different
+#: vocabularies and fails for the wrong reason, so the correspondence is
+#: stated once, here.
+MIRROR_OF = {
+    "ready": "ready",
+    "leased": "reserved",
+    "completed": "done",
+    "dead": "dead",
+}
+
+
+def _mirror_of(lease_state: str) -> str:
+    """The mirror state a lease state must correspond to."""
+    if lease_state not in MIRROR_OF:
+        raise AssertionError(f"unknown lease state: {lease_state!r}")
+    return MIRROR_OF[lease_state]
+
+
 class QueueIdentityTests(unittest.TestCase):
     """The queue side's identity: which key names which action."""
 
@@ -1215,6 +1237,412 @@ class LeaseClaimWiringTests(unittest.TestCase):
         self.manager.set_refusal_gate(None)
         self.manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
         self.assertEqual(self.manager.task("t1").state, "leased")
+
+
+class MirrorReleaseInsideTransactionTests(unittest.TestCase):
+    """The mirror's release must run INSIDE the lease transaction.
+
+    THE DEFECT (measured 2026-11-23)
+    --------------------------------
+    ``_mirror_release`` was called **after** the lease transaction
+    committed, in ``complete()``, ``fail()``, ``release()`` and
+    ``reap()``.  Only ``claim()`` called its mirror inside the
+    transaction.  A structural scan of the module:
+
+        line 895:  def claim(...)     -> INSIDE   the transaction
+        line 1108: def complete(...)  -> OUTSIDE  the transaction
+        line 1185: def fail(...)      -> OUTSIDE  the transaction
+        line 1230: def release(...)   -> OUTSIDE  the transaction
+        line 1292: def reap(...)      -> OUTSIDE  the transaction
+
+    The consequence is a **divergence between the two ledgers** that no
+    guard could see, because every guard looked at only one of them.
+    A refusal recorded in the **queue** namespace -- the mirror's own
+    gate, and a namespace deliberately distinct from the lease's -- made
+    the mirror's own ``retry()`` refuse, and that refusal arrived
+    **after** the lease transaction had already committed:
+
+        === (a) queue-namespace refusal on release ===
+          release RAISED: RefusalRefusedError
+          ledger state: ready
+          mirror state: reserved
+          audit kinds: ['task.enqueued', 'lease.claimed', 'lease.released']
+
+    Three things are wrong at once:
+
+    * the ledger says ``ready`` and the mirror says ``reserved`` -- the
+      two ledgers disagree, which is exactly what ``QueueMirrorError``
+      exists to prevent;
+    * a ``lease.released`` audit row was written for a release that was
+      **refused** -- the trail says the release happened;
+    * the task was **stuck**: the ledger said ``ready`` (so the reaper
+      found no lease to sweep) while the mirror said ``reserved`` (so
+      the claim refused to reserve it again).  Neither the ledger nor
+      the mirror would move it.
+
+    WHY THE FIX IS "MOVE THE CALL INSIDE", AND NOT "SWALLOW IT"
+    ----------------------------------------------------------
+    Swallowing the mirror's refusal would hide it: the caller would
+    believe the release happened, and the trail would say so, while
+    the mirror kept the job reserved.  That is the "recorded but not
+    enforced" failure the refusal hold's own docstring warns about.
+
+    So the mirror's release moves **inside** the transaction.  A
+    refusal then rolls the lease write back, and all three symptoms
+    go away at once: the task stays **leased** by the same worker, no
+    ``lease.released`` row is written, and the mirror stays
+    ``reserved`` -- which is the state a leased task's mirror job is
+    in.
+
+    The two namespaces now say the SAME thing about the same write:
+    a lease-namespace refusal and a queue-namespace refusal both leave
+    the task leased and the mirror reserved.
+
+    This is PRE-EXISTING, not a regression: measured against
+    ``372f5225`` (before the ``claim()`` work) the same probe prints
+    the same divergence, and the behaviour dates to the module's first
+    commit ``1c7e44b1``.
+    """
+
+    def setUp(self):
+        self.registry = RefusalHoldRegistry()
+        self.gate = RefusalHoldQueueGate(self.registry)
+        self.queue = JobQueue(refusal_gate=self.gate)
+        self.manager = LeasedTaskClaim(queue=self.queue, refusal_gate=self.gate)
+        self.manager.enqueue_task("t1", "demo-task", payload="hello")
+
+    def tearDown(self):
+        self.manager.close()
+
+    def _lease(self):
+        return self.manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+
+    def _audit_kinds(self):
+        return [row["kind"] for row in self.manager.audit_log()]
+
+    def test_a_refused_release_leaves_the_task_leased(self):
+        """A refused release is NOT a release.
+
+        The release is the act of giving the lease back.  A refusal
+        says the work item may not be **offered again**; it does not
+        say the worker may not stop working on it.  So the refusal
+        undoes the whole release -- the task stays leased, by the same
+        worker, and the worker can still finish it.
+
+        This is the semantics the lease-side gate already has (a
+        lease-namespace refusal rolls the release back), and the
+        queue-side refusal must agree with it.
+        """
+        lease = self._lease()
+        self.gate.record_queue("t1", "demo-task", row=make_row())
+        with self.assertRaises(RefusalRefusedError):
+            self.manager.release("t1", lease.token, now=101.0)
+        view = self.manager.task("t1")
+        self.assertEqual(view.state, "leased")
+        self.assertEqual(view.worker, "worker-A")
+
+    def test_a_refused_release_leaves_the_ledger_and_the_mirror_in_step(self):
+        """The two ledgers must not disagree after a refused release.
+
+        The two ledgers have different vocabularies, so they are
+        compared through the correspondence between them: a task that
+        is ``leased`` is ``reserved`` in the mirror, a task that is
+        ``ready`` is ``ready``, a ``completed`` task is ``done`` and a
+        ``dead`` task is ``dead``.
+        """
+        lease = self._lease()
+        self.gate.record_queue("t1", "demo-task", row=make_row())
+        with self.assertRaises(RefusalRefusedError):
+            self.manager.release("t1", lease.token, now=101.0)
+        ledger = self.manager.task("t1").state
+        mirror = self.queue.job("t1").state
+        self.assertEqual(
+            _mirror_of(ledger),
+            mirror,
+            f"the two ledgers disagree after a refused release: "
+            f"the lease ledger says {ledger!r}, the mirror says {mirror!r}",
+        )
+
+    def test_a_refused_release_writes_no_released_audit_row(self):
+        """The trail must not say a release happened when it did not.
+
+        ``lease.released`` is the record of a release.  A refused
+        release is not a release, and a trail that says it was is a
+        trail that lies to whoever reads it after the fact.
+        """
+        lease = self._lease()
+        self.gate.record_queue("t1", "demo-task", row=make_row())
+        with self.assertRaises(RefusalRefusedError):
+            self.manager.release("t1", lease.token, now=101.0)
+        self.assertNotIn(
+            "lease.released",
+            self._audit_kinds(),
+            "the audit trail records a release that was refused",
+        )
+
+    def test_a_refused_release_leaves_the_worker_able_to_finish(self):
+        """The worker keeps its lease, so it can still complete the task.
+
+        This is the control for "the refusal undoes the whole
+        release": if the release had half-happened, the worker would
+        have lost the lease and could not finish the work it was doing.
+        """
+        lease = self._lease()
+        self.gate.record_queue("t1", "demo-task", row=make_row())
+        with self.assertRaises(RefusalRefusedError):
+            self.manager.release("t1", lease.token, now=101.0)
+        record = self.manager.complete("t1", lease.token, now=102.0)
+        self.assertEqual(record.message_id, "t1:completed")
+        self.assertEqual(self.manager.task("t1").state, "completed")
+
+    def test_a_refused_release_does_not_book_a_failure(self):
+        """A refused release is not a failure.
+
+        The failure budget counts *reported failures*; a refused
+        release reports nothing, so it must not consume the budget.
+        """
+        lease = self._lease()
+        self.gate.record_queue("t1", "demo-task", row=make_row())
+        with self.assertRaises(RefusalRefusedError):
+            self.manager.release("t1", lease.token, now=101.0)
+        self.assertEqual(self.manager.task("t1").failures, 0)
+
+    def test_an_allowed_release_still_releases(self):
+        """The control: without a refusal nothing changes."""
+        lease = self._lease()
+        record = self.manager.release("t1", lease.token, now=101.0)
+        self.assertEqual(self.manager.task("t1").state, "ready")
+        self.assertIn("lease.released", self._audit_kinds())
+
+    def test_a_refused_release_in_the_lease_namespace_is_the_same(self):
+        """Both namespaces say the same thing about the same write.
+
+        The lease namespace refuses the write in the lease ledger's own
+        transaction; the queue namespace refuses it in the mirror's.
+        Both must leave the task leased and the mirror reserved.
+        """
+        lease = self._lease()
+        self.gate.record_task("t1", "demo-task", row=make_row())
+        with self.assertRaises(RefusalRefusedError):
+            self.manager.release("t1", lease.token, now=101.0)
+        self.assertEqual(self.manager.task("t1").state, "leased")
+        self.assertEqual(self.queue.job("t1").state, "reserved")
+
+    def test_a_refused_failure_leaves_the_task_leased(self):
+        """``fail()`` is a re-dispatch too, and its mirror call was outside.
+
+        The same fix applies: a refused mirror release rolls the
+        failure back, so the task keeps its lease and its failure
+        count.
+        """
+        lease = self._lease()
+        self.gate.record_queue("t1", "demo-task", row=make_row())
+        with self.assertRaises(RefusalRefusedError):
+            self.manager.fail("t1", lease.token, reason="boom", now=101.0)
+        view = self.manager.task("t1")
+        self.assertEqual(view.state, "leased")
+        self.assertEqual(view.failures, 0)
+        self.assertEqual(self.queue.job("t1").state, "reserved")
+
+
+class MirrorSweepTests(unittest.TestCase):
+    """The sweep must not be abandoned because of one refused task.
+
+    ``reap()`` sweeps a **batch** of expired leases.  A refusal there
+    must skip ONE task, not stop the sweep -- and the skipped task
+    must be left exactly as it was: leased in the ledger, reserved in
+    the mirror.  A sweep that flipped the ledger and then failed to
+    flip the mirror would leave the two out of step for that task too.
+    """
+
+    def setUp(self):
+        self.registry = RefusalHoldRegistry()
+        self.gate = RefusalHoldQueueGate(self.registry)
+        self.queue = JobQueue(refusal_gate=self.gate)
+        self.manager = LeasedTaskClaim(queue=self.queue, refusal_gate=self.gate)
+        self.manager.enqueue_task("t1", "demo-task", payload="hello")
+        self.manager.enqueue_task("t2", "demo-task", payload="hello")
+
+    def tearDown(self):
+        self.manager.close()
+
+    def test_one_refused_task_does_not_stop_the_sweep(self):
+        self.manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+        self.manager.claim("t2", "worker-B", ttl=10.0, now=100.0)
+        self.gate.record_queue("t1", "demo-task", row=make_row())
+        swept = self.manager.reap(now=200.0)
+        self.assertEqual([s.task_id for s in swept], ["t2"])
+
+    def test_a_refused_task_stays_leased_in_the_ledger(self):
+        self.manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+        self.manager.claim("t2", "worker-B", ttl=10.0, now=100.0)
+        self.gate.record_queue("t1", "demo-task", row=make_row())
+        self.manager.reap(now=200.0)
+        self.assertEqual(self.manager.task("t1").state, "leased")
+        self.assertEqual(self.manager.task("t2").state, "ready")
+
+    def test_a_refused_task_stays_reserved_in_the_mirror(self):
+        """The skipped task's mirror job is NOT re-offered.
+
+        The whole point of the skip: the work item is not handed out
+        again.  If the mirror said ``ready`` while the ledger said
+        ``leased``, the queue would hand out a task whose lease is
+        still live.
+        """
+        self.manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+        self.manager.claim("t2", "worker-B", ttl=10.0, now=100.0)
+        self.gate.record_queue("t1", "demo-task", row=make_row())
+        self.manager.reap(now=200.0)
+        self.assertEqual(self.queue.job("t1").state, "reserved")
+        self.assertEqual(self.queue.job("t2").state, "ready")
+
+    def test_a_refused_task_is_not_swept_again_either(self):
+        """A refused sweep leaves the task's lease to expire again.
+
+        The next sweep asks again -- the refusal stays on the record,
+        and the task is not silently swept on a later pass.
+        """
+        self.manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+        self.gate.record_queue("t1", "demo-task", row=make_row())
+        self.assertEqual(self.manager.reap(now=200.0), ())
+        self.assertEqual(self.manager.reap(now=300.0), ())
+        self.assertEqual(self.manager.task("t1").state, "leased")
+
+    def test_a_refused_task_keeps_its_crash_count(self):
+        """The crash budget is not consumed by a refused re-dispatch."""
+        self.manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+        self.gate.record_queue("t1", "demo-task", row=make_row())
+        self.manager.reap(now=200.0)
+        self.assertEqual(self.manager.task("t1").crashes, 0)
+
+
+class MirrorTerminalStateTests(unittest.TestCase):
+    """The mirror's TERMINAL transition: a completed task's job is DONE.
+
+    THE DEFECT (measured 2026-11-23)
+    --------------------------------
+    `LeasedTaskClaim` keeps two ledgers: the lease ledger (SQLite) and the
+    **queue mirror** (`job_queue.JobQueue`).  Every terminal path --
+    `complete()` and a `fail()` that exhausts the budget -- calls
+    `_mirror_release()`, which calls `queue.retry()`.  And `retry()` puts a
+    job back to **ready** -- it is the re-dispatch operation.
+
+    So a **completed** task's mirror job went back to `ready`:
+
+        === a COMPLETED task's mirror job goes back to 'ready' ===
+          mirror state after complete(): ready
+          ledger state: completed
+
+        === so the mirror can DEQUEUE a completed task's job ===
+          dequeue -> t1
+          mirror state now: reserved
+
+        === the same for a DEAD task ===
+          mirror state after fail(): ready
+          ledger state: dead
+
+    The mirror and the ledger now disagree: the ledger says the work is
+    finished, the mirror says it is waiting to be handed out, and the mirror
+    is the ledger the queue actually reads.  The lease side refuses the
+    re-claim (`TerminalTaskError`), so the work is not re-run -- but the
+    mirror advertises a finished work item as available, and the queue's
+    own `dequeue` will hand it to a worker.
+
+    The queue already has the right operation for this: `ack()`, which
+    moves a reserved job to **done**.  `retry()` is for a job that goes
+    back to being available; `ack()` is for a job that is finished.
+
+    This is PRE-EXISTING, not a regression: measured against
+    `372f5225` (before the `claim()` work) the two probes print the same
+    output, and the behaviour dates to the module's first commit
+    `1c7e44b1`.
+    """
+
+    def setUp(self):
+        self.registry = RefusalHoldRegistry()
+        self.gate = RefusalHoldQueueGate(self.registry)
+        self.queue = JobQueue(refusal_gate=self.gate)
+        self.manager = LeasedTaskClaim(queue=self.queue, refusal_gate=self.gate)
+        self.manager.enqueue_task("t1", "demo-task", payload="hello")
+
+    def tearDown(self):
+        self.manager.close()
+
+    def test_a_completed_task_is_done_in_the_mirror(self):
+        """The mirror says DONE, because the ledger says COMPLETED."""
+        lease = self.manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+        self.manager.complete("t1", lease.token, now=101.0)
+        self.assertEqual(self.manager.task("t1").state, "completed")
+        self.assertEqual(
+            self.queue.job("t1").state,
+            "done",
+            "a completed task's mirror job is still advertised as ready to "
+            "be handed out",
+        )
+
+    def test_a_dead_task_is_not_ready_in_the_mirror(self):
+        """The same for a task whose failure budget is exhausted."""
+        manager = LeasedTaskClaim(
+            queue=JobQueue(refusal_gate=self.gate),
+            max_failures=1,
+            refusal_gate=self.gate,
+        )
+        manager.enqueue_task("t2", "demo-task", payload="hello")
+        lease = manager.claim("t2", "worker-A", ttl=10.0, now=100.0)
+        manager.fail("t2", lease.token, reason="boom", now=101.0)
+        self.assertEqual(manager.task("t2").state, "dead")
+        self.assertNotEqual(
+            manager._queue.job("t2").state,
+            "ready",
+            "a dead task's mirror job is still advertised as ready to be "
+            "handed out",
+        )
+        manager.close()
+
+    def test_a_completed_task_cannot_be_dequeued_from_the_mirror(self):
+        """The observable consequence: the queue will not hand it out."""
+        lease = self.manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+        self.manager.complete("t1", lease.token, now=101.0)
+        reserved = self.queue.dequeue(
+            "worker-B", self.manager.queue_name_for("t1"), 500
+        )
+        self.assertIsNone(
+            reserved,
+            "the mirror handed out a COMPLETED task's job",
+        )
+
+    def test_a_released_task_is_still_ready_in_the_mirror(self):
+        """The control: a released task really does go back to ready.
+
+        This is the case `retry()` is FOR -- the work item is not
+        finished, it is available again -- and the fix must not turn it
+        into `done`.
+        """
+        lease = self.manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+        self.manager.release("t1", lease.token, now=101.0)
+        self.assertEqual(self.manager.task("t1").state, "ready")
+        self.assertEqual(self.queue.job("t1").state, "ready")
+
+    def test_a_reaped_task_is_still_ready_in_the_mirror(self):
+        """And the crash path: reaped means available again, not done."""
+        self.manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+        self.manager.reap(now=200.0)
+        self.assertEqual(self.manager.task("t1").state, "ready")
+        self.assertEqual(self.queue.job("t1").state, "ready")
+
+    def test_a_failed_task_that_still_has_budget_is_ready(self):
+        """A failure with budget left is a re-dispatch, not a terminal."""
+        manager = LeasedTaskClaim(
+            queue=JobQueue(refusal_gate=self.gate),
+            max_failures=3,
+            refusal_gate=self.gate,
+        )
+        manager.enqueue_task("t3", "demo-task", payload="hello")
+        lease = manager.claim("t3", "worker-A", ttl=10.0, now=100.0)
+        manager.fail("t3", lease.token, reason="boom", now=101.0)
+        self.assertEqual(manager.task("t3").state, "ready")
+        self.assertEqual(manager._queue.job("t3").state, "ready")
+        manager.close()
 
 
 if __name__ == "__main__":

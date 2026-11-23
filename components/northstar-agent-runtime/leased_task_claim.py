@@ -16,6 +16,13 @@ Read from the code, not assumed:
   - ``retry()`` counts *executions* (``attempts`` is incremented by
     ``dequeue()``), so a crash requeue would consume the same budget a
     reported failure consumes.
+  - **AMENDED 2026-11-23:** ``job_queue.py`` also gained ``dead()`` -- a
+    terminal FAILURE, distinct from ``ack()`` (terminal success) and from
+    ``retry()`` (a re-dispatch) -- and ``retry_allowed()``, the batch-safe
+    form of ``retry()``.  The mirror needs both: a finished task's mirror
+    job must not go back to ``ready``, and the reaper's sweep must not be
+    abandoned because one task's mirror refused.  See
+    ``docs/design/refusal-hold-wiring.md`` §13.
 * ``outbox_pattern.py`` owns the transactional outbox state machine
   (``OutboxMessage``/``MessageState``/``OutboxEvent``/``DispatchReport``) with
   store-then-send and at-least-once dispatch.
@@ -71,8 +78,16 @@ Scope of this slice
 This module wires **the reaper and the fencing-token claim** between the
 existing queue ledger and a lease.  It does **not** port the whole
 ``agent-task-runtime`` repository.  ``distributed_lock`` /
-``job_queue`` / ``outbox_pattern`` / ``dead_letter_queue`` are **read-only
+``outbox_pattern`` / ``dead_letter_queue`` are **read-only
 reused**: this module imports their public shapes and never edits them.
+
+**AMENDED 2026-11-23:** ``job_queue`` is no longer read-only.  The mirror
+needs two operations the queue ledger did not have -- a terminal FAILURE
+(``dead()``) and a batch-safe re-dispatch (``retry_allowed()``) -- and
+without them the mirror and the lease ledger disagreed in two measurable
+ways.  The reasoning and the measurement are in
+``docs/design/refusal-hold-wiring.md`` §13; the queue's version and schema
+pins are unchanged.
 
 Two wiring facts forced two design decisions, both recorded in
 ``docs/design/leased-task-claim.md``:
@@ -504,8 +519,7 @@ class _Store:
 class LeasedTaskClaim:
     """Lease a task with a fencing token; reap the dead; refuse the zombies.
 
-    The manager owns three ledgers, each read-only reused from an existing
-    module:
+    The manager owns three ledgers, each reused from an existing module:
 
     * the **lease ledger** (this module's SQLite store) -- the task's state,
       its current fencing token, its checkpoints and its outbox rows;
@@ -514,6 +528,14 @@ class LeasedTaskClaim:
       ``JobQueue.dequeue`` reserves by selection, not by id;
     * the **dead-letter ledger** (``dead_letter_queue.DeadLetterQueue``) --
       where a task goes when its *reported* failure budget is exhausted.
+
+    **The mirror and the lease ledger move together.**  Every mirror
+    write happens inside the transaction that writes the lease ledger, so
+    a refusal by the mirror's own gate rolls the lease write back rather
+    than leaving the two ledgers disagreeing -- and a *terminal* task
+    moves its mirror job to the queue's terminal state (``done`` for a
+    completion, ``dead`` for an exhausted budget) rather than back to
+    ``ready``, which would advertise a finished work item as available.
 
     Every public mutator takes a ``now`` argument (wall-clock seconds) so
     tests are deterministic; the default is ``time.time()``.
@@ -932,7 +954,14 @@ class LeasedTaskClaim:
             )
 
     def _mirror_release(self, task_id: str) -> None:
-        """Return the task's job to ``ready`` in the queue mirror."""
+        """Return the task's job to ``ready`` in the queue mirror.
+
+        The mirror's own ``retry()`` consults the queue-side refusal
+        gate, so a refusal recorded in the **queue** namespace refuses
+        this bookkeeping.  That refusal is **not** swallowed here: the
+        caller is told, and the caller is the one that decides what a
+        refused re-dispatch means for the lease ledger.
+        """
         view = self._queue.job(task_id)
         if view is None:
             raise QueueMirrorError(
@@ -940,6 +969,81 @@ class LeasedTaskClaim:
             )
         if view.state == "reserved":
             self._queue.retry(task_id, self._next_seq(), delay_seqs=0)
+
+    def _mirror_release_allowed(self, task_id: str) -> bool:
+        """The **batch-safe** form of :meth:`_mirror_release`.
+
+        A caller that sweeps a **batch** of tasks must not abandon the
+        sweep because one task's mirror refused the re-dispatch.  So
+        this form asks the **boolean** question and returns ``False``
+        for "not re-dispatched".
+
+        ``False`` means the mirror job stays ``reserved`` -- the work
+        item is not offered again -- which is exactly what a refusal
+        is for.
+        """
+        view = self._queue.job(task_id)
+        if view is None:
+            raise QueueMirrorError(
+                f"queue mirror has no job for task {task_id}"
+            )
+        if view.state != "reserved":
+            return True
+        record = self._queue.retry_allowed(
+            task_id, self._next_seq(), delay_seqs=0
+        )
+        return record is not None
+
+    def _mirror_terminal(self, task_id: str, dead: bool = False) -> None:
+        """Move the task's job to its **terminal** mirror state.
+
+        A task that is ``completed`` in the lease ledger is ``done`` in
+        the mirror; a task that is ``dead`` is ``dead`` in the mirror.
+
+        This used to be a ``_mirror_release()`` -- a ``retry()`` -- which
+        put the job back to ``ready``.  That is the **re-dispatch**
+        operation: it says "this work item is available again".  For a
+        finished work item that is a lie, and it had an observable
+        consequence: the queue's own ``dequeue`` handed out the job of
+        a **completed** task.
+
+        Measured 2026-11-23, before this fix:
+
+            === a COMPLETED task's mirror job goes back to 'ready' ===
+              mirror state after complete(): ready
+              ledger state: completed
+            === so the mirror can DEQUEUE a completed task's job ===
+              dequeue -> t1
+
+        The lease side then refused the re-claim with
+        ``TerminalTaskError``, so the work was not re-run -- but the
+        mirror advertised a finished work item as available, and the
+        queue is the ledger the dispatcher reads.
+
+        So the terminal transition is the queue's OWN terminal
+        operation: ``ack()`` for a success, ``dead()`` for a failure.
+
+        **A recorded refusal does not block this.**  A refusal is
+        about the **re-dispatch**: it says the work item may not be
+        offered again.  A job being *withdrawn* is not being offered
+        again.  So the terminal transition does not consult the gate --
+        exactly as ``ack()`` does not.  A refusal that could keep a
+        finished work item in the queue forever would be the
+        refusal's own denial of service.
+        """
+        view = self._queue.job(task_id)
+        if view is None:
+            raise QueueMirrorError(
+                f"queue mirror has no job for task {task_id}"
+            )
+        if view.state != "reserved":
+            # Already terminal (or never reserved): nothing to do.
+            return
+        seq = self._next_seq()
+        if dead:
+            self._queue.dead(task_id, seq)
+        else:
+            self._queue.ack(task_id, seq)
 
     # -- the write-time token check --------------------------------------
 
@@ -1105,7 +1209,15 @@ class LeasedTaskClaim:
                 {"token": int(token), "message_id": message_id,
                  "replayed": replayed},
             )
-        self._mirror_release(task_id)
+            # The task is FINISHED, so the mirror's job is finished too:
+            # ``ack()`` moves it to ``done``.  It used to be a
+            # ``_mirror_release()``, which put the job back to ``ready`` --
+            # the queue then handed out a completed task's job.
+            #
+            # The call is INSIDE the transaction, so the two ledgers
+            # move together: a mirror that refuses leaves the ledger
+            # alone rather than leaving the two out of step.
+            self._mirror_terminal(task_id, dead=False)
         return TerminalRecord(
             task_id=task_id,
             event_type=EVENT_COMPLETED,
@@ -1157,6 +1269,12 @@ class LeasedTaskClaim:
                 {"token": int(token), "failures": failures,
                  "delay_seconds": delay, "dead": dead, "reason": reason},
             )
+            # The mirror's release is INSIDE the transaction, so a
+            # refusal by the mirror's own gate rolls this write back:
+            # the task keeps its lease, its failure count and its
+            # delay, and no ``task.failed`` row is written.
+            if not dead:
+                self._mirror_release(task_id)
         if dead:
             message_id = idempotency_key(task_id, EVENT_DEAD)
             self._dead_letters.enqueue(
@@ -1182,7 +1300,11 @@ class LeasedTaskClaim:
                     {"token": int(token), "failures": failures,
                      "message_id": message_id},
                 )
-        self._mirror_release(task_id)
+                # A task whose failure budget is exhausted is FINISHED,
+                # so its mirror job is ``dead`` -- not ``ready``.  The
+                # call is INSIDE the transaction, so the two ledgers
+                # move together.
+                self._mirror_terminal(task_id, dead=True)
         return FailRecord(
             task_id=task_id,
             token=int(token),
@@ -1212,6 +1334,30 @@ class LeasedTaskClaim:
 
         The check runs inside the transaction, immediately before the
         ``UPDATE``, so a refusal and the release cannot interleave.
+
+        **The mirror's release runs INSIDE the transaction too.**
+        Measured 2026-11-23, before this fix: the mirror call was
+        AFTER the transaction committed, so a refusal recorded in the
+        **queue** namespace -- the mirror's own gate -- raised after
+        the lease ledger had already said ``ready``:
+
+            release RAISED: RefusalRefusedError
+            ledger state: ready
+            mirror state: reserved
+            audit kinds: ['task.enqueued', 'lease.claimed', 'lease.released']
+
+        Three things were wrong at once: the two ledgers disagreed, the
+        audit trail recorded a release that had been refused, and the
+        task was **stuck** -- the ledger said ``ready`` (so the reaper
+        found no lease to sweep) while the mirror said ``reserved`` (so
+        the claim refused to reserve it again).
+
+        Moving the mirror call inside the transaction fixes all three
+        at once: a refused mirror release rolls the lease write back,
+        so the task stays **leased** by the same worker, no
+        ``lease.released`` row is written, and the mirror stays
+        ``reserved`` -- which is the state a leased task's mirror job
+        is in.  The worker can still finish the work it was doing.
         """
         task_id = _check_text(task_id, "task_id")
         now = self._clock() if now is None else float(now)
@@ -1227,7 +1373,9 @@ class LeasedTaskClaim:
                 conn, "lease.released", task_id,
                 {"token": int(token), "worker": row["worker"]},
             )
-        self._mirror_release(task_id)
+            # The mirror's release is INSIDE the transaction, so a
+            # refusal by the mirror's own gate rolls this write back.
+            self._mirror_release(task_id)
         return ReleasedRecord(
             task_id=task_id, token=int(token), worker=row["worker"]
         )
@@ -1278,6 +1426,17 @@ class LeasedTaskClaim:
                     # and its lease.  The transaction ends without the
                     # UPDATE, so nothing is written.
                     continue
+                # The mirror's release is INSIDE the transaction, and it
+                # uses the BOOLEAN form: a refused mirror release must
+                # skip this ONE task, not abandon the sweep.
+                #
+                # It is asked BEFORE the UPDATE, so a refusal leaves
+                # the transaction without a write -- the task keeps its
+                # lease and its crash count, and the mirror stays
+                # ``reserved``, which is the state a leased task's
+                # mirror job is in.
+                if not self._mirror_release_allowed(task_id):
+                    continue
                 conn.execute(
                     "UPDATE ltc_task SET state = ?, worker = '', "
                     "delay_until = 0, crashes = crashes + 1 WHERE task_id = ?",
@@ -1288,8 +1447,6 @@ class LeasedTaskClaim:
                     {"worker": current["worker"], "token": int(current["token"]),
                      "crashes": int(current["crashes"]) + 1},
                 )
-            # Back to ``ready`` in the queue mirror, with no delay.
-            self._mirror_release(task_id)
             swept.append(
                 ReapedLease(
                     task_id=task_id,

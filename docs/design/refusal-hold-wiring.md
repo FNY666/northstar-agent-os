@@ -318,8 +318,11 @@ wires the ledger side.
 queue and the lease ledger must carry the **action identity** of the work
 item, so that the hold can be asked a question in the hold's own
 vocabulary. Adding that field is a change to `job_queue.py` /
-`leased_task_claim.py`, which are read-only in this slice. That is the
-honest open item, and it is stated here rather than left silent.
+`leased_task_claim.py`. **AMENDED 2026-11-23:** those two files are no
+longer read-only in this slice (§13), but the **action identity field**
+itself is still not added — §13 closed two *different* defects (the mirror
+disagreeing with the ledger), not this one. So the honest open item stands,
+and it is stated here rather than left silent.
 
 ## 5. Open items
 
@@ -1186,6 +1189,11 @@ queue-side gate treats **every** `retry()` as a re-dispatch, including
 the mirror's internal ones, and that is a decision this slice has not
 yet made deliberately.
 
+**RESOLVED 2026-11-23 — see §13.**  The decision was made deliberately
+there, and making it surfaced two **pre-existing** defects that this
+section had not found: a completed task's mirror job went back to
+`ready`, and the mirror's release ran outside the lease transaction.
+
 ## 12. OPEN 2026-11-23 — the strands slice's BENCH_DIFF is a baseline-pointer question, not a strands question
 
 `b173-accept.sh strands` reports `FAIL (10/11, 1 skipped)` with one failing
@@ -1239,3 +1247,228 @@ measurement's interference**, not a defect: re-running the test clean gives
 9 passed.  A file in the coordinator's directory is shared state, and
 changing it while another job reads it is the same mistake as editing a
 file another agent is working in.
+
+---
+
+## 13. AMENDED 2026-11-23 — the mirror and the ledger disagreed in two ways
+
+§11.4 recorded the composition question as **open**: "the queue-side gate
+treats **every** `retry()` as a re-dispatch, including the mirror's internal
+ones, and that is a decision this slice has not yet made deliberately."
+
+This section makes that decision, and in making it found two defects that
+were **pre-existing** -- they reproduce at `372f5225` (before the `claim()`
+work) and date to the module's first commit `1c7e44b1`.
+
+### 13.1 The decision: what the mirror's own `retry()` IS
+
+The mirror's `retry()` is **not** a re-dispatch of the work item.  It is the
+mirror's own bookkeeping: it keeps the queue's view of the task in step with
+the lease's view.  The distinction is the same one the whole slice turns on:
+
+| the write | what it means | is it a re-dispatch? |
+|---|---|---|
+| a worker is handed a task | the action is **offered** | **yes** |
+| a task goes back to `ready` | the action is **offered again** | **yes** |
+| a task goes to `completed` / `dead` | the action is **withdrawn** | **no** |
+
+So a **refusal** -- which is about the offer -- does not block a withdrawal.
+A refusal that could keep a finished work item in the queue forever would be
+the refusal's own denial of service.  This is why `JobQueue.ack()` never
+consults the gate, and why the new `JobQueue.dead()` does not either.
+
+### 13.2 DEFECT 1 — a terminal task's mirror job went back to `ready`
+
+Every terminal path called `_mirror_release()`, which calls `queue.retry()`.
+And `retry()` is the **re-dispatch** operation.  So a **completed** task's
+mirror job went back to `ready`:
+
+```
+=== a COMPLETED task's mirror job goes back to 'ready' ===
+  mirror state after complete(): ready
+  ledger state: completed
+=== so the mirror can DEQUEUE a completed task's job ===
+  dequeue -> t1
+=== and can it be CLAIMED again? (lease side says no) ===
+  claim REFUSED: TerminalTaskError
+=== the same for a DEAD task ===
+  mirror state after fail(): ready
+  ledger state: dead
+```
+
+The work was not re-run -- the lease side refused the re-claim with
+`TerminalTaskError` -- but the mirror **advertised a finished work item as
+available**, and the queue is the ledger the dispatcher reads.  The two
+ledgers disagreed about a task that is over.
+
+**The fix.**  The queue had an `ack()` for terminal success, which the mirror
+never used.  It had **no** terminal-failure operation at all: the only way to
+make a job terminal-failed was to exhaust its retry budget, which also books
+a `MaxRetriesExceededError`.  So `job_queue.py` gains `dead()`, and the
+mirror's terminal transition is the queue's OWN terminal operation:
+`ack()` for a completion, `dead()` for an exhausted budget.
+
+After the fix:
+
+```
+=== a COMPLETED task's mirror job ===
+  mirror state after complete(): done
+  ledger state: completed
+  dequeue -> None
+=== a DEAD task's mirror job ===
+  mirror state after fail(): dead
+  ledger state: dead
+```
+
+### 13.3 DEFECT 2 — the mirror's release ran OUTSIDE the lease transaction
+
+`_mirror_release` was called **after** the lease transaction committed, in
+`complete()`, `fail()`, `release()` and `reap()`.  Only `claim()` called its
+mirror inside the transaction.  A structural scan of the module, before the
+fix:
+
+```
+line 895:  def claim(...)     -> INSIDE   the transaction
+line 1108: def complete(...)  -> OUTSIDE  the transaction
+line 1185: def fail(...)      -> OUTSIDE  the transaction
+line 1230: def release(...)   -> OUTSIDE  the transaction
+line 1292: def reap(...)      -> OUTSIDE  the transaction
+```
+
+A refusal recorded in the **queue** namespace -- the mirror's own gate, and a
+namespace deliberately distinct from the lease's -- made the mirror's
+`retry()` refuse, and that refusal arrived **after** the lease ledger had
+already committed:
+
+```
+=== (a) queue-namespace refusal on release ===
+  release RAISED: RefusalRefusedError
+  ledger state: ready
+  mirror state: reserved
+  audit kinds: ['task.enqueued', 'lease.claimed', 'lease.released']
+```
+
+Three things are wrong at once:
+
+* the ledger says `ready` and the mirror says `reserved` -- the two ledgers
+  disagree, which is exactly what `QueueMirrorError` exists to prevent;
+* a `lease.released` audit row was written for a release that was **refused**
+  -- the trail says the release happened;
+* the task was **stuck**: the ledger said `ready` (so the reaper found no
+  lease to sweep) while the mirror said `reserved` (so the claim refused to
+  reserve it again).  Neither ledger would move it.
+
+**Why "move the call inside", and not "swallow the refusal".**  Swallowing
+would hide the refusal: the caller would believe the release happened, and the
+trail would say so, while the mirror kept the job reserved.  That is the
+"recorded but not enforced" failure the hold's own docstring warns about.
+
+Moving the call inside the transaction fixes all three symptoms at once: a
+refused mirror release rolls the lease write back, so the task stays
+**leased** by the same worker, no `lease.released` row is written, and the
+mirror stays `reserved` -- which is the state a leased task's mirror job is
+in.  The worker can still finish the work it was doing.
+
+After the fix:
+
+```
+=== (a) queue-namespace refusal on release ===
+  release RAISED: RefusalRefusedError
+  ledger state: leased
+  mirror state: reserved
+  audit kinds: ['task.enqueued', 'lease.claimed']
+  claim REFUSED: LeaseHeldError task t3 is leased by worker-A until 110.0
+  reap -> ()
+```
+
+The two namespaces now say the **same thing** about the same write: a
+lease-namespace refusal and a queue-namespace refusal both leave the task
+leased and the mirror reserved.
+
+### 13.4 The sweep is a different shape, and stays that way
+
+`reap()` sweeps a **batch** of expired leases.  A raise there would abandon
+the sweep: one refused task would stop every other expired lease from being
+requeued, which is a denial of service the refusal never asked for.  So the
+sweep uses the **boolean** form at both levels:
+
+* the lease-side question is already the boolean `task_allowed`;
+* the mirror-side question is now the boolean `retry_allowed`.
+
+`JobQueue.retry_allowed()` is the new batch-safe form of `retry()`: it
+returns `None` for "not re-dispatched" -- a refused job, a job that is not
+reserved, an unknown job, or a job whose retry budget is spent -- and it
+leaves the job exactly where it was.  `None` means "not re-dispatched", the
+same way `dequeue`'s `None` means "no job": data, not a failure.
+
+The two forms share **one writer** (`JobQueue._retry`), so the gate is
+consulted **once** per job whichever form is used.  That matters because the
+gate's check is audited: a double ask would book a double event and double
+the gate's own cost for no reason.
+
+### 13.5 The guards, and why they can fail
+
+| the guard | the defect it can fail on |
+|---|---|
+| `test_a_completed_task_is_done_in_the_mirror` | the terminal job stayed `ready` |
+| `test_a_completed_task_cannot_be_dequeued_from_the_mirror` | the queue handed out a finished task |
+| `test_a_dead_task_is_not_ready_in_the_mirror` | the exhausted task stayed `ready` |
+| `test_a_released_task_is_still_ready_in_the_mirror` | the control: a release is still a re-dispatch |
+| `test_a_reaped_task_is_still_ready_in_the_mirror` | the control: a crash-requeue is still a re-dispatch |
+| `test_a_failed_task_that_still_has_budget_is_ready` | the control: a failure with budget left is a re-dispatch |
+| `test_a_refused_release_leaves_the_task_leased` | the ledger committed while the mirror refused |
+| `test_a_refused_release_leaves_the_ledger_and_the_mirror_in_step` | the two ledgers disagreed |
+| `test_a_refused_release_writes_no_released_audit_row` | the trail recorded a release that was refused |
+| `test_a_refused_release_leaves_the_worker_able_to_finish` | the release half-happened |
+| `test_a_refused_release_does_not_book_a_failure` | the refusal consumed the failure budget |
+| `test_a_refused_release_in_the_lease_namespace_is_the_same` | the two namespaces disagreed |
+| `test_one_refused_task_does_not_stop_the_sweep` | the sweep was abandoned |
+| `test_a_refused_task_stays_reserved_in_the_mirror` | the skipped task was re-offered |
+| `test_a_refused_task_is_not_swept_again_either` | a later sweep silently took it |
+| `test_dead_never_hands_the_job_out_again` | a dead job stayed eligible |
+| `test_dead_does_not_consult_the_refusal_gate` | a refusal could freeze a finished job |
+| `test_retry_allowed_asks_the_gate_once_when_the_job_is_allowed` | the gate was asked twice |
+
+**Measured.**  Eight mutants planted and re-run; all eight killed:
+
+| mutant | verdict |
+|---|---|
+| M1 `dead()` -> `retry()` (the original defect) | **KILLED** |
+| M2 the mirror's release moved back OUTSIDE the transaction | **KILLED** |
+| M3 `reap()` uses the RAISING mirror form | **KILLED** |
+| M4 `reap()` asks the mirror AFTER the `UPDATE` | **KILLED** |
+| M5 `dead()` consults the refusal gate | **KILLED** |
+| M6 `retry_allowed` asks the gate twice | **KILLED** |
+| M7 `retry_allowed` raises instead of returning `None` | **KILLED** |
+| M8 `dead()` does not set the state | **KILLED** |
+
+**M6 needed a second guard, and that is worth recording.**  The first
+version of the counting guard used a gate that **refuses** every job -- and a
+refused job returns before the write, so a second ask was never reached and
+the mutant **survived**.  The guard that kills it asks an **allowing** gate,
+which reaches the write.  A guard that exercises only the refused path does
+not cover the ordinary path, and a mutant that only shows up on the ordinary
+path is a mutant the guard was blind to.
+
+### 13.6 What this does NOT change
+
+* The two namespaces stay separate.  A lease-namespace refusal still does
+  not block a queue-namespace check, and the mirror's own bookkeeping is
+  still the queue's business.
+* The lease side's own gate is unchanged: `fail()`, `claim()` and
+  `release()` still ask it inside their own transaction, and `reap()`
+  still asks it in the boolean form.
+* `job_queue.py`'s version and schema pins are unchanged
+  (`job-queue.v1` / `northstar.job-queue.v1`); `dead()` and
+  `retry_allowed()` are new **operations** on the existing ledger, not a
+  new record shape -- `DeadRecord` is a new record, but it carries the
+  same schema pin as `AckRecord`, and the audit kinds are the existing
+  `job.dead` and `job.retried`.
+* `leased_task_claim.py`'s version and schema pins are unchanged.
+* The design doc's own open item 1 ("the queue mirror and the lease ledger
+  are two ledgers ... a crash between the SQLite commit and the mirror
+  update would leave the two out of step") is **narrowed**, not closed:
+  the mirror calls are now inside the transactions, so the window is much
+  smaller, but the mirror is still an in-process ledger and a crash
+  between the two commits is still possible.  The reconciliation is still
+  the host's job.

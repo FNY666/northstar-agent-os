@@ -51681,6 +51681,11 @@ Booked reservation of a ready job by a worker.
 Terminal success of a reserved job.
 
 - `verify()`
+#### `DeadRecord`
+
+Terminal failure of a reserved job.
+
+- `verify()`
 #### `RetryRecord`
 
 Booked decision to return a reserved job to ``ready``.
@@ -51720,8 +51725,12 @@ Deterministic Celery/Sidekiq-shaped job queue bookkeeping.
   - Reserve the next eligible job in ``queue`` for a worker.
 - `ack(job_id: str, seq: int)`
   - Terminal success of a reserved job.
+- `dead(job_id: str, seq: int)`
+  - Terminal **failure** of a reserved job.
 - `retry(job_id: str, seq: int, delay_seqs: int=0, now: Optional[float]=None)`
   - Return a reserved job to ``ready`` with a backoff.
+- `retry_allowed(job_id: str, seq: int, delay_seqs: int=0, now: Optional[float]=None)`
+  - The **batch-safe** form of :meth:`retry`.
 #### `main()`
 
 Deterministic self-check: enqueue, priority dequeue, ack, retry, delay backoff, dead-lettering.

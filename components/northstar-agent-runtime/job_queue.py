@@ -22,12 +22,22 @@ Public API:
     (``reserved``) until it is acked or retried. Empty queue is
     ``None`` as data, never raised.
   - ``ack(job_id, seq)`` -> frozen ``AckRecord``: terminal success.
+  - ``dead(job_id, seq)`` -> frozen ``DeadRecord``: terminal **failure**.
+    The job is withdrawn and never handed out again.  A recorded
+    refusal does not block this: a refusal is about the *re-dispatch*,
+    and a job being killed is not being offered again.
   - ``retry(job_id, seq, delay_seqs=0)`` -> frozen ``RetryRecord``:
     returns a reserved job to ``ready`` with a logical-seq backoff
     (``not_before_seq = seq + delay_seqs``). When the just-completed
     attempt already reached ``max_retries`` the job is marked
     ``dead`` and ``MaxRetriesExceededError`` is raised fail-closed --
     from then on nothing may act on it.
+  - ``retry_allowed(job_id, seq, delay_seqs=0)`` -> ``Optional[RetryRecord]``:
+    the **batch-safe** form of ``retry``.  It returns ``None`` for
+    "not re-dispatched" (a refused job, a job that is not reserved, an
+    unknown job, a spent retry budget) instead of raising, so one
+    refused job cannot abandon a sweep.  The gate is consulted once
+    per job, whichever form is used.
   - ``job(job_id)`` / ``ready(queue)`` / ``reserved()`` / ``stats()`` /
     ``audit_log()`` -- pure read views; consume no seq.
 - ``job_queue_audit_event(kind, detail, seq)`` -- ``audit.ndjson/1``
@@ -453,6 +463,33 @@ class AckRecord:
 
 
 @dataclass(frozen=True)
+class DeadRecord:
+    """Terminal failure of a reserved job.
+
+    A job that fails terminally is **not** re-dispatched: it goes to
+    ``dead``, which no ``dequeue`` will ever hand out.  This is the
+    ledger's own terminal-failure operation, as distinct from
+    ``retry`` -- which is a failure that will be re-dispatched -- and
+    from ``ack`` -- which is a success.
+    """
+
+    job_id: str
+    attempts: int
+    digest: str
+    seq: int
+    schema: str = JOB_QUEUE_SCHEMA
+
+    def verify(self) -> bool:
+        try:
+            recomputed = _pin("dead", self.job_id, self.attempts, self.seq)
+        except JobQueueError:
+            return False
+        return recomputed == self.digest and (
+            self.schema == JOB_QUEUE_SCHEMA
+        )
+
+
+@dataclass(frozen=True)
 class RetryRecord:
     """Booked decision to return a reserved job to ``ready``.
 
@@ -635,6 +672,42 @@ class JobQueue:
                 f"action, now=...), got {type(gate).__name__}"
             )
         require(job_id, action, now=now)
+
+    def _refusal_allows(self, job_id: str, action: str,
+                        now: Optional[float]) -> bool:
+        """The **boolean** form of the refusal question.
+
+        :meth:`_require_refusal_allows` raises, and a raise is right
+        for a caller that reports ONE job for ONE call.  It is wrong
+        for a caller that sweeps a **batch**: one refused job would
+        abandon the whole sweep, which is a denial of service the
+        refusal never asked for.
+
+        So the batch form turns a refusal into ``False`` -- and a gate
+        that cannot answer at all is also ``False``, because the hold
+        fails closed.
+        """
+        gate = self._refusal_gate
+        if gate is None:
+            return True
+        allows = getattr(gate, "queue_allowed", None)
+        if callable(allows):
+            try:
+                return bool(allows(job_id, action, now=now))
+            except Exception:
+                return False
+        require = getattr(gate, "require_queue_allowed", None)
+        if not callable(require):
+            raise TypeError(
+                "the refusal gate must offer queue_allowed(job_id, action, "
+                f"now=...) or require_queue_allowed(job_id, action, now=...), "
+                f"got {type(gate).__name__}"
+            )
+        try:
+            require(job_id, action, now=now)
+        except Exception:
+            return False
+        return True
 
     # -- seq discipline ----------------------------------------------------
 
@@ -945,6 +1018,64 @@ class JobQueue:
             )
             return record
 
+    def dead(self, job_id: str, seq: int) -> DeadRecord:
+        """Terminal **failure** of a reserved job.
+
+        The job goes to ``dead``: it is never handed out again, and
+        no ``dequeue`` will ever select it.  This is the ledger's own
+        terminal-failure operation, and it is distinct from the two
+        other terminal-ish outcomes:
+
+        * ``ack()`` -- terminal **success** (``done``);
+        * ``retry()`` -- a failure that will be re-dispatched
+          (``ready``), unless the retry budget is already spent, in
+          which case ``retry()`` marks the job ``dead`` itself.
+
+        Only ``reserved`` jobs may be killed; anything else raises
+        ``JobStateError`` fail-closed.
+
+        **A recorded refusal does not block this.**  The refusal
+        semantics are about the **re-dispatch**: a refusal says the
+        work item may not be *offered again*.  A job that is being
+        killed is not being offered again -- it is being withdrawn.
+        So ``dead()`` does not consult the gate, exactly as ``ack()``
+        does not: a refusal must not be able to keep a finished work
+        item in the queue forever, which would be the refusal's own
+        denial of service.
+        """
+        with self._lock:
+            self._claim(seq)
+            try:
+                job_id = _check_job_id(job_id)
+                entry = self._entries.get(job_id)
+                if entry is None:
+                    raise UnknownJobError(f"unknown job_id: {job_id}")
+                if entry["state"] != _STATE_RESERVED:
+                    raise JobStateError(
+                        f"job {job_id} is {entry['state']}, "
+                        "only reserved jobs may be killed"
+                    )
+            except JobQueueError as exc:
+                self._reject(seq, type(exc).__name__, job_id)
+                raise
+            record = DeadRecord(
+                job_id=job_id,
+                attempts=entry["attempts"],
+                digest=_pin("dead", job_id, entry["attempts"], seq),
+                seq=seq,
+            )
+            entry["state"] = _STATE_DEAD
+            entry["worker_id"] = ""
+            self._dead += 1
+            self._audit.append(
+                job_queue_audit_event(
+                    KIND_DEAD,
+                    {"job_id": job_id, "attempts": entry["attempts"]},
+                    seq,
+                )
+            )
+            return record
+
     def retry(
         self, job_id: str, seq: int, delay_seqs: int = 0,
         now: Optional[float] = None,
@@ -968,6 +1099,53 @@ class JobQueue:
         own lock, immediately before the entry is flipped, so a refusal
         and the re-dispatch cannot interleave.
         """
+        record = self._retry(job_id, seq, delay_seqs, now=now, batch=False)
+        assert record is not None  # the raising form never returns None
+        return record
+
+    def retry_allowed(self, job_id: str, seq: int, delay_seqs: int = 0,
+                      now: Optional[float] = None) -> Optional[RetryRecord]:
+        """The **batch-safe** form of :meth:`retry`.
+
+        :meth:`retry` raises when the refusal gate refuses the
+        re-dispatch.  That is right for a caller that reports ONE job
+        for ONE call, and wrong for a caller that sweeps a **batch**:
+        one refused job would abandon the whole sweep, which is a
+        denial of service the refusal never asked for.
+
+        So this form returns ``None`` for "not re-dispatched" -- a
+        refused job, a job that is not reserved, an unknown job, or a
+        job whose retry budget is spent.  The job is left exactly where
+        it was.
+
+        ``None`` here means "not re-dispatched", exactly as
+        ``dequeue``'s ``None`` means "no job" -- it is data, not a
+        failure.
+
+        The gate is consulted **once**, by the same writer that
+        :meth:`retry` uses: a batch of three jobs is three checks, not
+        six.
+        """
+        return self._retry(job_id, seq, delay_seqs, now=now, batch=True)
+
+    def _retry(self, job_id: str, seq: int, delay_seqs: int,
+               *, now: Optional[float], batch: bool) -> Optional[RetryRecord]:
+        """The one writer behind :meth:`retry` and :meth:`retry_allowed`.
+
+        ``batch`` chooses the SHAPE of the refusal question, not
+        whether it is asked:
+
+        * ``batch=False`` -- the RAISING form.  A refusal raises, so
+          the caller learns the reason.  One job, one call.
+        * ``batch=True`` -- the BOOLEAN form.  A refusal is "not
+          allowed", so one refused job cannot abandon a sweep.
+
+        Both forms ask the gate **once**, under the same lock, at the
+        same point: immediately before the entry is flipped back to
+        ``ready``.  That is what makes the two forms agree, and it is
+        what keeps the audit trail's event count equal to the number
+        of jobs the caller asked about.
+        """
         with self._lock:
             self._claim(seq)
             try:
@@ -985,7 +1163,18 @@ class JobQueue:
                 # refusal is reported as a refusal rather than as an
                 # exceeded budget -- and before the entry is flipped, so
                 # a refusal leaves the job exactly where it was.
-                self._require_refusal_allows(job_id, str(entry["task"]), now)
+                if batch:
+                    if not self._refusal_allows(
+                        job_id, str(entry["task"]), now
+                    ):
+                        return None
+                else:
+                    # The raising form: the gate raises, so the caller
+                    # is told the REASON, and the job is left where it
+                    # was.  One call, one audit event.
+                    self._require_refusal_allows(
+                        job_id, str(entry["task"]), now
+                    )
                 if entry["attempts"] >= entry["max_retries"]:
                     entry["state"] = _STATE_DEAD
                     entry["worker_id"] = ""
@@ -1019,12 +1208,16 @@ class JobQueue:
                             seq,
                         )
                     )
+                    if batch:
+                        return None
                     raise MaxRetriesExceededError(
                         f"max_retries={entry['max_retries']} exceeded "
                         f"for {job_id}"
                     )
             except JobQueueError as exc:
                 self._reject(seq, type(exc).__name__, job_id)
+                if batch:
+                    return None
                 raise
             record = RetryRecord(
                 job_id=job_id,
@@ -1116,9 +1309,29 @@ def main() -> None:
     a = jq.ack("j-high", 17)
     assert a.verify() and jq.job("j-high").state == "done"
 
+    # Terminal FAILURE, distinct from ack() and from the retry budget.
+    jq3 = JobQueue()
+    jq3.enqueue("j-kill", "critical", "charge", lo, 1)
+    assert jq3.dequeue("w-9", "critical", 2) is not None
+    killed = jq3.dead("j-kill", 3)
+    assert killed.verify() and jq3.job("j-kill").state == "dead"
+    assert jq3.dequeue("w-9", "critical", 4) is None
+
+    # The batch-safe re-dispatch: an unknown job is "not re-dispatched",
+    # not an exception.
+    jq4 = JobQueue()
+    jq4.enqueue("j-batch", "default", "charge", lo, 1)
+    assert jq4.dequeue("w-9", "default", 2) is not None
+    assert jq4.retry_allowed("ghost", 3) is None
+    assert jq4.retry_allowed("j-batch", 4) is not None
+    assert jq4.job("j-batch").state == "ready"
+
     stats = jq.stats()
     assert (stats.enqueued, stats.dequeued, stats.queues) == (2, 3, 1)
-    print("job-queue OK: enqueue, priority, dequeue, ack, retry, delay, dead")
+    print(
+        "job-queue OK: enqueue, priority, dequeue, ack, dead, retry, "
+        "delay, dead-lettering"
+    )
 
 
 if __name__ == "__main__":
