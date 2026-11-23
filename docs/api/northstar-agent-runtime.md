@@ -90349,6 +90349,8 @@ The hold: refusal rows in, a blocked/allowed answer out.
 
 - `entries()`
   - Every entry the hold knows about, in registration order.
+- `store` (property)
+  - The store this hold reads from.
 - `now` (property)
   - The hold's caller-supplied clock value.
 - `check(key: RefusalHoldKey, now: Optional[int]=None)`

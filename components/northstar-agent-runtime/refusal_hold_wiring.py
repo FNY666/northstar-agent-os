@@ -108,6 +108,7 @@ from refusal_hold import (
     SCOPE_KIND_QUEUE,
     SCOPE_KIND_TASK,
     SCOPE_KINDS,
+    MAX_HOLD_ENTRIES,
     RefusalHold,
     RefusalHoldEntry,
     RefusalHoldError,
@@ -429,7 +430,23 @@ class RefusalHoldRegistry:
         self._gate_lock: Optional[Any] = None
         if hold is not None:
             self._entries = list(hold.entries())
-        self._store = RefusalHoldStore(self._entries)
+            # The host's OWN store is the one this registry reads from.
+            #
+            # AMENDED 2026-11-23: the registry used to build a FRESH
+            # store here, which dropped two things the host had
+            # configured -- the store's *contents* (a host that loaded
+            # its refusals from disk got a gate that knew about NO
+            # refusals, and answered "allowed") and the store's
+            # *unreadable flag* (a broken store came back READABLE, so
+            # a "blocked_store_unreadable" answer turned into
+            # "allowed_no_refusal").  Both are fail-OPEN, and the
+            # registry's own contract -- "a broken gate blocks", "an
+            # unreadable store is not a clean read: it blocks" -- says
+            # the opposite.  So the registry now reads the store it was
+            # handed, and carries its unreadable state with it.
+            self._store = hold.store
+        else:
+            self._store = RefusalHoldStore(self._entries)
         self._hold = RefusalHold(
             entries=self._entries, store=self._store, now=int(hold.now) if hold else 0
         )
@@ -621,6 +638,26 @@ class RefusalHoldRegistry:
         The two paths share this method, so the recording semantics --
         the row check, the lock order, the store rebuild, the event --
         cannot drift apart between the two sides.  Only the *key* differs.
+
+        **AMENDED 2026-11-23 -- the bound is checked BEFORE the write.**
+        The append used to happen FIRST and the store rebuild (which
+        enforces ``MAX_HOLD_ENTRIES``) SECOND, so a record that the
+        bound refused had already been appended:
+
+            reg._entries len  : 257        # grew, despite the failure
+            reg.store entries : 256
+            to_dict entries   : 257        # and no longer restores
+
+        A refused record must leave the registry **exactly** as it was.
+        So the bound is checked first, the way
+        ``cancellation_tombstone.TombstoneSet`` checks
+        ``MAX_TOMBSTONES`` before it adds.
+
+        And a **duplicate key is not a new refusal**: the store returns
+        the FIRST entry whose key matches, so a second entry for the
+        same key is unreachable -- it shadows nothing and is shadowed.
+        Recording the same key twice therefore needs no second slot, is
+        a no-op for the store, and must be a no-op for the registry too.
         """
         if row is None:
             raise RefusalHoldWiringError(
@@ -635,11 +672,21 @@ class RefusalHoldRegistry:
             )
         with self._gate():
             with self._lock:
-                self._entries = list(self._entries) + [
-                    RefusalHoldEntry(key=key, row=row)
-                ]
-                self._rebuild_store(now=now)
-                self._record_event("recorded", key, None)
+                # The bound is checked BEFORE the mutation, and a
+                # duplicate key is not a new refusal -- so it does not
+                # need a slot of its own.
+                if not any(entry.key == key for entry in self._entries):
+                    if len(self._entries) >= MAX_HOLD_ENTRIES:
+                        raise RefusalHoldWiringError(
+                            f"wiring: a registry carries at most "
+                            f"{MAX_HOLD_ENTRIES} refusals, got "
+                            f"{len(self._entries)}"
+                        )
+                    self._entries = list(self._entries) + [
+                        RefusalHoldEntry(key=key, row=row)
+                    ]
+                    self._rebuild_store(now=now)
+                    self._record_event("recorded", key, None)
         return key
 
     def lift(self, lift: Any) -> None:
@@ -720,7 +767,34 @@ class RefusalHoldRegistry:
 
         The registry is the authority on its entries.  A store that was
         broken stays broken: a recording must not heal the gate.
+
+        **AMENDED 2026-11-23:** the rebuild also must not **drop** the
+        host's rows.  The registry may have been handed a hold over a
+        host's own store (rows loaded from disk, say), and the rebuild
+        used to replace that store with a fresh one built from the
+        registry's own ``_entries`` -- which, for a registry built from
+        ``RefusalHold(entries=[], store=host_store)``, is EMPTY.  So the
+        first recording silently discarded every refusal the host had
+        loaded.  Measured before the fix:
+
+            before record: check job-1 = blocked_by_refusal
+            AFTER  record: check job-1 = allowed_no_refusal
+
+        The registry's ``_entries`` and the store's rows are the SAME
+        set once the registry has recorded anything of its own, so the
+        rebuild now seeds the new store from **both**: the registry's own
+        entries and whatever the store already carries.
         """
+        try:
+            carried = list(self._store.entries())
+        except Exception:
+            # An unreadable store carries nothing -- and stays broken.
+            carried = []
+        known = {(entry.key, id(entry.row)) for entry in self._entries}
+        for entry in carried:
+            if (entry.key, id(entry.row)) not in known:
+                self._entries = list(self._entries) + [entry]
+                known.add((entry.key, id(entry.row)))
         try:
             store = RefusalHoldStore(self._entries)
         except RefusalHoldError as error:

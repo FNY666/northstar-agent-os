@@ -1472,3 +1472,192 @@ path is a mutant the guard was blind to.
   smaller, but the mirror is still an in-process ledger and a crash
   between the two commits is still possible.  The reconciliation is still
   the host's job.
+
+---
+
+## 14. AMENDED 2026-11-23 — the registry half-recorded a refusal it refused, and it healed a broken gate
+
+§13 fixed the mirror.  The same round found **two more defects** in the
+refusal **registry** itself (`refusal_hold_wiring.py`), both of them
+**fail-open** in the direction that matters, and both of them
+pre-existing.
+
+### 14.1 DEFECT 3 — a refused record was half-recorded
+
+`RefusalHoldRegistry.record_entry()` appended to `self._entries` and
+**then** rebuilt the store.  The rebuild is what enforces the hold's
+bound (`MAX_HOLD_ENTRIES`, 256), and it raises when the bound is passed --
+so the append had already happened when the raise arrived.
+
+Measured on the tree before the fix:
+
+```
+BEFORE the failing record:
+  reg._entries len  : 256        # the store's bound
+  reg.hold entries  : 256
+  reg.store entries : 256
+  to_dict entries   : 256
+  events            : 256
+
+FAILED RECORD: RefusalHoldWiringError wiring: a hold carries at most 256
+                refusals, got 257
+
+AFTER the failed record:
+  reg._entries len  : 257        # <-- grew, despite the failure
+  reg.hold entries  : 256
+  reg.store entries : 256
+  to_dict entries   : 257        # <-- and is now UNRECONSTRUCTIBLE
+  events            : 256
+```
+
+Three consequences, in increasing order of severity:
+
+1. **The registry's own view of itself is a lie.**  `to_dict()` reports
+   257 entries while the store holds 256, so the two disagree about
+   what was recorded.
+
+2. **The registry can no longer be rebuilt.**  `to_dict()` is the shape
+   a host persists and restores, and restoring it raises: `a hold
+   carries at most 256 refusals, got 257`.  A host that persisted a
+   registry and tried to restore it gets a hard failure -- and it gets
+   it *because of* a record that was REFUSED.
+
+3. **The refusal mechanism is FROZEN.**  Every subsequent record fails
+   the same way, because the store is already at its bound and the
+   refused append keeps pushing `_entries` further past it.  Measured:
+   after the first failure, three further records all failed and
+   `_entries` grew to 259; after 200 more failed records `_entries` was
+   459 while the store stayed at 256.  So the registry grows without
+   bound and stores nothing new: **a host that records refusals for
+   more than 256 actions has a gate that can no longer refuse anything
+   it is asked about afterwards.**  The gate does not fail closed -- it
+   keeps answering "allowed".
+
+**The fix.**  The bound is checked **before** the mutation, the way
+`cancellation_tombstone.TombstoneSet` checks `MAX_TOMBSTONES` before it
+adds:
+
+```python
+if not any(entry.key == key for entry in self._entries):
+    if len(self._entries) >= MAX_HOLD_ENTRIES:
+        raise RefusalHoldWiringError(...)
+    self._entries = list(self._entries) + [RefusalHoldEntry(key=key, row=row)]
+    self._rebuild_store(now=now)
+    self._record_event("recorded", key, None)
+```
+
+And a **duplicate key is not a new refusal**: the store returns the
+FIRST entry whose key matches, so a second entry for the same key is
+unreachable -- it shadows nothing and is shadowed.  Recording the same
+key twice therefore needs no second slot, is a no-op for the store, and
+must be a no-op for the registry too.  Before the fix, a duplicate
+consumed a slot of the bound, so 256 duplicates exhausted a registry
+that held exactly one refusal.
+
+### 14.2 DEFECT 4 — the registry healed a broken gate and dropped a host's rows
+
+`RefusalHoldRegistry.__init__` accepts a `hold`, and the hold may carry
+a **host's own store** -- `RefusalHoldStore`'s own docstring says so:
+"A caller with rows on disk supplies its own store; the hold only
+requires the store to answer `fetch`".  But the registry did not keep
+the hold's store: it built a **fresh** `RefusalHoldStore(self._entries)`
+and a fresh hold over it.
+
+So two things the host configured were silently dropped.
+
+**The unreadable flag.**  A store the host broke (or one that is
+unreadable because the disk is gone) came back READABLE:
+
+```
+the hold's own answer (broken store): blocked_store_unreadable
+REGISTRY store readable after construction: True
+registry check: blocked_by_refusal
+```
+
+The direction is **fail OPEN**: the registry's own contract says "a
+broken gate blocks" and "an unreadable store is not a clean read: it
+blocks", and the construction path turned a blocked answer into an
+allowed one.
+
+**The rows.**  A store that carries the host's rows (the shape
+`RefusalHold(entries=[], store=disk_store)` produces) was emptied by
+the registry:
+
+```
+the HOLD's own answer for job-1: blocked_by_refusal
+the REGISTRY's answer for job-1: allowed_no_refusal
+registry entries: 0   store entries: 0
+```
+
+A host that loaded its refusals from disk and handed them to the
+registry got a gate that **knows about no refusals at all** -- and the
+answer is "allowed".  That is the one answer that must never be given
+by accident.
+
+**And the rebuild dropped them again.**  `_rebuild_store()` replaces the
+store with a fresh one built from the registry's own `_entries` -- and
+for a registry built over a host store, those are empty.  So even after
+the construction was fixed, the **first recording** discarded every
+refusal the host had loaded:
+
+```
+before record: check job-1 = blocked_by_refusal
+AFTER  record: check job-1 = allowed_no_refusal
+```
+
+**The fix.**  The registry reads the store it was handed
+(`RefusalHold` now exposes `store`), and the rebuild **seeds the new
+store from both** the registry's own entries and whatever the store
+already carries.  A broken store stays broken through both paths, which
+is the rule `_rebuild_store` already stated for itself ("a store that
+was broken stays broken: a recording must not heal the gate") but only
+honoured for the store the registry owned.
+
+### 14.3 The guards
+
+Thirteen new test methods in `tests/test_refusal_hold_wiring.py`:
+
+| # | guard | what it pins |
+|---|---|---|
+| 1 | `test_a_refused_record_leaves_the_entries_unchanged` | a refused record adds no entry |
+| 2 | `test_the_registry_and_its_store_agree_after_a_refused_record` | `to_dict()` and the store agree |
+| 3 | `test_a_refused_record_leaves_to_dict_reconstructible` | the payload still restores |
+| 4 | `test_a_refused_record_leaves_the_events_unchanged` | no event is left behind |
+| 5 | `test_a_refused_record_does_not_freeze_the_registry` | the gate still answers for what it has |
+| 6 | `test_the_registry_does_not_grow_without_bound` | 50 refused records leak no entries |
+| 7 | `test_a_duplicate_key_does_not_consume_a_second_slot` | a duplicate is one refusal |
+| 8 | `test_a_duplicate_key_is_refused_at_the_bound` | a duplicate needs no slot at the bound |
+| 9 | `test_a_broken_host_store_stays_broken` | construction does not heal a broken store |
+| 10 | `test_a_host_store_with_rows_is_not_emptied` | construction does not drop the host's rows |
+| 11 | `test_a_host_store_with_rows_is_the_registry_store` | the registry reads the store it was handed |
+| 12 | `test_a_recording_does_not_drop_the_host_s_rows` | the rebuild does not drop them either |
+| 13 | `test_a_broken_host_store_stays_broken_after_a_recording` | the rebuild does not heal it either |
+
+The same round found a **fourth, separate** defect -- the referee
+convicting slices that have not started -- which is not a runtime
+defect and is written up in
+`docs/design/r8-delivered-slice-scope.md`.
+
+**A note on how the capacity defect was found.**  It was found by
+*reading the code against the sibling*, not by reading the code alone.
+`cancellation_tombstone.TombstoneSet.add` checks its bound **before**
+it mutates; the refusal registry appended **first** and rebuilt
+**second**, so the bound was enforced by a step that ran after the
+mutation.  The two modules do the same thing -- carry a bounded set --
+and one of them checks first and the other checks last.  That
+difference is the defect.
+
+### 14.4 What this does NOT change
+
+* `refusal_hold.py`'s and `refusal_hold_wiring.py`'s version and schema
+  pins are unchanged.  `RefusalHold.store` is a new **read-only
+  property**, not a new record shape and not a new operation on the
+  ledger.
+* The hold's own semantics are unchanged: a refusal still blocks, a
+  broken store still blocks, a tampered row still blocks, and a
+  malformed key still raises.
+* The subject layer is still collapsed, and a refusal still cannot be
+  lifted.  Open items 2 and 3 above are unchanged.
+* The bound itself is unchanged: `MAX_HOLD_ENTRIES` is still 256, and
+  it is still enforced -- it is now enforced **before** the write, and a
+  duplicate no longer consumes a slot.

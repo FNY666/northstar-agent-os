@@ -67,6 +67,7 @@ from refusal_hold_wiring import (
     RefusalRefusedError,
     authorize,
     install_refusal_gate,
+    queue_hold_key,
     refusal_hold_key,
     scope_kind_for,
     stdlib_only,
@@ -1780,6 +1781,401 @@ def _legacy_ledger(state):
     ledger = _FSL.ForwardSealLedger.__new__(_FSL.ForwardSealLedger)
     ledger.__setstate__(state)
     return ledger
+
+
+class RegistryCapacityTests(unittest.TestCase):
+    """The registry must not half-record a refusal it cannot store.
+
+    THE DEFECT (measured 2026-11-23)
+    --------------------------------
+    ``RefusalHoldRegistry.record_entry()`` appends to ``self._entries``
+    and THEN rebuilds the store.  The rebuild is what enforces the
+    hold's bound (``MAX_HOLD_ENTRIES``), and it raises when the bound
+    is passed -- so the append has already happened when the raise
+    arrives.
+
+    Measured on the tree before the fix:
+
+        reg._entries len  : 256        # the store's bound
+        reg.hold entries  : 256
+        reg.store entries : 256
+        to_dict entries   : 256
+        events            : 256
+
+        FAILED RECORD: RefusalHoldWiringError wiring: a hold carries at
+                        most 256 refusals, got 257
+
+        AFTER the failed record:
+        reg._entries len  : 257        # <-- grew, despite the failure
+        reg.hold entries  : 256
+        reg.store entries : 256
+        to_dict entries   : 257        # <-- and is now UNRECONSTRUCTIBLE
+        events            : 256
+
+    Three consequences, in increasing order of severity:
+
+    1. **The registry's own view of itself is a lie.**  ``to_dict()``
+       reports 257 entries while the store holds 256, so the two
+       disagree about what was recorded.
+
+    2. **The registry can no longer be rebuilt.**  ``to_dict()`` is the
+       shape a host persists and restores, and restoring it raises:
+       ``a hold carries at most 256 refusals, got 257``.  A host that
+       persisted a registry and tried to restore it gets a hard
+       failure -- and it gets it *because* of a record that was
+       REFUSED.
+
+    3. **The refusal mechanism is FROZEN.**  Every subsequent record
+       fails the same way, because the store is already at its bound
+       and the refused append keeps pushing ``_entries`` further past
+       it.  Measured: after the first failure, three further records
+       all failed and ``_entries`` grew to 259; after 200 more failed
+       records ``_entries`` was 459 while the store stayed at 256.  So
+       the registry grows without bound and stores nothing new: a host
+       that records refusals for more than 256 actions has a gate that
+       can no longer refuse anything it is asked about afterwards.
+
+    The direction of the failure is what makes it a defect: the
+    registry **silently accepted** a write it then refused, and it
+    never recovered.
+
+    THE RULE
+    --------
+    A refused record must leave the registry **exactly** as it was:
+    the same entries, the same store, the same ``to_dict()``, the same
+    event trail.  The bound must be checked BEFORE the mutation, the
+    way ``cancellation_tombstone.TombstoneSet`` checks
+    ``MAX_TOMBSTONES`` before it adds -- see
+    ``TombstoneSet.add``::
+
+        if len(self._tombstones) >= MAX_TOMBSTONES:
+            raise TombstoneError(...)
+
+    A **duplicate** key is not a new refusal and must not consume a
+    slot of the bound either: re-recording the same key is a no-op for
+    the store (the store returns the FIRST matching entry), so it
+    must be a no-op for the registry too.
+    """
+
+    def _fill(self, registry, count, prefix="job"):
+        """Record ``count`` refusals, one per distinct key."""
+        for index in range(count):
+            registry.record(
+                f"{prefix}-{index}", "dispatch", row=make_row(f"r{index}")
+            )
+
+    def test_a_refused_record_leaves_the_entries_unchanged(self):
+        from refusal_hold import MAX_HOLD_ENTRIES
+
+        registry = RefusalHoldRegistry()
+        self._fill(registry, MAX_HOLD_ENTRIES)
+        before = len(registry.to_dict()["entries"])
+
+        with self.assertRaises(RefusalHoldWiringError):
+            registry.record("one-too-many", "dispatch", row=make_row("over"))
+
+        self.assertEqual(
+            len(registry.to_dict()["entries"]),
+            before,
+            "a refused record must not add an entry",
+        )
+
+    def test_the_registry_and_its_store_agree_after_a_refused_record(self):
+        """``to_dict()`` and the store must not disagree about the record.
+
+        This is the observable that caught the defect: the registry
+        counted 257 and the store counted 256.
+        """
+        from refusal_hold import MAX_HOLD_ENTRIES
+
+        registry = RefusalHoldRegistry()
+        self._fill(registry, MAX_HOLD_ENTRIES)
+
+        with self.assertRaises(RefusalHoldWiringError):
+            registry.record("one-too-many", "dispatch", row=make_row("over"))
+
+        self.assertEqual(
+            len(registry.to_dict()["entries"]),
+            len(registry.store.entries()),
+            "the registry's serialization and its store must agree",
+        )
+
+    def test_a_refused_record_leaves_to_dict_reconstructible(self):
+        """The registry's own serialization must still restore."""
+        from refusal_hold import MAX_HOLD_ENTRIES
+
+        registry = RefusalHoldRegistry()
+        self._fill(registry, MAX_HOLD_ENTRIES)
+
+        with self.assertRaises(RefusalHoldWiringError):
+            registry.record("one-too-many", "dispatch", row=make_row("over"))
+
+        payload = registry.to_dict()
+        self.assertEqual(
+            len(payload["entries"]),
+            MAX_HOLD_ENTRIES,
+            "to_dict() must agree with the store about what was recorded",
+        )
+        # And the payload must actually restore.
+        restored = RefusalHoldRegistry()
+        self.assertEqual(len(restored.hold.entries()), 0)
+        for entry in payload["entries"]:
+            restored.record(
+                entry["scope_id"],
+                entry["action"],
+                row=make_row(entry["row"]["reason"]),
+            )
+        self.assertEqual(len(restored.hold.entries()), MAX_HOLD_ENTRIES)
+
+    def test_a_refused_record_leaves_the_events_unchanged(self):
+        from refusal_hold import MAX_HOLD_ENTRIES
+
+        registry = RefusalHoldRegistry()
+        self._fill(registry, MAX_HOLD_ENTRIES)
+        before = len(registry.events())
+
+        with self.assertRaises(RefusalHoldWiringError):
+            registry.record("one-too-many", "dispatch", row=make_row("over"))
+
+        self.assertEqual(
+            len(registry.events()),
+            before,
+            "a refused record must not leave an event behind",
+        )
+
+    def test_a_refused_record_does_not_freeze_the_registry(self):
+        """After the bound is hit, the registry still answers for what it has."""
+        from refusal_hold import MAX_HOLD_ENTRIES
+
+        registry = RefusalHoldRegistry()
+        self._fill(registry, MAX_HOLD_ENTRIES)
+
+        with self.assertRaises(RefusalHoldWiringError):
+            registry.record("one-too-many", "dispatch", row=make_row("over"))
+
+        # The refusals that DID land still refuse.
+        result = registry.check(f"job-0", "dispatch")
+        self.assertTrue(result.blocked)
+        self.assertEqual(result.reason, REASON_BLOCKED_BY_REFUSAL)
+
+        # And the refusal that did NOT land is simply not there -- it is
+        # not a hole in the gate, it is an absence, and the gate says so.
+        absent = registry.check("one-too-many", "dispatch")
+        self.assertFalse(absent.blocked)
+        self.assertEqual(absent.reason, REASON_ALLOWED_NO_REFUSAL)
+
+    def test_the_registry_does_not_grow_without_bound(self):
+        """A refused record must not leak an entry per attempt."""
+        from refusal_hold import MAX_HOLD_ENTRIES
+
+        registry = RefusalHoldRegistry()
+        self._fill(registry, MAX_HOLD_ENTRIES)
+        before = len(registry.to_dict()["entries"])
+
+        for index in range(50):
+            with self.assertRaises(RefusalHoldWiringError):
+                registry.record(f"spam-{index}", "dispatch", row=make_row("x"))
+
+        self.assertEqual(
+            len(registry.to_dict()["entries"]),
+            before,
+            "the registry must not grow past the bound on refused records",
+        )
+
+    def test_a_duplicate_key_does_not_consume_a_second_slot(self):
+        """Re-recording the same key is a no-op, not a new entry."""
+        from refusal_hold import MAX_HOLD_ENTRIES
+
+        registry = RefusalHoldRegistry()
+        registry.record("job-1", "dispatch", row=make_row("first"))
+        registry.record("job-1", "dispatch", row=make_row("second"))
+
+        self.assertEqual(
+            len(registry.to_dict()["entries"]),
+            1,
+            "the same key recorded twice is one refusal",
+        )
+
+    def test_a_duplicate_key_is_refused_at_the_bound(self):
+        """At the bound, re-recording an existing key still works.
+
+        The duplicate does not need a new slot, so the bound does not
+        apply to it -- and the refusal it carries stays the one that is
+        already on the books.
+        """
+        from refusal_hold import MAX_HOLD_ENTRIES
+
+        registry = RefusalHoldRegistry()
+        self._fill(registry, MAX_HOLD_ENTRIES)
+
+        # job-0 is already recorded, so this needs no new slot.
+        registry.record("job-0", "dispatch", row=make_row("again"))
+        self.assertEqual(
+            len(registry.to_dict()["entries"]), MAX_HOLD_ENTRIES
+        )
+
+        result = registry.check("job-0", "dispatch")
+        self.assertTrue(result.blocked)
+        self.assertEqual(result.reason, REASON_BLOCKED_BY_REFUSAL)
+
+
+class RegistryHostStoreTests(unittest.TestCase):
+    """A host's OWN store must survive the registry's construction.
+
+    THE DEFECT (measured 2026-11-23)
+    --------------------------------
+    ``RefusalHoldRegistry.__init__`` accepts a ``hold`` -- and the hold
+    may carry a **host's own store** (the docstring of
+    ``RefusalHoldStore`` says so: "A caller with rows on disk supplies
+    its own store; the hold only requires the store to answer
+    ``fetch``").  But the registry does not keep the hold's store: it
+    builds a **fresh** ``RefusalHoldStore(self._entries)`` and a fresh
+    hold over it.
+
+    So two things the host configured are silently dropped:
+
+    * the host's store **readable flag** -- a store the host broke (or
+      one that is unreadable because the disk is gone) comes back
+      READABLE.  Measured before the fix:
+
+          the hold's own answer (broken store): blocked_store_unreadable
+          REGISTRY store readable after construction: True
+          registry check: blocked_by_refusal
+
+      The direction is **fail OPEN**: the registry's own contract says
+      "a broken gate blocks" and "an unreadable store is not a clean
+      read: it blocks", and the construction path turns a blocked
+      answer into an allowed one.
+
+    * the host's store **contents** -- a store that carries the host's
+      rows (the shape ``RefusalHold(entries=[], store=disk_store)``
+      produces) is emptied by the registry.  Measured before the fix:
+
+          the HOLD's own answer for job-1: blocked_by_refusal
+          the REGISTRY's answer for job-1: allowed_no_refusal
+          registry entries: 0   store entries: 0
+
+      A host that loaded its refusals from disk and handed them to the
+      registry gets a gate that **knows about no refusals at all** --
+      and the answer is "allowed".  That is the one answer that must
+      never be given by accident.
+
+    The registry's own ``_rebuild_store`` already knows the rule -- "A
+    store that was broken stays broken: a recording must not heal the
+    gate" -- but it only honours it for the store the registry itself
+    owns.  The construction path never went through it.
+
+    THE RULE
+    --------
+    The registry is a **view** over a hold.  When it is handed a hold,
+    it must read the same store the hold reads, and it must carry the
+    store's unreadable state with it.
+    """
+
+    def _host_store(self, rows=1, broken=False):
+        from refusal_hold import RefusalHoldEntry, RefusalHoldStore
+        from refusal_hold_wiring import queue_hold_key
+
+        entries = [
+            RefusalHoldEntry(
+                key=queue_hold_key(f"job-{index}", "dispatch"), row=make_row()
+            )
+            for index in range(rows)
+        ]
+        store = RefusalHoldStore(entries)
+        if broken:
+            store.break_reads()
+        return store
+
+    def test_a_broken_host_store_stays_broken(self):
+        from refusal_hold import RefusalHold
+
+        store = self._host_store(rows=1, broken=True)
+        hold = RefusalHold(entries=[], store=store)
+        self.assertTrue(hold.check(queue_hold_key("job-0", "dispatch")).blocked)
+
+        registry = RefusalHoldRegistry(hold=hold)
+
+        self.assertFalse(
+            registry.store.is_readable(),
+            "the registry must not heal a broken host store",
+        )
+        result = registry.check_key(queue_hold_key("job-0", "dispatch"))
+        self.assertTrue(result.blocked)
+        self.assertEqual(result.reason, REASON_BLOCKED_STORE_UNREADABLE)
+
+    def test_a_host_store_with_rows_is_not_emptied(self):
+        from refusal_hold import RefusalHold
+
+        store = self._host_store(rows=2)
+        hold = RefusalHold(entries=[], store=store)
+
+        registry = RefusalHoldRegistry(hold=hold)
+
+        result = registry.check_key(queue_hold_key("job-0", "dispatch"))
+        self.assertTrue(
+            result.blocked,
+            "the host's refusals must still be refusals after construction",
+        )
+        self.assertEqual(result.reason, REASON_BLOCKED_BY_REFUSAL)
+
+    def test_a_host_store_with_rows_is_the_registry_store(self):
+        from refusal_hold import RefusalHold
+
+        store = self._host_store(rows=1)
+        hold = RefusalHold(entries=[], store=store)
+
+        registry = RefusalHoldRegistry(hold=hold)
+
+        self.assertIs(
+            registry.store,
+            store,
+            "the registry must read the store it was handed",
+        )
+
+    def test_a_recording_does_not_drop_the_host_s_rows(self):
+        """The rebuild must not discard what the host had loaded.
+
+        This is the SECOND half of the defect: construction was fixed,
+        but the first recording rebuilt the store from the registry's
+        own entries -- which, for a registry built over a host store,
+        were empty -- so the recording dropped every refusal the host
+        had loaded.  Measured before the fix:
+
+            before record: check job-1 = blocked_by_refusal
+            AFTER  record: check job-1 = allowed_no_refusal
+        """
+        from refusal_hold import RefusalHold
+
+        store = self._host_store(rows=1)
+        hold = RefusalHold(entries=[], store=store)
+        registry = RefusalHoldRegistry(hold=hold)
+
+        self.assertTrue(registry.check_key(queue_hold_key("job-0", "dispatch")).blocked)
+
+        registry.record("grant-1", "dispatch", row=make_row("new"))
+
+        result = registry.check_key(queue_hold_key("job-0", "dispatch"))
+        self.assertTrue(
+            result.blocked,
+            "the host's refusal must survive a recording",
+        )
+        self.assertEqual(result.reason, REASON_BLOCKED_BY_REFUSAL)
+
+    def test_a_broken_host_store_stays_broken_after_a_recording(self):
+        """A recording must not heal a broken host store either."""
+        from refusal_hold import RefusalHold
+
+        store = self._host_store(rows=1, broken=True)
+        hold = RefusalHold(entries=[], store=store)
+        registry = RefusalHoldRegistry(hold=hold)
+
+        registry.record("grant-1", "dispatch", row=make_row("new"))
+
+        self.assertFalse(registry.store.is_readable())
+        result = registry.check_key(queue_hold_key("job-0", "dispatch"))
+        self.assertTrue(result.blocked)
+        self.assertEqual(result.reason, REASON_BLOCKED_STORE_UNREADABLE)
 
 
 if __name__ == "__main__":

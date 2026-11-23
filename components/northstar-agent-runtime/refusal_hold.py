@@ -479,6 +479,18 @@ class RefusalHold:
         """Every entry the hold knows about, in registration order."""
         return tuple(self._entries)
 
+    @property
+    def store(self) -> RefusalHoldStore:
+        """The store this hold reads from.
+
+        Exposed so that a **view** over the hold -- the wiring's
+        ``RefusalHoldRegistry`` -- can read the SAME store the hold
+        reads, instead of building a fresh one and quietly dropping the
+        host's rows (and the host's store's unreadable state).  See
+        ``docs/design/refusal-hold-wiring.md`` §14.
+        """
+        return self._store
+
     def __len__(self) -> int:
         return len(self._entries)
 
