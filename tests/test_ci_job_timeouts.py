@@ -104,9 +104,9 @@ class CiJobTimeoutTests(unittest.TestCase):
 
     def test_the_slowest_job_has_a_limit_above_its_measured_workload(self):
         # The agent-runtime job's measured workload on this host is about
-        # 22 minutes: the 33,275-test pytest suite (measured 8m43s), the
+        # 22 minutes: the 33,527-test pytest suite (measured 8m47s), the
         # baseline drift check, which runs the SAME suite a second time
-        # (measured 8m43s), and the 13-guard invariant verification
+        # (measured 8m47s), and the 13-guard invariant verification
         # (measured 5m06s).  The limit must be well above it, so a slower
         # runner cannot produce a false failure, and well below GitHub's
         # 360-minute default, so a hang is bounded.

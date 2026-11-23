@@ -23,15 +23,28 @@
 #
 # Measured, same tree:
 #
-#     33275 passed, 20 skipped, 6 warnings, 1501 subtests passed
-#     in 496.92s (0:08:16)
+#     33507 passed, 20 skipped, 6 warnings, 1501 subtests passed
+#     in 527.57s (0:08:47)
 #
 # and, under the legacy unittest runner:
 #
-#     Ran 23171 tests in 373.162s
+#     Ran 23240 tests in 399.430s
 #     OK (skipped=20)
 #
 # Both runners agree the failure set is EMPTY.
+#
+# The pytest count moved from 33,275 to 33,507 because 18 tests that
+# read an artifact outside the repository now RUN on a bare checkout
+# instead of CRASHING there -- see `docs/design/mutant-evidence-closure.md`
+# section 9.1c.  The unittest count moved from 23,171 to 23,240, and
+# that movement is NOT this slice's: the count of TestCase methods in
+# the component is 23,317 in this tree AND in the tree this file was
+# last measured against (verified by parsing both), so the 23,171 in
+# the earlier copy of this file was already stale.  The two runners
+# also disagree on what they collect -- unittest sees only TestCase
+# methods, pytest sees the module-level `test_*` functions too -- which
+# is why the two numbers are not comparable and only the failure SET
+# is.
 #
 # The authority is the coordinator's baseline, named by the POINTER
 # `/home/muse-newapi/b173-baseline-CURRENT` -- which is what

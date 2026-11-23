@@ -359,7 +359,18 @@ class SubjectCommitCountTests(unittest.TestCase):
         """If this ever drops to 0, the newline bug is no longer reachable."""
         slugs = 0
         multi = 0
-        for manifest in sorted(HOME.glob("b173-*.files")):
+        manifests = sorted(HOME.glob("b173-*.files"))
+        # The manifests live in the COORDINATOR's directory, so a CI
+        # runner does not have them -- and the glob then finds nothing.
+        # Measured 2026-11-22: on a simulated runner this test FAILED
+        # with "expected the whole batch, got 0", because it treated
+        # an ABSENT batch as a batch of zero slices.  "The batch is not
+        # here" is not "the batch has no slices with 2+ commits".
+        if not manifests:
+            self.skipTest(
+                f"no slice manifests available: {HOME}/b173-*.files"
+            )
+        for manifest in manifests:
             slug = manifest.name[len("b173-") : -len(".files")]
             if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", slug):
                 continue

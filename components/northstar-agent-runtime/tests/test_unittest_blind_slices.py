@@ -70,15 +70,45 @@ CLOSURE_DOC = REPO_ROOT / "docs" / "design" / "mutant-evidence-closure.md"
 #: The re-measurement artifact for the unittest-blind rows.  One line
 #: per slice:
 #:   <slug> MUTANT <kind>@<n> <VERDICT> (...);MUTANT RESULT: killed k/n; ...
-MEASUREMENT = Path("/home/muse-newapi/k3-blind-rows.txt")
+#:
+#: The coordinator's copy comes FIRST and the checkout-local copy second:
+#: the coordinator's copy is the freshest, and re-measuring is the
+#: coordinator's decision.  The checkout-local copy is what makes the
+#: check runnable on a CI runner -- measured 2026-11-22, a runner had
+#: none of the coordinator's artifacts, and the check FAILED (it did not
+#: skip) because a blind suite's 3/3 claim had nothing behind it.
+MEASUREMENT_CANDIDATES = (
+    Path("/home/muse-newapi/k3-blind-rows.txt"),
+    REPO_ROOT / "docs" / "baseline" / "mutant-census" / "k3-blind-rows.txt",
+)
 
 #: The same re-measurement, taken at each slice's OWN pinned commit.
 #: It is authoritative where it covers a slice, because a pinned commit's
 #: line numbers are the ones §2's table lists.
-PIN_MEASUREMENT = Path("/home/muse-newapi/k3-bash-pins.txt")
+PIN_MEASUREMENT_CANDIDATES = (
+    Path("/home/muse-newapi/k3-bash-pins.txt"),
+    REPO_ROOT / "docs" / "baseline" / "mutant-census" / "k3-bash-pins.txt",
+)
 
 #: The slice census artifact (the old, unittest-runner census).
-OLD_CENSUS = Path("/home/muse-newapi/census-parallel.txt")
+OLD_CENSUS_CANDIDATES = (
+    Path("/home/muse-newapi/census-parallel.txt"),
+    REPO_ROOT / "docs" / "baseline" / "mutant-census" / "census-parallel.txt",
+)
+
+
+def _first_present(candidates) -> Path | None:
+    """The first candidate that exists, or ``None``.
+
+    An absent measurement is a SKIP for the caller, never a crash and
+    never a silent pass: these checks compare a claim against a
+    measurement, and with no measurement there is nothing to compare --
+    which is a different fact from "the claim agrees".
+    """
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
 
 #: A §2 table row: ``| `slug` | `module.py` | `test_x.py` | **k/n** | ...``
 ROW_RE = re.compile(
@@ -190,8 +220,9 @@ class UnittestBlindSliceTests(unittest.TestCase):
             self.skipTest(f"closure doc missing: {CLOSURE_DOC}")
         self.doc = CLOSURE_DOC.read_text(encoding="utf-8")
         self.rows = _table_rows(self.doc)
-        self.verdicts = _verdicts(MEASUREMENT)
-        self.measured = _measured(MEASUREMENT)
+        self.measurement = _first_present(MEASUREMENT_CANDIDATES)
+        self.verdicts = _verdicts(self.measurement) if self.measurement else {}
+        self.measured = _measured(self.measurement) if self.measurement else {}
 
     def _blind_slices(self) -> set[str]:
         """The slices whose suite unittest collects nothing from."""
@@ -213,7 +244,10 @@ class UnittestBlindSliceTests(unittest.TestCase):
         §2's column describes.
         """
         out: dict[str, dict[str, str]] = {}
-        for path in (PIN_MEASUREMENT, MEASUREMENT):
+        for candidates in (PIN_MEASUREMENT_CANDIDATES, MEASUREMENT_CANDIDATES):
+            path = _first_present(candidates)
+            if path is None:
+                continue
             for slug, sites in _verdicts(path).items():
                 out.setdefault(slug, {}).update(sites)
         return out
@@ -237,7 +271,10 @@ class UnittestBlindSliceTests(unittest.TestCase):
         difference that is only a line-number shift.
         """
         if not self.verdicts:
-            self.skipTest(f"measurement artifact not available: {MEASUREMENT}")
+            self.skipTest(
+                "measurement artifact not available: "
+                + ", ".join(str(p) for p in MEASUREMENT_CANDIDATES)
+            )
         wrong = []
         compared = 0
         for slug, sites in sorted(self.verdicts.items()):
@@ -287,6 +324,22 @@ class UnittestBlindSliceTests(unittest.TestCase):
         """
         blind = self._blind_slices()
         verdicts = self._all_verdicts()
+        # With NO measurement at all, every blind 3/3 claim is
+        # "unbacked" -- which would report the absence of a measurement
+        # as a finding about the slices.  Measured 2026-11-22: on a
+        # simulated CI runner this test FAILED with "these slices claim
+        # 3/3 ... and no re-measurement backs the claim", listing three
+        # slices that were fine.  "The measurement is not here" is not
+        # "the claim is unbacked".
+        if not verdicts:
+            self.skipTest(
+                "re-measurement artifact not available: "
+                + ", ".join(
+                    str(p)
+                    for p in PIN_MEASUREMENT_CANDIDATES
+                    + MEASUREMENT_CANDIDATES
+                )
+            )
         unbacked = []
         for slug in sorted(blind):
             row = self.rows.get(slug)
@@ -318,8 +371,17 @@ class UnittestBlindSliceTests(unittest.TestCase):
         anything -- it would be a copy of the artifact it is checking.
         """
         if not self.measured:
-            self.skipTest(f"measurement artifact not available: {MEASUREMENT}")
-        old = _measured(OLD_CENSUS)
+            self.skipTest(
+                "measurement artifact not available: "
+                + ", ".join(str(p) for p in MEASUREMENT_CANDIDATES)
+            )
+        old_census = _first_present(OLD_CENSUS_CANDIDATES)
+        if old_census is None:
+            self.skipTest(
+                "old census artifact not available: "
+                + ", ".join(str(p) for p in OLD_CENSUS_CANDIDATES)
+            )
+        old = _measured(old_census)
         shared = sorted(set(old) & set(self.measured))
         self.assertTrue(shared, "the two artifacts share no slice")
         differing = [s for s in shared if old[s] != self.measured[s]]
@@ -345,8 +407,17 @@ class UnittestBlindSliceTests(unittest.TestCase):
         than an excuse for the slice.
         """
         if not self.measured:
-            self.skipTest(f"measurement artifact not available: {MEASUREMENT}")
-        old = _measured(OLD_CENSUS)
+            self.skipTest(
+                "measurement artifact not available: "
+                + ", ".join(str(p) for p in MEASUREMENT_CANDIDATES)
+            )
+        old_census = _first_present(OLD_CENSUS_CANDIDATES)
+        if old_census is None:
+            self.skipTest(
+                "old census artifact not available: "
+                + ", ".join(str(p) for p in OLD_CENSUS_CANDIDATES)
+            )
+        old = _measured(old_census)
         blind = self._blind_slices()
         perfect_old = {
             slug: old[slug]

@@ -250,6 +250,15 @@ class AcceptancePatchTests(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="r6-baseline-patch-"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
+        # The patch is a HAND-OVER artifact: it lives in the coordinator's
+        # directory, not in the repository, so a CI runner does not have
+        # it.  Measured 2026-11-22: on a simulated runner this class
+        # FAILED four times with FileNotFoundError, because the guard
+        # was on the first test only and the other three read the file
+        # unconditionally.  An absent hand-over artifact is a SKIP for
+        # the whole class.
+        if not PATCH_FILE.is_file():
+            self.skipTest(f"acceptance patch not present: {PATCH_FILE}")
 
     def test_patch_file_exists_and_has_before_after(self):
         self.assertTrue(PATCH_FILE.is_file(), f"missing patch: {PATCH_FILE}")

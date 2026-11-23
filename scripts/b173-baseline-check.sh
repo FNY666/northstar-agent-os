@@ -144,8 +144,8 @@ fi
 #
 # CI runs the component suite with `pytest -q tests`; this script ran it
 # with `python -m unittest <modules>`.  unittest's discovery only finds
-# test METHODS inside TestCase classes.  The suite also has 9,815
-# standalone module-level `test_*` FUNCTIONS, in 812 files, which
+# test METHODS inside TestCase classes.  The suite also has 9,945
+# standalone module-level `test_*` FUNCTIONS, in 811 files, which
 # unittest's discovery does not see at all:
 #
 #     unittest discovery:  23,171 tests

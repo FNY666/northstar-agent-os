@@ -21,8 +21,8 @@ blocker measured on its own:
 2. **The runner CI uses.**  The check ran the suite with ``unittest``
    while CI runs ``pytest``.  unittest's discovery finds only test
    METHODS inside TestCase classes, so the check watched 23,171 tests
-   while CI watched 33,295 -- it never saw the suite's 9,815 standalone
-   module-level ``test_*`` functions, in 812 files.  The runner is now
+   while CI watched 33,295 -- it never saw the suite's 9,945 standalone
+   module-level ``test_*`` functions, in 811 files.  The runner is now
    selectable and defaults to pytest.
 3. **The path.**  The runtime job's ``working-directory`` is the
    component, so the step must reach the repository's ``scripts/``.
@@ -270,8 +270,8 @@ class BaselineCheckPrerequisitesTests(unittest.TestCase):
         """pytest, not unittest.
 
         unittest's discovery collects only test METHODS inside TestCase
-        classes.  The runtime suite has 9,815 standalone module-level
-        ``test_*`` functions in 812 files that unittest never sees, so a
+        classes.  The runtime suite has 9,945 standalone module-level
+        ``test_*`` functions in 811 files that unittest never sees, so a
         unittest-based check watches 23,171 tests while CI watches
         33,295.
         """

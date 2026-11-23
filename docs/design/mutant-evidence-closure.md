@@ -1411,6 +1411,94 @@ comment as evidence and a key nobody could look up as a row.  The
 lesson is the same as AMENDED (e)'s: **read how the check resolves a
 proof, not only that it resolves one.**
 
+### 9.1c AMENDED 2026-11-22 (l) -- the guard could not run on CI at all
+
+Section 9.1b hardened this table's guard.  It hardened it against a tree
+that is not the tree CI runs.
+
+**The defect.**  Every artifact this guard compares against lives in the
+**coordinator's directory**, outside the repository:
+
+    census-parallel-corrected.txt   census-parallel.txt   census-v3.txt
+    k3-remeasure.txt   k3-blind-rows.txt   k3-bash-pins.txt
+
+A GitHub runner has none of them.  And the absence was not handled as an
+absence: `_census_path()` returns `None` when no census is available, and
+the caller did `scope, path = _census_path()` -- so the **absence** of an
+optional artifact raised
+
+    TypeError: cannot unpack non-iterable NoneType object
+
+in `setUp`, and **all nine tests of the class FAILED on every CI run**.
+Six of those nine predated 9.1b's hardening; the hardening added three
+more tests to the same crashing class, because a test added to a class
+whose `setUp` crashes inherits the crash.
+
+Measured under a faithful simulation of a runner (the whole coordinator
+directory absent, the repository subtree present, the interpreter and
+pip's cache left visible -- they live under the coordinator's directory
+on this host, and hiding them breaks the test RUNNER rather than the
+tree):
+
+| suite | before | after |
+|---|---|---|
+| component `pytest -q tests` | **18 failures across 7 files** | 0 |
+| repo `unittest discover -s tests` | 0 | 0 |
+
+The component job runs exactly `python -m pytest -q tests`, so **CI was
+red on every run of this branch**.  The local suite said nothing about
+it: on the coordinator's machine every artifact is present, so every
+test passed.
+
+**The fix has two halves, and the second is the one that matters.**
+
+1. **An absent artifact is a SKIP, not a crash.**  `_census_path()`'s
+   `None` is handled where it is consumed; the class skips when no
+   census is available at all.
+
+2. **The artifacts have a checkout-local copy**, under
+   `docs/baseline/mutant-census/`, with the coordinator's copy FIRST in
+   the candidate list and the local copy as the fallback.  This is the
+   same shape as the baseline's own fix (`docs/baseline/current.failures.txt`,
+   §A-7 in `baseline-attribution.md`): the coordinator's file is the
+   authority, and a copy makes the check runnable off that machine.
+
+The second half is the one that matters because **a skip leaves the
+check unrun**.  Before the fix the guard never ran on CI at all -- it
+crashed.  After it, the guard **runs and passes** on a simulated runner:
+all nine of its tests pass, not skip.
+
+**The other five files.**  The same shape appeared in five more files,
+each with its own artifact: the referee `b173-accept.sh`, the
+`b173-r6-baseline-unify-fix.patch` hand-over, the 104 `b173-*.files`
+manifests, and the `b173-*-cc-prompt-rerun.md` taskbooks.  Each now
+**skips** when its artifact is absent.  They are not tracked in the
+repository: they are the coordinator's live state, and a copy of them
+would be a copy of a moving target.  The census and the re-measurements
+are different -- they are **snapshots of a measurement**, which is a
+claim about a named tree, so a copy of the snapshot is still a true
+claim.
+
+**What is pinned.**  `tests/test_ci_runner_artifacts.py` writes a
+`sitecustomize.py` that simulates the runner and **runs** the files
+that name the coordinator's directory, asserting that none of them
+fails.  It also asserts that the checkout-local copies exist, because a
+missing copy turns the guard into a skip -- a silent loss of coverage
+that looks like a pass.
+
+Both halves were verified by planting the defect and re-running: the
+un-guarded `None` unpack fails
+`test_the_files_that_read_the_coordinator_survive_its_absence`, and a
+missing checkout-local census fails
+`test_the_census_artifacts_have_a_checkout_local_copy`.
+
+**The shape.**  A guard that cannot run is not a guard, and a guard that
+crashes on the runner is worse than one that is absent -- because it
+makes CI red for a reason that has nothing to do with the code, and
+train everyone to ignore red.  This section keeps finding the same
+class: 9.1b found a check that accepted a comment as a proof; this one
+found a check that could not execute.
+
 ### 9.2 Two pitfalls, both measured
 
 **A control that asserts the SOURCE TEXT is a false kill.**  The first

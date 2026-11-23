@@ -164,9 +164,9 @@ jobs:
   agent-runtime:
     name: Agent runtime (offline unit tests)
     runs-on: ubuntu-latest
-    # The slowest job: a 33,275-test pytest suite (measured 8m43s), the
+    # The slowest job: a 33,527-test pytest suite (measured 8m47s), the
     # baseline drift check, which runs the SAME suite a second time
-    # (measured 8m43s), plus the 13-guard invariant verification
+    # (measured 8m47s), plus the 13-guard invariant verification
     # (measured 5m06s) -- about 22 minutes in total on this host.  The
     # limit is set well above that, so a slower runner cannot produce a
     # false failure, and well below GitHub's 360-minute default, so a

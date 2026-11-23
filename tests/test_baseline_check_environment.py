@@ -140,7 +140,7 @@ class BaselineCheckRunnerTests(unittest.TestCase):
     CI runs the component suite with ``pytest -q tests``.  The check ran
     it with ``python -m unittest <modules>``, and unittest's discovery
     finds only test METHODS inside TestCase classes -- it does not see
-    the suite's 9,815 standalone module-level ``test_*`` functions.
+    the suite's 9,945 standalone module-level ``test_*`` functions.
 
     Measured 2026-11-22: unittest discovery collects 23,171 tests and
     pytest collects 33,295.  The check was watching 70% of the suite,

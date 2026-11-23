@@ -422,11 +422,11 @@ classes.  The component's suite is mostly the other shape -- standalone
 module-level `test_*` **FUNCTIONS**:
 
 ```
-1,545 test files
+1,547 test files
   812 have ONLY standalone functions  (unittest sees 0 of them)
   730 have only TestCase classes
     0 have both
-  815 files where unittest collects ZERO tests, holding 9,815 test
+  815 files where unittest collects ZERO tests, holding 9,945 test
   functions in total
 ```
 

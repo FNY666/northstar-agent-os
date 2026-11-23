@@ -98,10 +98,37 @@ CLOSURE_DOC = REPO_ROOT / "docs" / "design" / "mutant-evidence-closure.md"
 #: * ``scope="module"`` -- one row per module in the component.  It
 #:   reaches modules no slice ever touched, so it reports many more
 #:   survivor sites, and it is NOT what the table is diffed against.
+#:
+#: Each scope lists TWO places: the coordinator's copy, outside the
+#: repository, and a checkout-local copy under
+#: ``docs/baseline/mutant-census/``.  The second one is what makes this
+#: check runnable on a CI runner at all -- measured 2026-11-22, a
+#: runner had none of the coordinator's artifacts, and the check
+#: CRASHED (see :func:`_census_path`).
+#:
+#: The order inside a scope is the coordinator's copy first, then the
+#: checkout-local one: the coordinator's copy is the freshest, and the
+#: in-repo one is a FALLBACK for a machine that does not have it.
 CENSUS_CANDIDATES = (
     ("slice", Path("/home/muse-newapi/census-parallel-corrected.txt")),
     ("slice", Path("/home/muse-newapi/census-parallel.txt")),
+    ("slice", REPO_ROOT / "docs" / "baseline" / "mutant-census"
+                / "census-parallel-corrected.txt"),
+    ("slice", REPO_ROOT / "docs" / "baseline" / "mutant-census"
+                / "census-parallel.txt"),
     ("module", Path("/home/muse-newapi/census-v3.txt")),
+    ("module", REPO_ROOT / "docs" / "baseline" / "mutant-census"
+                / "census-v3.txt"),
+)
+
+#: The module-scope census, read on its own.  It is a separate
+#: artifact from the slice census, and it is used by a check that
+#: compares the two SCOPES -- so it is named separately rather than
+#: being looked up through :func:`_census_path` (which returns the
+#: slice census first).
+MODULE_CENSUS_CANDIDATES = (
+    Path("/home/muse-newapi/census-v3.txt"),
+    REPO_ROOT / "docs" / "baseline" / "mutant-census" / "census-v3.txt",
 )
 
 
@@ -111,6 +138,14 @@ def _census_path() -> tuple[str, Path] | None:
     The order matters and it is the reason this function returns the
     scope with the path: the **slice** census comes first, so the
     default reading of "the census" is the scope §9.1's table covers.
+
+    It returns ``None`` when no census is available at all, and every
+    caller must handle that.  Measured 2026-11-22: the caller did
+    ``scope, path = _census_path()``, so the ABSENCE of an optional
+    artifact raised ``TypeError: cannot unpack non-iterable NoneType``
+    -- and a CI runner, which has none of the coordinator's artifacts,
+    failed all nine tests of this class on every run.  An absent
+    artifact is a SKIP, not a crash.
     """
     for scope, candidate in CENSUS_CANDIDATES:
         if candidate.exists():
@@ -286,8 +321,15 @@ def _slice_census_modules() -> dict[str, str]:
     under two names (``diviner`` and ``scope-verb-canonical`` both probe
     ``scope_qualifier.py``), so the mapping keeps the first slug it saw
     and the caller unions it with §2's.
+
+    A census that is not available yields an EMPTY mapping -- not an
+    exception.  See :func:`_census_path`: unpacking its ``None`` was
+    the crash that made CI red on every run.
     """
-    scope, path = _census_path()
+    found = _census_path()
+    if found is None:
+        return {}
+    scope, path = found
     if scope != "slice" or not path.exists():
         return {}
     out: dict[str, str] = {}
@@ -380,6 +422,18 @@ class EquivalenceTableCoverageTests(unittest.TestCase):
         self.slice_modules = dict(_slice_modules(self.doc))
         for module, slug in _slice_census_modules().items():
             self.slice_modules.setdefault(module, slug)
+        # A census artifact that is not available is a SKIP for the
+        # whole class, not a crash.  Measured 2026-11-22: a CI runner
+        # has none of the coordinator's census artifacts, and the
+        # setUp raised ``TypeError: cannot unpack non-iterable NoneType
+        # object`` -- so all nine tests of this class FAILED on every
+        # run, and the check that guards the equivalence table never
+        # once ran on CI.
+        if _census_path() is None:
+            self.skipTest(
+                "no census artifact available: "
+                + ", ".join(str(c) for _scope, c in CENSUS_CANDIDATES)
+            )
 
     # -- helpers --------------------------------------------------------
 
@@ -641,9 +695,14 @@ class EquivalenceTableCoverageTests(unittest.TestCase):
         overlap: the same name in a module inside the scope and in a
         module outside it is two sites, not one.
         """
-        module_census = Path("/home/muse-newapi/census-v3.txt")
-        if not module_census.exists():
-            self.skipTest(f"module census artifact not available: {module_census}")
+        module_census = next(
+            (p for p in MODULE_CENSUS_CANDIDATES if p.exists()), None
+        )
+        if module_census is None:
+            self.skipTest(
+                "module census artifact not available: "
+                + ", ".join(str(p) for p in MODULE_CENSUS_CANDIDATES)
+            )
         text = module_census.read_text(encoding="utf-8")
         by_module = _survivor_sites_by_module(text)
         self.assertTrue(by_module, "the module census reports no survivors")

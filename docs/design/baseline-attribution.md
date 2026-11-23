@@ -483,7 +483,7 @@ were fixed.
 | **A-4** | **already done** | `merged_tree_review` is registered in `pyproject.toml` `py-modules` (`:976`) and in `runtime_registration` (`:1097`) — by an earlier slice, not by this one. | the four D-4 items were already green at HEAD. |
 | **A-5** | **confirmed, and it uncovered two real defects** | with the declared extra installed in a venv (`jsonschema>=4.26,<5` + `regex`), `test_tool_input_schema` is **25/25 OK** and `test_shell_sessions` is **6/6 OK**. But installing the extra into a venv **broke the live sandbox cases** — and the cause was a runtime defect, not a test artifact. See §6.2. And the *un*-installed case exposed a second defect: a type-confusion in the `enum` keyword. See §6.4. | the 4 `tool_input_schema` items and the 6 `shell_sessions` items are now green **on both** interpreters. |
 | **A-6** | **open** | the `pyproject.toml` `dependencies` comment still claims "the whole deterministic test suite run on a bare interpreter". **That claim is now true** — the suite is green on a bare interpreter — but the comment is still misleading about *why*, and the `json-schema` extra is not in `requirements.txt`. | documentation only |
-| **A-7** | **done** | `scripts/b173-baseline-check.sh` is now wired into CI as a step of the `agent-runtime` job -- the job whose unit-test step runs the very suite the check compares.  Three things blocked it and all three are now fixed: (i) the baseline file lives at `/home/muse-newapi/`, which a CI runner does not have, so a checkout-local copy with provenance now exists at `docs/baseline/current.failures.txt`; (ii) the check ran the suite with **unittest** while CI runs **pytest**, so it was watching 23,171 tests while CI watched 33,295 -- the check missed the suite's 9,815 standalone module-level test functions, so the runner is now selectable and defaults to the one CI uses; and (iii) the runtime job's `working-directory` is the component, so the step reaches the script at `../../scripts/`.  A fourth defect was found in the same script: a **full tmpfs** was reported as `BASELINE DRIFT`, which reads as "the code regressed" when nothing in the code changed -- the check now REFUSES to measure (exit 2, distinct from both MATCH and DRIFT).  `tests/test_baseline_check_ci_wiring.py` (8 tests) pins the wiring, and 4 of them fail against the pre-fix workflow. | the check now watches the same suite CI watches, runs on a bare checkout, and **CI actually runs it** -- so "the failure set is identical to the baseline" is machine-checked rather than asserted in prose. |
+| **A-7** | **done** | `scripts/b173-baseline-check.sh` is now wired into CI as a step of the `agent-runtime` job -- the job whose unit-test step runs the very suite the check compares.  Three things blocked it and all three are now fixed: (i) the baseline file lives at `/home/muse-newapi/`, which a CI runner does not have, so a checkout-local copy with provenance now exists at `docs/baseline/current.failures.txt`; (ii) the check ran the suite with **unittest** while CI runs **pytest**, so it was watching 23,171 tests while CI watched 33,295 -- the check missed the suite's 9,945 standalone module-level test functions, so the runner is now selectable and defaults to the one CI uses; and (iii) the runtime job's `working-directory` is the component, so the step reaches the script at `../../scripts/`.  A fourth defect was found in the same script: a **full tmpfs** was reported as `BASELINE DRIFT`, which reads as "the code regressed" when nothing in the code changed -- the check now REFUSES to measure (exit 2, distinct from both MATCH and DRIFT).  `tests/test_baseline_check_ci_wiring.py` (8 tests) pins the wiring, and 4 of them fail against the pre-fix workflow. | the check now watches the same suite CI watches, runs on a bare checkout, and **CI actually runs it** -- so "the failure set is identical to the baseline" is machine-checked rather than asserted in prose. |
 | **A-8** | **open, and now stale in the OTHER direction** | the baseline in force (the one `b173-baseline-CURRENT` names) held **26** items, and **all 26 are green**.  The newest baseline file on this machine holds **ZERO**.  Re-pinning is the **coordinator's** call (`r6-baseline-unify.md` §5.1: "a slice that legitimately fixes a pre-existing failure will show 'fewer items than the baseline', which is a real finding to report, not a reason to re-take the baseline").  The checker now follows the pointer, so it compares against whatever the coordinator has pinned; a checkout-local copy of an empty measurement, with provenance, is at `docs/baseline/current.failures.txt` -- it is a FALLBACK for machines that have no `/home/muse-newapi`, not a re-take. | — |
 | **A-9** | **done** | the strategy ledger (`b173-strategy-ledger-2026-11-14.md`) now carries a §5.1 correction: its "内核能力缺失" attribution was **wrong** — Landlock *is* available on this host (`landlock_create_ruleset works (ABI v1 flags)`); the 8 bench failures were two code defects (D-1, D-2). Its §1 table carries the re-measured suite line. | the ledger no longer tells the next slice's brief that `161/169` is an environment artifact. It was not. |
 | **A-10** | **already done** | `b173-accept.sh`'s `FULL_SUITE` grep was widened to `Ran [0-9]{4,}` in round 7; the `Ran 19[0-9]{3}` string survives only in the comment that explains the change. | — |
@@ -713,8 +713,8 @@ fixes **A-5**'s items, and turns **A-6**'s claim from false to true.
   * the check ran the suite with **unittest** while CI runs **pytest**.
     unittest's discovery finds only test METHODS inside TestCase
     classes, so the check was watching **23,171** tests while CI
-    watched **33,295** — it never saw the suite's **9,815** standalone
-    module-level `test_*` functions, in 812 files.  The runner is now
+    watched **33,295** — it never saw the suite's **9,945** standalone
+    module-level `test_*` functions, in 811 files.  The runner is now
     selectable and defaults to the one CI uses, and both runners'
     failure lines are normalised to one shape so a baseline taken with
     either is comparable against the other;
@@ -760,6 +760,35 @@ fixes **A-5**'s items, and turns **A-6**'s claim from false to true.
   read as text, and each of them fails when the defect is planted back
   in (measured: the old order fails two of them; ignoring the pointer
   fails two).
+
+* **A-7c** — **done, 2026-11-22.**  The check was wired into CI, and
+  the wiring was the easy part: **the rest of the B173 suite could not
+  run on CI at all.**  See `mutant-evidence-closure.md` §9.1c for the
+  measurement and the fix.  The short form:
+
+  * the component job runs `python -m pytest -q tests`, and **18 tests
+    across 7 files FAILED** under a faithful simulation of a runner --
+    so CI was **red on every run** of this branch, for reasons that had
+    nothing to do with the code;
+  * the sharpest instance was an **optional artifact whose absence
+    crashed**: `_census_path()` returns `None`, and the caller unpacked
+    it, so the absence of a census raised `TypeError` in `setUp` and
+    failed all nine tests of the class;
+  * the census and the re-measurements now have **checkout-local
+    copies** under `docs/baseline/mutant-census/`, with the
+    coordinator's file first and the local copy as the fallback -- so
+    the guard **runs and passes** on a runner rather than skipping;
+  * the coordinator's live state (the referee, the hand-over patch, the
+    104 manifests, the taskbooks) **skips** when absent, because a copy
+    of a moving target is not evidence;
+  * `tests/test_ci_runner_artifacts.py` **runs** the affected files
+    under the simulation and asserts that none of them fails, and it
+    fails when the defect is planted back in.
+
+  The rule this adds to this section: **a check that cannot run is not
+  a check, and a check that crashes on the runner is worse than one
+  that is absent** -- because it makes CI red for a reason unrelated to
+  the code, and trains everyone to ignore red.
 
 * **A-8** — the baseline in force over-reports by **26** (the newest
   baseline file on this machine holds ZERO).  It should be

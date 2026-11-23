@@ -43,6 +43,14 @@ class NewTestsThresholdTests(unittest.TestCase):
 
     def test_the_judge_compares_against_the_computed_threshold(self):
         """The verdict must use $NTEST_THRESHOLD, not a literal number."""
+        # The referee is the COORDINATOR's tool: it lives outside the
+        # repository, so a CI runner does not have it.  The sibling test
+        # above already skips when it is absent -- this one did not, and
+        # read the file unconditionally.  Measured 2026-11-22: on a
+        # simulated runner this test FAILED with FileNotFoundError,
+        # while its sibling skipped.  An absent referee is a SKIP.
+        if not ACCEPT.is_file():
+            self.skipTest(f"live referee not installed: {ACCEPT}")
         text = ACCEPT.read_text(encoding="utf-8")
         self.assertRegex(
             text,

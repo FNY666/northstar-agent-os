@@ -69,7 +69,17 @@ ARTIFACT_COMPLETION_DOC = (
 #:
 #: Its scope is the slice's **first three** constructs -- the same scope
 #: as §2's k/3 column.
-MEASUREMENT = Path("/home/muse-newapi/k3-remeasure.txt")
+#:
+#: The coordinator's copy comes FIRST and the checkout-local copy second:
+#: the coordinator's copy is the freshest, and re-measuring is the
+#: coordinator's decision.  The checkout-local copy is what makes the
+#: check runnable on a CI runner -- measured 2026-11-22, a runner had
+#: none of the coordinator's artifacts, and the check failed rather
+#: than skipped.
+MEASUREMENT_CANDIDATES = (
+    Path("/home/muse-newapi/k3-remeasure.txt"),
+    REPO_ROOT / "docs" / "baseline" / "mutant-census" / "k3-remeasure.txt",
+)
 
 #: The re-measurement of the rows whose suite unittest cannot collect a
 #: test from.  Measured 2026-11-22 with the fixed (pytest) probe; it is
@@ -80,11 +90,31 @@ MEASUREMENT = Path("/home/muse-newapi/k3-remeasure.txt")
 #: so its k/n is NOT comparable with §2's first-three k/3.  The
 #: comparable numbers from it are the PER-CONSTRUCT verdicts, and
 #: §2's column is the count of the listed constructs that were killed.
-BLIND_MEASUREMENT = Path("/home/muse-newapi/k3-blind-rows.txt")
+BLIND_MEASUREMENT_CANDIDATES = (
+    Path("/home/muse-newapi/k3-blind-rows.txt"),
+    REPO_ROOT / "docs" / "baseline" / "mutant-census" / "k3-blind-rows.txt",
+)
 
 #: The re-measurement of the rows at their OWN PINNED commits.  Same
 #: whole-file scope as the blind measurement.
-PIN_MEASUREMENT = Path("/home/muse-newapi/k3-bash-pins.txt")
+PIN_MEASUREMENT_CANDIDATES = (
+    Path("/home/muse-newapi/k3-bash-pins.txt"),
+    REPO_ROOT / "docs" / "baseline" / "mutant-census" / "k3-bash-pins.txt",
+)
+
+
+def _first_present(candidates) -> Path | None:
+    """The first candidate that exists, or ``None``.
+
+    An absent measurement is a SKIP for the caller, never a crash and
+    never a silent pass: the checks that use this compare a table
+    against a measurement, and with no measurement there is nothing to
+    compare -- which is a different fact from "the table agrees".
+    """
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
 
 #: A table row: ``| `slug` | `module.py` | `test_x.py` | **k/n** | `hash` | k/n | ...``
 ROW_RE = re.compile(
@@ -145,9 +175,10 @@ def _table_constructs(doc_text: str) -> dict[str, list[str]]:
 def _measured() -> dict[str, str]:
     """``{slug: "k/n"}`` from the re-measurement artifact."""
     out = {}
-    if not MEASUREMENT.exists():
+    path = _first_present(MEASUREMENT_CANDIDATES)
+    if path is None:
         return out
-    for line in MEASUREMENT.read_text(encoding="utf-8").splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         parts = line.split()
         if not parts:
             continue
@@ -196,7 +227,10 @@ def _blind_verdicts() -> dict[str, dict[str, str]]:
     column describes.
     """
     out: dict[str, dict[str, str]] = {}
-    for path in (PIN_MEASUREMENT, BLIND_MEASUREMENT):
+    for candidates in (PIN_MEASUREMENT_CANDIDATES, BLIND_MEASUREMENT_CANDIDATES):
+        path = _first_present(candidates)
+        if path is None:
+            continue
         for slug, sites in _verdicts(path).items():
             merged = out.setdefault(slug, {})
             merged.update(sites)
@@ -274,7 +308,10 @@ class CensusTableFreshnessTests(unittest.TestCase):
     def test_every_measured_slice_has_a_row(self):
         """A measured slice with no row is a slice the table forgot."""
         if not self.measured:
-            self.skipTest(f"measurement artifact not available: {MEASUREMENT}")
+            self.skipTest(
+                "measurement artifact not available: "
+                + ", ".join(str(p) for p in MEASUREMENT_CANDIDATES)
+            )
         missing = sorted(set(self.measured) - set(self.rows))
         self.assertEqual(
             missing, [],
@@ -294,7 +331,10 @@ class CensusTableFreshnessTests(unittest.TestCase):
         """
         measured = self.measured_any
         if not measured:
-            self.skipTest(f"measurement artifact not available: {MEASUREMENT}")
+            self.skipTest(
+                "measurement artifact not available: "
+                + ", ".join(str(p) for p in MEASUREMENT_CANDIDATES)
+            )
         wrong = []
         for slug, (pinned, _head) in sorted(self.rows.items()):
             got = measured.get(slug)
@@ -329,7 +369,11 @@ class CensusTableFreshnessTests(unittest.TestCase):
         if not verdicts:
             self.skipTest(
                 "re-measurement artifact not available: "
-                f"{BLIND_MEASUREMENT}, {PIN_MEASUREMENT}"
+                + ", ".join(
+                    str(p)
+                    for p in BLIND_MEASUREMENT_CANDIDATES
+                    + PIN_MEASUREMENT_CANDIDATES
+                )
             )
         wrong = []
         compared = 0
@@ -378,7 +422,11 @@ class CensusTableFreshnessTests(unittest.TestCase):
         if not verdicts:
             self.skipTest(
                 "re-measurement artifact not available: "
-                f"{BLIND_MEASUREMENT}, {PIN_MEASUREMENT}"
+                + ", ".join(
+                    str(p)
+                    for p in BLIND_MEASUREMENT_CANDIDATES
+                    + PIN_MEASUREMENT_CANDIDATES
+                )
             )
         # §2's rows, keyed by slug, with their listed constructs.
         corrected = {
@@ -443,7 +491,11 @@ class CensusTableFreshnessTests(unittest.TestCase):
         if not verdicts:
             self.skipTest(
                 "re-measurement artifact not available: "
-                f"{BLIND_MEASUREMENT}, {PIN_MEASUREMENT}"
+                + ", ".join(
+                    str(p)
+                    for p in BLIND_MEASUREMENT_CANDIDATES
+                    + PIN_MEASUREMENT_CANDIDATES
+                )
             )
         weak = {slug for slug, (pinned, _h) in self.rows.items()
                 if pinned != "3/3"}

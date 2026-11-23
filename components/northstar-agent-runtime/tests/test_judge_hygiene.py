@@ -138,7 +138,7 @@ FIXTURE_TEST = (
 )
 
 # A test file whose tests are STANDALONE FUNCTIONS -- the shape 815 of the
-# component's 1,545 test files have.  unittest's discovery does not see
+# component's 1,547 test files have.  unittest's discovery does not see
 # these at all: it collects only test METHODS inside TestCase classes.
 FIXTURE_STANDALONE_TEST = (
     "from probe_mod import pick\n"
@@ -488,7 +488,7 @@ class JudgeHygieneProbeBehaviourTests(unittest.TestCase):
         ``unittest`` exits **5** when it collects no tests, and the probe
         reads any non-zero exit as "the mutant was KILLED".  So a test
         file whose tests are STANDALONE FUNCTIONS -- which is 815 of the
-        component's 1,545 test files, holding 9,815 test functions --
+        component's 1,547 test files, holding 9,945 test functions --
         makes the probe report every mutant in the module as killed
         without a single test having run.
 
