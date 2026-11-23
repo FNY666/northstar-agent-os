@@ -15,7 +15,7 @@ backward-compatible integrity layer on top of the existing envelope:
   is stored on that record so a verifier can recompute it. Any edit,
   deletion or reorder of a chained record breaks every later link.
 
-* **Ed25519 signature** (non-repudiation, optional): ``signature`` covers
+* **Ed25519 signature** (non-repudiation, optional for general audit feeds): ``signature`` covers
   ``canonical_json(record minus signature)`` — i.e. it seals the chain
   fields too, binding the signature to the record's chain position.
 
@@ -34,12 +34,18 @@ spec reproduces the exact bytes hashed here.
 Chain versions: ``northstar-audit-chain/1`` (legacy canonicalization) and
 ``northstar-audit-chain/2`` (JCS per RFC 8785, aligned with
 draft-sharif-agent-audit-trail §6.1). The version is stamped on the genesis
-anchor and on every v2 record's hashed body; verifiers dispatch on it, so
-v1 feeds verify forever. See docs/concepts/ietf-audit-trail-alignment.md
-for the item-by-item comparison with the IETF draft.
+anchor and, in current writers, on every v2 record's hashed body. Verifiers
+also accept historical v2 feeds that stamped only the genesis or first
+record; any explicit marker must still be supported and consistent. See
+docs/concepts/ietf-audit-trail-alignment.md for the item-by-item comparison
+with the IETF draft.
 
 Everything here is offline and deterministic. No network, no clock reads:
 timestamps only ever come from the records themselves.
+
+``verify_lines`` accepts either one public key or a ``key_id`` -> public-key
+mapping. The latter supports verified key rotation within one uninterrupted
+hash chain; callers that require signed feeds can set ``require_signatures``.
 """
 from __future__ import annotations
 
@@ -49,7 +55,7 @@ import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Iterator
+from typing import Any, BinaryIO, Iterable, Iterator, Mapping
 
 #: Version of the chain construction described here and in the proof spec.
 CHAIN_VERSION = "northstar-audit-chain/1"
@@ -127,19 +133,34 @@ def _canon_for_version(chain_version: str):
 def _version_of_record(record: Any) -> str:
     """Chain version governing a record's canonicalization.
 
-    v2 chains stamp every record's hashed body with
-    ``"chain": "northstar-audit-chain/2"``; v1 records carry no stamp
-    (frozen), so a missing/unknown marker means v1 and old feeds keep
-    verifying. The genesis anchor's own ``"chain"`` field is the fallback
-    for the first record.
+    Current v2 chains stamp every record's hashed body. Historical v2
+    records may be unstamped and rely on the genesis anchor. A present but
+    unsupported or conflicting marker is rejected rather than downgraded.
     """
     if isinstance(record, dict):
-        if record.get("chain") == CHAIN_VERSION_V2:
-            return CHAIN_VERSION_V2
         genesis = record.get("genesis")
-        if isinstance(genesis, dict) and genesis.get("chain") == CHAIN_VERSION_V2:
-            return CHAIN_VERSION_V2
+        record_version = _declared_chain_version(record.get("chain"))
+        genesis_version = (
+            _declared_chain_version(genesis.get("chain")) if isinstance(genesis, dict) else None
+        )
+        if record_version is not None and genesis_version is not None and record_version != genesis_version:
+            raise ValueError("record and genesis declare different audit chain versions")
+        return record_version or genesis_version or CHAIN_VERSION
     return CHAIN_VERSION
+
+
+def _declared_chain_version(value: Any) -> str | None:
+    """Return an explicit supported version, or ``None`` when unstamped.
+
+    A present but unknown marker is never treated as legacy v1: doing so
+    would silently downgrade a feed produced under a future/unsupported
+    canonicalization.
+    """
+    if value is None:
+        return None
+    if value not in _CHAIN_VERSIONS:
+        raise ValueError(f"unknown audit chain version {value!r}")
+    return value
 
 
 def _sha256_hex(data: bytes) -> str:
@@ -332,7 +353,10 @@ def verify_signature(record: dict[str, Any], public_key: bytes) -> bool:
         sig_bytes = bytes.fromhex(signature)
     except ValueError:
         return False
-    canon = _canon_for_version(_version_of_record(record))
+    try:
+        canon = _canon_for_version(_version_of_record(record))
+    except ValueError:
+        return False
     body = {k: v for k, v in record.items() if k != "signature"}
     return verify(public_key, canon(body), sig_bytes)
 
@@ -374,22 +398,59 @@ class ChainResult:
         return self.ok
 
 
+MAX_RECORD_JSON_DEPTH = 128
+
+
 def _iter_records(lines: Iterable[str]) -> Iterator[tuple[int, dict[str, Any]]]:
     """Yield (physical_line_number, parsed_json) for non-blank lines."""
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON key {key!r}")
+            result[key] = value
+        return result
+
+    def reject_constant(value: str):
+        raise ValueError(f"non-standard JSON constant {value}")
+
     for number, raw in enumerate(lines, start=1):
         line = raw.strip()
         if not line:
             continue
-        yield number, json.loads(line)
+        depth = 0
+        in_string = False
+        escaped = False
+        for character in line:
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif character == "\\":
+                    escaped = True
+                elif character == '"':
+                    in_string = False
+                continue
+            if character == '"':
+                in_string = True
+            elif character in "[{":
+                depth += 1
+                if depth > MAX_RECORD_JSON_DEPTH:
+                    raise ValueError(
+                        f"JSON depth limit exceeded ({MAX_RECORD_JSON_DEPTH} containers)"
+                    )
+            elif character in "]}":
+                depth -= 1
+        yield number, json.loads(line, object_pairs_hook=unique_object, parse_constant=reject_constant)
 
 
 def verify_lines(
     lines: Iterable[str],
     *,
-    public_key: bytes | None = None,
+    public_key: bytes | Mapping[str, bytes] | None = None,
     expect_session_id: str | None = None,
     expect_run_id: str | None = None,
     strict: bool = False,
+    require_signatures: bool = False,
     clock_skew_seconds: float = 300.0,
 ) -> ChainResult:
     """Verify a feed's hash chain (and signatures when ``public_key`` is given).
@@ -418,106 +479,201 @@ def verify_lines(
     """
     if clock_skew_seconds < 0:
         raise ValueError("clock_skew_seconds must be >= 0")
-    records: list[tuple[int, dict[str, Any]]] = []
-    try:
-        for number, record in _iter_records(lines):
-            if not isinstance(record, dict):
-                return ChainResult(ok=False, broken_at=number, reason=f"line {number} is not a JSON object")
-            records.append((number, record))
-    except json.JSONDecodeError as error:
-        return ChainResult(ok=False, broken_at=None, reason=f"line is not valid JSON: {error}")
-
-    if not records:
-        return ChainResult(ok=False, reason="feed is empty")
-    if not any("chain_hash" in record for _, record in records):
-        return ChainResult(ok=False, unprotected=True, records=len(records),
-                           reason="feed carries no chain fields (unprotected legacy feed)")
-
+    record_count = 0
     prev_chain: str | None = None
     chained = 0
     sig_failures: list[int] = []
+    strict_failure: tuple[int, str, str] | None = None
+    strict_prev_epoch: float | None = None
+    strict_prev_ts: str | None = None
+    strict_seen_nonces: dict[Any, int] = {}
+    first_missing_chain: int | None = None
+    saw_chain_hash = False
     # Previous record's parsed HLC stamp for the causality check; None
     # until a record with a parseable stamp is seen.
     prev_hlc: tuple[int, int] | None = None
     from hlc import unpack as _hlc_unpack
     # The chain version is a feed-wide property, stamped on every v2
     # record's body and on the genesis anchor; the first record decides.
-    canon = _canon_for_version(_version_of_record(records[0][1]))
-    for position, (number, record) in enumerate(records):
-        chain_hash = record.get("chain_hash")
-        prev_hash = record.get("prev_hash")
-        if not isinstance(chain_hash, str) or not _HEX64_RE.match(chain_hash):
-            return ChainResult(ok=False, broken_at=number, records=len(records), chained=chained,
-                               reason=f"line {number}: missing or malformed chain_hash (chain interrupted)")
-        if not isinstance(prev_hash, str) or not _HEX64_RE.match(prev_hash):
-            return ChainResult(ok=False, broken_at=number, records=len(records), chained=chained,
-                               reason=f"line {number}: missing or malformed prev_hash")
-        if position == 0:
-            genesis = record.get("genesis")
-            if not isinstance(genesis, dict):
-                return ChainResult(ok=False, broken_at=number, records=len(records), chained=chained,
-                                   reason=f"line {number}: first chained record must carry the genesis anchor")
-            if genesis_hash(genesis) != prev_hash:
-                return ChainResult(ok=False, broken_at=number, records=len(records), chained=chained,
-                                   reason=f"line {number}: genesis anchor does not match prev_hash")
-            if expect_session_id is not None and genesis.get("session_id") != expect_session_id:
-                return ChainResult(ok=False, broken_at=number, records=len(records), chained=chained,
-                                   reason=f"line {number}: genesis session_id {genesis.get('session_id')!r} "
-                                          f"!= expected {expect_session_id!r}")
-            if expect_run_id is not None and genesis.get("run_id") != expect_run_id:
-                return ChainResult(ok=False, broken_at=number, records=len(records), chained=chained,
-                                   reason=f"line {number}: genesis run_id {genesis.get('run_id')!r} "
-                                          f"!= expected {expect_run_id!r}")
-        elif prev_hash != prev_chain:
-            return ChainResult(ok=False, broken_at=number, records=len(records), chained=chained,
-                               reason=f"line {number}: prev_hash does not link to the previous chain_hash "
-                                      f"(reorder or splice)")
-        body = {k: v for k, v in record.items() if k not in _SEAL_FIELDS}
-        expected = _sha256_hex(bytes.fromhex(prev_hash) + canon(body))
-        if expected != chain_hash:
-            return ChainResult(ok=False, broken_at=number, records=len(records), chained=chained,
-                               reason=f"line {number}: chain_hash mismatch (record modified after sealing)")
-        prev_chain = chain_hash
-        chained += 1
-        trust_error = _check_provenance_trust(record)
-        if trust_error is not None:
-            return ChainResult(ok=False, broken_at=number, records=len(records), chained=chained,
-                               reason=f"line {number}: {trust_error}")
-        # Causal-order check (HLC): the child's stamp must not precede the
-        # parent's. Tuples compare lexicographically, which is the HLC
-        # order. Unparseable stamps mean "no HLC information" and skip the
-        # pair — this keeps pre-HLC feeds verifying unchanged.
-        hlc_now = _hlc_unpack(record.get("hlc"))
-        if hlc_now is not None and prev_hlc is not None and hlc_now < prev_hlc:
-            return ChainResult(
-                ok=False, broken_at=number, records=len(records), chained=chained,
-                reason=f"line {number}: causality inversion: hlc stamp "
-                       f"{record['hlc']!r} precedes the previous record's "
-                       f"stamp (timestamps contradict the chain's causal order)",
-                causality_violation="causality-inversion",
-            )
-        if hlc_now is not None:
-            prev_hlc = hlc_now
-        if "signature" in record:
-            if public_key is None:
-                return ChainResult(ok=False, broken_at=number, records=len(records), chained=chained,
-                                   reason=f"line {number}: record is signed but no public key was given")
-            if not verify_signature(record, public_key):
-                sig_failures.append(number)
+    canon = None
+    feed_chain_version: str | None = None
+    try:
+        for number, record in _iter_records(lines):
+            if not isinstance(record, dict):
+                return ChainResult(ok=False, broken_at=number, reason=f"line {number} is not a JSON object")
+            record_count += 1
+            if "chain_hash" not in record:
+                if first_missing_chain is None:
+                    first_missing_chain = number
+                continue
+            try:
+                record_version = _declared_chain_version(record.get("chain"))
+                genesis_for_version = record.get("genesis")
+                genesis_version = (
+                    _declared_chain_version(genesis_for_version.get("chain"))
+                    if isinstance(genesis_for_version, dict)
+                    else None
+                )
+            except ValueError as error:
+                return ChainResult(
+                    ok=False, broken_at=number, records=record_count,
+                    reason=f"line {number}: {error}",
+                )
+            if feed_chain_version is None:
+                feed_chain_version = record_version or genesis_version or CHAIN_VERSION
+                if record_version is not None and genesis_version is not None and record_version != genesis_version:
+                    return ChainResult(
+                        ok=False, broken_at=number, records=record_count,
+                        reason=f"line {number}: record and genesis declare different audit chain versions",
+                    )
+            elif record_version is not None and record_version != feed_chain_version:
+                return ChainResult(
+                    ok=False, broken_at=number, records=record_count,
+                    reason=f"line {number}: mixed audit chain versions",
+                )
+            if genesis_version is not None and genesis_version != feed_chain_version:
+                return ChainResult(
+                    ok=False, broken_at=number, records=record_count,
+                    reason=f"line {number}: genesis declares a different audit chain version",
+                )
+            saw_chain_hash = True
+            if first_missing_chain is not None:
+                return ChainResult(ok=False, broken_at=first_missing_chain, records=record_count,
+                                   reason=f"line {first_missing_chain}: missing or malformed chain_hash (chain interrupted)")
+            if canon is None:
+                canon = _canon_for_version(_version_of_record(record))
+            chain_hash = record.get("chain_hash")
+            prev_hash = record.get("prev_hash")
+            if not isinstance(chain_hash, str) or not _HEX64_RE.match(chain_hash):
+                return ChainResult(ok=False, broken_at=number, records=record_count, chained=chained,
+                                   reason=f"line {number}: missing or malformed chain_hash (chain interrupted)")
+            if not isinstance(prev_hash, str) or not _HEX64_RE.match(prev_hash):
+                return ChainResult(ok=False, broken_at=number, records=record_count, chained=chained,
+                                   reason=f"line {number}: missing or malformed prev_hash")
+            if chained == 0:
+                genesis = record.get("genesis")
+                if not isinstance(genesis, dict):
+                    return ChainResult(ok=False, broken_at=number, records=record_count, chained=chained,
+                                       reason=f"line {number}: first chained record must carry the genesis anchor")
+                if genesis_hash(genesis) != prev_hash:
+                    return ChainResult(ok=False, broken_at=number, records=record_count, chained=chained,
+                                       reason=f"line {number}: genesis anchor does not match prev_hash")
+                if expect_session_id is not None and genesis.get("session_id") != expect_session_id:
+                    return ChainResult(ok=False, broken_at=number, records=record_count, chained=chained,
+                                       reason=f"line {number}: genesis session_id {genesis.get('session_id')!r} "
+                                              f"!= expected {expect_session_id!r}")
+                if expect_run_id is not None and genesis.get("run_id") != expect_run_id:
+                    return ChainResult(ok=False, broken_at=number, records=record_count, chained=chained,
+                                       reason=f"line {number}: genesis run_id {genesis.get('run_id')!r} "
+                                              f"!= expected {expect_run_id!r}")
+            elif prev_hash != prev_chain:
+                return ChainResult(ok=False, broken_at=number, records=record_count, chained=chained,
+                                   reason=f"line {number}: prev_hash does not link to the previous chain_hash "
+                                          f"(reorder or splice)")
+            body = {k: v for k, v in record.items() if k not in _SEAL_FIELDS}
+            expected = _sha256_hex(bytes.fromhex(prev_hash) + canon(body))
+            if expected != chain_hash:
+                return ChainResult(ok=False, broken_at=number, records=record_count, chained=chained,
+                                   reason=f"line {number}: chain_hash mismatch (record modified after sealing)")
+            prev_chain = chain_hash
+            chained += 1
+            trust_error = _check_provenance_trust(record)
+            if trust_error is not None:
+                return ChainResult(ok=False, broken_at=number, records=record_count, chained=chained,
+                                   reason=f"line {number}: {trust_error}")
+            # Causal-order check (HLC): the child's stamp must not precede the
+            # parent's. Tuples compare lexicographically, which is the HLC
+            # order. Unparseable stamps mean "no HLC information" and skip the
+            # pair — this keeps pre-HLC feeds verifying unchanged.
+            hlc_now = _hlc_unpack(record.get("hlc"))
+            if hlc_now is not None and prev_hlc is not None and hlc_now < prev_hlc:
+                return ChainResult(
+                    ok=False, broken_at=number, records=record_count, chained=chained,
+                    reason=f"line {number}: causality inversion: hlc stamp "
+                           f"{record['hlc']!r} precedes the previous record's "
+                           f"stamp (timestamps contradict the chain's causal order)",
+                    causality_violation="causality-inversion",
+                )
+            if hlc_now is not None:
+                prev_hlc = hlc_now
+            if require_signatures and "signature" not in record:
+                return ChainResult(ok=False, broken_at=number, records=record_count, chained=chained,
+                                   reason=f"line {number}: signature is required")
+            if "signature" in record:
+                if public_key is None:
+                    return ChainResult(ok=False, broken_at=number, records=record_count, chained=chained,
+                                       reason=f"line {number}: record is signed but no public key was given")
+                if isinstance(public_key, Mapping):
+                    record_key_id = record.get("key_id")
+                    if isinstance(record_key_id, str):
+                        signing_key = public_key.get(record_key_id)
+                    else:
+                        signing_key = public_key.get("__legacy_default__")
+                else:
+                    signing_key = public_key
+                if signing_key is None or not verify_signature(record, signing_key):
+                    sig_failures.append(number)
+            if strict and strict_failure is None:
+                ts = record.get("ts")
+                epoch = _parse_audit_ts(ts)
+                if epoch is None:
+                    strict_failure = (
+                        number, "unparseable-timestamp",
+                        f"line {number}: strict mode: timestamp {ts!r} is missing or "
+                        "not a valid RFC 3339 UTC 'Z' timestamp",
+                    )
+                elif strict_prev_epoch is not None and epoch < strict_prev_epoch - clock_skew_seconds:
+                    regression = strict_prev_epoch - epoch
+                    strict_failure = (
+                        number, "timestamp-regression",
+                        f"line {number}: strict mode: timestamp regressed "
+                        f"{regression:.3f}s ({strict_prev_ts} -> {ts}), exceeding the "
+                        f"allowed clock skew of {clock_skew_seconds:g}s",
+                    )
+                else:
+                    nonce = record.get("nonce")
+                    if nonce is not None:
+                        try:
+                            hash(nonce)
+                        except TypeError:
+                            strict_failure = (
+                                number, "invalid-nonce",
+                                f"line {number}: strict mode: nonce must be a scalar, "
+                                f"got {type(nonce).__name__}",
+                            )
+                        else:
+                            if nonce in strict_seen_nonces:
+                                strict_failure = (
+                                    number, "duplicate-nonce",
+                                    f"line {number}: strict mode: duplicate nonce {nonce!r} "
+                                    f"(first seen at line {strict_seen_nonces[nonce]})",
+                                )
+                            else:
+                                strict_seen_nonces[nonce] = number
+                    strict_prev_epoch, strict_prev_ts = epoch, ts
+    except (ValueError, RecursionError) as error:
+        return ChainResult(ok=False, broken_at=None, reason=f"line is not valid JSON: {error}")
 
+    if not record_count:
+        return ChainResult(ok=False, reason="feed is empty")
+    if not saw_chain_hash:
+        return ChainResult(ok=False, unprotected=True, records=record_count,
+                           reason="feed carries no chain fields (unprotected legacy feed)")
+    if first_missing_chain is not None:
+        return ChainResult(ok=False, broken_at=first_missing_chain, records=record_count,
+                           reason=f"line {first_missing_chain}: missing or malformed chain_hash (chain interrupted)")
     if sig_failures:
         first = sig_failures[0]
-        return ChainResult(ok=False, broken_at=first, records=len(records), chained=chained,
+        return ChainResult(ok=False, broken_at=first, records=record_count, chained=chained,
                            reason=f"line {first}: Ed25519 signature invalid",
                            signature_failures=sig_failures)
     if strict:
-        hit = _check_strict(records, clock_skew_seconds=clock_skew_seconds)
-        if hit is not None:
-            number, violation, strict_reason = hit
-            return ChainResult(ok=False, broken_at=number, records=len(records),
+        if strict_failure is not None:
+            number, violation, strict_reason = strict_failure
+            return ChainResult(ok=False, broken_at=number, records=record_count,
                                chained=chained, reason=strict_reason,
                                strict_mode=True, strict_violation=violation)
-    return ChainResult(ok=True, records=len(records), chained=chained,
+    return ChainResult(ok=True, records=record_count, chained=chained,
                        reason=f"chain intact over {chained} records"
                               + (" (strict mode)" if strict else ""),
                        strict_mode=strict)
@@ -700,10 +856,321 @@ def check_anchor(path: str | Path, manifest: dict[str, Any]) -> tuple[bool, str]
             chain_hash = record.get("chain_hash")
             if isinstance(chain_hash, str):
                 head = chain_hash
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+    except (UnicodeDecodeError, ValueError, RecursionError) as error:
         return False, f"feed is not readable: {error}"
     if head != manifest.get("head_chain_hash"):
         return False, "head chain_hash differs from the anchor (rewritten history)"
     if records != manifest.get("records"):
         return False, f"record count {records} != anchored {manifest.get('records')} (truncated or extended)"
     return True, f"anchor matches: {records} records, head {str(head)[:16]}…"
+
+
+# ---------------------------------------------------------------------------
+# Durable append: crash-durability for the audit NDJSON feed.
+#
+# Honest scope: these are *crash-durability* guarantees — fsync so a record
+# that was acknowledged is on stable storage, short-write retry so a
+# partial ``os.write`` never leaves a torn line, corrupt-tail truncation so
+# a crash mid-write does not poison the whole feed on reopen, and restart
+# continuity so the chain resumes with the right ``prev_hash``. They are
+# NOT Byzantine fault tolerance: a hostile operator with write access can
+# still rewrite history and start a fresh chain (that needs an external
+# head anchor — see ``anchor_manifest``).
+# ---------------------------------------------------------------------------
+
+import warnings as _warnings
+
+
+def _write_all(fd: int, data: bytes) -> None:
+    """Write all of ``data`` to ``fd``, retrying on short writes.
+
+    ``os.write`` is allowed to write fewer bytes than requested (partial
+    write); a naive single call can leave a torn NDJSON line on a crash.
+    This loop keeps writing the remainder until every byte is accepted.
+    """
+    view = memoryview(data)
+    while view:
+        written = os.write(fd, view)
+        if written == 0:
+            # Per POSIX, a zero return on a blocking fd should not happen
+            # for a non-empty write; treat it as an error rather than
+            # spinning forever.
+            raise OSError("os.write returned 0 bytes on a blocking file descriptor")
+        view = view[written:]
+
+
+def _verify_prefix(
+    raw: bytes | BinaryIO,
+    *,
+    chain_version: str = CHAIN_VERSION_V2,
+) -> tuple[str | None, int, int, str]:
+    """Verify a feed prefix; return (last_chain_hash, valid_bytes, records, error).
+
+    Walks bytes or a binary file handle line by line, checking JSON
+    parseability and the hash-chain links exactly like :func:`verify_lines`.
+    Passing a file handle keeps recovery memory proportional to the largest
+    record instead of the whole append-only feed. ``last_chain_hash``
+    is the ``chain_hash`` of the last valid record (``None`` when no valid
+    chained record exists); ``valid_bytes`` is the byte offset just past the
+    last valid line (the safe truncation point); ``error`` is "" when the
+    whole prefix verified, otherwise a human-readable description of the
+    first bad line.
+    """
+    canon = _canon_for_version(chain_version)
+    last_chain: str | None = None
+    valid_bytes = 0
+    offset = 0
+    records = 0  # count of valid chained records seen
+    position = 0  # count of non-blank lines seen
+    try:
+        expected_version = _declared_chain_version(chain_version)
+    except ValueError as exc:
+        return None, 0, 0, str(exc)
+    import io
+
+    lines = io.BytesIO(raw) if isinstance(raw, bytes) else raw
+    for raw_line in lines:
+        line = raw_line.strip()
+        line_len = len(raw_line)
+        if not line:
+            # Blank lines are skipped by the verifier; they are still part
+            # of the valid prefix (they carry no chain state).
+            offset += line_len
+            valid_bytes = offset
+            continue
+        try:
+            record = next(_iter_records((line.decode("utf-8"),)))[1]
+        except (UnicodeDecodeError, ValueError, RecursionError) as exc:
+            return last_chain, valid_bytes, records, f"line is not valid JSON ({exc}); truncating to last valid record"
+        if not isinstance(record, dict):
+            return last_chain, valid_bytes, records, "line is not a JSON object; truncating to last valid record"
+        try:
+            record_version = _declared_chain_version(record.get("chain"))
+            genesis_for_version = record.get("genesis")
+            genesis_version = (
+                _declared_chain_version(genesis_for_version.get("chain"))
+                if isinstance(genesis_for_version, dict)
+                else None
+            )
+        except ValueError as exc:
+            return last_chain, valid_bytes, records, f"{exc}; truncating to last valid record"
+        if record_version is not None and record_version != expected_version:
+            return last_chain, valid_bytes, records, "record declares a different audit chain version; truncating"
+        if genesis_version is not None and genesis_version != expected_version:
+            return last_chain, valid_bytes, records, "genesis declares a different audit chain version; truncating"
+        chain_hash = record.get("chain_hash")
+        prev_hash = record.get("prev_hash")
+        if not isinstance(chain_hash, str) or not _HEX64_RE.match(chain_hash):
+            return last_chain, valid_bytes, records, "missing or malformed chain_hash; truncating to last valid record"
+        if not isinstance(prev_hash, str) or not _HEX64_RE.match(prev_hash):
+            return last_chain, valid_bytes, records, "missing or malformed prev_hash; truncating to last valid record"
+        if position == 0:
+            genesis = record.get("genesis")
+            if not isinstance(genesis, dict):
+                return last_chain, valid_bytes, records, "first chained record lacks the genesis anchor; truncating"
+            if genesis_hash(genesis) != prev_hash:
+                return last_chain, valid_bytes, records, "genesis anchor does not match prev_hash; truncating"
+        elif prev_hash != last_chain:
+            return last_chain, valid_bytes, records, "prev_hash does not link to the previous chain_hash; truncating"
+        body = {k: v for k, v in record.items() if k not in _SEAL_FIELDS}
+        expected = _sha256_hex(bytes.fromhex(prev_hash) + canon(body))
+        if expected != chain_hash:
+            return last_chain, valid_bytes, records, "chain_hash mismatch (record modified after sealing); truncating"
+        last_chain = chain_hash
+        position += 1
+        records += 1
+        offset += line_len
+        valid_bytes = offset
+    return last_chain, valid_bytes, records, ""
+
+
+class DurableAuditWriter:
+    """Append-only, crash-durable writer for a chained audit NDJSON feed.
+
+    On open, an existing file is verified from genesis (unless
+    ``verify_on_open=False``); a corrupt tail — invalid JSON or a broken
+    chain link — is truncated to the last valid record and a warning is
+    emitted. The chain then resumes with the correct ``prev_hash`` from the
+    last valid record (restart continuity): a crash mid-write never poisons
+    the feed, it only loses the torn tail.
+
+    Every :meth:`append` seals the record (``prev_hash``/``chain_hash`` via
+    :func:`chain_record`), writes the full line with a short-write retry
+    loop, and — when ``durable`` — calls :func:`os.fsync` so an
+    acknowledged record is on stable storage before returning. Pass
+    ``durable=False`` only for performance testing; records may then be
+    lost on crash.
+
+    Honest scope: crash-durability, not Byzantine fault tolerance. A
+    hostile operator with write access can still rewrite history wholesale
+    and start a fresh chain; that threat needs an external head anchor
+    (see :func:`anchor_manifest`).
+
+    The writer holds an OS file descriptor; use as a context manager or
+    call :meth:`close`. Not thread-safe.
+    """
+
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        component: str,
+        session_id: str | None = None,
+        run_id: str | None = None,
+        durable: bool = True,
+        verify_on_open: bool = True,
+        chain_version: str = CHAIN_VERSION_V2,
+    ) -> None:
+        """Open (creating if needed) the audit feed at ``path``.
+
+        ``component``/``session_id``/``run_id`` seed the genesis anchor for
+        a fresh file. ``durable`` controls the default fsync behavior of
+        :meth:`append`. ``verify_on_open`` controls the corrupt-tail scan;
+        disable it only when the caller has already verified the file.
+        """
+        if chain_version not in _CHAIN_VERSIONS:
+            raise ValueError(f"unknown chain version {chain_version!r}")
+        self._path = Path(path)
+        self._component = component
+        self._session_id = session_id
+        self._run_id = run_id
+        self._durable = durable
+        self._chain_version = chain_version
+        self._closed = False
+
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        # O_APPEND so concurrent writers (if any) never interleave mid-line;
+        # the fd is what fsync operates on.
+        self._fd = os.open(self._path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+
+        self._prev_hash: str | None = None  # chain_hash of the last record
+        self._genesis_anchor: dict[str, Any] | None = None
+        self._record_count = 0
+        if verify_on_open:
+            self._recover_tail()
+        else:
+            self._prev_hash, self._record_count = self._read_tail_hash_unverified()
+
+    # -- open-time recovery ---------------------------------------------
+
+    def _recover_tail(self) -> None:
+        """Verify the existing file; truncate a corrupt tail, warn loudly."""
+        try:
+            with self._path.open("rb") as handle:
+                last_chain, valid_bytes, record_count, error = _verify_prefix(
+                    handle, chain_version=self._chain_version
+                )
+        except OSError:
+            last_chain, valid_bytes, record_count, error = None, 0, 0, ""
+        if valid_bytes == 0 and record_count == 0 and not error:
+            return  # fresh file: genesis will be minted on first append
+        if error:
+            _warnings.warn(
+                f"audit feed {self._path}: corrupt tail detected ({error}); "
+                f"truncated to last valid record",
+                UserWarning,
+                stacklevel=3,
+            )
+            # Truncate to the last valid byte offset. Use a separate fd so
+            # the append fd's O_APPEND offset stays consistent.
+            with os.fdopen(os.open(self._path, os.O_WRONLY, 0o644), "wb", closefd=True) as handle:
+                handle.truncate(valid_bytes)
+        self._prev_hash = last_chain
+        self._record_count = record_count
+
+    def _read_tail_hash_unverified(self) -> tuple[str | None, int]:
+        """(last chain_hash, record count) without verification (verify_on_open=False path)."""
+        try:
+            handle = self._path.open("rb")
+        except OSError:
+            return None, 0
+        last: str | None = None
+        count = 0
+        with handle:
+            for raw_line in handle:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    record = next(_iter_records((line.decode("utf-8"),)))[1]
+                except (UnicodeDecodeError, ValueError, RecursionError):
+                    break
+                chain_hash = record.get("chain_hash") if isinstance(record, dict) else None
+                if isinstance(chain_hash, str) and _HEX64_RE.match(chain_hash):
+                    last = chain_hash
+                    count += 1
+                else:
+                    break
+        return last, count
+
+    # -- append ----------------------------------------------------------
+
+    @property
+    def prev_hash(self) -> str | None:
+        """The ``chain_hash`` the next appended record will link to (None on a fresh feed)."""
+        return self._prev_hash
+
+    @property
+    def records(self) -> int:
+        """Number of chained records currently in the file (valid prefix)."""
+        return self._record_count
+
+    def append(self, record: dict[str, Any], *, durable: bool | None = None) -> dict[str, Any]:
+        """Seal ``record`` onto the chain and durably append it.
+
+        ``durable`` overrides the writer default for this call: when true
+        (the default), the line is fsync'd before returning. Returns the
+        sealed record (with ``prev_hash``/``chain_hash``).
+        """
+        if self._closed:
+            raise ValueError("cannot append to a closed DurableAuditWriter")
+        if not isinstance(record, dict):
+            raise TypeError("record must be a dict")
+        do_fsync = self._durable if durable is None else durable
+
+        if self._prev_hash is None:
+            # First record: mint the genesis anchor and seal against it.
+            anchor = build_genesis_params(
+                self._component,
+                session_id=self._session_id,
+                run_id=self._run_id,
+                started_ts=record.get("ts"),
+                chain_version=self._chain_version,
+            )
+            self._genesis_anchor = anchor
+            genesis = genesis_hash(anchor)
+            body_record: dict[str, Any] = {**record, "genesis": anchor}
+            if self._chain_version == CHAIN_VERSION_V2:
+                body_record = {**body_record, "chain": self._chain_version}
+            sealed = chain_record(body_record, genesis, chain_version=self._chain_version)
+        else:
+            body_record = record
+            if self._chain_version == CHAIN_VERSION_V2:
+                body_record = {**record, "chain": self._chain_version}
+            sealed = chain_record(body_record, self._prev_hash, chain_version=self._chain_version)
+
+        line = canonical_json(sealed) + b"\n"
+        _write_all(self._fd, line)
+        if do_fsync:
+            os.fsync(self._fd)
+        self._prev_hash = sealed["chain_hash"]
+        self._record_count += 1
+        return sealed
+
+    def flush(self) -> None:
+        """fsync the file descriptor (durable barrier without appending)."""
+        if self._closed:
+            raise ValueError("cannot flush a closed DurableAuditWriter")
+        os.fsync(self._fd)
+
+    def close(self) -> None:
+        """Close the underlying file descriptor."""
+        if not self._closed:
+            os.close(self._fd)
+            self._closed = True
+
+    def __enter__(self) -> "DurableAuditWriter":
+        return self
+
+    def __exit__(self, *_exc: Any) -> None:
+        self.close()

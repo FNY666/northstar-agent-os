@@ -27,9 +27,12 @@ Conservative modelling choices (documented, not hidden):
 * Labels attach on the gate's *request* for an allowed call: the gate runs
   before execution, so it cannot know whether the call will succeed. A
   denied call attaches no label — a denied call produces no data.
-* The audience check only constrains non-empty trajectory audiences.
+* The audience check only constrains data with an audience label.
   Public (unlabelled) data may go anywhere; labelled data may only go to
-  recipients named in its audience. This mirrors OpenAPPA's
+  recipients named in its audience. A labelled trajectory escalates at any
+  sink without an explicit audience contract, including an otherwise unknown
+  sink. When labelled sources are combined,
+  their allowed-recipient sets intersect. This mirrors OpenAPPA's
   "secret-stays-inside" without its symbolic audience-source machinery.
 * A sink template (``$arg``) that names a missing argument fails closed:
   the expansion cannot be satisfied, so the call escalates.
@@ -72,11 +75,6 @@ trust_chain = ["public", "internal", "confidential", "restricted"]
 
 [[policy.source]]
 tool = "Read"
-match_args = { path = "/etc/*" }
-delta = { trust = "confidential" }
-
-[[policy.source]]
-tool = "Read"
 match_args = { path = "*.pem" }
 delta = { trust = "restricted" }
 
@@ -84,6 +82,11 @@ delta = { trust = "restricted" }
 tool = "Read"
 match_args = { path = "*credentials*" }
 delta = { trust = "restricted" }
+
+[[policy.source]]
+tool = "Read"
+match_args = { path = "/etc/*" }
+delta = { trust = "confidential" }
 
 [[policy.source]]
 tool = "Read"
@@ -111,6 +114,14 @@ requires = { trust = "internal" }
 
 [[policy.sink]]
 tool = "http_post"
+requires = { trust = "public" }
+
+[[policy.sink]]
+tool = "Fetch"
+requires = { trust = "public" }
+
+[[policy.sink]]
+tool = "Task"
 requires = { trust = "public" }
 
 [[policy.sink]]
@@ -335,7 +346,36 @@ class SessionDataflow:
     policy: DataflowPolicy
     trust_index: int = 0
     audience: frozenset[str] = frozenset()
+    audience_labeled: bool = False
+    audience_unknown: bool = False
     events: list[dict[str, Any]] = field(default_factory=list)
+
+    @classmethod
+    def from_memory_audience(
+        cls, policy: DataflowPolicy, audience: tuple[str, ...] | list[str]
+    ) -> "SessionDataflow":
+        """Start a trajectory with the recipient boundary of injected memory.
+
+        An empty audience means public/unlabelled memory. A non-empty operator
+        grant stays labelled for the whole run and is intersected with later
+        source labels like any other dataflow audience.
+        """
+        recipients = frozenset(audience)
+        return cls(
+            policy,
+            audience=recipients,
+            audience_labeled=bool(recipients),
+            events=(
+                [{
+                    "tool": "workspace_memory",
+                    "rule": "memory_audience_manifest",
+                    "trust": policy.rank_name(0),
+                    "audience": sorted(recipients),
+                    "audience_labeled": True,
+                }]
+                if recipients else []
+            ),
+        )
 
     def observe(self, tool_name: str, arguments: Mapping[str, Any]) -> SourceRule | None:
         """Attach the first matching source rule's label to the trajectory.
@@ -345,44 +385,103 @@ class SessionDataflow:
                 if rule.delta_trust > self.trust_index:
                     self.trust_index = rule.delta_trust
                 if rule.delta_audience:
-                    self.audience = self.audience | frozenset(rule.delta_audience)
+                    delta_audience = frozenset(rule.delta_audience)
+                    if self.audience_labeled:
+                        self.audience = self.audience & delta_audience
+                    else:
+                        self.audience = delta_audience
+                        self.audience_labeled = True
                 self.events.append(
                     {
                         "tool": tool_name,
                         "rule": rule.tool,
                         "trust": self.policy.rank_name(self.trust_index),
                         "audience": sorted(self.audience),
+                        "audience_labeled": self.audience_labeled,
                     }
                 )
                 return rule
         return None
 
     def check_sink(self, tool_name: str, arguments: Mapping[str, Any]) -> SinkVerdict:
-        """Decide whether this sink call must escalate given the trajectory."""
+        """Decide whether this sink call must escalate given the trajectory.
+
+        Include the matching source delta for this same call in the check.
+        A tool can be both a source and a sink (for example, a proxy that
+        reads from one store and forwards to another); checking only the
+        pre-call trajectory would otherwise let that flow skip its label.
+        """
+        projected_trust = self.trust_index
+        projected_audience = self.audience
+        projected_audience_labeled = self.audience_labeled or bool(self.audience)
+        matching_source = False
+        for source in self.policy.sources:
+            if source.matches(tool_name, arguments):
+                matching_source = True
+                projected_trust = max(projected_trust, source.delta_trust)
+                if source.delta_audience:
+                    delta_audience = frozenset(source.delta_audience)
+                    if projected_audience_labeled:
+                        projected_audience = projected_audience & delta_audience
+                    else:
+                        projected_audience = delta_audience
+                        projected_audience_labeled = True
+                break
         for rule in self.policy.sinks:
             if not rule.matches(tool_name):
                 continue
-            if self.trust_index > rule.requires_max_trust:
+            if self.audience_unknown:
                 return SinkVerdict(
                     escalate=True,
                     reason=(
-                        f"trajectory carries {self.policy.rank_name(self.trust_index)} data, "
+                        f"resumed trajectory audience is unknown for sink {tool_name!r}; "
+                        "the original recipient boundary cannot be proven"
+                    ),
+                )
+            if projected_trust > rule.requires_max_trust:
+                return SinkVerdict(
+                    escalate=True,
+                    reason=(
+                        f"trajectory carries {self.policy.rank_name(projected_trust)} data, "
                         f"but sink {tool_name!r} may receive at most "
                         f"{self.policy.rank_name(rule.requires_max_trust)}"
                     ),
                 )
-            if self.audience and rule.requires_audience:
+            if projected_audience_labeled and not rule.requires_audience:
+                return SinkVerdict(
+                    escalate=True,
+                    reason=(
+                        f"sink {tool_name!r} has no audience contract for a "
+                        f"trajectory restricted to {sorted(projected_audience)}"
+                    ),
+                )
+            if projected_audience_labeled and rule.requires_audience:
                 expanded = rule.expand_audience(arguments)
-                missing = [token for token in expanded if token not in self.audience]
+                missing = [token for token in expanded if token not in projected_audience]
                 if missing:
                     return SinkVerdict(
                         escalate=True,
                         reason=(
                             f"sink {tool_name!r} requires audience {sorted(expanded)}, "
-                            f"trajectory audience is {sorted(self.audience)}"
+                            f"trajectory audience is {sorted(projected_audience)}"
                         ),
                     )
             return SinkVerdict(escalate=False, reason="sink requirements satisfied")
+        if (projected_audience_labeled or self.audience_unknown) and not matching_source:
+            return SinkVerdict(
+                escalate=True,
+                reason=(
+                    (
+                        f"no audience-aware sink rule matches {tool_name!r} for a "
+                        "resumed trajectory whose audience is unknown"
+                    )
+                    if self.audience_unknown
+                    else (
+                        f"no audience-aware sink rule matches {tool_name!r} for a "
+                        f"trajectory restricted to {sorted(projected_audience)}"
+                    )
+                ),
+            )
         return SinkVerdict(escalate=False, reason="no sink rule matches")
 
 
