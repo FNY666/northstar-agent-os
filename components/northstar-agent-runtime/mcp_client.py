@@ -1276,17 +1276,34 @@ class McpStdioClient:
                 f"mcp {self.name}/{tool_name}: denied: server cancelled its change subscription "
                 f"({self._quarantine_reason}); re-admit the server to clear"
             )
-        # Drain any pending list_changed notification: the server announced
-        # a toolset change, so re-verify pins before executing anything.
-        if self._pending_list_changed:
-            self._pending_list_changed = False
+        # Re-list and compare the pinned definitions before every invocation,
+        # whether or not a notification arrived. A buffered list_changed
+        # notification is only a cue to refetch: this stdio client does not
+        # hold the long-lived subscriptions/listen stream the spec requires for
+        # notification delivery, so the notification alone cannot protect the
+        # call boundary.
+        self._pending_list_changed = False
+        was_quarantined = self._quarantined
+        try:
             drifts = self.refresh_tools()
-            if drifts and self._quarantined:
-                return ToolResult.error(
-                    f"mcp {self.name}/{tool_name}: denied: server pushed "
-                    f"notifications/tools/list_changed and the re-list drifted "
-                    f"({self._quarantine_reason}); re-admit the server to clear"
-                )
+        except McpError as error:
+            return ToolResult.error(
+                f"mcp {self.name}/{tool_name}: denied: could not verify "
+                f"current tool definitions: {error}"
+            )
+        if not was_quarantined and self._quarantined:
+            # The re-list itself failed (malformed or over-budget tool list).
+            # refresh_tools reports that by quarantining rather than raising,
+            # so surface it as a verification failure and not as a drift.
+            return ToolResult.error(
+                f"mcp {self.name}/{tool_name}: denied: could not verify "
+                f"current tool definitions: {self._quarantine_reason}"
+            )
+        if drifts and self._quarantined:
+            return ToolResult.error(
+                f"mcp {self.name}/{tool_name}: denied: tool-definition drift "
+                f"detected ({self._quarantine_reason}); re-admit the server to clear"
+            )
         try:
             remote_tool = self.tool(tool_name)  # raises McpError for an unknown tool
         except McpError as error:

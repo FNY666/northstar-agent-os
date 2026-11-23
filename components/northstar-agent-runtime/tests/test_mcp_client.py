@@ -366,10 +366,19 @@ class ClientTests(unittest.TestCase):
     def test_non_boolean_is_error_flag_quarantines_remote_server(self):
         client = self.connect()
         try:
-            client._request = lambda method, *_args, **_kwargs: {
-                "content": [{"type": "text", "text": "looks successful"}],
-                "isError": "false",
-            }  # type: ignore[method-assign]
+            original_request = client._request
+
+            def malformed_is_error(method, *args, **kwargs):
+                if method == "tools/call":
+                    return {
+                        "content": [{"type": "text", "text": "looks successful"}],
+                        "isError": "false",
+                    }
+                # The client re-lists before every call; let the real server
+                # answer that so the stub only exercises the call path.
+                return original_request(method, *args, **kwargs)
+
+            client._request = malformed_is_error  # type: ignore[method-assign]
             result = client.call_tool("echo", {"text": "hello"})
             self.assertTrue(result.is_error)
             self.assertIn("malformed isError", result.text())
@@ -975,14 +984,73 @@ class ToolPinningTests(unittest.TestCase):
         client.connect()
         return client, original_request
 
+
+    def test_call_revalidates_definition_before_invocation_without_notification(self):
+        client = self.connect()
+        try:
+            name = client.tool_names()[0]
+            original_request = client._request
+            remote_calls = []
+
+            def drifted_request(method, params=None):
+                result = original_request(method, params)
+                if method == "tools/list":
+                    result["tools"][0]["description"] = "rewritten after admission"
+                elif method == "tools/call":
+                    remote_calls.append(params)
+                return result
+
+            # No notification is pending: freshness must not depend on the
+            # server sending a change event the client has not subscribed to.
+            self.assertFalse(client._pending_list_changed)
+            client._request = drifted_request
+            result = client.call_tool(name, {"text": "hi"})
+
+            self.assertTrue(result.is_error)
+            self.assertIn("tool-definition drift", result.text())
+            self.assertTrue(client.quarantined)
+            self.assertEqual(remote_calls, [], "a changed definition must be denied before tools/call")
+        finally:
+            client.close()
+
+    def test_call_refuses_oversized_tool_list_during_revalidation(self):
+        from mcp_client import MAX_TOOLS_PER_SERVER
+
+        client = self.connect()
+        try:
+            original_request = client._request
+            remote_calls = []
+
+            def oversized_request(method, params=None):
+                result = original_request(method, params)
+                if method == "tools/list":
+                    result["tools"] = result["tools"] * (MAX_TOOLS_PER_SERVER + 1)
+                elif method == "tools/call":
+                    remote_calls.append(params)
+                return result
+
+            client._request = oversized_request
+            result = client.call_tool(client.tool_names()[0], {})
+
+            self.assertTrue(result.is_error)
+            self.assertIn("could not verify current tool definitions", result.text())
+            self.assertEqual(remote_calls, [], "an over-limit list must be denied before tools/call")
+        finally:
+            client.close()
     def test_unnegotiated_task_result_is_rejected_and_audited(self):
         client = self.connect()
         records: list[dict] = []
         request_methods: list[str] = []
         client.audit = records.append
         try:
-            def task_response(method, *_args, **_kwargs):
+            original_request = client._request
+
+            def task_response(method, *args, **kwargs):
                 request_methods.append(method)
+                if method == "tools/list":
+                    # The client re-lists before every call; let the real server
+                    # answer that so the stub only exercises the call path.
+                    return original_request(method, *args, **kwargs)
                 return {
                     "resultType": "task",
                     "taskId": "server-task-secret",
@@ -996,7 +1064,9 @@ class ToolPinningTests(unittest.TestCase):
             self.assertIn("without negotiated task support", result.text())
             self.assertNotIn("server-task-secret", result.text())
             self.assertTrue(client.quarantined)
-            self.assertEqual(request_methods, ["tools/call"])
+            # Every invocation re-lists first so a drifted definition cannot be
+            # called after the server changed it behind the pinned baseline.
+            self.assertEqual(request_methods, ["tools/list", "tools/call"])
             self.assertEqual(len(records), 1)
             self.assertEqual(records[0]["type"], "mcp.tool_drift")
             self.assertEqual(records[0]["at"], "output_validation")
@@ -1005,7 +1075,9 @@ class ToolPinningTests(unittest.TestCase):
             denied = client.call_tool("echo", {})
             self.assertTrue(denied.is_error)
             self.assertIn("quarantined", denied.text())
-            self.assertEqual(request_methods, ["tools/call"])
+            # Every invocation re-lists first so a drifted definition cannot be
+            # called after the server changed it behind the pinned baseline.
+            self.assertEqual(request_methods, ["tools/list", "tools/call"])
         finally:
             client.close()
 
@@ -1015,8 +1087,14 @@ class ToolPinningTests(unittest.TestCase):
         request_methods: list[str] = []
         client.audit = records.append
         try:
-            def unknown_response(method, *_args, **_kwargs):
+            original_request = client._request
+
+            def unknown_response(method, *args, **kwargs):
                 request_methods.append(method)
+                if method == "tools/list":
+                    # The client re-lists before every call; let the real server
+                    # answer that so the stub only exercises the call path.
+                    return original_request(method, *args, **kwargs)
                 return {
                     "resultType": "future_extension_result",
                     "taskId": "server-task-secret",
@@ -1032,7 +1110,9 @@ class ToolPinningTests(unittest.TestCase):
             self.assertNotIn("future_extension_result", result.text())
             self.assertNotIn("server-task-secret", result.text())
             self.assertTrue(client.quarantined)
-            self.assertEqual(request_methods, ["tools/call"])
+            # Every invocation re-lists first so a drifted definition cannot be
+            # called after the server changed it behind the pinned baseline.
+            self.assertEqual(request_methods, ["tools/list", "tools/call"])
             self.assertEqual(len(records), 1)
             self.assertEqual(records[0]["type"], "mcp.tool_drift")
             self.assertEqual(records[0]["at"], "output_validation")
@@ -1042,7 +1122,9 @@ class ToolPinningTests(unittest.TestCase):
             denied = client.call_tool("echo", {})
             self.assertTrue(denied.is_error)
             self.assertIn("quarantined", denied.text())
-            self.assertEqual(request_methods, ["tools/call"])
+            # Every invocation re-lists first so a drifted definition cannot be
+            # called after the server changed it behind the pinned baseline.
+            self.assertEqual(request_methods, ["tools/list", "tools/call"])
         finally:
             client.close()
 
