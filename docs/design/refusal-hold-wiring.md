@@ -525,6 +525,12 @@ by asking the uncomfortable question -- *can a refused task be
 laundered back into the queue?* -- and both answered yes until the
 gate was installed on them.
 
+**AMENDED 2026-11-23 (§11): this enumeration was still incomplete.**
+The three paths above are the three ways a task goes **back** to
+`ready`.  There is a **fourth** path -- `claim()` -- that takes a task
+**out** of `ready` and offers it to a worker, and it is the moment the
+refused action is actually re-offered.  §11 closes it.
+
 `reap()` and `release()` differ in how they answer it, and the
 difference is deliberate:
 
@@ -984,3 +990,198 @@ targeted refusal/lease/ledger suites; the repo suite 461 passed +
 6230 subtests under pytest and `Ran 461 tests ... OK` under unittest;
 `job_queue`'s own self-check: `job-queue OK: enqueue, priority,
 dequeue, ack, retry, delay, dead`.
+
+## 11. AMENDED 2026-11-23 — `claim()` hands a refused action to a worker
+
+### 11.1 The defect
+
+§7.4 says `LeasedTaskClaim` has **three** paths that put a task back to
+`ready`, and that all three consult the gate.  That is true, and it is
+also **the wrong enumeration**.
+
+`claim()` does not put a task back to `ready`.  It takes a task **out
+of** `ready` and hands it to a worker:
+
+```python
+conn.execute(
+    "UPDATE ltc_task SET state = ?, worker = ?, token = ?, ...",
+    (STATE_LEASED, worker, token, float(now), expires_at, task_id),
+)
+```
+
+That is the **re-dispatch itself** -- the moment the action is offered
+to somebody.  And it consults no gate.
+
+Measured on this branch, 2026-11-23, with the lease-side gate
+installed and a refusal recorded against the lease namespace
+(`task:task-1:dispatch`):
+
+```
+=== CASE 1: FIRST claim of a READY task ===
+  claim SUCCEEDED -- the refused action was offered to w1
+=== CASE 2: TAKEOVER claim of an EXPIRED lease ===
+  TAKEOVER SUCCEEDED -- the refused action was offered to w2
+=== CASE 3: for contrast, reap() on the same expired lease ===
+  reap returned: ()
+  lease state after reap: leased
+```
+
+Case 3 is the contrast that makes the defect legible: the **reaper**
+(which merely *cleans up* an expired lease) refuses, while the
+**claim** (which actually hands the work to a worker) succeeds.  The
+guard is on the cheap path and not on the one that matters.
+
+So the three paths §7.4 enumerated are the three ways a task goes
+**back** to ``ready``, and there is a **fourth** path that takes it
+**out** of ``ready`` again.  A refusal says "this action may not be
+offered again", and `claim()` is where it is offered again.
+
+**Why this is worse than the queue side's gap (§10).**  On the queue
+side, the gate existed but the host had to remember to install it.  On
+the lease side, the gate is inside the object -- and `claim()` simply
+does not ask.  The lease side's `release()` docstring states the rule
+the code is missing:
+
+> The question is not whether the work item failed; it is whether the
+> work item may be **offered again**, and a refusal says no by any
+> route.
+
+`claim()` is exactly "offered again", and it asks no route.
+
+### 11.2 The fix
+
+`claim()` consults the gate **inside the same transaction**, immediately
+before the `UPDATE` that installs the lease.  A refusal raises, the
+transaction rolls back, and the task keeps its state and its worker.
+
+**Which form: raising or boolean?**  `claim()` reports ONE task for ONE
+call, and the caller asked about that task and nothing else -- so it
+uses the **raising** form (`require_task_allowed`), exactly like
+`fail()` and `release()`.  The boolean form (`task_allowed`) exists for
+`reap()`, which sweeps a **batch** and must not abandon the sweep; there
+is no such concern here.
+
+**The takeover case matters.**  A claim of a task whose lease has
+expired is a takeover, and it is the case a refusal is most likely to
+want to stop: the previous holder crashed, and the work item is being
+offered to somebody new.  `claim()` refuses both the first claim and
+the takeover, because the gate is asked on every claim.
+
+**What this does NOT change.**  `claim()` still refuses a terminal task
+(`completed`, `dead`) and still refuses a live lease
+(`LeaseHeldError`); those checks come first and are untouched.  The gate
+is asked **after** the state checks and **before** the `UPDATE`, so a
+task that is not claimable at all still fails for its own reason.
+
+### 11.3 The guards, and why they can fail
+
+| guard | what it pins |
+|---|---|
+| `test_a_refused_claim_leaves_the_task_ready` | the observable proof: the task does **not** go to ``leased``, and no worker gets it |
+| `test_a_refused_takeover_leaves_the_task_leased` | the takeover case: an expired lease is **not** taken over |
+| `test_a_refusal_recorded_before_the_claim_blocks_it` | the ordering: the refusal is on the books *before* the claim, so the claim is refused |
+| `test_an_allowed_claim_still_hands_the_task_over` | the control: no refusal, the claim works exactly as before |
+| `test_a_different_action_is_not_refused` | the refusal covers one action, not the whole task |
+| `test_a_broken_gate_refuses_the_claim` | a gate that cannot answer fails **closed** |
+| `test_a_gate_without_the_required_method_is_refused` | an unusable gate is refused, not ignored |
+| `test_a_terminal_task_is_still_refused_for_its_own_reason` | the gate does not change the *other* refusals |
+| `test_a_terminal_and_refused_task_fails_for_its_own_reason` | the **order** of the two checks, made observable |
+| `test_no_gate_leaves_the_claim_path_unchanged` | the default is unchanged: no gate, no behaviour change |
+
+The first two are the ones that can fail on the defect: both make the
+**plain `claim()` call** -- the one a host writes -- the thing under
+test, with no wrapping to hide behind.
+
+**The mutation run.**  Every guard above was checked by planting the
+defect it is supposed to catch and re-running `LeaseClaimWiringTests`.
+Six defects, five killed, one proved to be an equivalence:
+
+| # | the planted defect | result |
+|---|---|---|
+| MUT-1 | the gate call deleted from `claim()` | **KILLED** by 5 guards |
+| MUT-2 | the gate asked about the wrong action (`task_id` instead of the action) | **KILLED** by 3 guards |
+| MUT-3 | an unusable gate ignored instead of refused (fail **open**) | **KILLED** by 1 guard |
+| MUT-4 | a gate that raises swallowed (fail **open**) | **KILLED** by 4 guards |
+| MUT-6 | the gate asked **outside** the transaction | **KILLED** by 5 guards |
+| MUT-7 | the gate asked **before** the terminal/live-lease checks | **KILLED** by 1 guard |
+| MUT-5 | the gate asked **after** the lease `UPDATE`, still inside the transaction | **SURVIVED** -- and that is an equivalence, proved below |
+
+**MUT-5 is an equivalence, not a missing guard.**  The transaction
+rolls back on the raise, so asking the gate immediately before or
+immediately after the `UPDATE` inside the same transaction produces the
+**same observable outcome**.  Measured by running both versions of the
+module against the same probe and comparing the full task row (state,
+worker, token, failures, crashes, delay) and the exception raised, for
+the refused first claim, the refused takeover and the allowed claim:
+
+```
+ORIGINAL : {"A": {"crashes": 0, "delay_until": 0.0, "failures": 0,
+                   "raised": "RefusalRefusedError", "state": "ready",
+                   "token": 0, "worker": ""},
+            "B": {"crashes": 0, "delay_until": 0.0, "failures": 0,
+                   "raised": "RefusalRefusedError", "state": "leased",
+                   "token": 1, "worker": "w1"},
+            "C": {"crashes": 0, "delay_until": 0.0, "failures": 0,
+                   "raised": null, "state": "leased",
+                   "token": 1, "worker": "w1"}}
+MUT-5    : {"A": {"crashes": 0, "delay_until": 0.0, "failures": 0,
+                   "raised": "RefusalRefusedError", "state": "ready",
+                   "token": 0, "worker": ""},
+            "B": {"crashes": 0, "delay_until": 0.0, "failures": 0,
+                   "raised": "RefusalRefusedError", "state": "leased",
+                   "token": 1, "worker": "w1"},
+            "C": {"crashes": 0, "delay_until": 0.0, "failures": 0,
+                   "raised": null, "state": "leased",
+                   "token": 1, "worker": "w1"}}
+
+EQUIVALENT
+```
+
+MUT-6 is the one that shows the *transaction* is load-bearing: the
+same check asked **outside** the transaction leaves the lease
+**installed** and the task gone to `leased`, so it is killed by five
+guards.  Moving the call *within* the transaction cannot change
+anything, because the rollback undoes it either way.
+
+**MUT-7 needed a guard that did not exist yet.**  The first version of
+the terminal-task guard had no refusal on the books, so it could not
+tell the two checks apart and MUT-7 survived it.  The order is only
+observable when the task is **both** terminal **and** refused, so
+`test_a_terminal_and_refused_task_fails_for_its_own_reason` was added
+to make the order visible: the task's own terminal state is the reason
+the claim fails, and the refusal is a second, unrelated reason.  If the
+gate were asked first, the caller would be told the action is *held*
+when the truth is that the task is *done* -- and would go looking for a
+refusal that is not why the claim failed.
+
+### 11.4 The interaction with the mirror's own retry
+
+`claim()` and `release()` and `fail()` all end with `_mirror_reserve()`
+or `_mirror_release()`, which call `self._queue.retry(...)` on the
+**queue mirror**.  Now that the queue side carries a gate of its own
+(§10), a host that installs a queue-side gate on a queue that is also
+acting as a lease mirror would have the mirror's **internal
+bookkeeping** refused by the gate.
+
+Measured, before this section's fix:
+
+```
+release RAISED: RefusalRefusedError : job 'task-1' may not be
+re-dispatched for action 'dispatch': a recorded refusal covers it
+```
+
+The mirror's `retry()` is not a re-dispatch of the work item -- it is
+the mirror's own bookkeeping, keeping the queue's view of the task in
+step with the lease's view.  The two namespaces are different
+(``queue:`` versus ``lease:``), so a **lease**-namespace refusal does
+not block a **queue**-namespace check; but a host that records the
+refusal in the *queue* namespace, on a queue that is a lease mirror,
+would block the mirror's own bookkeeping.
+
+This is recorded here rather than fixed in this slice, because it is a
+**composition** question -- "what happens when a queue is also a lease
+mirror" -- and it is a question about the mirror's bookkeeping, not
+about the claim path this section closes.  The honest statement is: the
+queue-side gate treats **every** `retry()` as a re-dispatch, including
+the mirror's internal ones, and that is a decision this slice has not
+yet made deliberately.

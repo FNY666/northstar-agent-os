@@ -550,8 +550,10 @@ class LeasedTaskClaim:
         #: The optional **refusal gate** (see
         #: ``refusal_hold_wiring.RefusalHoldQueueGate``).  When one is
         #: installed, a task whose re-dispatch is covered by a recorded
-        #: refusal is NOT put back to ``ready`` -- ``fail()`` refuses the
-        #: write and the task stays where it is.
+        #: refusal is NOT re-dispatched: ``fail()`` refuses the write
+        #: that puts it back to ``ready``, and ``claim()`` refuses the
+        #: write that takes it out of ``ready`` and offers it to a
+        #: worker.  Either way the task stays where it is.
         #:
         #: The gate is **duck-typed**: this module does not import the
         #: wiring (the wiring imports the hold, and the hold must not
@@ -577,10 +579,22 @@ class LeasedTaskClaim:
                                 now: float) -> None:
         """Ask the refusal gate, if one is installed.
 
-        Called **inside** ``fail()``'s transaction, immediately before the
-        ``UPDATE`` that flips the task back to ``ready``.  A refusal
-        raises, so the transaction rolls back and the task keeps its
-        state, its failure count and its delay.
+        Called **inside** the caller's transaction, immediately before the
+        ``UPDATE`` that flips the task's state.  A refusal raises, so the
+        transaction rolls back and the task keeps its state, its failure
+        count and its delay.
+
+        Two callers use this raising form, and they are the two that
+        report **one** task for **one** call:
+
+        * :meth:`fail` -- the worker reports a failure, and the task goes
+          back to ``ready``;
+        * :meth:`claim` -- the task goes **out** of ``ready`` and the
+          action is offered to a worker.
+
+        :meth:`reap` does not use it: it sweeps a batch and must not
+        abandon the sweep, so it asks the boolean form instead (see
+        :meth:`_refusal_allows_reap`).
         """
         gate = self._refusal_gate
         if gate is None:
@@ -805,6 +819,24 @@ class LeasedTaskClaim:
         cannot be claimed again (``LeaseHeldError``); a task whose lease has
         expired *is* claimable, and the takeover is the moment the previous
         holder's writes start being refused.
+
+        **A recorded refusal blocks the claim.**  This is the path that
+        actually **offers the action to somebody**: the task leaves
+        ``ready`` and a worker gets it.  The other three paths
+        (``fail()``, ``release()``, ``reap()``) put a task *back* to
+        ``ready``; this one takes it *out*, and it is the moment the
+        refused action is offered again.
+
+        The check runs inside the transaction, immediately before the
+        ``UPDATE`` that installs the lease, so a refusal and the claim
+        cannot interleave, and a refused claim leaves the task exactly
+        as it was -- ``ready`` with no worker, or ``leased`` with its
+        previous holder.
+
+        Measured 2026-11-23, before this check: a refusal recorded
+        against the lease namespace was honoured by ``reap()`` but not
+        by ``claim()``, so a crashed holder's task was handed to a new
+        worker anyway.
         """
         task_id = _check_text(task_id, "task_id")
         worker = _check_text(worker, "worker")
@@ -844,6 +876,11 @@ class LeasedTaskClaim:
 
             token = int(row["token"]) + 1
             expires_at = float(now) + ttl
+            # The refusal gate is asked BEFORE the lease is installed, so
+            # a refusal leaves the task exactly where it was -- and
+            # AFTER the terminal/live-lease checks, so a task that is not
+            # claimable at all still fails for its own reason.
+            self._require_refusal_allows(task_id, str(row["task"]), now)
             conn.execute(
                 "UPDATE ltc_task SET state = ?, worker = ?, token = ?, "
                 "acquired_at = ?, expires_at = ? WHERE task_id = ?",

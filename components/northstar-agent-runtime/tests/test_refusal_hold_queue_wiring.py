@@ -50,7 +50,7 @@ for _cached in Path(__file__).resolve().parents[1].glob(
     _cached.unlink(missing_ok=True)
 
 from job_queue import JobQueue
-from leased_task_claim import LeasedTaskClaim
+from leased_task_claim import LeasedTaskClaim, TerminalTaskError
 from refusal_hold import (
     REASON_ALLOWED_NO_REFUSAL,
     REASON_BLOCKED_BY_REFUSAL,
@@ -561,9 +561,17 @@ class LeaseFailWiringTests(unittest.TestCase):
         self.assertEqual(self.manager.task("t1").state, "leased")
 
     def test_a_gate_without_the_required_method_is_refused(self):
-        """A gate that cannot answer the question is not a gate."""
-        self.manager.set_refusal_gate(object())
+        """A gate that cannot answer the question is not a gate.
+
+        The claim happens FIRST, and the unusable gate is installed
+        afterwards: this test is about ``fail()``, and the claim is a
+        path that now consults the gate too (see
+        ``LeaseClaimWiringTests``).  Installing the bad gate before the
+        claim would make the claim raise first, and the test would pass
+        for the wrong reason.
+        """
         lease = self._lease()
+        self.manager.set_refusal_gate(object())
         with self.assertRaises(TypeError):
             self.manager.fail("t1", lease.token, reason="boom", now=101.0)
 
@@ -1029,6 +1037,184 @@ class QueueOwnGateTests(unittest.TestCase):
                 "retry had the refusal on the books and must have been "
                 "refused -- the job went back to ready anyway",
             )
+
+
+class LeaseClaimWiringTests(unittest.TestCase):
+    """The path that actually OFFERS the action: ``LeasedTaskClaim.claim()``.
+
+    THE DEFECT (measured 2026-11-23)
+    --------------------------------
+    ``fail()``, ``release()`` and ``reap()`` all put a task **back** to
+    ``ready``, and all three consult the gate.  ``claim()`` does the
+    opposite: it takes a task **out** of ``ready`` and hands it to a
+    worker.  That is the re-dispatch itself -- the moment the refused
+    action is offered to somebody -- and it consulted no gate at all.
+
+    Measured on this branch, with the lease-side gate installed and a
+    refusal recorded against the lease namespace:
+
+        === CASE 1: FIRST claim of a READY task ===
+          claim SUCCEEDED -- the refused action was offered to w1
+        === CASE 2: TAKEOVER claim of an EXPIRED lease ===
+          TAKEOVER SUCCEEDED -- the refused action was offered to w2
+        === CASE 3: for contrast, reap() on the same expired lease ===
+          reap returned: ()
+          lease state after reap: leased
+
+    Case 3 is the contrast that makes the defect legible: the REAPER,
+    which merely cleans up an expired lease, refuses -- while the CLAIM,
+    which actually hands the work to a worker, succeeds.  The guard was
+    on the cheap path and not on the one that matters.
+
+    WHY THE ENUMERATION WAS WRONG
+    ------------------------------
+    The design doc counted "the three paths that put a task back to
+    ``ready``" and stopped there.  ``claim()`` is a **fourth** path,
+    and it is the one the question was really about: the ``release()``
+    docstring already states the rule -- "it is whether the work item
+    may be **offered again**, and a refusal says no by any route".
+
+    WHICH FORM
+    ----------
+    ``claim()`` reports ONE task for ONE call, and the caller asked
+    about that task and nothing else -- so it uses the **raising** form
+    (``require_task_allowed``), exactly like ``fail()`` and
+    ``release()``.  The boolean form (``task_allowed``) exists for
+    ``reap()``, which sweeps a **batch** and must not abandon the
+    sweep; there is no such concern here.
+    """
+
+    def setUp(self):
+        self.registry = RefusalHoldRegistry()
+        self.gate = RefusalHoldQueueGate(self.registry)
+        self.manager = LeasedTaskClaim(
+            max_failures=3,
+            base_backoff_seconds=2.0,
+            refusal_gate=self.gate,
+        )
+        self.manager.enqueue_task("t1", "demo-task", payload="hello")
+
+    def tearDown(self):
+        self.manager.close()
+
+    def test_a_refused_claim_leaves_the_task_ready(self):
+        """The observable proof: the task does NOT go to ``leased``.
+
+        And no worker gets it -- the refusal is not just a state
+        question, it is the question "may this action be offered to
+        somebody".
+        """
+        self.gate.record_task("t1", "demo-task", row=make_row())
+        with self.assertRaises(RefusalRefusedError):
+            self.manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+        view = self.manager.task("t1")
+        self.assertEqual(view.state, "ready")
+        self.assertEqual(view.worker, "")
+
+    def test_a_refused_takeover_leaves_the_task_leased(self):
+        """The takeover case: an expired lease is NOT taken over.
+
+        This is the case a refusal is most likely to want to stop: the
+        previous holder crashed, and the work item is about to be
+        offered to somebody new.
+        """
+        lease = self.manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+        self.gate.record_task("t1", "demo-task", row=make_row())
+        with self.assertRaises(RefusalRefusedError):
+            self.manager.claim("t1", "worker-B", ttl=10.0, now=200.0)
+        view = self.manager.task("t1")
+        self.assertEqual(view.state, "leased")
+        self.assertEqual(
+            view.worker,
+            "worker-A",
+            "the previous holder lost the task to a refused takeover",
+        )
+
+    def test_a_refusal_recorded_before_the_claim_blocks_it(self):
+        """The ordering: the refusal is on the books FIRST.
+
+        The refusal is recorded, and then the claim happens.  The
+        claim must be refused -- the ordering is what makes this a
+        guarantee rather than a race.
+        """
+        self.gate.record_task("t1", "demo-task", row=make_row())
+        self.assertTrue(
+            self.gate.check_task("t1", "demo-task").blocked,
+            "the refusal is not on the books, so this test would pass "
+            "for the wrong reason",
+        )
+        with self.assertRaises(RefusalRefusedError):
+            self.manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+
+    def test_an_allowed_claim_still_hands_the_task_over(self):
+        """The control: no refusal, the claim works exactly as before."""
+        lease = self.manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+        self.assertEqual(self.manager.task("t1").state, "leased")
+        self.assertEqual(self.manager.task("t1").worker, "worker-A")
+        self.assertEqual(lease.token, 1)
+
+    def test_a_different_action_is_not_refused(self):
+        """The refusal covers one action, not the whole task."""
+        self.gate.record_task("t1", "other-action", row=make_row())
+        self.manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+        self.assertEqual(self.manager.task("t1").state, "leased")
+
+    def test_a_broken_gate_refuses_the_claim(self):
+        """A gate that cannot answer fails CLOSED."""
+        self.registry.store.break_reads()
+        with self.assertRaises(RefusalRefusedError):
+            self.manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+        self.assertEqual(self.manager.task("t1").state, "ready")
+
+    def test_a_gate_without_the_required_method_is_refused(self):
+        """An unusable gate is refused, not ignored.
+
+        Silently ignoring it would be fail-OPEN: the refusal would be
+        on the books and the action would be offered anyway.
+        """
+        self.manager.set_refusal_gate(object())
+        with self.assertRaises(TypeError):
+            self.manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+        self.assertEqual(self.manager.task("t1").state, "ready")
+
+    def test_a_terminal_task_is_still_refused_for_its_own_reason(self):
+        """The gate does not change the OTHER refusals.
+
+        A completed task must still raise ``TerminalTaskError``, not
+        the refusal's error -- the gate is asked AFTER the state
+        checks, so a task that is not claimable at all still fails for
+        its own reason.
+        """
+        lease = self.manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+        self.manager.complete("t1", lease.token, now=101.0)
+        with self.assertRaises(TerminalTaskError):
+            self.manager.claim("t1", "worker-B", ttl=10.0, now=200.0)
+
+    def test_a_terminal_and_refused_task_fails_for_its_own_reason(self):
+        """The ORDER, made observable: terminal beats refused.
+
+        A task that is BOTH terminal and refused is the only case where
+        the order of the two checks is visible.  The task's own
+        terminal state is the reason it cannot be claimed -- the
+        refusal is a second, unrelated reason -- and the terminal
+        reason is the one the caller must see, because it says "this
+        task is done" rather than "this action is held".
+
+        If the gate were asked first, this would raise
+        ``RefusalRefusedError`` instead, and the caller would go looking
+        for a refusal that is not why the claim failed.
+        """
+        lease = self.manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+        self.manager.complete("t1", lease.token, now=101.0)
+        self.gate.record_task("t1", "demo-task", row=make_row())
+        with self.assertRaises(TerminalTaskError):
+            self.manager.claim("t1", "worker-B", ttl=10.0, now=200.0)
+
+    def test_no_gate_leaves_the_claim_path_unchanged(self):
+        """The default is unchanged: no gate, no behaviour change."""
+        self.manager.set_refusal_gate(None)
+        self.manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+        self.assertEqual(self.manager.task("t1").state, "leased")
 
 
 if __name__ == "__main__":
