@@ -2927,6 +2927,711 @@ class RecordVerifyErrorTaxonomyTests(unittest.TestCase):
             "a real record must still verify",
         )
 
+    def test_every_record_kind_answers_false_for_an_unencodable_field(self):
+        """The COUNT: all FIVE kinds, not just ``AckRecord``.
+
+        Measured 2026-11-24 by the whole-file census over
+        ``job_queue.py``: the mutant that turns ``return False`` into
+        ``return True`` **survives** in ``DequeuedJob``,
+        ``DeadRecord`` and ``RetryRecord`` -- and is killed in
+        ``EnqueueRecord`` and ``AckRecord``.
+
+        The reason is that the guard above uses ONE kind
+        (``AckRecord``).  A guard that checks one kind is a predicate,
+        not a count -- the §17 lesson, one level down.  Planting the
+        mutant in ``DeadRecord.verify()`` alone leaves the whole suite
+        green.
+        """
+        import dataclasses
+
+        records = self._all_record_kinds()
+        self.assertEqual(
+            len(records),
+            5,
+            "the guard must cover every record kind",
+        )
+        for name, record in records.items():
+            forged = dataclasses.replace(record, job_id="j\ud800x")
+            try:
+                answer = forged.verify()
+            except Exception as exc:  # noqa: BLE001
+                self.fail(
+                    f"{name}.verify() raised {type(exc).__name__} instead "
+                    f"of answering False: {exc}"
+                )
+            self.assertFalse(
+                answer,
+                f"{name}.verify() accepted an unencodable record",
+            )
+
+    def _all_record_kinds(self):
+        """One REAL record of every kind, made by the ledger."""
+        from job_queue import JobQueue
+
+        queue = JobQueue()
+        enqueued = queue.enqueue("j1", "q", "dispatch", DIGEST, 1)
+        dequeued = queue.dequeue("worker-1", "q", 2)
+        acked = queue.ack("j1", 3)
+
+        queue2 = JobQueue()
+        queue2.enqueue("j2", "q", "dispatch", DIGEST, 4)
+        queue2.dequeue("worker-1", "q", 5)
+        dead = queue2.dead("j2", 6)
+
+        queue3 = JobQueue()
+        queue3.enqueue("j3", "q", "dispatch", DIGEST, 7)
+        queue3.dequeue("worker-1", "q", 8)
+        retried = queue3.retry("j3", 9)
+
+        return {
+            "EnqueueRecord": enqueued,
+            "DequeuedJob": dequeued,
+            "AckRecord": acked,
+            "DeadRecord": dead,
+            "RetryRecord": retried,
+        }
+
+
+class StatsCountersAreVerifiedTests(unittest.TestCase):
+    """Every counter in ``stats()`` must count what it says.
+
+    Measured 2026-11-24 by the whole-file census over
+    ``job_queue.py``: the mutant that flips ``_STATE_DONE`` to
+    something else in ``stats()`` **survives** -- nothing asserted the
+    ``done`` counter.
+
+    And nothing in the repo reads it either: ``stats().done`` had no
+    assertion anywhere, in the component suite or the repo suite.  So
+    a counter that was silently wrong was also silently useless.
+    """
+
+    def test_every_counter_counts_what_it_says(self):
+        """The counters, after a known sequence of transitions."""
+        from job_queue import JobQueue
+
+        queue = JobQueue()
+        queue.enqueue("j1", "q", "dispatch", DIGEST, 1)
+        queue.enqueue("j2", "q", "dispatch", DIGEST, 2)
+        queue.enqueue("j3", "q", "dispatch", DIGEST, 3)
+        queue.dequeue("worker-1", "q", 4)
+        queue.ack("j1", 5)
+        queue.dequeue("worker-1", "q", 6)
+        queue.dead("j2", 7)
+
+        stats = queue.stats()
+        self.assertEqual(stats.ready, 1, "one job is still ready")
+        self.assertEqual(stats.reserved, 0, "nothing is reserved")
+        self.assertEqual(stats.done, 1, "one job was acked")
+        self.assertEqual(stats.dead, 1, "one job was killed")
+        self.assertEqual(stats.enqueued, 3, "three jobs were enqueued")
+        self.assertEqual(stats.dequeued, 2, "two jobs were handed out")
+
+    def test_the_done_counter_counts_only_acked_jobs(self):
+        """A dead job is not a done job.
+
+        The mutant that breaks this makes ``dead`` and ``done`` share
+        a state, so the counter cannot tell a success from a failure.
+        """
+        from job_queue import JobQueue
+
+        queue = JobQueue()
+        queue.enqueue("j1", "q", "dispatch", DIGEST, 1)
+        queue.dequeue("worker-1", "q", 2)
+        queue.dead("j1", 3)
+        self.assertEqual(queue.stats().done, 0)
+        self.assertEqual(queue.stats().dead, 1)
+
+        queue2 = JobQueue()
+        queue2.enqueue("j2", "q", "dispatch", DIGEST, 1)
+        queue2.dequeue("worker-1", "q", 2)
+        queue2.ack("j2", 3)
+        self.assertEqual(queue2.stats().done, 1)
+        self.assertEqual(queue2.stats().dead, 0)
+
+    def test_the_counters_add_up_to_the_ledger(self):
+        """The counters must agree with each other.
+
+        A guard that checks one counter cannot see another being
+        wrong; this one checks the whole set against the ledger.
+        """
+        from job_queue import JobQueue
+
+        queue = JobQueue()
+        for index in range(4):
+            queue.enqueue(
+                f"j{index}", "q", "dispatch", DIGEST, index + 1
+            )
+        queue.dequeue("worker-1", "q", 5)
+        queue.ack("j0", 6)
+        queue.dequeue("worker-1", "q", 7)
+        queue.dead("j1", 8)
+        queue.dequeue("worker-1", "q", 9)
+
+        stats = queue.stats()
+        self.assertEqual(
+            stats.ready + stats.reserved + stats.done + stats.dead,
+            stats.enqueued,
+            "the state counters do not add up to the number of jobs "
+            "enqueued: a job is in two states or in none",
+        )
+
+
+class ValidationErrorsArePinpointedTests(unittest.TestCase):
+    """A refusal must say **which** rule was broken.
+
+    Measured 2026-11-24 by the whole-file census over
+    ``job_queue.py``: **nine** mutants in the validation functions
+    survive the whole suite --
+
+        or@219   isinstance(job_id, bool) or not isinstance(job_id, str)
+        gt@225   len(job_id) > 256
+        or@286   priority < _PRIORITY_MIN or priority > _PRIORITY_MAX
+        or@294   isinstance(max_retries, bool) or not isinstance(...)
+        gt@312   delay_seqs > _MAX_INT
+        or@318   isinstance(seq, bool) or not isinstance(seq, int)
+        lt@320   seq < 0
+        gt@427   abs(v) > _MAX_INT          (the fallback canonicalizer)
+        or@431   v != v or v in (inf, -inf)  (the fallback canonicalizer)
+
+    The reason is not that the validation is wrong -- measured, every
+    bad input raises the RIGHT error type with the RIGHT message.  The
+    reason is that the existing test asserts only the **base** class:
+
+        with pytest.raises(JobQueueError):
+            jq.enqueue(...)
+
+    Every one of these errors IS a ``JobQueueError``, so a mutant that
+    replaces a *specific* rule with a *different* specific rule -- a
+    bool check for a str check, a bound moved by one -- still raises
+    ``JobQueueError`` and the test still passes.
+
+    A guard that asserts the base class cannot see which rule fired.
+    This one asserts the **exact type** and the **message**, so the
+    mutant has to break the rule it claims to check.
+    """
+
+    def _cases(self):
+        """Every bad input, with the type and the message it owes."""
+        from job_queue import (
+            BadDelayError,
+            BadDigestError,
+            BadJobError,
+            BadPriorityError,
+            BadQueueError,
+            BadRetryError,
+            BadTaskError,
+            SeqOrderError,
+        )
+
+        digest = "sha256:" + "d" * 64
+        return [
+            # (label, error type, a fragment of the message, the call)
+            (
+                "job_id must be a str",
+                BadJobError,
+                "job_id must be str",
+                lambda q: q.enqueue(True, "q", "t", digest, 1),
+            ),
+            (
+                "job_id must be a str (not a bool)",
+                BadJobError,
+                "job_id must be str",
+                lambda q: q.enqueue(42, "q", "t", digest, 1),
+            ),
+            (
+                "job_id must be non-empty",
+                BadJobError,
+                "job_id must be non-empty",
+                lambda q: q.enqueue("", "q", "t", digest, 1),
+            ),
+            (
+                "job_id must fit",
+                BadJobError,
+                "job_id exceeds 256 chars",
+                lambda q: q.enqueue("x" * 257, "q", "t", digest, 1),
+            ),
+            (
+                "queue must be non-empty",
+                BadQueueError,
+                "queue must be non-empty",
+                lambda q: q.enqueue("j", "", "t", digest, 1),
+            ),
+            (
+                "task must be non-empty",
+                BadTaskError,
+                "task must be non-empty",
+                lambda q: q.enqueue("j", "q", "", digest, 1),
+            ),
+            (
+                "digest must be a digest",
+                BadDigestError,
+                "payload_digest must be",
+                lambda q: q.enqueue("j", "q", "t", "nope", 1),
+            ),
+            (
+                "priority must be an int",
+                BadPriorityError,
+                "priority must be int",
+                lambda q: q.enqueue("j", "q", "t", digest, 1, priority=True),
+            ),
+            (
+                "priority must be in range",
+                BadPriorityError,
+                "priority must be in [-100, 100]",
+                lambda q: q.enqueue(
+                    "j", "q", "t", digest, 1, priority=101
+                ),
+            ),
+            (
+                "priority must be in range (low)",
+                BadPriorityError,
+                "priority must be in [-100, 100]",
+                lambda q: q.enqueue(
+                    "j", "q", "t", digest, 1, priority=-101
+                ),
+            ),
+            (
+                "max_retries must be an int",
+                BadRetryError,
+                "max_retries must be int",
+                lambda q: q.enqueue(
+                    "j", "q", "t", digest, 1, max_retries=True
+                ),
+            ),
+            (
+                "max_retries must be in range",
+                BadRetryError,
+                "max_retries must be in [1, 64]",
+                lambda q: q.enqueue(
+                    "j", "q", "t", digest, 1, max_retries=65
+                ),
+            ),
+            (
+                "delay_seqs must be an int",
+                BadDelayError,
+                "delay_seqs must be int",
+                lambda q: q.enqueue(
+                    "j", "q", "t", digest, 1, delay_seqs=True
+                ),
+            ),
+            (
+                "delay_seqs must be non-negative",
+                BadDelayError,
+                "delay_seqs must be non-negative",
+                lambda q: q.enqueue(
+                    "j", "q", "t", digest, 1, delay_seqs=-1
+                ),
+            ),
+            (
+                "delay_seqs must fit",
+                BadDelayError,
+                "delay_seqs exceeds safe range",
+                lambda q: q.enqueue(
+                    "j", "q", "t", digest, 1, delay_seqs=2**53
+                ),
+            ),
+            (
+                "seq must be an int",
+                SeqOrderError,
+                "seq must be int",
+                lambda q: q.enqueue("j", "q", "t", digest, "x"),
+            ),
+            (
+                "seq must not be a bool",
+                SeqOrderError,
+                "seq must be int",
+                lambda q: q.enqueue("j", "q", "t", digest, True),
+            ),
+            (
+                "seq must be non-negative",
+                SeqOrderError,
+                "seq must be non-negative",
+                lambda q: q.enqueue("j", "q", "t", digest, -1),
+            ),
+            (
+                "seq must fit",
+                SeqOrderError,
+                "seq exceeds the safe range",
+                lambda q: q.enqueue("j", "q", "t", digest, 2**53),
+            ),
+        ]
+
+    def _accepted_cases(self):
+        """The values that are AT a limit and must be ACCEPTED.
+
+        A guard that checks only "over the limit is refused" cannot see
+        a mutant that moves the edge.  These are the legal values at
+        each boundary, and they are what kills an edge mutant.
+        """
+        digest = "sha256:" + "d" * 64
+        return [
+            ("job_id at 256 chars", lambda q: q.enqueue(
+                "x" * 256, "q", "t", digest, 1)),
+            ("delay_seqs at the safe range", lambda q: q.enqueue(
+                "j", "q", "t", digest, 1, delay_seqs=2**53 - 1)),
+            ("seq at zero", lambda q: q.enqueue(
+                "j", "q", "t", digest, 0)),
+            ("max_retries at its minimum", lambda q: q.enqueue(
+                "j", "q", "t", digest, 1, max_retries=1)),
+            ("priority at its maximum", lambda q: q.enqueue(
+                "j", "q", "t", digest, 1, priority=100)),
+            ("priority at its minimum", lambda q: q.enqueue(
+                "j", "q", "t", digest, 1, priority=-100)),
+            ("queue at 128 chars", lambda q: q.enqueue(
+                "j", "q" * 128, "t", digest, 1)),
+        ]
+
+    def test_each_limit_edge_value_is_accepted(self):
+        """The edge is legal -- a mutant that moves it is caught here.
+
+        The census reported four edge mutants that survived the case
+        list alone: ``gt@225`` (job id length), ``gt@312``
+        (delay_seqs), ``lt@320`` (seq sign) and the fallback's
+        ``gt@427``.  All four move a boundary by one, and all four are
+        killed by a case that says the boundary VALUE is legal.
+        """
+        from job_queue import JobQueue
+
+        for label, call in self._accepted_cases():
+            queue = JobQueue()
+            try:
+                call(queue)
+            except Exception as exc:  # noqa: BLE001
+                self.fail(
+                    f"{label}: a legal value was refused with "
+                    f"{type(exc).__name__}: {exc}"
+                )
+
+    def test_the_fallback_canonicalizer_refuses_the_same_inputs(self):
+        """The fallback's own rules, which the census cannot see.
+
+        The fallback branch is marked ``# pragma: no cover`` -- the
+        repo declares it uncovered -- so a mutant there survives
+        (the census's ``gt@427`` and ``or@431``).  But the fallback is
+        a **configuration**, and §20 established that the two
+        configurations must agree.
+
+        So the fallback is exercised here, deliberately, with the
+        same inputs.
+        """
+        import job_queue
+
+        original = job_queue._cj
+        try:
+            job_queue._cj = None
+            # The LAST legal integer must be accepted: a guard that
+            # only checks "a big int is refused" cannot see the edge
+            # move by one.
+            job_queue._canonical([1, 2**53 - 1])
+            for label, payload, fragment in (
+                ("big int", [1, 2**53], "integer outside safe range"),
+                ("non-finite float", [1, float("inf")],
+                 "non-finite float refused"),
+                ("unsupported type", [1, object()],
+                 "unencodable type"),
+            ):
+                with self.assertRaises(
+                    job_queue.JobQueueError, msg=f"fallback: {label}"
+                ) as caught:
+                    job_queue._canonical(payload)
+                self.assertIn(
+                    fragment,
+                    str(caught.exception),
+                    f"fallback: {label} -- the refusal does not say "
+                    f"which rule was broken",
+                )
+        finally:
+            job_queue._cj = original
+
+    def test_the_fallback_and_the_shipped_path_agree_on_the_error_type(self):
+        """The two configurations must use the module's OWN error type.
+
+        This is §20's property, applied to the canonicalizer's rules
+        rather than to the records: whatever each configuration
+        refuses, it refuses with ``JobQueueError`` -- never with the
+        sibling helper's ``JcsError``, which is what §20 found
+        escaping.
+
+        The two do NOT agree on *how much* they refuse, and need not:
+        the fallback is **stricter** (it refuses an integer above the
+        safe range, which the shipped path accepts and the JCS helper
+        serializes losslessly as a double).  A stricter fallback is
+        safe -- it refuses more, never less.  What would not be safe
+        is the fallback refusing something the shipped path accepts
+        *silently*, which is exactly what a differing error type
+        looks like to a caller.
+        """
+        import job_queue
+
+        original = job_queue._cj
+        refusals = {
+            "non-finite float": [1, float("inf")],
+            "unsupported type": [1, object()],
+        }
+        try:
+            for label, payload in refusals.items():
+                for configuration, canonical in (
+                    ("shipped", original),
+                    ("fallback", None),
+                ):
+                    job_queue._cj = canonical
+                    try:
+                        job_queue._canonical(payload)
+                        self.fail(
+                            f"{label}/{configuration}: the input was "
+                            f"accepted"
+                        )
+                    except job_queue.JobQueueError:
+                        pass
+                    except Exception as exc:  # noqa: BLE001
+                        self.fail(
+                            f"{label}/{configuration}: refused with "
+                            f"{type(exc).__name__} instead of the "
+                            f"module's own JobQueueError"
+                        )
+        finally:
+            job_queue._cj = original
+
+    def test_each_bad_input_raises_its_own_error_type(self):
+        """The TYPE is pinned, not just the base class."""
+        from job_queue import JobQueue
+
+        for label, expected, message, call in self._cases():
+            queue = JobQueue()
+            with self.assertRaises(
+                expected, msg=f"{label}: wrong error type"
+            ):
+                call(queue)
+
+    def test_each_bad_input_says_which_rule_was_broken(self):
+        """The MESSAGE names the rule."""
+        from job_queue import JobQueue
+
+        for label, expected, fragment, call in self._cases():
+            queue = JobQueue()
+            with self.assertRaises(expected) as caught:
+                call(queue)
+            self.assertIn(
+                fragment,
+                str(caught.exception),
+                f"{label}: the refusal does not say which rule was "
+                f"broken",
+            )
+
+    def test_the_case_list_covers_every_validation_rule(self):
+        """The COUNT: a rule dropped from the list fails here.
+
+        A guard that checked one bad input would be a predicate, not a
+        count.  The list names 18 rules; a rule that loses its case
+        fails this guard.
+        """
+        expected_rules = {
+            "job_id must be a str",
+            "job_id must be a str (not a bool)",
+            "job_id must be non-empty",
+            "job_id must fit",
+            "queue must be non-empty",
+            "task must be non-empty",
+            "digest must be a digest",
+            "priority must be an int",
+            "priority must be in range",
+            "priority must be in range (low)",
+            "max_retries must be an int",
+            "max_retries must be in range",
+            "delay_seqs must be an int",
+            "delay_seqs must be non-negative",
+            "delay_seqs must fit",
+            "seq must be an int",
+            "seq must not be a bool",
+            "seq must be non-negative",
+            "seq must fit",
+        }
+        covered = {case[0] for case in self._cases()}
+        self.assertEqual(
+            covered,
+            expected_rules,
+            "the guard does not cover every validation rule: a rule "
+            "that loses its case would leave its bound unverified",
+        )
+
+    def _other_field_cases(self):
+        """The type and length rules of the OTHER four fields.
+
+        Measured 2026-11-24: the census reported six more survivors in
+        the validation functions once ``job_id``'s rules were pinned --
+        ``or@231`` (queue type), ``or@243`` (worker id type), ``gt@249``
+        (worker id length), ``or@255`` (task type), ``gt@261`` (task
+        length) and ``or@267`` (digest type).
+
+        Every field has the SAME three rules -- it must be a str, not a
+        bool; it must be non-empty; it must fit -- so this table holds
+        them all together.  A guard that pinned ``job_id``'s rules and
+        left the other four fields alone is a predicate, not a count.
+        """
+        from job_queue import (
+            BadDigestError,
+            BadQueueError,
+            BadTaskError,
+            BadWorkerError,
+        )
+
+        digest = "sha256:" + "d" * 64
+        return [
+            (
+                "queue must be a str",
+                BadQueueError,
+                "queue must be str",
+                lambda q: q.enqueue("j", 42, "t", digest, 1),
+            ),
+            (
+                "queue must not be a bool",
+                BadQueueError,
+                "queue must be str",
+                lambda q: q.enqueue("j", True, "t", digest, 1),
+            ),
+            (
+                "queue must fit",
+                BadQueueError,
+                "queue exceeds 128 chars",
+                lambda q: q.enqueue("j", "q" * 129, "t", digest, 1),
+            ),
+            (
+                "task must be a str",
+                BadTaskError,
+                "task must be str",
+                lambda q: q.enqueue("j", "q", 42, digest, 1),
+            ),
+            (
+                "task must not be a bool",
+                BadTaskError,
+                "task must be str",
+                lambda q: q.enqueue("j", "q", True, digest, 1),
+            ),
+            (
+                "task must fit",
+                BadTaskError,
+                "task exceeds 256 chars",
+                lambda q: q.enqueue("j", "q", "t" * 257, digest, 1),
+            ),
+            (
+                "digest must be a str",
+                BadDigestError,
+                "payload_digest must be str",
+                lambda q: q.enqueue("j", "q", "t", 42, 1),
+            ),
+            (
+                "digest must not be a bool",
+                BadDigestError,
+                "payload_digest must be str",
+                lambda q: q.enqueue("j", "q", "t", True, 1),
+            ),
+            (
+                "worker_id must be a str",
+                BadWorkerError,
+                "worker_id must be str",
+                lambda q: q.dequeue(42, "q", 1),
+            ),
+            (
+                "worker_id must not be a bool",
+                BadWorkerError,
+                "worker_id must be str",
+                lambda q: q.dequeue(True, "q", 1),
+            ),
+            (
+                "worker_id must be non-empty",
+                BadWorkerError,
+                "worker_id must be non-empty",
+                lambda q: q.dequeue("", "q", 1),
+            ),
+            (
+                "worker_id must fit",
+                BadWorkerError,
+                "worker_id exceeds 256 chars",
+                lambda q: q.dequeue("w" * 257, "q", 1),
+            ),
+        ]
+
+    def test_every_other_field_has_its_own_error_type(self):
+        """The TYPE, for the other four fields."""
+        from job_queue import JobQueue
+
+        for label, expected, fragment, call in self._other_field_cases():
+            queue = JobQueue()
+            with self.assertRaises(
+                expected, msg=f"{label}: wrong error type"
+            ):
+                call(queue)
+
+    def test_every_other_field_says_which_rule_was_broken(self):
+        """The MESSAGE, for the other four fields."""
+        from job_queue import JobQueue
+
+        for label, expected, fragment, call in self._other_field_cases():
+            queue = JobQueue()
+            with self.assertRaises(expected) as caught:
+                call(queue)
+            self.assertIn(
+                fragment,
+                str(caught.exception),
+                f"{label}: the refusal does not say which rule was "
+                f"broken",
+            )
+
+    def test_the_other_fields_edge_values_are_accepted(self):
+        """The edge is legal, for the other four fields."""
+        from job_queue import JobQueue
+
+        digest = "sha256:" + "d" * 64
+        cases = [
+            ("queue at 128 chars",
+             lambda q: q.enqueue("j", "q" * 128, "t", digest, 1)),
+            ("task at 256 chars",
+             lambda q: q.enqueue("j", "q", "t" * 256, digest, 1)),
+        ]
+        for label, call in cases:
+            queue = JobQueue()
+            try:
+                call(queue)
+            except Exception as exc:  # noqa: BLE001
+                self.fail(
+                    f"{label}: a legal value was refused with "
+                    f"{type(exc).__name__}: {exc}"
+                )
+
+        # The worker's edge is a dequeue, which needs a booked job.
+        queue = JobQueue()
+        queue.enqueue("j", "q", "t", digest, 1)
+        try:
+            queue.dequeue("w" * 256, "q", 2)
+        except Exception as exc:  # noqa: BLE001
+            self.fail(
+                f"worker_id at 256 chars: a legal value was refused with "
+                f"{type(exc).__name__}: {exc}"
+            )
+
+    def test_the_case_list_covers_every_other_field(self):
+        """The COUNT: a rule dropped from the list fails here."""
+        expected_rules = {
+            "queue must be a str",
+            "queue must not be a bool",
+            "queue must fit",
+            "task must be a str",
+            "task must not be a bool",
+            "task must fit",
+            "digest must be a str",
+            "digest must not be a bool",
+            "worker_id must be a str",
+            "worker_id must not be a bool",
+            "worker_id must be non-empty",
+            "worker_id must fit",
+        }
+        covered = {case[0] for case in self._other_field_cases()}
+        self.assertEqual(
+            covered,
+            expected_rules,
+            "the guard does not cover every other field's rules",
+        )
+
 
 class UnencodableIdentityIsAuditedTests(unittest.TestCase):
     """A rejected call must leave a trail row.

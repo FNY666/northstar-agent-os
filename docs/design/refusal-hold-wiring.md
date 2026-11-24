@@ -2457,6 +2457,11 @@ census -- it stops at the first kill; the census is
 MUTANT RESULT: killed 42/81
 ```
 
+(That is the **two-suite** scope -- `test_refusal_hold_queue_wiring`
+and `test_job_queue`.  §22 re-measures the whole series over the
+**union** of every suite that references the module, which is the
+scope to quote; see §22.1 for both series.)
+
 The survivors include the `and` that joins the digest check to the
 schema check, at **five** places -- one per record kind.  Inverting
 the schema comparison in all five at once:
@@ -2891,3 +2896,282 @@ huge seq is refused" would not have seen the edge move.
 * No behaviour changes for a seq in `[0, 2**53 - 1]` -- the whole
   legal range is untouched.
 * §17's, §18's, §19's and §20's guards are unaffected.
+
+## 22. AMENDED 2026-11-24 — the census found two gaps in the slices that came before it
+
+### 22.1 The measurement
+
+With §19, §20 and §21 landed, the whole-file census over
+`job_queue.py` was re-run.  The scope is the **union of every suite
+that references the module** -- `test_job_queue`,
+`test_leased_task_claim`, `test_refusal_hold` and
+`test_refusal_hold_queue_wiring` -- because a module's real coverage
+is the union, and a narrower scope understates it:
+
+```
+before §19-§21:  MUTANT RESULT: killed 45/81
+after  §19-§21:  MUTANT RESULT: killed 54/82
+after  §22:      MUTANT RESULT: killed 73/82
+```
+
+The survivor count fell from **36** (81 candidates, 45 killed) to
+**28** (82 candidates, 54 killed) across §19-§21, and to **9** (73
+killed) across §22.
+
+§22 closed **nineteen** of the twenty-eight §19-§21 left open.
+
+(§19 and §20 recorded the **narrower two-suite** scope
+(`test_refusal_hold_queue_wiring,test_job_queue`).  Re-measured at
+that scope the same series reads `42/81` -> `51/82` -> `73/82` -- the
+same progression, measured over fewer suites.  The two scopes are
+stated so they are never compared as if they were the same
+measurement; the four-suite scope is the one to quote, because a
+module's real coverage is the union of every suite that references
+it.)
+
+Two of the survivors §22 found were gaps in the slices that came
+before -- **in my own work**.
+
+### 22.2 The gap in §20: the taxonomy guard covered ONE record kind
+
+§20 fixed the taxonomy so that all five record kinds answer `False`
+instead of raising.  Its guard, `RecordVerifyErrorTaxonomyTests`,
+built **one** record -- an `AckRecord` -- and checked it.
+
+So the census's mutant (the `except JobQueueError: return False`
+clause turned into `return True`) was:
+
+| kind | census | why |
+|---|---|---|
+| `AckRecord` | killed | §20's taxonomy guard builds one |
+| `DequeuedJob` | **survived** | nothing built one |
+| `DeadRecord` | **survived** | nothing built one |
+| `RetryRecord` | **survived** | nothing built one |
+| `EnqueueRecord` | **survived** | nothing built one -- §19's schema guard builds one, but it asserts the *schema*, not the *taxonomy*, so the `return True` plant still verifies |
+
+Planting the mutant in `DeadRecord.verify()` **alone** leaves the
+whole suite green.
+
+**This is §17's lesson, one level down, and it landed on my own
+work.**  §17's guard was named `test_every_refused_candidate_books_a
+_rejected_row` and asserted `assertIn("job.rejected", kinds)` -- one
+row satisfies that.  §20's guard was named
+`test_an_unencodable_record_answers_false_and_does_not_raise` and
+built one kind -- one kind satisfies that.  Both names said "a" where
+they meant "every", and both bodies did what the name said.
+
+The fix is the same shape as §19's `test_every_record_type_is_covered`:
+a guard that **counts** the kinds it covers.
+
+| guard | what it holds |
+|---|---|
+| `test_every_record_kind_answers_false_for_an_unencodable_field` | all **FIVE** kinds answer `False` -- and it asserts `len(records) == 5` first, so a dropped kind fails the guard |
+| `_all_record_kinds()` | the fixture: one **real** record of every kind, made by the ledger |
+
+### 22.3 The gap in `stats()`: a counter nothing read
+
+The census also reported the `stats()` `done` counter as a survivor
+(`eq@1033`, the `== _STATE_DONE` comparison).  Nothing asserted it --
+and, measured, **nothing read it either**: `stats().done` had no
+assertion anywhere in the component suite or the repo suite, and no
+production caller reads it.
+
+A counter that is silently wrong is also silently useless.  Three
+guards now hold the whole set:
+
+| guard | what it holds |
+|---|---|
+| `test_every_counter_counts_what_it_says` | each counter, after a known sequence of transitions |
+| `test_the_done_counter_counts_only_acked_jobs` | a **dead** job is not a **done** job -- the two states cannot be conflated |
+| `test_the_counters_add_up_to_the_ledger` | the state counters sum to the number of jobs enqueued, so a job cannot be in two states or in none |
+
+The third is the one that generalises: a guard that checks one
+counter cannot see another being wrong.  Checking the whole set
+against the ledger is what makes them agree with each other.
+
+### 22.4 The mutants
+
+The census reported **twenty-eight** survivors at this point (§22.1).
+Nineteen of them were in the validation functions and the record
+taxonomy; §22 closed **all nineteen**, which is exactly the drop from
+`54/82` to `73/82`.
+
+**Five** were the taxonomy and the counters -- the `return False`
+clause, in each of the **four** record kinds that had no guard of its
+own, and the `stats()` counter:
+
+| # | site | mutation | before | after |
+|---|---|---|---|---|
+| M1 | `EnqueueRecord.verify()` (`job_queue.py:498`) | `return False` -> `return True` | survived | killed |
+| M2 | `DequeuedJob.verify()` (`job_queue.py:538`) | the same | survived | killed |
+| M3 | `DeadRecord.verify()` (`job_queue.py:585`) | the same | survived | killed |
+| M4 | `RetryRecord.verify()` (`job_queue.py:624`) | the same | survived | killed |
+| M5 | `stats()`'s done counter (`job_queue.py:1033`) | `== _STATE_DONE` -> `!= _STATE_DONE` | survived | killed |
+
+Each of M1-M4 is a **single-kind** plant, so the guard that kills it
+has to be a single-kind-agnostic one -- the count.  M5 is killed by
+`test_the_done_counter_counts_only_acked_jobs`, which is the guard
+that says the two states are different.
+
+**Fourteen** were in the validation functions.  Every one is a
+**bound** or a **type** check, and every one survived for the same
+reason: the existing guard asserts only the **base** class.
+
+| # | site | mutation | before | after |
+|---|---|---|---|---|
+| V1 | `job_queue.py:219` | `job_id`'s type check `or` -> `and` | survived | killed |
+| V2 | `job_queue.py:231` | `queue`'s type check `or` -> `and` | survived | killed |
+| V3 | `job_queue.py:243` | `worker_id`'s type check `or` -> `and` | survived | killed |
+| V4 | `job_queue.py:249` | `worker_id`'s length bound `>` -> `>=` | survived | killed |
+| V5 | `job_queue.py:255` | `task`'s type check `or` -> `and` | survived | killed |
+| V6 | `job_queue.py:267` | `digest`'s type check `or` -> `and` | survived | killed |
+| V7 | `job_queue.py:286` | `priority`'s upper bound `>` -> `>=` | survived | killed |
+| V8 | `job_queue.py:286` | `priority`'s lower bound `<` -> `<=` | survived | killed |
+| V9 | `job_queue.py:294` | `max_retries`' type check `or` -> `and` | survived | killed |
+| V10 | `job_queue.py:312` | `delay_seqs`' bound `>` -> `>=` | survived | killed |
+| V11 | `job_queue.py:318` | `seq`'s type check `or` -> `and` | survived | killed |
+| V12 | `job_queue.py:320` | `seq`'s sign check `<` -> `<=` | survived | killed |
+| V13 | `job_queue.py:427` | the fallback's int bound `>` -> `>=` | survived | killed |
+| V14 | `job_queue.py:431` | the fallback's non-finite check `or` -> `and` | survived | killed |
+
+Every one of the nineteen was planted and re-run individually and
+observed **killed**; the census then re-run over the whole file
+confirmed the drop.
+
+The first case list killed only **four** of the fourteen.  The other
+ten needed two things the first list did not have:
+
+* the **edge** -- a case that says the last *legal* value is legal
+  (this is what kills V4, V7, V8, V10, V12 and V13, all of which move
+  a boundary by one), and
+* the **other fields** -- `queue`, `task`, `digest` and `worker_id`
+  each have their own type rule, and `queue`, `task` and `worker_id`
+  each have their own length rule; the first list covered only
+  `job_id`.
+
+The site numbers above are the census's own, and they are **not**
+interchangeable with a hand-written list: an earlier draft of this
+section named `gt@225` (`job_id`'s length) and `gt@261` (`task`'s
+length) among the survivors, and neither is one -- both were already
+killed before this slice.  The list above is the census's output,
+copied.
+
+### 22.5 What this does NOT change
+
+* **No code change.**  `job_queue.py` is unchanged by this slice --
+  it is not one byte different from `e07cc869`.  This slice closes
+  *evidence* gaps, exactly as §19 did.
+* The **validation rules** are unchanged -- every bound and every type
+  check was already correct (measured, §22.6), and this slice only
+  pins them.
+* No version, schema, or audit kind is added or changed.
+* No digest changes: the records the fixtures build are the ones the
+  module already books.
+* §17's, §18's, §19's, §20's and §21's guards are unaffected.
+
+### 22.6 The validation functions: a guard that asserts the BASE class
+
+The census reported **fourteen** survivors in the validation
+functions -- and the number is a **count**, so it says how many
+rules are unverified, not which.  Every one of them is a **bound** or
+a **type** check (the full site list is §22.4's table):
+
+```
+or@219   isinstance(job_id, bool) or not isinstance(job_id, str)
+or@231   isinstance(queue, bool) or not isinstance(queue, str)
+or@243   isinstance(worker_id, bool) or not isinstance(worker_id, str)
+gt@249   len(worker_id) > 256
+or@255   isinstance(task, bool) or not isinstance(task, str)
+or@267   isinstance(digest, bool) or not isinstance(digest, str)
+gt@286   priority > _PRIORITY_MAX
+lt@286   priority < _PRIORITY_MIN
+or@294   isinstance(max_retries, bool) or not isinstance(max_retries, int)
+gt@312   delay_seqs > _MAX_INT
+or@318   isinstance(seq, bool) or not isinstance(seq, int)
+lt@320   seq < 0
+gt@427   abs(v) > _MAX_INT            (the fallback canonicalizer)
+or@431   v != v or v in (inf, -inf)    (the fallback canonicalizer)
+```
+
+**The validation is not wrong.**  Measured, every bad input raises the
+right error type with the right message.  The reason the mutants
+survived is that the existing test asserts only the **base** class:
+
+```python
+with pytest.raises(JobQueueError):
+    jq.enqueue(...)
+```
+
+Every one of these errors IS a `JobQueueError`, so a mutant that
+replaces a *specific* rule with a *different* specific rule -- a
+bool check for a str check, a bound moved by one -- still raises
+`JobQueueError` and the test still passes.
+
+**A guard that asserts the base class cannot see which rule fired.**
+
+So the guard asserts the **exact type** and the **message**, for
+**every** field:
+
+| guard | what it holds |
+|---|---|
+| `test_each_bad_input_raises_its_own_error_type` | the exact type, for `job_id`, `queue`, `task`, `digest`, `worker_id`, `priority`, `max_retries`, `delay_seqs` and `seq` |
+| `test_each_bad_input_says_which_rule_was_broken` | the message names the rule |
+| `test_each_limit_edge_value_is_accepted` | the **last legal value is legal** -- this is what kills an *edge* mutant |
+| `test_the_case_list_covers_every_validation_rule` | the **count**: 19 cases, and a rule that loses its case fails the guard |
+| `test_every_other_field_has_its_own_error_type` | the same, for the other four fields |
+| `test_every_other_field_says_which_rule_was_broken` | the same, for the other four fields |
+| `test_the_other_fields_edge_values_are_accepted` | the edge, for the other four fields |
+| `test_the_case_list_covers_every_other_field` | the **count**: 12 more cases |
+
+The **edge** guards are the ones worth remembering.  The first case
+list covered "over the limit is refused" and nothing else, so six
+mutants survived it: `gt@249` (worker id length), `gt@286` and
+`lt@286` (priority's two bounds), `gt@312` (delay_seqs), `lt@320`
+(seq's sign) and `gt@427` (the fallback's int bound).  All six move a
+boundary **by one**, and all six are killed by a case that says the
+boundary *value* is legal.  A guard that only checks "too big is
+refused" cannot see the edge move.
+
+### 22.7 The fallback canonicalizer
+
+Two of the survivors (`gt@427`, `or@431`) are in the **stdlib
+fallback** branch -- the one the module marks `# pragma: no cover`,
+and the one that only runs when `canonical_json` cannot be imported
+(it is a declared dependency, so in practice never).
+
+A mutant in a branch nothing exercises is a **mis-aimed** mutant, not
+a weak guard.  But the fallback is a *configuration*, and §20
+established that the two configurations must agree -- so the fallback
+is exercised **deliberately**, with the same inputs:
+
+| guard | what it holds |
+|---|---|
+| `test_the_fallback_canonicalizer_refuses_the_same_inputs` | the fallback refuses a big int, a non-finite float and an unsupported type, **and says which rule**; and the **last legal integer is accepted** |
+| `test_the_fallback_and_the_shipped_path_agree_on_the_error_type` | both configurations refuse with the module's **own** `JobQueueError` -- never with the sibling helper's `JcsError` |
+
+The two configurations do **not** agree on *how much* they refuse, and
+need not: the fallback is **stricter** (it refuses an integer above
+the safe range; the shipped path accepts it, and the JCS helper
+serializes it losslessly as a double).  A stricter fallback is safe --
+it refuses more, never less.  What would not be safe is the fallback
+refusing something the shipped path accepts *silently*, which is
+exactly what a differing error type looks like to a caller.
+
+### 22.8 What the census still reports
+
+Nine survivors remain, and they are two shapes:
+
+| site | what it is |
+|---|---|
+| `or@1273` | the `or` in the dequeue skip loop (`job_id is None or entry is None`) |
+| `and@1681`, `and@1685`, `and@1686`, `and@1691`, `and@1696`, `and@1701`, `and@1718`, `and@1725` | the `and` in the module's own `main()` self-check's **assertion chains** |
+
+The `main()` survivors are a different shape: each conjunct of an
+`assert a and b` is individually untested, so flipping one leaves the
+assertion still true.  `main()` is exercised -- `test_main_self_check`
+runs it as a subprocess -- but a *self-check* is not a *test*: it
+asserts what the author believed, and a conjunct that is never
+false is never checked.
+
+That is a separate category (the self-check's own assertions are
+untested), and it is recorded here rather than folded in.
