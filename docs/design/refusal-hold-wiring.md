@@ -2577,3 +2577,191 @@ into an evidence slice:
 
 Left open deliberately: fixing it changes the module's error taxonomy,
 which is a design decision, not an evidence gap.
+
+## 20. AMENDED 2026-11-24 — the canonicalizer's own error escaped the queue's taxonomy
+
+### 20.1 The defect
+
+§19 left one census survivor open, and it was not a mis-aimed mutant:
+the `except JobQueueError: return False` clause of each record's
+`verify()` is **live** -- but only in the *fallback* configuration.
+
+`_canonical()` (`job_queue.py:363`) uses the sibling JCS helper
+whenever it is importable:
+
+```python
+def _canonical(payload: Any) -> bytes:
+    if _cj is not None:
+        return _cj.jcs_dumps(payload).encode("utf-8")
+    ...
+```
+
+And `canonical_json.jcs_dumps()` refuses input it cannot canonicalize
+-- a lone surrogate, a non-finite float, an unsupported type -- with
+**its own** error type, `JcsError`, which is a `ValueError`:
+
+```
+class JcsError(ValueError):
+    """Input that JCS cannot canonicalize ..."""
+```
+
+`JcsError` is **not** a `JobQueueError`.  So the `except JobQueueError`
+clause never fired in the shipped configuration, and the stdlib
+fallback -- which *does* raise `JobQueueError` -- was the only place
+the clause was live.  Two configurations, two answers to the same
+question.
+
+Measured consequences, all in the shipped configuration:
+
+| # | input | before |
+|---|---|---|
+| 1 | `verify()` on a record whose field is a lone surrogate | **raised** `JcsError` instead of answering `False` |
+| 2 | `verify()` on a record whose field is `float('inf')` | **raised** `JcsError` |
+| 3 | `enqueue()` with a lone-surrogate job id | raised, and booked **no** `job.rejected` row |
+| 4 | `dequeue()` with a lone-surrogate worker id | raised, and left the job **`reserved`** with `dequeued=0` |
+
+**#1 and #2 are the worst.**  `verify()` is the module's integrity
+predicate: a caller asks "is this record intact?" and gets an
+exception instead of an answer.  And because `JcsError` is a
+`ValueError`, a caller guarding with `except ValueError` treats a
+**tampered record** as a **parse error** and moves on -- so the record
+is neither verified nor rejected.
+
+**#4 is a stranded job.**  `dequeue()` flipped the entry to `reserved`
+*before* it computed the digest, so the refusal left the job
+`reserved`, with `stats()` reporting `reserved=1, dequeued=0` and no
+`job.dequeued` row: a job nobody holds, that no worker ever got, and
+that the trail never mentioned.
+
+**#3 is the §17 property, one layer down.**  §17 established that a
+refusal that leaves no trail row is invisible.  A refused
+`enqueue()` left the trail showing *nothing at all* -- the queue
+could not tell "the queue refused this job" from "the queue never
+saw it".
+
+### 20.2 The fix
+
+Three parts, all in `job_queue.py`.
+
+**(a) Translate the error at the boundary.**  `_canonical()` now
+converts the helper's `ValueError` into this module's own taxonomy:
+
+```python
+if _cj is not None:
+    try:
+        return _cj.jcs_dumps(payload).encode("utf-8")
+    except ValueError as exc:
+        raise JobQueueError(f"unencodable payload: {exc}") from exc
+```
+
+One place, so the two configurations cannot drift again: the fallback
+already raised `JobQueueError`, and now the shipped path raises the
+same type for the same inputs.
+
+**(b) Compute each digest INSIDE the guarded block.**  Every mutator
+now computes its digest before the entry is flipped and inside the
+`try` that books the rejection:
+
+| mutator | before | after |
+|---|---|---|
+| `enqueue()` | digest computed after the `except` | inside the guarded block |
+| `dequeue()` | digest computed after the entry was flipped to `reserved` | before the flip, inside a guarded block that books the rejection |
+| `ack()` | digest computed after the `except` | inside the guarded block |
+| `dead()` | digest computed after the `except` | inside the guarded block |
+| `retry()` | digest computed after the `except` (both branches) | inside the guarded block (both branches) |
+
+So a refused digest now (i) books a `job.rejected` row naming the
+job, and (ii) leaves the job **exactly where it was** -- `ready` after
+a refused `dequeue()`, `reserved` after a refused `ack()`.
+
+**(c) Order the `dequeue()` computation before the flip.**  This is
+the part that fixes the stranded job: the digest is computed while
+the entry is still `ready`.
+
+### 20.3 The guards
+
+Nine guards in two classes.
+
+`RecordVerifyErrorTaxonomyTests` (4):
+
+| guard | what it holds |
+|---|---|
+| `test_an_unencodable_record_answers_false_and_does_not_raise` | `verify()` **answers** `False`; it does not raise |
+| `test_a_non_finite_field_answers_false_and_does_not_raise` | the same, for a float the canonicalizer refuses |
+| `test_the_answer_is_false_in_the_stdlib_fallback_too` | the two configurations **agree** |
+| `test_the_control_a_real_record_still_verifies` | the control: the working path still works |
+
+`UnencodableIdentityIsAuditedTests` (5):
+
+| guard | what it holds |
+|---|---|
+| `test_an_unencodable_enqueue_books_a_rejected_row` | a refused `enqueue()` leaves a trail row |
+| `test_the_rejected_row_names_the_job` | the row names the job, and is booked exactly once |
+| `test_a_refused_dequeue_does_not_strand_the_job` | the job stays `ready`: `reserved=0, ready=1, dequeued=0` |
+| `test_a_refused_dequeue_books_a_rejected_row` | the refusal is visible, and **no** `job.dequeued` row is booked |
+| `test_the_job_is_still_handable_out_after_the_refusal` | the refusal is per-call, not permanent |
+
+### 20.4 The mutants
+
+| # | mutation | before | after |
+|---|---|---|---|
+| M1 | `except JobQueueError: return False` -> `return True`, all 5 kinds | **survived** (§19's open item) | killed (`FAILED (failures=3)`) |
+| M2 | `_canonical`'s `except ValueError` -> `except _NeverRaised` | n/a (the fix) | killed (`FAILED (failures=6)`) |
+| M3 | `dequeue()`'s digest moved **after** the entry flip | n/a (the fix) | killed (`FAILED (failures=2)`) |
+| M4 | `dequeue()`'s refusal **not booked** as a rejection | n/a (the fix) | killed (`FAILED (failures=1)`) |
+| M5 | `enqueue()`'s digest moved back outside the guarded block | n/a (the fix) | killed (`FAILED (failures=2, errors=124)`) |
+
+M1 is §19's open item, now closed: the clause is **live** in both
+configurations, so the mutant that inverts it dies.
+
+M3 is the one worth remembering: the mutant that puts the digest back
+*after* the entry flip restores the stranded job exactly, and the
+guard that kills it is `test_a_refused_dequeue_does_not_strand_the_job`
+-- which asserts the **counters**, not the exception.  A guard that
+only asserted "the call raised" would not have seen the difference.
+
+### 20.5 What this does NOT change
+
+* `job_queue.py`'s version and schema pins are unchanged
+  (`job-queue.v1` / `northstar.job-queue.v1`), and **no audit kind is
+  added or changed**.  `job.rejected` is an existing kind.
+* The **digests** are unchanged: `_canonical()`'s bytes are the same
+  for every input the module accepts, so every existing record's
+  digest still verifies.  (The two configurations never agreed on the
+  bytes -- the shipped path emits `[...]` and the fallback emits
+  `{"t":"list",...}` -- so there was no cross-configuration digest to
+  preserve; the fallback is a *fallback*, not a second format.)
+* The **stdlib-only** promise is unchanged: `canonical_json` was
+  already the only non-stdlib import, and `test_stdlib_only` still
+  passes.
+* The gate is not consulted by any of this.
+* §17's, §18's and §19's guards are unaffected.
+* The **lease** side is unchanged: `leased_task_claim.py`'s mirror
+  calls are unaffected, because the mirror's worker and task ids are
+  the ones the module already validated.
+
+### 20.6 The sibling defect, still open
+
+`graph_database.py` has the **identical** clause --
+`except GraphDatabaseError` around its own `_pin()`, with the same
+`canonical_json` behind it.  So the same `verify()`-raises bug is
+there.  It is a separate module with its own scope, and the repo's
+house pattern is consistent, so it is left for a slice that owns
+`graph_database.py` rather than folded in here.
+
+And the bigger one, still open: `canonical_json` serializes an
+integer outside the safe range as an IEEE-754 **double**, so at
+`|seq| >= 2**53` two different seqs canonicalize to the same bytes.
+A **real** record's digest then stops pinning its `seq`:
+
+```
+real DequeuedJob seq: 9007199254740992
+tampered seq:         9007199254740993   same digest
+tampered.verify() = True
+```
+
+The stdlib fallback refuses that integer outright, so the two
+configurations also disagree about whether a large seq is legal at
+all.  This is a **digest-fidelity** defect, not a taxonomy defect,
+and it is not fixed here -- fixing it means deciding what the module
+promises about `seq`, which is a design decision.

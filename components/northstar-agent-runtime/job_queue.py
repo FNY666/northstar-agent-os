@@ -362,7 +362,37 @@ def _is_refusal(exc: BaseException) -> bool:
 
 def _canonical(payload: Any) -> bytes:
     if _cj is not None:
-        return _cj.jcs_dumps(payload).encode("utf-8")  # type: ignore
+        try:
+            return _cj.jcs_dumps(payload).encode("utf-8")  # type: ignore
+        except ValueError as exc:
+            # The sibling helper refuses input it cannot canonicalize
+            # (a lone surrogate, a non-finite float, an unsupported
+            # type) with ITS OWN error type -- ``JcsError``, which is
+            # a ``ValueError``.  That type is not part of this
+            # module's taxonomy, and it must not escape: every caller
+            # here catches ``JobQueueError``, and the stdlib fallback
+            # below raises exactly that.
+            #
+            # Left untranslated, the two configurations disagreed about
+            # the SAME input -- the shipped path raised ``JcsError``,
+            # the fallback raised ``JobQueueError`` -- and the shipped
+            # path's error escaped the ``except JobQueueError`` clause
+            # that was written to catch it.  Two consequences, both
+            # measured:
+            #
+            # * ``verify()`` RAISED instead of answering ``False``, so
+            #   a caller asking "is this record intact?" got an
+            #   exception; and because ``JcsError`` is a
+            #   ``ValueError``, a caller guarding with ``except
+            #   ValueError`` treats a *tampered record* as a *parse
+            #   error* and moves on -- the record is neither verified
+            #   nor rejected.
+            # * A refused ``enqueue()`` booked NO ``job.rejected``
+            #   row, so the trail could not tell "the queue refused
+            #   this job" from "the queue never saw it".
+            raise JobQueueError(
+                f"unencodable payload: {exc}"
+            ) from exc
 
     def _tag(v: Any) -> Any:
         if isinstance(v, bool):
@@ -1049,6 +1079,23 @@ class JobQueue:
                     raise DuplicateJobError(
                         f"job_id already booked: {job_id}"
                     )
+                # The digest is computed INSIDE the guarded block, so an
+                # identity the canonicalizer refuses is booked as a
+                # rejection like every other refused call.  Left
+                # outside, the refusal raised past the ``except`` and
+                # the trail showed nothing at all -- see
+                # :func:`_canonical`.
+                digest = _pin(
+                    "enqueue",
+                    job_id,
+                    queue,
+                    task,
+                    payload_digest,
+                    priority,
+                    max_retries,
+                    delay_seqs,
+                    seq,
+                )
             except JobQueueError as exc:
                 self._reject(
                     seq,
@@ -1064,17 +1111,7 @@ class JobQueue:
                 priority=priority,
                 max_retries=max_retries,
                 delay_seqs=delay_seqs,
-                digest=_pin(
-                    "enqueue",
-                    job_id,
-                    queue,
-                    task,
-                    payload_digest,
-                    priority,
-                    max_retries,
-                    delay_seqs,
-                    seq,
-                ),
+                digest=digest,
                 seq=seq,
             )
             self._entries[job_id] = {
@@ -1221,6 +1258,31 @@ class JobQueue:
                 # first candidate's refusal.
                 assert first_refusal is not None
                 raise first_refusal
+            # The digest is computed BEFORE the entry is flipped.  A
+            # worker id the canonicalizer refuses must not leave the
+            # job RESERVED with no record and no ``job.dequeued`` row:
+            # measured before this fix, ``dequeue()`` raised, the
+            # entry stayed ``reserved``, and ``stats()`` reported
+            # ``reserved=1, dequeued=0`` -- a job nobody holds and
+            # nobody can account for.
+            #
+            # The refusal is BOOKED, so the trail says the queue
+            # refused this hand-out rather than showing nothing.
+            try:
+                digest = _pin(
+                    "dequeue",
+                    job_id,
+                    queue,
+                    entry["task"],
+                    entry["payload_digest"],
+                    worker_id,
+                    entry["attempts"] + 1,
+                    entry["priority"],
+                    seq,
+                )
+            except JobQueueError as exc:
+                self._reject(seq, type(exc).__name__, job_id)
+                raise
             entry["state"] = _STATE_RESERVED
             entry["worker_id"] = worker_id
             entry["attempts"] += 1
@@ -1232,17 +1294,7 @@ class JobQueue:
                 worker_id=worker_id,
                 attempts=entry["attempts"],
                 priority=entry["priority"],
-                digest=_pin(
-                    "dequeue",
-                    job_id,
-                    queue,
-                    entry["task"],
-                    entry["payload_digest"],
-                    worker_id,
-                    entry["attempts"],
-                    entry["priority"],
-                    seq,
-                ),
+                digest=digest,
                 seq=seq,
             )
             self._dequeues.append(record)
@@ -1279,13 +1331,17 @@ class JobQueue:
                         f"job {job_id} is {entry['state']}, "
                         "only reserved jobs may be acked"
                     )
+                # Computed inside the guarded block, so a refused
+                # digest is booked as a rejection and the job is left
+                # exactly where it was -- see :func:`_canonical`.
+                digest = _pin("ack", job_id, entry["attempts"], seq)
             except JobQueueError as exc:
                 self._reject(seq, type(exc).__name__, job_id)
                 raise
             record = AckRecord(
                 job_id=job_id,
                 attempts=entry["attempts"],
-                digest=_pin("ack", job_id, entry["attempts"], seq),
+                digest=digest,
                 seq=seq,
             )
             entry["state"] = _STATE_DONE
@@ -1337,13 +1393,16 @@ class JobQueue:
                         f"job {job_id} is {entry['state']}, "
                         "only reserved jobs may be killed"
                     )
+                # Computed inside the guarded block -- see
+                # :func:`_canonical`.
+                digest = _pin("dead", job_id, entry["attempts"], seq)
             except JobQueueError as exc:
                 self._reject(seq, type(exc).__name__, job_id)
                 raise
             record = DeadRecord(
                 job_id=job_id,
                 attempts=entry["attempts"],
-                digest=_pin("dead", job_id, entry["attempts"], seq),
+                digest=digest,
                 seq=seq,
             )
             entry["state"] = _STATE_DEAD
@@ -1455,6 +1514,19 @@ class JobQueue:
                 # exceeded budget -- and before the entry is flipped, so
                 # a refusal leaves the job exactly where it was.
                 retry_action = str(entry["task"])
+                # The READY digest is computed inside the guarded
+                # block, so a refused digest is booked as a rejection
+                # and the job is left exactly where it was.  See
+                # :func:`_canonical`.
+                ready_digest = _pin(
+                    "retry",
+                    job_id,
+                    entry["attempts"],
+                    delay_seqs,
+                    entry["max_retries"],
+                    _STATE_READY,
+                    seq,
+                )
                 if batch:
                     allowed, exc = self._refusal_allows(
                         job_id, retry_action, now
@@ -1489,6 +1561,19 @@ class JobQueue:
                             )
                         raise
                 if entry["attempts"] >= entry["max_retries"]:
+                    # The digest is computed BEFORE the entry is
+                    # flipped, so a refused digest leaves the job
+                    # exactly where it was -- reserved, not dead.
+                    # See :func:`_canonical`.
+                    dead_digest = _pin(
+                        "retry",
+                        job_id,
+                        entry["attempts"],
+                        delay_seqs,
+                        entry["max_retries"],
+                        _STATE_DEAD,
+                        seq,
+                    )
                     entry["state"] = _STATE_DEAD
                     entry["worker_id"] = ""
                     dead_record = RetryRecord(
@@ -1497,15 +1582,7 @@ class JobQueue:
                         delay_seqs=delay_seqs,
                         max_retries=entry["max_retries"],
                         state=_STATE_DEAD,
-                        digest=_pin(
-                            "retry",
-                            job_id,
-                            entry["attempts"],
-                            delay_seqs,
-                            entry["max_retries"],
-                            _STATE_DEAD,
-                            seq,
-                        ),
+                        digest=dead_digest,
                         seq=seq,
                     )
                     self._retries.append(dead_record)
@@ -1538,15 +1615,7 @@ class JobQueue:
                 delay_seqs=delay_seqs,
                 max_retries=entry["max_retries"],
                 state=_STATE_READY,
-                digest=_pin(
-                    "retry",
-                    job_id,
-                    entry["attempts"],
-                    delay_seqs,
-                    entry["max_retries"],
-                    _STATE_READY,
-                    seq,
-                ),
+                digest=ready_digest,
                 seq=seq,
             )
             entry["state"] = _STATE_READY

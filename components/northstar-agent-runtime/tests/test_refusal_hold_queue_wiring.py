@@ -2805,5 +2805,252 @@ class RecordSchemaPinIsVerifiedTests(unittest.TestCase):
         return (enqueued, dequeued, acked, dead, retried)
 
 
+class RecordVerifyErrorTaxonomyTests(unittest.TestCase):
+    """``verify()`` must ANSWER, not raise.
+
+    Each record's ``verify()`` recomputes the digest and answers
+    ``True`` or ``False``.  It wraps that computation in
+    ``except JobQueueError: return False`` -- the shape that says "an
+    unencodable record is not a verifying record", never "this call
+    raised".
+
+    Measured 2026-11-24, by the whole-file census over
+    ``job_queue.py``: the mutant that turns that ``return False`` into
+    ``return True`` in all five record types **survives** the whole
+    suite.  The reason is not a weak guard -- it is that the clause is
+    **dead** in the shipped configuration.
+
+    ``_canonical()`` uses ``canonical_json.jcs_dumps()`` whenever the
+    sibling helper is importable, and that raises ``JcsError`` -- a
+    ``ValueError``, **not** a ``JobQueueError``.  So the
+    ``except JobQueueError`` never fires, and an unencodable record
+    makes ``verify()`` **raise** instead of answering ``False``.
+
+    The stdlib fallback (``_cj is None``) *does* raise
+    ``JobQueueError``, so the clause is live only there -- which is
+    why the mutant survives the shipped configuration and dies in the
+    fallback.
+
+    **Why that matters.**  ``verify()`` is the module's integrity
+    predicate.  A caller asks "is this record intact?" and gets an
+    exception instead of an answer.  Worse, the exception is a
+    ``ValueError``, so a caller guarding with ``except ValueError``
+    treats a *tampered record* as a *parse error* and moves on --
+    the record is neither verified nor rejected.
+    """
+
+    def _record_with(self, **fields):
+        """A real record, with one field replaced."""
+        import dataclasses
+
+        from job_queue import AckRecord
+
+        record = AckRecord(
+            job_id="j1", attempts=1, digest=DIGEST, seq=1
+        )
+        return dataclasses.replace(record, **fields)
+
+    def test_an_unencodable_record_answers_false_and_does_not_raise(self):
+        """The defect: ``verify()`` raised instead of answering.
+
+        A lone surrogate is the input the JCS canonicalizer refuses.
+        """
+        record = self._record_with(job_id="j\ud800x")
+        try:
+            answer = record.verify()
+        except Exception as exc:  # noqa: BLE001 -- the point is the type
+            self.fail(
+                f"verify() raised {type(exc).__name__} instead of "
+                f"answering False: {exc}"
+            )
+        self.assertFalse(
+            answer,
+            "an unencodable record must not verify",
+        )
+
+    def test_a_non_finite_field_answers_false_and_does_not_raise(self):
+        """The same, for a float the canonicalizer refuses."""
+        record = self._record_with(attempts=float("inf"))
+        try:
+            answer = record.verify()
+        except Exception as exc:  # noqa: BLE001 -- the point is the type
+            self.fail(
+                f"verify() raised {type(exc).__name__} instead of "
+                f"answering False: {exc}"
+            )
+        self.assertFalse(
+            answer,
+            "a record with a non-finite field must not verify",
+        )
+
+    def test_the_answer_is_false_in_the_stdlib_fallback_too(self):
+        """The two configurations must AGREE.
+
+        The fallback raises ``JobQueueError`` and the shipped path
+        raises ``JcsError``; both must answer ``False``.  Before the
+        fix the shipped path raised and the fallback answered, so the
+        two configurations disagreed about the same record.
+        """
+        import job_queue
+
+        original = job_queue._cj
+        try:
+            for label, canonical in (
+                ("shipped", original),
+                ("fallback", None),
+            ):
+                job_queue._cj = canonical
+                record = self._record_with(job_id="j\ud800x")
+                try:
+                    answer = record.verify()
+                except Exception as exc:  # noqa: BLE001
+                    self.fail(
+                        f"{label}: verify() raised "
+                        f"{type(exc).__name__} instead of answering "
+                        f"False: {exc}"
+                    )
+                self.assertFalse(
+                    answer,
+                    f"{label}: an unencodable record must not verify",
+                )
+        finally:
+            job_queue._cj = original
+
+    def test_the_control_a_real_record_still_verifies(self):
+        """The control: the fix did not break the working path."""
+        from job_queue import JobQueue
+
+        queue = JobQueue()
+        record = queue.enqueue("j1", "q", "dispatch", DIGEST, 1)
+        self.assertTrue(
+            record.verify(),
+            "a real record must still verify",
+        )
+
+
+class UnencodableIdentityIsAuditedTests(unittest.TestCase):
+    """A rejected call must leave a trail row.
+
+    ``enqueue()`` and the other mutators wrap their validation in
+    ``except JobQueueError: self._reject(...); raise`` -- so a call
+    refused for a bad shape books a ``job.rejected`` row naming the
+    reason.
+
+    Measured 2026-11-24: an identity the canonicalizer refuses (a lone
+    surrogate) is refused **before** that clause, because the refusal
+    is a ``JcsError``.  The call fails -- which is right -- but it
+    books **no row**, so the trail cannot tell "the queue refused this
+    job" from "the queue never saw it".
+
+    This is the same property §17 and §18 established for refusals:
+    a refusal that leaves no trace is invisible.
+    """
+
+    def test_an_unencodable_enqueue_books_a_rejected_row(self):
+        from job_queue import JobQueue
+
+        queue = JobQueue()
+        with self.assertRaises(Exception):
+            queue.enqueue("j\ud800x", "q", "dispatch", DIGEST, 1)
+        kinds = [row["kind"] for row in queue.audit_log()]
+        self.assertIn(
+            "job.rejected",
+            kinds,
+            "a refused enqueue left no trail row: the trail cannot "
+            "tell 'the queue refused this job' from 'the queue never "
+            "saw it'",
+        )
+
+    def test_the_rejected_row_names_the_job(self):
+        from job_queue import JobQueue
+
+        queue = JobQueue()
+        with self.assertRaises(Exception):
+            queue.enqueue("j\ud800x", "q", "dispatch", DIGEST, 1)
+        rejected = [
+            row
+            for row in queue.audit_log()
+            if row["kind"] == "job.rejected"
+        ]
+        self.assertEqual(
+            len(rejected),
+            1,
+            "the refusal must be booked exactly once",
+        )
+        self.assertEqual(
+            rejected[0]["detail"]["job_id"],
+            "j\ud800x",
+            "the row must name the job that was refused",
+        )
+
+    def test_a_refused_dequeue_does_not_strand_the_job(self):
+        """A refused hand-out must leave the job READY, not RESERVED.
+
+        Measured before the fix: ``dequeue()`` raised, the entry stayed
+        ``reserved``, and ``stats()`` reported ``reserved=1,
+        dequeued=0`` -- a job nobody holds, that no worker ever got,
+        and that the trail never mentioned.
+        """
+        from job_queue import JobQueue
+
+        queue = JobQueue()
+        queue.enqueue("j1", "q", "dispatch", DIGEST, 1)
+        with self.assertRaises(Exception):
+            queue.dequeue("w\ud800x", "q", 2)
+
+        stats = queue.stats()
+        self.assertEqual(
+            stats.reserved,
+            0,
+            "a refused hand-out left the job reserved: nobody holds it "
+            "and no worker ever got it",
+        )
+        self.assertEqual(
+            stats.ready,
+            1,
+            "the refused job must still be offerable",
+        )
+        self.assertEqual(
+            stats.dequeued,
+            0,
+            "a refused hand-out booked no dequeue",
+        )
+
+    def test_a_refused_dequeue_books_a_rejected_row(self):
+        """The refusal is visible in the trail."""
+        from job_queue import JobQueue
+
+        queue = JobQueue()
+        queue.enqueue("j1", "q", "dispatch", DIGEST, 1)
+        with self.assertRaises(Exception):
+            queue.dequeue("w\ud800x", "q", 2)
+        kinds = [row["kind"] for row in queue.audit_log()]
+        self.assertIn(
+            "job.rejected",
+            kinds,
+            "a refused hand-out left no trail row",
+        )
+        self.assertNotIn(
+            "job.dequeued",
+            kinds,
+            "a refused hand-out booked a dequeue it never made",
+        )
+
+    def test_the_job_is_still_handable_out_after_the_refusal(self):
+        """The refusal is per-call, not permanent."""
+        from job_queue import JobQueue
+
+        queue = JobQueue()
+        queue.enqueue("j1", "q", "dispatch", DIGEST, 1)
+        with self.assertRaises(Exception):
+            queue.dequeue("w\ud800x", "q", 2)
+        record = queue.dequeue("w-good", "q", 3)
+        self.assertIsNotNone(
+            record,
+            "the job must still be offerable after a refused hand-out",
+        )
+        self.assertEqual(record.job_id, "j1")
+
+
 if __name__ == "__main__":
     unittest.main()
