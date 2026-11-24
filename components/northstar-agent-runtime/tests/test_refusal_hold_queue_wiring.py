@@ -2661,5 +2661,149 @@ class RefusedRetryIsAuditedTests(unittest.TestCase):
         )
 
 
+class RecordSchemaPinIsVerifiedTests(unittest.TestCase):
+    """The schema pin must be part of ``verify()``, not decoration.
+
+    Every record this module books carries a ``schema`` field, and
+    every record's ``verify()`` recomputes the digest and compares it.
+    The schema is checked in the same expression:
+
+        return recomputed == self.digest and (
+            self.schema == JOB_QUEUE_SCHEMA
+        )
+
+    Measured 2026-11-24, by the whole-file census over
+    ``job_queue.py`` (the accept probe's ``MUTANT`` check is an accept
+    *metric*, not a census -- it stops at the first kill):
+
+        MUTANT RESULT: killed 42/81
+
+    and the survivors include the ``and`` that joins the digest check to
+    the schema check, at **five** places -- ``EnqueueRecord``,
+    ``DequeuedJob``, ``AckRecord``, ``DeadRecord`` and ``RetryRecord``.
+    Inverting the schema comparison in all five at once:
+
+        return recomputed == self.digest and (
+            self.schema != JOB_QUEUE_SCHEMA
+        )
+
+    leaves the **whole suite green**.  So the schema pin was carried by
+    every record and checked by none.
+
+    **Why that matters.**  The schema pin is what says "this record is
+    a ``northstar.job-queue.v1`` record".  A record from a *different*
+    schema -- a future revision with a different field set, or a record
+    that crossed a boundary it should not have -- would carry a digest
+    computed over its own fields, and ``verify()`` would say True
+    because the digest matched.  The digest says "this record is
+    internally consistent"; the schema says "this record is the shape
+    the reader expects".  A verifier that checks only the first is
+    verifying the wrong thing.
+
+    This is the same shape as §17's lesson, one level down: the
+    property was **written** in the code, so every reader of the code
+    believed it was **held**.  Nothing tested it.
+    """
+
+    def test_every_records_verify_is_true_for_a_real_record(self):
+        """The control: the pin is not simply broken."""
+        for record in self._real_records():
+            self.assertTrue(
+                record.verify(),
+                f"{type(record).__name__}.verify() is False for a real record",
+            )
+
+    def test_every_record_rejects_a_foreign_schema(self):
+        """The defect: a foreign schema verified as True.
+
+        Flipping the comparison in the module made the whole suite
+        green, so this is a real gap and not an equivalent mutant.
+        """
+        import dataclasses
+
+        for record in self._real_records():
+            forged = dataclasses.replace(record, schema="northstar.other.v1")
+            self.assertFalse(
+                forged.verify(),
+                f"{type(record).__name__}.verify() accepted a record with a "
+                f"foreign schema: {forged.schema!r}",
+            )
+
+    def test_every_record_rejects_an_empty_schema(self):
+        """An empty schema is a foreign schema too."""
+        import dataclasses
+
+        for record in self._real_records():
+            forged = dataclasses.replace(record, schema="")
+            self.assertFalse(
+                forged.verify(),
+                f"{type(record).__name__}.verify() accepted an empty schema",
+            )
+
+    def test_the_digest_still_verifies(self):
+        """The control for the control: the digest is not what changed.
+
+        The schema check is *additional* to the digest check, not a
+        replacement for it.  A record with the right schema and a
+        wrong digest must still fail.
+        """
+        import dataclasses
+
+        for record in self._real_records():
+            forged = dataclasses.replace(record, digest="sha256:" + "0" * 64)
+            self.assertFalse(
+                forged.verify(),
+                f"{type(record).__name__}.verify() accepted a wrong digest",
+            )
+
+    def test_every_record_type_is_covered(self):
+        """All FIVE kinds are covered -- the count matters.
+
+        The census found the survivor at five places, so a guard that
+        checked one of them would be a predicate, not a count.  This
+        guard names the kinds it expects, so a kind that is dropped
+        from the set fails here.
+        """
+        expected = {
+            "EnqueueRecord",
+            "DequeuedJob",
+            "AckRecord",
+            "DeadRecord",
+            "RetryRecord",
+        }
+        covered = {type(record).__name__ for record in self._real_records()}
+        self.assertEqual(
+            covered,
+            expected,
+            "the guard does not cover every record kind: a dropped kind "
+            "would leave its schema pin unverified",
+        )
+
+    def _real_records(self):
+        """One REAL record of every kind, made by the ledger itself.
+
+        They are made by the queue, not hand-built, so the digests are
+        the ones the module actually books.
+        """
+        from job_queue import JobQueue
+
+        queue = JobQueue()
+        enqueued = queue.enqueue("j1", "q", "dispatch", DIGEST, 1)
+        dequeued = queue.dequeue("worker-1", "q", 2)
+        acked = queue.ack("j1", 3)
+
+        # A dead record: kill a reserved job outright.
+        queue.enqueue("j2", "q", "dispatch", DIGEST, 4)
+        queue.dequeue("worker-1", "q", 5)
+        dead = queue.dead("j2", 6)
+
+        # A retry record: a job that was retried successfully.
+        queue.enqueue("j3", "q", "dispatch", DIGEST, 7)
+        queue.dequeue("worker-1", "q", 8)
+        retried = queue.retry("j3", 9)
+
+        return (enqueued, dequeued, acked, dead, retried)
+
+
 if __name__ == "__main__":
     unittest.main()

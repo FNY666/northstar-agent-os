@@ -2420,3 +2420,160 @@ plant the fault there.
 * The **hand-out** side is unchanged: §17's per-candidate rows stand,
   and §17.4's correction (the "one check per job" count is about the
   *gate's calls*, not the queue's trail) is unaffected.
+
+## 19. AMENDED 2026-11-24 — every record carried a schema pin that nothing checked
+
+### 19.1 The defect
+
+`job_queue.py` books five kinds of record, and each one carries a
+`schema` field pinned to `JOB_QUEUE_SCHEMA`:
+
+| kind | where |
+|---|---|
+| `EnqueueRecord` | `job_queue.py:408` |
+| `DequeuedJob` | `job_queue.py:449` |
+| `AckRecord` | `job_queue.py:489` |
+| `DeadRecord` | `job_queue.py:509` |
+| `RetryRecord` | `job_queue.py:536` |
+
+Each one's `verify()` recomputes the digest and checks the schema in
+the same expression:
+
+```python
+return recomputed == self.digest and (
+    self.schema == JOB_QUEUE_SCHEMA
+)
+```
+
+So the schema pin was **written** in the code.  It was **checked** by
+nothing.
+
+Measured 2026-11-24 by the whole-file census over `job_queue.py`
+(the accept probe's `MUTANT` check is an accept *metric*, not a
+census -- it stops at the first kill; the census is
+`b173-mutant.py --file <abs> --no-early-stop`):
+
+```
+MUTANT RESULT: killed 42/81
+```
+
+The survivors include the `and` that joins the digest check to the
+schema check, at **five** places -- one per record kind.  Inverting
+the schema comparison in all five at once:
+
+```python
+return recomputed == self.digest and (
+    self.schema != JOB_QUEUE_SCHEMA
+)
+```
+
+leaves the **whole suite green**: at the time of the measurement
+(before these five guards existed) 23373 tests, `OK (skipped=20)`.
+The pin was carried by every record and verified by none.
+
+**Why that matters.**  The digest says "this record is internally
+consistent"; the schema says "this record is the shape the reader
+expects".  A record from a *different* schema -- a future revision
+with a different field set, or a record that crossed a boundary it
+should not have -- carries a digest computed over its own fields, so
+`verify()` says `True` because the digest matched.  A verifier that
+checks only the first is verifying the wrong thing.
+
+This is §17's lesson, one level down: the property was **written** in
+the code, so every reader of the code believed it was **held**.
+
+### 19.2 The fix
+
+No code change: the expression was already correct.  What was missing
+was the **evidence**.  Five guards now cover it, in
+`tests/test_refusal_hold_queue_wiring.py::RecordSchemaPinIsVerifiedTests`.
+
+The guards do not hand-build the records.  They ask the **ledger** for
+one real record of every kind, so the digests under test are the ones
+the module actually books:
+
+```python
+queue.enqueue("j1", "q", "dispatch", DIGEST, 1)   # EnqueueRecord
+queue.dequeue("worker-1", "q", 2)                  # DequeuedJob
+queue.ack("j1", 3)                                 # AckRecord
+queue.enqueue("j2", ...); queue.dequeue(...); queue.dead("j2", 6)   # DeadRecord
+queue.enqueue("j3", ...); queue.dequeue(...); queue.retry("j3", 9)  # RetryRecord
+```
+
+A record is then forged with `dataclasses.replace(record, schema=...)`
+-- the shape is frozen, so the *only* way to change it is to rebuild
+it, and the digest stays the original one.  That is the point: the
+forged record is **internally consistent but of a foreign schema**,
+which is exactly the case the digest check cannot see.
+
+### 19.3 The guards
+
+| guard | what it holds |
+|---|---|
+| `test_every_records_verify_is_true_for_a_real_record` | the control: the pin is not simply broken |
+| `test_every_record_rejects_a_foreign_schema` | the defect: a foreign schema must not verify |
+| `test_every_record_rejects_an_empty_schema` | an empty schema is a foreign schema too |
+| `test_the_digest_still_verifies` | the control for the control: the schema check is *additional* to the digest check, not a replacement |
+| `test_every_record_type_is_covered` | the **count**: all FIVE kinds are covered |
+
+`test_every_record_type_is_covered` is the guard that matters most.
+It names the five kinds it expects and compares them as a **set**
+against the kinds the fixture produced.  A guard that only checked
+`EnqueueRecord` would be a predicate, not a count -- and the census
+found the survivor at **five** places, so a one-kind guard would have
+left four of them uncovered while the suite stayed green.
+
+### 19.4 The mutants
+
+| # | mutation | before | after |
+|---|---|---|---|
+| M1 | `self.schema == JOB_QUEUE_SCHEMA` -> `!=`, all 5 kinds | **survived** | killed (`FAILED (failures=3)`) |
+| M2 | `recomputed == self.digest and (...)` -> `or (...)`, all 5 kinds | **survived** | killed (`FAILED (failures=3)`) |
+
+Both were re-planted after the guards landed and re-run against
+`tests.test_refusal_hold_queue_wiring` + `tests.test_job_queue`, with
+`__pycache__` cleared between every plant and restore (a
+length-preserving mutate-then-restore within one second loads the
+mutant's `.pyc`, so a killed mutant reads as a survivor).
+
+M2's lesson: **the `and` was the load-bearing operator**.  Turning it
+into `or` means a record with a *correct* digest but a *foreign* schema
+verifies, and a record with a *wrong* digest but a *correct* schema
+verifies.  Only the digest-only forgery is caught by
+`test_the_digest_still_verifies` alone; the schema-only forgery needs
+`test_every_record_rejects_a_foreign_schema`.
+
+### 19.5 What this does NOT change
+
+* `job_queue.py` is **unchanged** -- not one byte.  This slice adds
+  evidence for a property the module already held.
+* No version, schema or audit kind is added or changed.
+* The gate is not consulted by `verify()` and was not consulted
+  before either; `verify()` is a pure integrity check.
+* §17's and §18's trail rows are unaffected.
+
+### 19.6 A sibling survivor, NOT closed here
+
+The same census reported a survivor on the `except JobQueueError:
+return False` clause of each `verify()`.  That one is a **live
+branch** -- but the finding is a separate defect with a separate fix,
+so it is recorded here and taken as its own slice rather than folded
+into an evidence slice:
+
+> `job_queue.py` catches `JobQueueError` around `_pin()`.  But
+> `_canonical()` uses `canonical_json.jcs_dumps()` whenever the
+> sibling helper is importable, and **that** raises `JcsError` -- a
+> `ValueError`, not a `JobQueueError`.  So in the shipped
+> configuration the `except` clause is **dead**: a record whose
+> `attempts` is `float('inf')` makes `verify()` **raise**
+> `JcsError` instead of returning `False`.
+>
+> The stdlib fallback (`_cj is None`) *does* raise `JobQueueError`,
+> so the clause is live only there -- which is why the mutant
+> survives the shipped configuration.
+>
+> `graph_database.py` has the identical clause (the same house
+> pattern), so this is repo-wide, not specific to this module.
+
+Left open deliberately: fixing it changes the module's error taxonomy,
+which is a design decision, not an evidence gap.
