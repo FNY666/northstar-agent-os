@@ -21,6 +21,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -142,6 +143,7 @@ class CodeResumeCliTests(unittest.TestCase):
             )
             try:
                 run_dir = self.wait_for_evidence(evidence)
+                self.wait_for_completed_effect(run_dir)
                 self.kill_run(process)
             finally:
                 process.wait(timeout=30)
@@ -153,6 +155,62 @@ class CodeResumeCliTests(unittest.TestCase):
             report = json.loads(resume_out)
             self.assertTrue(report["resumable"], report)
             self.assertNotIn(report["state"], {"success", "failed"})
+
+    def wait_for_completed_effect(self, run_dir: Path, timeout: float = 60.0) -> None:
+        """Wait until a mutating effect has written its completion receipt.
+
+        The kill has to land at a *deterministic* point: after the edit is
+        recorded but before the run reaches a terminal state.  Killing at an
+        arbitrary moment leaves an effect without a receipt, and such a run is
+        (correctly) not resumable.
+        """
+        deadline = time.monotonic() + timeout
+        phases = run_dir / "phases.json"
+        while time.monotonic() < deadline:
+            try:
+                raw = phases.read_text(encoding="utf-8")
+            except OSError:
+                raw = ""
+            if raw:
+                try:
+                    payload = json.loads(raw)
+                except ValueError:
+                    payload = {}
+                for effect in payload.get("effects", ()):
+                    if (
+                        str(effect.get("tool")) != "HostCheck"
+                        and str(effect.get("status")) == "completed"
+                    ):
+                        return
+            time.sleep(0.1)
+        raise AssertionError("no completed effect was recorded before the timeout")
+
+    def wait_for_started_effect(self, run_dir: Path, timeout: float = 60.0) -> None:
+        """Wait until a mutating effect has *started* but has no receipt yet.
+
+        That is the only interruption point from which a resume is unsafe:
+        the edit may or may not have reached the worktree.
+        """
+        deadline = time.monotonic() + timeout
+        phases = run_dir / "phases.json"
+        while time.monotonic() < deadline:
+            try:
+                raw = phases.read_text(encoding="utf-8")
+            except OSError:
+                raw = ""
+            if raw:
+                try:
+                    payload = json.loads(raw)
+                except ValueError:
+                    payload = {}
+                for effect in payload.get("effects", ()):
+                    if (
+                        str(effect.get("tool")) != "HostCheck"
+                        and str(effect.get("status")) != "completed"
+                    ):
+                        return
+            time.sleep(0.05)
+        raise AssertionError("no started effect was recorded before the timeout")
 
     def kill_run(self, process: subprocess.Popen) -> None:
         """Kill the run *and* everything it spawned."""
@@ -324,6 +382,7 @@ class CodeResumeCliTests(unittest.TestCase):
             )
             try:
                 run_dir = self.wait_for_evidence(evidence)
+                self.wait_for_completed_effect(run_dir)
                 self.kill_run(process)
             finally:
                 process.wait(timeout=30)
