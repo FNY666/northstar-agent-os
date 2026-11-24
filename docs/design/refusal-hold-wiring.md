@@ -3175,3 +3175,182 @@ false is never checked.
 
 That is a separate category (the self-check's own assertions are
 untested), and it is recorded here rather than folded in.
+
+## 23. AMENDED 2026-11-24 — the census found four unreached branches in the chain's own modules
+
+### 23.1 The measurement
+
+§19-§22 closed the census over `job_queue.py`.  The chain spans
+**three** modules, and the other two had never been censused.  Run
+over the union of every suite that references each one:
+
+| module | suites | before | after |
+|---|---|---|---|
+| `refusal_hold.py` | `test_refusal_hold`, `test_finding_gate`, `test_refusal_hold_wiring`, `test_refusal_hold_queue_wiring` | **killed 14/14** | 14/14 |
+| `refusal_hold_wiring.py` | `test_finding_gate`, `test_refusal_hold_wiring`, `test_refusal_hold_queue_wiring` | **killed 22/23** | **killed 22/23** -- the one survivor is an EQUIVALENT mutant (§23.4), so no guard can close it |
+| `leased_task_claim.py` | `test_leased_task_claim`, `test_refusal_hold`, `test_refusal_hold_queue_wiring` | **killed 38/42** | **42/42** |
+
+`refusal_hold.py` was already clean.  The other two had **five**
+survivors between them, and they are the same shape: **branches the
+repo's own code never takes**.
+
+**Four** of the five were closed by this slice.  The fifth is an
+**equivalent mutant** -- a mutation that changes no observable
+behaviour, so no guard can kill it -- and §23.4 says so rather than
+claiming it as a fix.
+
+### 23.2 Three of them are one helper's unreachable half
+
+`leased_task_claim.py`'s `_refusal_allows_reap` is the batch-safe
+form of the refusal question, and it is the ONLY consumer of the
+gate's boolean method:
+
+```python
+allows = getattr(gate, "task_allowed", None)
+if callable(allows):
+    try:
+        return bool(allows(task_id, action, now=now))
+    except Exception:
+        return False          # <- leased_task_claim.py:666
+require = getattr(gate, "require_task_allowed", None)
+if not callable(require):
+    raise TypeError(...)
+try:
+    require(task_id, action, now=now)
+except Exception:
+    return False              # <- leased_task_claim.py:677
+return True                   # <- leased_task_claim.py:678
+```
+
+The repo's own gate (`RefusalHoldQueueGate`) offers **both**
+methods, so:
+
+* the boolean branch is always taken, and the **fallback** branch --
+  the raising one -- is **never reached**; and
+* the boolean method never raises (it answers `False`), so the
+  `except Exception` inside it is **never reached** either.
+
+So the whole fail-closed contract of this helper -- *a gate that
+cannot answer blocks* -- was verified by **nothing**.  Three mutants
+survived, and each one is a way to turn "the gate could not answer"
+into "the re-dispatch is allowed":
+
+| site | mutation | what it would break |
+|---|---|---|
+| `leased_task_claim.py:666` | the catch's `return False` -> `return True` | a gate whose boolean method **raises** (an unreadable store) is read as an ALLOW: the task goes back to `ready` behind a gate that never answered |
+| `leased_task_claim.py:677` | the fallback's `return False` -> `return True` | a gate that offers only the raising method, and **refuses** by raising, is read as an ALLOW |
+| `leased_task_claim.py:678` | the `return True` after the fallback -> `return False` | a gate that offers only the raising method, and does **not** refuse, is read as a REFUSAL -- the sweep skips every task forever |
+
+**An unreached branch is not a weak guard; it is a branch nothing
+reaches.**  The fix is to reach it -- the new guards install gates
+that are shaped to take each branch on purpose:
+
+| guard | branch it reaches |
+|---|---|
+| `test_a_gate_whose_boolean_method_raises_blocks_the_sweep` | the boolean branch's `except Exception` -- the fail-closed direction |
+| `test_the_boolean_helper_answers_false_when_the_gate_raises` | the same, one level down, so the helper's own answer is pinned |
+| `test_a_gate_that_only_offers_the_raising_method_blocks_the_sweep` | the **fallback** branch, with a refusal that RAISES |
+| `test_the_fallback_branch_allows_when_the_gate_does_not_refuse` | the fallback branch's CONTROL -- without it, a helper that answered "not allowed" forever would pass the guard above |
+
+The last two are a **pair**: one pins the answer in the refusing
+direction and one in the allowing direction, so a helper that always
+answered the same thing fails one of them.  That is the same shape as
+§22's edge guards.
+
+### 23.3 The mirror's release, in neither direction
+
+`leased_task_claim.py:1035` is the fourth survivor:
+
+```python
+if view.state != "reserved":
+    return True
+```
+
+A mirror job that is not `reserved` has **nothing to release**, so
+the release is allowed -- a no-op must not block the sweep.  And a
+`reserved` job's release is owed, so it is allowed only when the
+queue's own gate allows.  The census found the answer pinned in
+**neither** direction.
+
+The guards are a pair for the same reason as §23.2's:
+
+| guard | direction |
+|---|---|
+| `test_a_mirror_job_that_is_not_reserved_needs_no_release` | not `reserved` -> allowed |
+| `test_a_reserved_mirror_job_is_released_only_when_the_gate_allows` | `reserved` -> allowed only when the gate allows, and **refused** when it does not |
+
+Note what this guard found about the **wiring**, not the code: the
+mirror's release is judged by the **queue's** gate
+(`JobQueue.refusal_gate`), not the manager's.  The manager's gate
+answers the *lease* question; the queue's answers the *queue*
+question.  A guard that installed only one of them would have been
+testing a gate the real path never consults.
+
+### 23.4 The fifth survivor is EQUIVALENT -- and saying so is the finding
+
+`refusal_hold_wiring.py:753` is the registry's event cap:
+
+```python
+if len(self._events) > MAX_WIRING_EVENTS:
+    del self._events[: len(self._events) - MAX_WIRING_EVENTS]
+```
+
+The census reports the `>` -> `>=` mutation as surviving.  **It is
+an equivalent mutant, and no guard can kill it.**  The reason is
+arithmetic: at `len(self._events) == MAX_WIRING_EVENTS` the deletion
+is `self._events[:0]` -- a no-op.  So the two variants keep exactly
+the same trail for every number of events.
+
+Verified exhaustively, not by eye:
+
+```
+for MAX in (1, 2, 3, 5, 4096):
+    for n in 1 .. MAX + 11:
+        ">"  and  ">="  produce identical trails   # always true
+```
+
+and at the real numbers:
+
+```
+MAX = 4096, 4106 events:
+  ">"   -> 4096 kept, first is job-10, last is job-4105
+  ">="  -> 4096 kept, first is job-10, last is job-4105
+```
+
+So the honest thing is to **say so** rather than to claim the cap is
+now verified.  The three guards that ship with this slice do not
+target that mutation; they pin the properties that ARE observable:
+
+| guard | property |
+|---|---|
+| `test_the_registry_keeps_exactly_the_cap` | the trail holds exactly `MAX_WIRING_EVENTS` |
+| `test_the_cap_drops_the_OLDEST_events` | the cap keeps the NEWEST and drops the OLDEST -- a cap that kept the newest-but-N would discard the refusal recorded first |
+| `test_the_cap_never_exceeds_the_limit` | the trail is never LONGER than the cap, so the registry's memory is bounded |
+
+**A mutant that changes no observable behaviour is not a coverage
+gap.**  Reporting it as one would be a false finding.
+
+### 23.5 What this does NOT change
+
+* **No code change.**  `leased_task_claim.py`, `refusal_hold.py` and
+  `refusal_hold_wiring.py` are unchanged by this slice -- not one byte
+  different from `719c4cb5`.  This slice closes *evidence* gaps,
+  exactly as §19 and §22 did.
+* No version, schema, or audit kind is added or changed.
+* No digest changes.
+* §17's through §22's guards are unaffected.
+
+### 23.6 What the census still reports
+
+* `job_queue.py`: nine survivors (§22.8) -- the dequeue skip loop's
+  `or`, and the `main()` self-check's assertion chains.
+* `leased_task_claim.py`: **none**.
+* `refusal_hold_wiring.py`: **one**, and it is EQUIVALENT -- the
+  event cap's `>` -> `>=`, which changes no observable behaviour
+  (§23.4).  It is reported, not closed.
+* `refusal_hold.py`: **none**.
+
+The one survivor that remains everywhere is the **self-check** shape:
+`main()` asserts what the author believed, and each conjunct of an
+`assert a and b` is individually untested.  That is a separate
+category, and it is recorded rather than folded in.

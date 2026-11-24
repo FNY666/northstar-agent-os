@@ -3909,3 +3909,374 @@ class SeqIsDigestFaithfullyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ChainGateBranchesAreReachedTests(unittest.TestCase):
+    """The gate's FALLBACK branches, and the fail-closed catch.
+
+    Measured 2026-11-24 by the whole-file census over the chain's own
+    modules -- ``leased_task_claim.py`` and ``refusal_hold_wiring.py`` --
+    which reported **four** survivors in the gate's own plumbing:
+
+        leased_task_claim.py:666  the `return False` in the BOOLEAN
+                                  method's `except Exception`
+        leased_task_claim.py:677  the `return False` in the RAISING
+                                  method's `except Exception`
+        leased_task_claim.py:678  the `return True` after the raising
+                                  method returned without raising
+        leased_task_claim.py:1035 the `return True` when the mirror job
+                                  is NOT `reserved`
+        refusal_hold_wiring.py:753 the `>` in the event-cap's length test
+
+    Three of them are in **the same helper**, and the reason is the
+    same in all three:
+
+        allows = getattr(gate, "task_allowed", None)
+        if callable(allows):
+            try:
+                return bool(allows(task_id, action, now=now))
+            except Exception:
+                return False
+        require = getattr(gate, "require_task_allowed", None)
+        ...
+        try:
+            require(task_id, action, now=now)
+        except Exception:
+            return False
+        return True
+
+    The repo's own gate offers BOTH methods, so the boolean branch is
+    always taken and the raising branch is **never** reached.  And the
+    `except Exception` in the boolean branch is never taken either,
+    because the repo's gate's boolean method does not raise -- it
+    answers ``False``.
+
+    So the whole fail-closed contract of this helper -- "a gate that
+    cannot answer blocks" -- was **verified by nothing**.
+
+    A fallback branch that nothing reaches is not a weak guard; it is
+    an **unreached branch**, and the fix is to reach it.  These guards
+    install gates that exercise each branch deliberately.
+    """
+
+    def _manager(self, gate):
+        """A manager whose mirror is gated by the SAME gate.
+
+        The manager's gate answers the *lease* question and the queue
+        mirror's gate answers the *queue* question; the mirror's release
+        is judged by the queue's gate.  Both are installed, so a guard
+        that exercises the mirror is exercising the real wiring.
+        """
+        manager = LeasedTaskClaim(
+            max_failures=3,
+            base_backoff_seconds=2.0,
+            queue=JobQueue(refusal_gate=gate),
+            refusal_gate=gate,
+        )
+        self.addCleanup(manager.close)
+        manager.enqueue_task("t1", "demo-task", payload="hello")
+        return manager
+
+    def test_a_gate_whose_boolean_method_raises_blocks_the_sweep(self):
+        """A gate that CANNOT ANSWER must not be read as an ALLOW.
+
+        The boolean method raises -- the store cannot be read.  The
+        helper catches it and answers "not allowed", so the sweep
+        skips this task.  If the catch answered "allowed" instead, the
+        broken gate would be laundered into a re-dispatch: the task
+        would go back to ``ready`` behind a gate that never answered.
+
+        This is the fail-closed direction, and it is the one the
+        census found nothing to hold it down.
+        """
+        class _BooleanRaises:
+            """The gate's boolean method cannot answer."""
+
+            def task_allowed(self, task_id, action, *, now=None):
+                raise RuntimeError("the store cannot be read")
+
+            def require_task_allowed(self, task_id, action, *, now=None):
+                return None
+
+            def require_queue_allowed(self, job_id, action, *, now=None):
+                return None
+
+        manager = self._manager(_BooleanRaises())
+        manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+        swept = manager.reap(now=200.0)
+        self.assertEqual(
+            swept, (),
+            "a gate that could not answer was treated as an ALLOW: the "
+            "task was re-dispatched behind a broken gate",
+        )
+        self.assertEqual(manager.task("t1").state, "leased")
+
+    def test_the_boolean_helper_answers_false_when_the_gate_raises(self):
+        """The helper itself: a raising boolean method is NOT allowed.
+
+        This is the same contract as the guard above, one level down,
+        so a mutant that changes the helper's answer fails here even
+        if the sweep's own guard is also satisfied by accident.
+        """
+        class _BooleanRaises:
+            def task_allowed(self, task_id, action, *, now=None):
+                raise RuntimeError("the store cannot be read")
+
+            def require_task_allowed(self, task_id, action, *, now=None):
+                return None
+
+            def require_queue_allowed(self, job_id, action, *, now=None):
+                return None
+
+        manager = self._manager(_BooleanRaises())
+        self.assertFalse(
+            manager._refusal_allows_reap("t1", "demo-task", 200.0),
+            "a gate that raised was treated as allowing the re-dispatch",
+        )
+
+    def test_a_gate_that_only_offers_the_raising_method_blocks_the_sweep(self):
+        """The FALLBACK branch: the boolean method is absent.
+
+        The repo's own gate offers both methods, so the fallback --
+        "ask the raising one instead" -- is never taken.  A gate that
+        offers only the raising method is the shape a host that
+        implements the gate's contract partially provides, and the
+        fallback must still fail closed.
+
+        Note the asymmetry, which is the point: the gate here refuses
+        by RAISING, and the helper catches the raise and answers "not
+        allowed".  It does not let the raise escape, because the sweep
+        must not be abandoned by one refused task.
+        """
+        class _RaisingOnly:
+            """Only the raising method -- the boolean one is absent."""
+
+            def __init__(self):
+                self.refuse = False
+
+            def require_task_allowed(self, task_id, action, *, now=None):
+                if self.refuse:
+                    raise RuntimeError("this action is refused")
+
+            def require_queue_allowed(self, job_id, action, *, now=None):
+                if self.refuse:
+                    raise RuntimeError("this action is refused")
+
+        gate = _RaisingOnly()
+        manager = self._manager(gate)
+        # The claim happens while the gate allows: ``claim`` uses the
+        # raising form directly, so a refusing gate stops the claim
+        # before the sweep is ever reached.  The refusal is introduced
+        # AFTER the lease exists, which is the state the sweep sees.
+        manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+        gate.refuse = True
+        self.assertFalse(
+            manager._refusal_allows_reap("t1", "demo-task", 200.0),
+            "a refusal raised by the fallback branch was treated as "
+            "allowing the re-dispatch",
+        )
+
+    def test_the_fallback_branch_allows_when_the_gate_does_not_refuse(self):
+        """The CONTROL for the fallback: no refusal means allowed.
+
+        Without this, a helper that answered "not allowed" forever
+        would pass the guard above.  The two guards together pin the
+        answer in BOTH directions.
+        """
+        class _RaisingOnly:
+            def require_task_allowed(self, task_id, action, *, now=None):
+                return None
+
+            def require_queue_allowed(self, job_id, action, *, now=None):
+                return None
+
+        manager = self._manager(_RaisingOnly())
+        self.assertTrue(
+            manager._refusal_allows_reap("t1", "demo-task", 200.0),
+            "a gate that did not refuse was treated as refusing the "
+            "re-dispatch",
+        )
+
+    def test_a_mirror_job_that_is_not_reserved_needs_no_release(self):
+        """The mirror's release is only owed for a RESERVED job.
+
+        ``_mirror_release_allowed`` answers "is the mirror's release
+        allowed?" -- and for a job that is not ``reserved`` there is
+        nothing to release, so the answer is yes: the call is a no-op
+        and must not block the sweep.
+
+        The census found the ``return True`` here untested, so the
+        answer was pinned in neither direction.
+        """
+        class _Both:
+            def task_allowed(self, task_id, action, *, now=None):
+                return True
+
+            def require_task_allowed(self, task_id, action, *, now=None):
+                return None
+
+            def require_queue_allowed(self, job_id, action, *, now=None):
+                return None
+
+        manager = self._manager(_Both())
+        manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+        token = manager.task("t1").token
+        manager.release("t1", token, now=105.0)
+        self.assertEqual(
+            manager._queue.job("t1").state,
+            "ready",
+            "the mirror job should be `ready` after a release",
+        )
+        self.assertTrue(
+            manager._mirror_release_allowed("t1"),
+            "a mirror job that is not `reserved` has nothing to "
+            "release, so the release must be allowed",
+        )
+
+    def test_a_reserved_mirror_job_is_released_only_when_the_gate_allows(self):
+        """The CONTROL for the guard above: `reserved` means it is owed.
+
+        The two guards together pin the answer in both directions, so
+        a helper that always answered the same thing fails one of them.
+        """
+        class _Both:
+            def __init__(self):
+                self.refuse = False
+
+            def task_allowed(self, task_id, action, *, now=None):
+                return not self.refuse
+
+            def require_task_allowed(self, task_id, action, *, now=None):
+                return None
+
+            def require_queue_allowed(self, job_id, action, *, now=None):
+                if self.refuse:
+                    raise RefusalRefusedError(
+                        "the queue-side action is refused",
+                        reason=REASON_BLOCKED_BY_REFUSAL,
+                    )
+
+        gate = _Both()
+        manager = self._manager(gate)
+        manager.claim("t1", "worker-A", ttl=10.0, now=100.0)
+        self.assertEqual(manager._queue.job("t1").state, "reserved")
+
+        # The REFUSING answer first, while the job is still `reserved`:
+        # the question "is the release allowed?" is only meaningful
+        # while there is a release to make.
+        gate.refuse = True
+        self.assertFalse(
+            manager._mirror_release_allowed("t1"),
+            "a refusing gate must forbid the mirror's release",
+        )
+        self.assertEqual(
+            manager._queue.job("t1").state,
+            "reserved",
+            "a refused mirror release moved the mirror's job anyway",
+        )
+
+        # And the ALLOWING answer on a fresh task: the two together
+        # pin the answer in both directions.
+        gate.refuse = False
+        manager.enqueue_task("t2", "demo-task", payload="hello")
+        manager.claim("t2", "worker-B", ttl=10.0, now=100.0)
+        self.assertTrue(
+            manager._mirror_release_allowed("t2"),
+            "an allowed gate must permit the mirror's release",
+        )
+
+
+class TheEventCapIsHonouredTests(unittest.TestCase):
+    """The wiring registry's audit trail is capped -- and the cap is a
+    number, not a mood.
+
+    Measured 2026-11-24 by the whole-file census over
+    ``refusal_hold_wiring.py``: the event-cap's length test
+
+        if len(self._events) > MAX_WIRING_EVENTS:
+            del self._events[: len(self._events) - MAX_WIRING_EVENTS]
+
+    survived, because no test ever put the registry over its cap.  A
+    boundary that is never crossed is a boundary that is never tested.
+
+    **But the mutation that survives here is an EQUIVALENT one.**
+    Moving ``>`` to ``>=`` changes nothing, and the reason is
+    arithmetic: at ``len(self._events) == MAX_WIRING_EVENTS`` the
+    deletion ``self._events[: len(self._events) - MAX_WIRING_EVENTS]``
+    is ``self._events[:0]`` -- a no-op.  So the two variants keep
+    exactly the same trail for every number of events:
+
+        MAX = 4096, 4106 events:
+          ">"   -> 4096 kept, first is job-10,   last is job-4105
+          ">="  -> 4096 kept, first is job-10,   last is job-4105
+
+    Verified exhaustively for every ``n`` from 1 to ``MAX + 11`` and
+    for MAX in {1, 2, 3, 5, 4096}: the two variants agree on every
+    trail.  A mutant that changes no observable behaviour is an
+    **equivalent mutant**, and no guard can kill it -- the honest
+    thing is to say so rather than to claim the cap is now verified.
+
+    So these guards do not target that mutation.  They pin the
+    properties that ARE observable -- the cap's length, and WHICH end
+    of the trail survives -- because a cap that kept the newest would
+    silently discard the refusal recorded first, and a cap that let
+    the trail grow would make the registry's memory unbounded.
+    """
+
+    def test_the_registry_keeps_exactly_the_cap(self):
+        """At the cap, the trail holds exactly ``MAX_WIRING_EVENTS``."""
+        from refusal_hold_wiring import MAX_WIRING_EVENTS
+
+        registry = RefusalHoldRegistry()
+        gate = RefusalHoldQueueGate(registry)
+        for index in range(MAX_WIRING_EVENTS + 10):
+            gate.check_queue(f"job-{index}", "dispatch")
+        self.assertEqual(
+            len(registry.events()),
+            MAX_WIRING_EVENTS,
+            "the registry's audit trail does not hold exactly the cap",
+        )
+
+    def test_the_cap_drops_the_OLDEST_events(self):
+        """The cap drops the oldest, not the newest.
+
+        A cap that kept the newest would silently discard the refusal
+        that was recorded first -- the one a host reads to learn what
+        happened.  So the guard asserts which end survives.
+        """
+        from refusal_hold_wiring import MAX_WIRING_EVENTS
+
+        registry = RefusalHoldRegistry()
+        gate = RefusalHoldQueueGate(registry)
+        for index in range(MAX_WIRING_EVENTS + 5):
+            gate.check_queue(f"job-{index}", "dispatch")
+        keys = [event["key"] for event in registry.events()]
+        self.assertEqual(
+            keys[0],
+            "queue:job-5:dispatch",
+            "the cap dropped the newest events instead of the oldest",
+        )
+        self.assertEqual(
+            keys[-1],
+            f"queue:job-{MAX_WIRING_EVENTS + 4}:dispatch",
+            "the newest event was dropped by the cap",
+        )
+
+    def test_the_cap_never_exceeds_the_limit(self):
+        """The trail is never LONGER than the cap.
+
+        The guard above proves the length at the cap; this one proves
+        the cap is never exceeded, which is the property that makes
+        the registry's memory bounded.
+        """
+        from refusal_hold_wiring import MAX_WIRING_EVENTS
+
+        registry = RefusalHoldRegistry()
+        gate = RefusalHoldQueueGate(registry)
+        for index in range(MAX_WIRING_EVENTS + 1):
+            gate.check_queue(f"job-{index}", "dispatch")
+            self.assertLessEqual(
+                len(registry.events()),
+                MAX_WIRING_EVENTS,
+                "the registry's audit trail grew past its cap",
+            )
