@@ -2765,3 +2765,129 @@ configurations also disagree about whether a large seq is legal at
 all.  This is a **digest-fidelity** defect, not a taxonomy defect,
 and it is not fixed here -- fixing it means deciding what the module
 promises about `seq`, which is a design decision.
+
+## 21. AMENDED 2026-11-24 — a record's digest stopped pinning its seq above the safe range
+
+### 21.1 The defect
+
+§20.6 left one thing open, and it was the more serious of the pair:
+the **fidelity** of a record's digest.
+
+`canonical_json` serializes an integer outside the safe range as an
+IEEE-754 **double** (RFC 8785 Appendix B note (2)):
+
+```
+jcs_dumps([2**53])   == b'[9007199254740992]'
+jcs_dumps([2**53+1]) == b'[9007199254740992]'
+```
+
+So two different seqs canonicalize to the **same bytes** above
+`2**53 - 1`.  `job_queue.py`'s `seq` was **unbounded** -- the only
+integer in a digest that was -- so a real record's digest stopped
+pinning its seq there, and a **tampered** seq still verified:
+
+```
+real DequeuedJob seq: 9007199254740992
+tampered seq:         9007199254740993   same digest
+tampered.verify() = True
+```
+
+The stdlib fallback *refuses* such an integer outright
+(`JobQueueError: integer outside safe range`), so the two
+configurations also disagreed about whether a large seq was legal at
+all -- the same divergence §20 found, one level deeper.
+
+**Why that matters.**  A digest's job is to pin the fields it covers.
+A field that the digest cannot distinguish is a field the digest does
+not protect.  A record whose `seq` was altered would verify, and `seq`
+is the ledger's logical clock -- the thing that says **when** the
+record happened.
+
+### 21.2 The fix
+
+One bound, in `_check_seq()`:
+
+```python
+if seq > _MAX_INT:
+    raise SeqOrderError("seq exceeds the safe range")
+```
+
+`_MAX_INT` is `2**53 - 1`, already defined in the module.
+
+This is the repo's **house pattern**, not a new invention:
+
+| module | bound |
+|---|---|
+| `grant_pin_ledger.py` | `_MAX_COUNTER = 2**53 - 1`; a counter above it raises `MalformedPinError("... exceeds the safe range")` |
+| `profiler.py` | `_canonical()` refuses an integral above `2**53` fail-closed ("integral magnitude > 2**53 cannot be pinned safely") -- it accepts `2**53` itself, which is safe because that value **is** exactly representable as a double and so collides with nothing above it |
+| `job_queue.py` | `seq` was the **outlier** -- the one unbounded integer in a digest |
+
+`job_queue.py`'s bound (`> 2**53 - 1`) is **one value more
+conservative** than the minimum safe bound: `2**53` itself is exactly
+representable as a double and so collides with nothing above it, which
+is why `profiler.py` accepts it.  The tighter bound is deliberate --
+it matches `grant_pin_ledger.py`, and it leaves no room for a future
+change to the canonicalizer's edge.
+
+And `seq` was the *only* unbounded integer in a digest here:
+
+| field | bound |
+|---|---|
+| `priority` | `[-100, 100]` (`_PRIORITY_MIN`/`_PRIORITY_MAX`) |
+| `max_retries` | `[1, 64]` (`_MAX_RETRIES_CAP`) |
+| `delay_seqs` | `[0, 2**53-1]` (`_MAX_INT`) |
+| `attempts` | `<= max_retries`, so `<= 64` |
+| `seq` | **was unbounded** -- now `[0, 2**53-1]` |
+
+### 21.3 Which convention the refusal follows
+
+The module has **two** conventions for a refused call, and they are
+not interchangeable.  Measured:
+
+| the refusal is... | consumes the seq? | books a trail row? |
+|---|---|---|
+| a malformed **seq** (not an int, negative) | no | no |
+| a malformed **argument** at a valid seq (bad job id) | yes | yes |
+
+An oversized seq is a malformed **seq**, so it follows the first rule:
+the call never reached the ledger, so it consumes nothing and books
+nothing.  `test_a_refused_seq_does_not_consume_the_seq` holds that
+line, so a future change cannot quietly move the oversized-seq refusal
+into the other category.
+
+### 21.4 The guards
+
+| guard | what it holds |
+|---|---|
+| `test_a_seq_at_the_safe_range_is_accepted` | the upper edge is legal -- `2**53 - 1` works, and the record verifies |
+| `test_a_seq_one_over_the_safe_range_is_refused` | `2**53` is refused, and the refusal says why |
+| `test_a_tampered_seq_is_caught` | the property at a small seq |
+| `test_a_tampered_seq_is_caught_at_the_safe_range_edge` | the property **at the edge**, where the loss was |
+| `test_every_mutator_refuses_an_oversized_seq` | the **count**: `enqueue`, `dequeue`, `ack` and `retry` all refuse |
+| `test_a_refused_seq_does_not_consume_the_seq` | the convention of §21.3 |
+
+### 21.5 The mutants
+
+| # | mutation | after |
+|---|---|---|
+| M1 | the seq bound removed (`if seq > _MAX_INT:` -> `if False:`) | killed (`FAILED (failures=3)`) |
+| M2 | the edge moved (`>` -> `>=`) | killed (`FAILED (errors=2)`) |
+| M3 | the bound removed from `seq` and left nowhere | killed (`FAILED (failures=3)`) |
+
+M2 is the edge case, and it is killed by
+`test_a_seq_at_the_safe_range_is_accepted` alone -- the guard that
+says the *last legal value* is legal.  A guard that only checked "a
+huge seq is refused" would not have seen the edge move.
+
+### 21.6 What this does NOT change
+
+* No version, schema, or audit kind is added or changed.
+* The **digests** of every record that was legal before are
+  **unchanged** -- the bound only refuses seqs that were never
+  pinnable.
+* Every seq the module's own production caller uses is legal: the one
+  caller, `leased_task_claim.py`, gets every seq from `_next_seq()`,
+  a monotonic counter starting at 0.
+* No behaviour changes for a seq in `[0, 2**53 - 1]` -- the whole
+  legal range is untouched.
+* §17's, §18's, §19's and §20's guards are unaffected.

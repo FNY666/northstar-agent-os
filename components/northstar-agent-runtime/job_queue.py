@@ -319,6 +319,32 @@ def _check_seq(seq: Any) -> int:
         raise SeqOrderError(f"seq must be int, got {type(seq).__name__}")
     if seq < 0:
         raise SeqOrderError("seq must be non-negative")
+    if seq > _MAX_INT:
+        # A seq above the safe range cannot be PINNED by a digest.
+        #
+        # ``canonical_json`` serializes an integer outside the safe
+        # range as an IEEE-754 double (RFC 8785 Appendix B note (2)),
+        # so 2**53 and 2**53+1 canonicalize to the SAME bytes:
+        #
+        #     jcs_dumps([2**53])   == b'[9007199254740992]'
+        #     jcs_dumps([2**53+1]) == b'[9007199254740992]'
+        #
+        # So a record's digest would stop pinning its seq, and a
+        # *tampered* seq would still verify -- measured on a real
+        # ``DequeuedJob``: the seq was changed from 9007199254740992 to
+        # 9007199254740993, the digest was unchanged, and
+        # ``verify()`` said True.
+        #
+        # The stdlib fallback refuses such an integer outright, so
+        # without this bound the two configurations also disagreed
+        # about whether a large seq is legal at all.
+        #
+        # The bound matches the repo's house pattern: see
+        # ``grant_pin_ledger.py`` (``_MAX_COUNTER = 2**53 - 1``) and
+        # ``profiler.py`` (``record_digest()`` refuses a huge integral
+        # fail-closed).  ``seq`` was the one integer in a digest here
+        # that was unbounded.
+        raise SeqOrderError("seq exceeds the safe range")
     return seq
 
 

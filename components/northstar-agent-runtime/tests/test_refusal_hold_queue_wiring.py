@@ -3052,5 +3052,155 @@ class UnencodableIdentityIsAuditedTests(unittest.TestCase):
         self.assertEqual(record.job_id, "j1")
 
 
+class SeqIsDigestFaithfullyTests(unittest.TestCase):
+    """A record's digest must pin its ``seq``.
+
+    ``canonical_json`` serializes an integer outside the safe range as
+    an IEEE-754 **double** (RFC 8785 Appendix B note (2)), so two
+    different seqs at ``|seq| >= 2**53`` canonicalize to the *same*
+    bytes::
+
+        jcs_dumps([2**53])   == b'[9007199254740992]'
+        jcs_dumps([2**53+1]) == b'[9007199254740992]'
+
+    So a **real** record's digest stops pinning its seq there, and a
+    *tampered* seq still verifies:
+
+        real DequeuedJob seq: 9007199254740992
+        tampered seq:         9007199254740993   same digest
+        tampered.verify() = True
+
+    The stdlib fallback refuses that integer outright
+    (``JobQueueError: integer outside safe range``), so the two
+    configurations also disagreed about whether a large seq is legal
+    at all.
+
+    The repo's house pattern is to bound the counter: see
+    ``grant_pin_ledger.py`` (``_MAX_COUNTER = 2**53 - 1``) and
+    ``profiler.py`` (``record_digest()`` refuses a huge integral
+    fail-closed).  ``job_queue.py``'s ``seq`` was the outlier: it was
+    the one integer in a digest that was **unbounded**.
+    """
+
+    def test_a_seq_at_the_safe_range_is_accepted(self):
+        """The upper edge of the safe range is legal."""
+        from job_queue import JobQueue
+
+        queue = JobQueue()
+        record = queue.enqueue(
+            "j1", "q", "dispatch", DIGEST, 2**53 - 1
+        )
+        self.assertEqual(record.seq, 2**53 - 1)
+        self.assertTrue(record.verify())
+
+    def test_a_seq_one_over_the_safe_range_is_refused(self):
+        """One over is not."""
+        from job_queue import JobQueue
+        from job_queue import SeqOrderError
+
+        queue = JobQueue()
+        with self.assertRaises(SeqOrderError) as caught:
+            queue.enqueue("j1", "q", "dispatch", DIGEST, 2**53)
+        self.assertIn(
+            "safe range",
+            str(caught.exception),
+            "the refusal must say why: an unbounded seq silently loses "
+            "the digest's fidelity",
+        )
+
+    def test_a_tampered_seq_is_caught(self):
+        """The property: a changed seq must not verify.
+
+        At a small seq the digest already caught this.  The defect was
+        that it did **not** at a large one.
+        """
+        import dataclasses
+
+        from job_queue import JobQueue
+
+        queue = JobQueue()
+        queue.enqueue("j1", "q", "dispatch", DIGEST, 1)
+        record = queue.dequeue("worker-1", "q", 2)
+        tampered = dataclasses.replace(record, seq=3)
+        self.assertFalse(
+            tampered.verify(),
+            "a record with a changed seq verified: the digest does not "
+            "pin the seq",
+        )
+
+    def test_a_tampered_seq_is_caught_at_the_safe_range_edge(self):
+        """The edge is where the loss was.
+
+        At ``2**53 - 1`` -- the largest legal seq -- the digest must
+        still pin the seq.  Before the bound, a seq of ``2**53`` and
+        one of ``2**53 + 1`` canonicalized to the same bytes, so a
+        tampered seq verified.
+        """
+        import dataclasses
+
+        from job_queue import JobQueue
+
+        queue = JobQueue()
+        queue.enqueue("j1", "q", "dispatch", DIGEST, 1)
+        record = queue.dequeue("worker-1", "q", 2**53 - 1)
+        tampered = dataclasses.replace(record, seq=2**53 - 2)
+        self.assertFalse(
+            tampered.verify(),
+            "a record with a changed seq verified at the safe range edge",
+        )
+
+    def test_every_mutator_refuses_an_oversized_seq(self):
+        """The bound must hold on every mutator, not just ``enqueue``.
+
+        A guard that checked one mutator would be a predicate, not a
+        count.
+        """
+        from job_queue import JobQueue
+        from job_queue import SeqOrderError
+
+        big = 2**53
+        queue = JobQueue()
+        queue.enqueue("j1", "q", "dispatch", DIGEST, 1)
+        queue.dequeue("worker-1", "q", 2)
+
+        calls = {
+            "enqueue": lambda: queue.enqueue(
+                "j2", "q", "dispatch", DIGEST, big
+            ),
+            "dequeue": lambda: queue.dequeue("worker-2", "q", big),
+            "ack": lambda: queue.ack("j1", big),
+            "retry": lambda: queue.retry("j1", big),
+        }
+        for name, call in calls.items():
+            with self.assertRaises(
+                SeqOrderError, msg=f"{name} accepted an oversized seq"
+            ):
+                call()
+
+    def test_a_refused_seq_does_not_consume_the_seq(self):
+        """A bad seq is not a bad argument.
+
+        The module's convention, measured: a malformed **seq** does
+        not consume a seq and books no trail row, because the call
+        never reached the ledger.  A malformed **argument** at a valid
+        seq does consume it and books a row.  The oversized seq is a
+        malformed seq, so it follows the first rule -- and the two
+        rules must not be confused.
+        """
+        from job_queue import JobQueue
+        from job_queue import SeqOrderError
+
+        queue = JobQueue()
+        with self.assertRaises(SeqOrderError):
+            queue.enqueue("j1", "q", "dispatch", DIGEST, 2**53)
+        # The refused seq did not consume the position.
+        record = queue.enqueue("j1", "q", "dispatch", DIGEST, 5)
+        self.assertEqual(
+            record.seq,
+            5,
+            "the refused seq consumed the ledger position",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
