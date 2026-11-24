@@ -285,6 +285,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "providers.anthropic",
         "providers.openai_compat",
         "providers.scripted",
+        "code_resume", "checkpoint_select",
         "code_task", "verification", "memory_integrity", "ssrf_detect", "tool_input_schema",
         "runtime_evidence",
         "providers.http_response_limits", "tools.code", "tools.resource_limits", "tools.systemd_scope",

@@ -488,6 +488,8 @@ py-modules = [
     "code_scan",
     "code_signer",
     "code_task",
+    "checkpoint_select",
+    "code_resume",
     "coerce_guard",
     "column_store",
     "command_hooks",
