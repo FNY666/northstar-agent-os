@@ -24,15 +24,16 @@ classifiers = [
 # No hard dependencies by design: every SDK import is lazy, so the offline
 # scripted provider and the whole deterministic test suite run on a bare
 # interpreter. Install an extra to talk to a live model or export traces:
-#   pip install northstar-agent-runtime[anthropic,tracing]
+#   pip install northstar-agent-runtime[anthropic,openai,tracing]
 dependencies = []
 
 [project.optional-dependencies]
 anthropic = ["anthropic>=1.0"]
+openai = ["openai>=1.30"]
 tracing = ["opentelemetry-api>=1.20", "opentelemetry-sdk>=1.20"]
 json-schema = ["jsonschema>=4.26,<5", "regex>=2025.7.31,<2027"]
 bench = ["northstar-run-contract", "northstar-host", "northstar-durable-run"]
-full = ["anthropic>=1.0", "opentelemetry-api>=1.20", "opentelemetry-sdk>=1.20", "jsonschema>=4.26,<5", "regex>=2025.7.31,<2027"]
+full = ["anthropic>=1.0", "openai>=1.30", "opentelemetry-api>=1.20", "opentelemetry-sdk>=1.20", "jsonschema>=4.26,<5", "regex>=2025.7.31,<2027"]
 
 [project.scripts]
 # Product entry (next-gen Agent OS). Prefer this in docs and day-to-day use.

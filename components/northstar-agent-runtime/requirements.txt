@@ -1,9 +1,13 @@
 # Runtime dependencies for components/northstar-agent-runtime.
 #
-# Both are lazy imports: every other module in this component is importable with
-# nothing installed, so the offline test suite (and the scripted provider) runs on a
-# bare interpreter. Continuous integration uses Python 3.12.
+# All of these are lazy imports: every other module in this component is
+# importable with nothing installed, so the offline test suite (and the scripted
+# provider) runs on a bare interpreter. Continuous integration uses Python 3.12.
+#
+# `openai` is the Chat Completions adapter behind `--provider openai` and the
+# OpenAI-compatible endpoint the baseline harness measures against.
 anthropic>=1.0
+openai>=1.30
 opentelemetry-api>=1.20
 
 # Test dependency: native pytest functions/classes are not run by unittest discovery.
