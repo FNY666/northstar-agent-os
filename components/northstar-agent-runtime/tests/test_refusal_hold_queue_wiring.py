@@ -2372,5 +2372,294 @@ class RefusedCandidatesAreAllAuditedTests(unittest.TestCase):
         self.assertEqual(queue.job("j1").state, "ready")
 
 
+class RefusedRetryIsAuditedTests(unittest.TestCase):
+    """A refused RE-DISPATCH must be named in the queue's own trail.
+
+    §17 fixed the hand-out side: every refused **candidate** now books
+    its own ``job.rejected`` row.  The re-dispatch side had the same
+    gap, and the same shape of blindness.
+
+    Measured 2026-11-24, on the tree as §17 left it:
+
+        retry() raised: RefusalRefusedError
+
+        What an operator reading the QUEUE trail sees:
+            job.enqueued {'job_id': 'j1', ...}
+            job.dequeued {'job_id': 'j1', 'queue': 'q', 'worker_id': 'w', ...}
+        job state: reserved
+
+        What the REGISTRY trail sees:
+            recorded queue:j1:dispatch blocked= False None
+            checked  queue:j1:dispatch blocked= True blocked_by_refusal
+
+    Read the two trails together.  The queue's trail says "dequeued,
+    then nothing" -- which is **indistinguishable from a worker that
+    died mid-flight**.  The registry's trail knows the re-dispatch was
+    refused, but the registry is a *different* ledger, and a host
+    reading the queue's own audit cannot tell a refusal from a crash.
+
+    And the **batch** form is worse.  ``retry_allowed()`` returns
+    ``None`` for "not re-dispatched", and it uses the boolean gate
+    form, which catches the gate's exception and throws it away:
+
+        retry_allowed -> None
+          (the reason is GONE: the batch form returns a bare None)
+
+    So on the batch path the reason is lost *entirely* -- not even the
+    registry's event survives with the right shape, because the gate
+    was asked through the boolean form and the exception never
+    reached the caller.
+
+    The rule this pins: **the same gate, the same queue, the same
+    trail.**  A refusal that stops a hand-out is named; a refusal that
+    stops a re-dispatch is named too.
+    """
+
+    def setUp(self):
+        self.registry = RefusalHoldRegistry()
+        self.gate = RefusalHoldQueueGate(self.registry)
+
+    def _reserved(self, job_id="j1", task="dispatch"):
+        """A job that is enqueued and RESERVED, with the gate installed."""
+        queue = JobQueue(refusal_gate=self.gate)
+        queue.enqueue(job_id, "q", task, DIGEST, 1)
+        queue.set_refusal_gate(None)
+        queue.dequeue("worker-1", "q", 2)
+        queue.set_refusal_gate(self.gate)
+        return queue
+
+    def _rejected(self, queue):
+        return [
+            row for row in queue.audit_log() if row["kind"] == "job.rejected"
+        ]
+
+    def test_a_refused_retry_is_named_in_the_queue_trail(self):
+        """The defect: a refused re-dispatch left NO row."""
+        queue = self._reserved()
+        self.gate.record_queue("j1", "dispatch", row=make_row())
+        with self.assertRaises(RefusalRefusedError):
+            queue.retry("j1", 3)
+        rejected = self._rejected(queue)
+        self.assertEqual(
+            [row["detail"].get("job_id") for row in rejected],
+            ["j1"],
+            "the refused re-dispatch left no trace in the queue's own trail",
+        )
+
+    def test_the_refused_retry_row_names_the_action_and_the_slug(self):
+        """The row says WHO, WHAT and WHY -- not merely "rejected"."""
+        queue = self._reserved()
+        self.gate.record_queue("j1", "dispatch", row=make_row())
+        with self.assertRaises(RefusalRefusedError):
+            queue.retry("j1", 3)
+        detail = self._rejected(queue)[0]["detail"]
+        self.assertEqual(detail.get("job_id"), "j1")
+        self.assertEqual(detail.get("action"), "dispatch")
+        self.assertEqual(
+            detail.get("refusal_reason"),
+            "blocked_by_refusal",
+            "the trail does not say WHICH condition refused the re-dispatch",
+        )
+
+    def test_a_refused_retry_allowed_is_named_in_the_queue_trail(self):
+        """The BATCH form books a row too.
+
+        ``retry_allowed()`` is the form a sweep uses, so it is the form
+        most likely to run unattended -- and the form whose refusal
+        was the most invisible.
+        """
+        queue = self._reserved()
+        self.gate.record_queue("j1", "dispatch", row=make_row())
+        self.assertIsNone(queue.retry_allowed("j1", 3))
+        rejected = self._rejected(queue)
+        self.assertEqual(
+            [row["detail"].get("job_id") for row in rejected],
+            ["j1"],
+            "the refused batch re-dispatch left no trace in the trail",
+        )
+
+    def test_the_batch_form_does_not_lose_the_reason(self):
+        """The batch form must not throw the reason away.
+
+        ``retry_allowed()`` returns ``None`` -- a bare "no".  The row
+        it books must still carry the hold's reason slug, or a sweep's
+        refusal is unexplainable.
+        """
+        queue = self._reserved()
+        self.gate.record_queue("j1", "dispatch", row=make_row())
+        queue.retry_allowed("j1", 3)
+        detail = self._rejected(queue)[0]["detail"]
+        self.assertEqual(
+            detail.get("refusal_reason"),
+            "blocked_by_refusal",
+            "the batch form lost the reason: the refusal is unexplained",
+        )
+
+    def test_the_raising_and_the_batch_form_book_the_same_row(self):
+        """Two forms, one truth: the rows must agree.
+
+        The two forms are one writer (``_retry``), so a refusal must
+        leave the same trail whichever form asked.
+        """
+        raising = self._reserved()
+        self.gate.record_queue("j1", "dispatch", row=make_row())
+        with self.assertRaises(RefusalRefusedError):
+            raising.retry("j1", 3)
+
+        batch = self._reserved()
+        self.gate.record_queue("j1", "dispatch", row=make_row())
+        batch.retry_allowed("j1", 3)
+
+        self.assertEqual(
+            self._rejected(raising)[0]["detail"],
+            self._rejected(batch)[0]["detail"],
+            "the two forms left different trails",
+        )
+
+    def test_an_allowed_retry_books_no_rejected_row(self):
+        """The control: the trail does not invent refusals."""
+        queue = self._reserved()
+        record = queue.retry("j1", 3)
+        self.assertEqual(record.state, "ready")
+        self.assertEqual(self._rejected(queue), [])
+        kinds = [row["kind"] for row in queue.audit_log()]
+        self.assertIn("job.retried", kinds)
+
+    def test_a_broken_gate_books_no_rejected_row(self):
+        """A broken gate is not a refusal -- it must not be recorded as one.
+
+        A broken gate fails the call (or fails the batch closed), but
+        it refuses nothing in particular.  Booking a ``job.rejected``
+        row for it would put a refusal in the trail that never
+        happened.
+        """
+        class _Broken:
+            def require_queue_allowed(self, job_id, action, *, now=None):
+                raise RuntimeError("the gate cannot answer")
+
+        queue = JobQueue(refusal_gate=_Broken())
+        queue.enqueue("j1", "q", "dispatch", DIGEST, 1)
+        queue.set_refusal_gate(None)
+        queue.dequeue("worker-1", "q", 2)
+        queue.set_refusal_gate(_Broken())
+        with self.assertRaises(RuntimeError):
+            queue.retry("j1", 3)
+        self.assertEqual(self._rejected(queue), [])
+
+    def test_a_refused_retry_leaves_the_job_exactly_where_it_was(self):
+        """The row is a record; it must not change the job.
+
+        A refused re-dispatch must leave the state, the attempts and
+        the backoff exactly as they were.  The existing guard pins the
+        state and the attempts; this one pins that booking the row did
+        not disturb them either.
+        """
+        queue = self._reserved()
+        self.gate.record_queue("j1", "dispatch", row=make_row())
+        before = queue.job("j1")
+        with self.assertRaises(RefusalRefusedError):
+            queue.retry("j1", 3)
+        after = queue.job("j1")
+        self.assertEqual(after.state, before.state)
+        self.assertEqual(after.attempts, before.attempts)
+        self.assertEqual(after.worker_id, before.worker_id)
+
+    def test_the_trail_and_the_registry_trail_agree_on_the_refusal(self):
+        """One gate call, one refusal, one row in each trail."""
+        queue = self._reserved()
+        self.gate.record_queue("j1", "dispatch", row=make_row())
+        with self.assertRaises(RefusalRefusedError):
+            queue.retry("j1", 3)
+        blocked_checks = [
+            event for event in self.registry.events()
+            if event["kind"] == "checked" and event["blocked"]
+        ]
+        self.assertEqual(
+            len(blocked_checks), 1, "the gate was asked more than once"
+        )
+        self.assertEqual(
+            len(self._rejected(queue)),
+            len(blocked_checks),
+            "the two trails disagree about how many refusals there were",
+        )
+
+    def test_the_refused_retry_row_books_the_calls_seq(self):
+        """One call, one seq -- and the refusal is booked under it."""
+        queue = self._reserved()
+        self.gate.record_queue("j1", "dispatch", row=make_row())
+        with self.assertRaises(RefusalRefusedError):
+            queue.retry("j1", 3)
+        rejected = self._rejected(queue)
+        self.assertEqual(len(rejected), 1)
+        self.assertEqual(
+            rejected[0]["seq"], 3, "the refusal was booked under another seq"
+        )
+
+    def test_the_refused_retry_row_carries_no_payload(self):
+        """The audit boundary still holds: no payload crosses it."""
+        queue = self._reserved()
+        self.gate.record_queue("j1", "dispatch", row=make_row())
+        with self.assertRaises(RefusalRefusedError):
+            queue.retry("j1", 3)
+        detail = self._rejected(queue)[0]["detail"]
+        for banned in ("payload", "payload_bytes", "value", "raw"):
+            self.assertNotIn(banned, detail)
+
+    def test_a_non_string_reason_is_not_written_into_the_trail(self):
+        """The slug slot holds a slug or nothing -- never a stray value.
+
+        A host that re-implements the gate's contract may raise an
+        error whose ``reason`` attribute is not a string.  The row's
+        ``refusal_reason`` slot documents a **slug**, so a non-string
+        must not land there: the trail is machine-read, and a number or
+        a list in a slot that says "slug" is a value the reader cannot
+        interpret.
+        """
+        class _OddReason:
+            def require_queue_allowed(self, job_id, action, *, now=None):
+                raise RefusalRefusedError("refused", reason=12345)
+
+        queue = JobQueue(refusal_gate=_OddReason())
+        queue.enqueue("j1", "q", "dispatch", DIGEST, 1)
+        queue.set_refusal_gate(None)
+        queue.dequeue("worker-1", "q", 2)
+        queue.set_refusal_gate(_OddReason())
+        with self.assertRaises(RefusalRefusedError):
+            queue.retry("j1", 3)
+        detail = self._rejected(queue)[0]["detail"]
+        self.assertIsNone(
+            detail.get("refusal_reason"),
+            "a non-string reason was written into the slug slot",
+        )
+        self.assertEqual(
+            detail.get("reason"),
+            "RefusalRefusedError",
+            "the class name must still say that a refusal happened",
+        )
+
+    def test_a_refused_retry_is_still_visible_to_a_later_sweep(self):
+        """A refusal is not a one-off: the trail shows the history.
+
+        The job stays ``reserved`` (a refusal does not release it), so
+        a host that sweeps later sees the same refusal again.  The
+        trail must then show **both** -- two refusals, two rows -- so
+        the trail is a history and not a single snapshot.
+        """
+        queue = self._reserved()
+        self.gate.record_queue("j1", "dispatch", row=make_row())
+        with self.assertRaises(RefusalRefusedError):
+            queue.retry("j1", 3)
+        with self.assertRaises(RefusalRefusedError):
+            queue.retry("j1", 4)
+        rejected = self._rejected(queue)
+        self.assertEqual(
+            len(rejected), 2, "the trail shows one refusal where there were two"
+        )
+        self.assertEqual(
+            [row["seq"] for row in rejected], [3, 4],
+            "the refusals are not in the order they happened",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

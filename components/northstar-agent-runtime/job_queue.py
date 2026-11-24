@@ -38,7 +38,10 @@ Public API:
     (``not_before_seq = seq + delay_seqs``). When the just-completed
     attempt already reached ``max_retries`` the job is marked
     ``dead`` and ``MaxRetriesExceededError`` is raised fail-closed --
-    from then on nothing may act on it.
+    from then on nothing may act on it.  A refusal blocks the
+    re-dispatch, and the refusal is booked in the trail as a
+    ``job.rejected`` row naming the job, the action and the hold's
+    reason slug -- on both the raising and the batch form.
   - ``retry_allowed(job_id, seq, delay_seqs=0)`` -> ``Optional[RetryRecord]``:
     the **batch-safe** form of ``retry``.  It returns ``None`` for
     "not re-dispatched" (a refused job, a job that is not reserved, an
@@ -816,8 +819,8 @@ class JobQueue:
         require(job_id, action, now=now)
 
     def _refusal_allows(self, job_id: str, action: str,
-                        now: Optional[float]) -> bool:
-        """The **boolean** form of the refusal question.
+                        now: Optional[float]) -> Tuple[bool, Optional[BaseException]]:
+        """The **boolean** form of the refusal question, and the reason.
 
         :meth:`_require_refusal_allows` raises, and a raise is right
         for a caller that reports ONE job for ONE call.  It is wrong
@@ -828,16 +831,26 @@ class JobQueue:
         So the batch form turns a refusal into ``False`` -- and a gate
         that cannot answer at all is also ``False``, because the hold
         fails closed.
+
+        **The reason comes back too.**  The boolean alone was not
+        enough: the batch form caught the gate's exception and threw
+        it away, so a sweep's refusal was not just un-named in the
+        queue's trail -- the *reason* was gone from the caller's hands
+        as well.  The second element of the tuple is the exception
+        that caused the refusal, or ``None`` when the job is allowed.
+
+        A caller that ignores the second element gets the old
+        behaviour exactly; nothing about the boolean changed.
         """
         gate = self._refusal_gate
         if gate is None:
-            return True
+            return True, None
         allows = getattr(gate, "queue_allowed", None)
         if callable(allows):
             try:
-                return bool(allows(job_id, action, now=now))
-            except Exception:
-                return False
+                return bool(allows(job_id, action, now=now)), None
+            except Exception as exc:
+                return False, exc
         require = getattr(gate, "require_queue_allowed", None)
         if not callable(require):
             raise TypeError(
@@ -847,9 +860,9 @@ class JobQueue:
             )
         try:
             require(job_id, action, now=now)
-        except Exception:
-            return False
-        return True
+        except Exception as exc:
+            return False, exc
+        return True, None
 
     # -- seq discipline ----------------------------------------------------
 
@@ -1414,6 +1427,15 @@ class JobQueue:
         ``ready``.  That is what makes the two forms agree, and it is
         what keeps the audit trail's event count equal to the number
         of jobs the caller asked about.
+
+        **A refusal is booked in the queue's OWN trail**, on both
+        forms, as a ``job.rejected`` row naming the job, the action
+        and the hold's reason slug.  Without it the trail showed
+        "dequeued, then nothing", which is indistinguishable from a
+        worker that died mid-flight.  The batch form asks the boolean
+        gate question, so it needs the reason handed back to it --
+        hence ``_refusal_allows()``'s tuple.  A **broken** gate books
+        no row: it refuses nothing in particular.
         """
         with self._lock:
             self._claim(seq)
@@ -1432,18 +1454,40 @@ class JobQueue:
                 # refusal is reported as a refusal rather than as an
                 # exceeded budget -- and before the entry is flipped, so
                 # a refusal leaves the job exactly where it was.
+                retry_action = str(entry["task"])
                 if batch:
-                    if not self._refusal_allows(
-                        job_id, str(entry["task"]), now
-                    ):
+                    allowed, exc = self._refusal_allows(
+                        job_id, retry_action, now
+                    )
+                    if not allowed:
+                        # AUDIT the refusal, on the queue's own trail.
+                        # The batch form returns a bare ``None`` -- "not
+                        # re-dispatched" -- so without this row the
+                        # refusal was invisible here: the trail showed
+                        # "dequeued, then nothing", which is
+                        # indistinguishable from a worker that died.
+                        self._reject_refusal(seq, job_id, retry_action, exc)
                         return None
                 else:
                     # The raising form: the gate raises, so the caller
                     # is told the REASON, and the job is left where it
                     # was.  One call, one audit event.
-                    self._require_refusal_allows(
-                        job_id, str(entry["task"]), now
-                    )
+                    try:
+                        self._require_refusal_allows(
+                            job_id, retry_action, now
+                        )
+                    except Exception as exc:
+                        if _is_refusal(exc):
+                            # A REFUSAL is booked in the queue's own
+                            # trail, so the trail names the refused
+                            # re-dispatch.  A BROKEN gate is not: it
+                            # refuses nothing in particular, so a
+                            # ``job.rejected`` row would put a refusal
+                            # in the trail that never happened.
+                            self._reject_refusal(
+                                seq, job_id, retry_action, exc
+                            )
+                        raise
                 if entry["attempts"] >= entry["max_retries"]:
                     entry["state"] = _STATE_DEAD
                     entry["worker_id"] = ""

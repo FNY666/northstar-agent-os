@@ -2226,7 +2226,197 @@ from three.
   `job.rejected` row (which §16.2 measured) is still booked by the
   queue's own `dequeue()`.
 * `retry()`'s refusal is still **not** booked in the queue's trail.
-  That is a separate gap, and it is left open on purpose: booking a
-  row there changes the "one check per job" audit count §10 pinned, and
-  it belongs with the lease side's own refused-write rows (§14's
-  subject layer), not with this fix.
+  That is a separate gap, and it is left open here for one reason only:
+  this slice is about the candidates the **hand-out** refused, and
+  `retry()`'s refusal is a refusal of the **re-dispatch** -- a
+  different question, on a different path, that wants its own
+  measurement.
+
+  **A correction to what this section first claimed.**  An earlier
+  draft of this paragraph said that booking a row on the `retry()` path
+  "changes the 'one check per job' audit count §10 pinned".  That is
+  **wrong**, and it is worth recording why.  §10's "one check per job"
+  is about the **gate's calls** -- it is the *registry's* `checked`
+  events that count, because a double ask would book a double event.
+  The queue's own trail is a **different** trail, and a row there
+  changes neither the number of gate calls nor the number of
+  `checked` events.  Measured:
+
+      gate 'checked' events on the retry path: 1 -> ONE
+      QUEUE trail rows: ['job.enqueued', 'job.dequeued'] -> NO rejection row
+
+  So the gap is real, and it is NOT blocked by a count.  It is simply
+  a different slice.
+
+## 18. AMENDED 2026-11-24 — a refused re-dispatch left no trace in the queue's trail
+
+### 18.1 The defect
+
+§17 fixed the **hand-out** side: every refused candidate books its own
+`job.rejected` row.  The **re-dispatch** side had the same gap, and the
+same shape of blindness.
+
+Measured 2026-11-24, on the tree as §17 left it:
+
+```
+retry() raised: RefusalRefusedError
+
+What an operator reading the QUEUE trail sees:
+    job.enqueued {'job_id': 'j1', 'queue': 'q', 'task': 'dispatch', ...}
+    job.dequeued {'job_id': 'j1', 'queue': 'q', 'worker_id': 'w', ...}
+job state: reserved
+
+What the REGISTRY trail sees:
+    recorded queue:j1:dispatch blocked= False None
+    checked  queue:j1:dispatch blocked= True blocked_by_refusal
+```
+
+Read the two trails together.  The queue's trail says **"dequeued, then
+nothing"** -- which is **indistinguishable from a worker that died
+mid-flight**.  The registry's trail knows the re-dispatch was refused,
+but the registry is a *different* ledger, and a host reading the
+queue's own audit cannot tell a refusal from a crash.
+
+**And the batch form was worse.**  `retry_allowed()` returns `None` for
+"not re-dispatched", and it asks the gate through the **boolean** form,
+which catches the gate's exception and throws it away:
+
+```
+retry_allowed -> None
+  (the reason is GONE: the batch form returns a bare None)
+```
+
+So on the batch path the reason was lost **entirely** -- not merely
+unnamed in the queue's trail, but gone from the caller's hands too.
+
+### 18.2 The fix
+
+Both re-dispatch forms now book the refusal in the queue's own trail,
+through the same helper §17 landed (`_reject_refusal`), so the row
+names **who** was refused, **what** action, and **why** -- including
+the hold's reason slug.
+
+The **raising** form (`retry()`) books the row in the refusal branch
+and re-raises:
+
+```python
+try:
+    self._require_refusal_allows(job_id, retry_action, now)
+except Exception as exc:
+    if _is_refusal(exc):
+        self._reject_refusal(seq, job_id, retry_action, exc)
+    raise
+```
+
+The **batch** form (`retry_allowed()`) books the row and returns
+`None`.  For that to be possible the boolean helper had to stop
+throwing the reason away, so `_refusal_allows()` now returns a
+**tuple**:
+
+```python
+def _refusal_allows(self, job_id, action, now) -> Tuple[bool, Optional[BaseException]]:
+```
+
+`(allowed, exc)` -- the boolean is exactly what it was, and the second
+element is the exception that caused the refusal, or `None` when the
+job is allowed.  A caller that ignores the second element gets the old
+behaviour exactly.
+
+**A broken gate books no row**, on either form -- same rule as §17: a
+broken gate refuses nothing in particular, so a `job.rejected` row
+would put a refusal in the trail that never happened.
+
+**The two forms agree.**  The raising form and the batch form are one
+writer (`_retry`), so a refusal must leave the same trail whichever
+form asked.  A guard asserts that the two rows are equal.
+
+### 18.3 The guards
+
+Thirteen new guards in `RefusedRetryIsAuditedTests`
+(`tests/test_refusal_hold_queue_wiring.py`):
+
+| guard | what it pins |
+|---|---|
+| `test_a_refused_retry_is_named_in_the_queue_trail` | the defect: a refused re-dispatch left **no** row |
+| `test_the_refused_retry_row_names_the_action_and_the_slug` | the row says WHO, WHAT and WHY |
+| `test_a_refused_retry_allowed_is_named_in_the_queue_trail` | the **batch** form books a row too |
+| `test_the_batch_form_does_not_lose_the_reason` | the batch form must not throw the reason away |
+| `test_the_raising_and_the_batch_form_book_the_same_row` | two forms, one truth -- the rows are equal |
+| `test_an_allowed_retry_books_no_rejected_row` | the control: the trail does not invent refusals |
+| `test_a_broken_gate_books_no_rejected_row` | a broken gate is not recorded as a refusal |
+| `test_a_refused_retry_leaves_the_job_exactly_where_it_was` | booking the row did not disturb the job |
+| `test_the_trail_and_the_registry_trail_agree_on_the_refusal` | one gate call, one refusal, one row in each trail |
+| `test_the_refused_retry_row_books_the_calls_seq` | one call, one seq |
+| `test_the_refused_retry_row_carries_no_payload` | the audit boundary still holds |
+| `test_a_refused_retry_is_still_visible_to_a_later_sweep` | the trail is a **history**: two refusals, two rows |
+| `test_a_non_string_reason_is_not_written_into_the_trail` | the slug slot holds a slug or nothing -- never a stray value |
+
+**The mutation run.**  Eight mutants planted and re-run; all eight
+killed (one of them only after a guard was added -- see M8):
+
+| mutant | verdict | killed by |
+|---|---|---|
+| M1 never book the batch form's refusal row | **KILLED** | 3 guards |
+| M2 never book the raising form's refusal row | **KILLED** | 7 guards |
+| M3 the **live** batch branch throws the reason away | **KILLED** | 2 guards |
+| M4 book a row for a broken gate as well | **KILLED** | 1 guard |
+| M5 the two forms disagree | **KILLED** | 1 guard |
+| M6 the shared helper drops the action | **KILLED** | 2 guards |
+| M7 the shared helper drops the slug | **KILLED** | 4 guards |
+| M8 the shared helper drops the slug's type check | **KILLED** | 1 guard — **and this one SURVIVED the first pass**; see below |
+
+**M8 needed a second pass too, and it found a real gap.**  The
+mutant dropped the `isinstance(slug, str)` check in the shared helper,
+so a gate raising an error whose ``reason`` attribute is *not* a
+string would write that value straight into the row's
+``refusal_reason`` slot.  The first mutant run reported it as
+**survived**, and it was: no guard covered it.  The slot documents a
+**slug**, so a number or a list in it is a value the reader cannot
+interpret -- and the trail is machine-read.
+
+A guard was added (`test_a_non_string_reason_is_not_written_into_the_trail`:
+a gate raising ``RefusalRefusedError(reason=12345)`` must leave the
+slug slot ``None`` while the class name still says a refusal
+happened), and M8 is now **KILLED** by it.  A surviving mutant is a
+finding about the *guards*, not about the mutant: see
+[[b173-accept-metric-is-not-a-census]].
+
+**M3 needed a second pass, and the reason is worth recording.**  The
+first version of M3 was planted in `_refusal_allows()`'s
+`queue_allowed` branch -- and it **survived**.  That branch is
+**unreachable** with the repository's own gate: `RefusalHoldQueueGate`
+offers `require_queue_allowed` and `task_allowed`, but **no**
+`queue_allowed`, so the `queue_allowed` branch never runs.  The
+surviving mutant was in dead code, and no guard could have killed it.
+
+So the mutant was re-targeted at the **live** branch -- the
+`require_queue_allowed` fallback -- and killed there.  The lesson is
+§16.3's M2 lesson again, in a third costume: **a mutant in an
+unreachable branch is not evidence that the guards are weak; it is
+evidence that the mutant was mis-aimed.**  The way to tell the two
+apart is to ask *which* branch the repository's own gate takes, and
+plant the fault there.
+
+### 18.4 What this does NOT change
+
+* `job_queue.py`'s version and schema pins are unchanged
+  (`job-queue.v1` / `northstar.job-queue.v1`), and **no audit kind is
+  added or changed**.  `job.rejected` is an existing kind.
+* `retry()`'s and `retry_allowed()`'s **signatures** are unchanged, and
+  every existing call site is unchanged.
+* The gate is still asked **once** per job, on both forms.  §13.4's
+  "one check per job" count is unchanged -- it is the count of the
+  *gate's* calls, and the registry's `checked` events are unaffected:
+  a row in the queue's own trail is a **different** trail.
+* `retry_allowed()` still returns `None` for "not re-dispatched".  The
+  second element of `_refusal_allows()`'s tuple is **internal**; the
+  public contract of the batch form is unchanged.
+* The **lease** side is unchanged: `claim()`, `fail()`, `release()`
+  and `reap()` ask exactly what they asked before, and the lease
+  ledger's own trail is unchanged.  §18 fixes the **queue's** trail;
+  the lease ledger's equivalent gap is a separate slice.
+* `ack()` and `dead()` still do not consult the gate -- a
+  **withdrawal** is not a re-dispatch (§13.1).
+* The **hand-out** side is unchanged: §17's per-candidate rows stand,
+  and §17.4's correction (the "one check per job" count is about the
+  *gate's calls*, not the queue's trail) is unaffected.
