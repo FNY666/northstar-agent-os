@@ -108,3 +108,21 @@ than as a measurement -- a missing credential is never dressed up as a score.
 
 The runtime never sees the pack's hidden checks: host checks run in their own
 clean environment, and the provider credential is given only to the model call.
+
+## Recorded measurements
+
+`controls-baseline.json` is the *control* group: it records what the frozen
+reference solutions do against the frozen pack.  It is not a model
+measurement, and it never claims to be one.
+
+`measurements/` holds the opposite thing: records of a real model run
+against this pack.  Each file pins the pack fingerprint it was measured
+against, the model and endpoint, the sandbox profile, the turn budget, and
+the outcome and patch fingerprint of every task.  A record whose release
+gate says `eligible` is a measurement, not an aspiration: it was produced
+by `scripts/run-code-task-baseline.py`.
+
+Records name the endpoint that served the model, including when that
+endpoint was a third-party relay rather than the vendor's own API.  A
+measurement is only comparable to another measurement with the same model,
+endpoint, and budget.
