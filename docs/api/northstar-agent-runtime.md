@@ -13383,6 +13383,38 @@ Plays back a fixed list of turns.
   - Every tool_result block the loop has handed back, in order.
 - `sent_tool_errors()`
 - `message_roles()`
+### `code_resume`
+
+Source: `components/northstar-agent-runtime/code_resume.py`
+
+Resume an interrupted ``northstar code`` run from its durable evidence.
+
+#### `restore_phase_machine(evidence_dir: str | Path, *, worktree: str | Path | None=None, start_commit: str='')`
+
+Rebuild a :class:`CodePhaseMachine` from a durable phase journal.
+
+#### `prepare_code_resume(evidence_dir: str | Path)`
+
+Decide whether an interrupted code run may be resumed.
+
+#### `write_resume_receipt(evidence_dir: str | Path, report: dict[str, Any])`
+
+Record the resume decision inside the evidence directory.
+
+#### `resume_code_run(evidence_dir: str | Path, *, runner: Any=None, options: Any=None, keep_worktree: bool=True)`
+
+Continue an interrupted code run inside its original isolated worktree.
+
+### `checkpoint_select`
+
+Source: `components/northstar-agent-runtime/checkpoint_select.py`
+
+Select the checkpoint a code resume should fork from.
+
+#### `select_resume_checkpoint(sessions_dir: str | Path, session_id: str)`
+
+Return the checkpoint a resume should use and how many calls it discards.
+
 ### `code_task`
 
 Source: `components/northstar-agent-runtime/code_task.py`
@@ -13401,6 +13433,8 @@ The requested code workspace cannot be prepared or evidenced safely.
 
 Host-owned phase gate with a durable, atomic transition journal.
 
+- `restore(evidence_dir: str | Path, *, run_id: str='', worktree: str | Path | None=None, start_commit: str='')`
+  - Rebuild a phase machine from a recorded evidence directory.
 - `state` (property)
 - `outcome` (property)
 - `plan_submitted` (property)

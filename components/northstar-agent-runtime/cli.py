@@ -262,6 +262,28 @@ def build_parser() -> argparse.ArgumentParser:
     run = sub.add_parser("run", help="kernel path: one agent loop, every default explicit")
     _add_run_arguments(run)
 
+    code_resume = sub.add_parser(
+        "code-resume",
+        help="continue an interrupted code run from its evidence directory",
+        description=(
+            "Continue a ``northstar code`` run that was interrupted. The run keeps "
+            "its original isolated worktree, starting commit and declared checks, "
+            "and forks from the interrupted session's checkpoint. A run whose "
+            "evidence does not authorise a resume is refused: reconcile it instead."
+        ),
+    )
+    code_resume.add_argument(
+        "evidence_dir",
+        help="evidence directory of the interrupted run (contains manifest.json)",
+    )
+    code_resume.add_argument(
+        "--keep-worktree",
+        action="store_true",
+        default=True,
+        help="keep the isolated worktree after the resumed run (default)",
+    )
+    _add_run_arguments(code_resume)
+
     sub.add_parser("tools", help="list the built-in tools and their classification")
     agents = sub.add_parser("agents", help="list the built-in subagent definitions")
     agents.add_argument("--workspace", default=".", help="workspace used to describe tool availability")
@@ -992,6 +1014,94 @@ def _run_code(args: argparse.Namespace) -> int:
     return exit_code
 
 
+def _run_code_resume(args: argparse.Namespace) -> int:
+    """Continue an interrupted code run from its durable evidence."""
+    import json as _json
+
+    from code_resume import prepare_code_resume, write_resume_receipt
+    from code_task import CodeTaskError
+
+    evidence_dir = Path(args.evidence_dir).expanduser()
+    try:
+        report = prepare_code_resume(evidence_dir)
+    except CodeTaskError as error:
+        print(f"[code-resume] {error}", file=sys.stderr)
+        return USAGE_ERROR
+
+    if args.dry_run:
+        payload = _json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2)
+        print(payload)
+        return 0 if report["resumable"] else 1
+
+    if not report["resumable"]:
+        write_resume_receipt(evidence_dir, report)
+        print(
+            f"[code-resume] not resumable: {report['reason']}"
+            + (f" ({report['detail']})" if report.get("detail") else "")
+            + " -- reconcile the evidence instead",
+            file=sys.stderr,
+        )
+        return 1
+
+    from code_resume import resume_code_run
+
+    def runner(goal, worktree, session_id, phases):
+        # Reuse the ordinary run path so a resumed run sees exactly the same
+        # permission, policy and provider resolution as any other run.
+        args.prompt = goal
+        args.workspace = str(worktree)
+        args.checks = list(report["checks"])
+        args._code_requires_verification = True
+        args._code_default_accept_edits = True
+        args._code_phase_machine = phases
+        args.session_dir = str(Path(report["evidence_dir"]) / "sessions")
+        args.resume_from = session_id
+        args.command = "code"
+        # A fork at the newest checkpoint discards the parent's tail; any tool
+        # call in it may already have changed the worktree, so the replay has
+        # to be acknowledged rather than assumed.
+        if report.get("discarded_tool_calls"):
+            if not getattr(args, "allow_checkpoint_tool_replay", False):
+                raise CodeTaskError(
+                    "resuming would discard "
+                    f"{report['discarded_tool_calls']} tool call(s) the interrupted run "
+                    "already made; their effects may have changed the worktree. Re-run "
+                    "with --allow-checkpoint-tool-replay only when that replay is intentional"
+                )
+            args.allow_checkpoint_tool_replay = True
+        exit_code = _run(args)
+
+        class _Resumed:
+            def __init__(self):
+                self.exit_code = int(exit_code)
+                self.subtype = "success" if self.exit_code == 0 else "error_during_execution"
+                self.events = ()
+
+        return _Resumed()
+
+    try:
+        result = resume_code_run(
+            evidence_dir,
+            runner=runner,
+            keep_worktree=bool(getattr(args, "keep_worktree", True)),
+        )
+    except CodeTaskError as error:
+        print(f"[code-resume] {error}", file=sys.stderr)
+        return 1
+    except Exception as error:  # pragma: no cover - defensive
+        print(f"[code-resume] resume failed: {error}", file=sys.stderr)
+        return 1
+
+    if args.json:
+        print(_json.dumps(result.as_dict(), ensure_ascii=False, sort_keys=True, indent=2))
+    else:
+        print(
+            f"[code-resume] evidence={result.evidence_dir} patch={result.patch_path} "
+            f"start={result.start_commit[:12]} subtype={result.subtype}"
+        )
+    return result.exit_code
+
+
 def _run_code_reconcile(args: argparse.Namespace) -> int:
     from code_task import reconcile_code_evidence
 
@@ -1192,6 +1302,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"created {path}")
         print(f"governed project scaffolded; start with `{PROG_NAME} doctor --workspace <dir>`")
         return 0
+    if args.command == "code-resume":
+        return _run_code_resume(args)
     if args.command == "code":
         try:
             return _run_code(args)

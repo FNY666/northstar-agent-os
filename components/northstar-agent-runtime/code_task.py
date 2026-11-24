@@ -210,6 +210,79 @@ class CodePhaseMachine:
         self._lock = threading.RLock()
         self._persist()
 
+    @classmethod
+    def restore(
+        cls,
+        evidence_dir: str | Path,
+        *,
+        run_id: str = "",
+        worktree: str | Path | None = None,
+        start_commit: str = "",
+    ) -> "CodePhaseMachine":
+        """Rebuild a phase machine from a recorded evidence directory.
+
+        The recorded plan and every finished receipt are kept. An effect that a
+        crash left open is closed here: an effect the model started becomes
+        "unknown" because its side effect may already have happened, while a
+        host verification is closed as "failed" because it only reads the tree
+        and the resumed run re-runs it.
+        """
+        directory = Path(evidence_dir)
+        path = directory / "phases.json"
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise CodeTaskError(f"cannot read the recorded code phases: {exc}") from exc
+        if not isinstance(raw, dict):
+            raise CodeTaskError("the recorded code phases are not an object")
+        recorded_run_id = str(raw.get("run_id") or "")
+        if run_id and recorded_run_id and recorded_run_id != run_id:
+            raise CodeTaskError("the recorded code phases belong to another run")
+
+        machine = cls(
+            run_id=recorded_run_id or run_id,
+            evidence_dir=directory,
+            plan_only=bool(raw.get("plan_only")),
+            worktree=worktree,
+            start_commit=start_commit,
+            check_inputs=tuple(str(item) for item in (raw.get("check_inputs") or ())),
+        )
+        with machine._lock:
+            machine._state = str(raw.get("state") or "created")
+            machine._outcome = raw.get("outcome")
+            machine._plan = raw.get("plan") if isinstance(raw.get("plan"), dict) else None
+            machine._transitions = [
+                dict(item)
+                for item in (raw.get("transitions") or ())
+                if isinstance(item, dict)
+            ]
+            machine._effects = [
+                dict(item)
+                for item in (raw.get("effects") or ())
+                if isinstance(item, dict)
+            ]
+            pins = raw.get("check_input_pins")
+            machine._check_input_pins = (
+                [dict(pin) for pin in pins if isinstance(pin, dict)]
+                if isinstance(pins, list)
+                else None
+            )
+            for effect in machine._effects:
+                if str(effect.get("status")) != "in_flight":
+                    continue
+                if str(effect.get("tool")) == "HostCheck":
+                    # A host check only reads the tree, so the resumed run may
+                    # simply run it again.
+                    effect["status"] = "failed"
+                    effect["error_class"] = "interrupted before completion"
+                else:
+                    # A model tool may already have changed the tree.
+                    effect["status"] = "unknown"
+                    effect["error_class"] = "interrupted before completion"
+                effect["finished_unix_ms"] = int(time.time() * 1000)
+            machine._persist()
+        return machine
+
     @property
     def state(self) -> str:
         with self._lock:
@@ -936,6 +1009,14 @@ def reconcile_code_evidence(evidence_dir: str | Path) -> dict[str, Any]:
             }
         )
     unknown = [effect for effect in effects if effect["status"] in {"in_flight", "unknown", "failed"}]
+    # A host-declared check only reads the tree, so an interrupted check is
+    # re-run on resume.  An effect the model started may already have mutated
+    # the worktree: it is never replayed automatically.
+    unreceipted_model_effects = [
+        effect
+        for effect in unknown
+        if effect["status"] in {"in_flight", "unknown"} and effect["tool"] != "HostCheck"
+    ]
     effect_journal_complete = phases.get("effect_journal_version") == 1
     worktree_value = manifest.get("worktree")
     worktree_exists = bool(
@@ -947,7 +1028,7 @@ def reconcile_code_evidence(evidence_dir: str | Path) -> dict[str, Any]:
     if integrity_errors:
         classification = "invalid_evidence"
         next_action = "repair or independently inspect the evidence before any restart"
-    elif unknown:
+    elif unreceipted_model_effects:
         classification = "manual_review_required"
         next_action = "inspect the retained worktree and external systems; never replay the listed effects automatically"
     elif isinstance(outcome, str) and outcome in CODE_PHASE_TERMINALS and (
@@ -963,10 +1044,16 @@ def reconcile_code_evidence(evidence_dir: str | Path) -> dict[str, Any]:
         next_action = "use the sealed terminal evidence; no recovery action is required"
     elif not effects:
         classification = "interrupted_before_effects"
-        next_action = "start a new run from the recorded commit; phase resume is not implemented"
+        next_action = (
+            "resume the run from its evidence directory; no tool effect was "
+            "started, so continuing cannot replay a side effect"
+        )
     else:
         classification = "interrupted_after_receipted_effects"
-        next_action = "inspect the retained worktree, then start a new run or wait for phase-resume support"
+        next_action = (
+            "resume the run from its evidence directory; every listed effect "
+            "carries a completion receipt"
+        )
 
     receipt = {
         "schema": "northstar.code-reconcile.v1",
@@ -980,10 +1067,18 @@ def reconcile_code_evidence(evidence_dir: str | Path) -> dict[str, Any]:
         "integrity_errors": integrity_errors,
         "effect_counts": dict(Counter(effect["status"] for effect in effects)),
         "unknown_side_effects": unknown,
+        "unreceipted_model_effects": unreceipted_model_effects,
         "worktree": worktree_value,
         "worktree_exists": worktree_exists,
         "automatic_tool_replay": False,
-        "phase_resume_supported": False,
+        "phase_resume_supported": True,
+        "phase_resume_allowed": (
+            not integrity_errors
+            and effect_journal_complete
+            and not unreceipted_model_effects
+            and not (isinstance(outcome, str) and outcome in CODE_PHASE_TERMINALS)
+            and state in {"understanding", "planned", "executing", "verifying"}
+        ),
         "safe_restart_from_start_commit": (
             not integrity_errors
             and effect_journal_complete
