@@ -1285,3 +1285,157 @@ class SelfCheckAndAssertKillerTests(unittest.TestCase):
                 self._run()
         finally:
             ltc.LeasedTaskClaim.outbox_rows = original_rows
+
+
+class MirrorQueueNameIsInjectiveTests(unittest.TestCase):
+    """The mirror's queue name must be INJECTIVE over the task ids.
+
+    THE DEFECT (measured 2026-11-23)
+    --------------------------------
+    ``queue_name_for(task_id)`` returned ``"task:" + task_id`` truncated to
+    the 128 characters ``job_queue`` allows, while a task id may be up to
+    **256** characters long.  So two task ids sharing their first 123
+    characters landed in the **same** mirror queue -- and the mirror's
+    by-task reservation stopped being by-task.
+
+    Measured, before the fix::
+
+        queue names equal: True
+        queue name: 'task:aaaa...aaaa'      # 128 chars, BOTH tasks
+
+        --- claim task a (b is at the head of the SHARED queue) ---
+        claim raised: QueueMirrorError queue mirror refused to reserve aaa...X
+        mirror states: [('aaaaX', 'ready'), ('aaaaY', 'reserved')]
+        ledger states: [('aaaaX', 'ready'), ('aaaaY', 'ready')]
+
+    The two ledgers disagreed in the worst way: the mirror had handed
+    **b**'s job to the worker while the ledger still had **b**'s task
+    ``ready``, and then **a**'s claim was refused because the mirror
+    would not hand a worker a job that was not ``a``'s.
+
+    The fix pins a **digest of the whole id** into the name whenever the
+    plain form would be truncated, so the mapping is injective over the
+    ids the ledger accepts.
+    """
+
+    def setUp(self) -> None:
+        self.manager = LeasedTaskClaim(
+            max_failures=3, base_backoff_seconds=2.0, backoff_factor=2.0
+        )
+
+    def tearDown(self) -> None:
+        self.manager.close()
+
+    def _name(self, task_id: str) -> str:
+        return self.manager.queue_name_for(task_id)
+
+    def test_two_long_task_ids_that_share_a_prefix_do_not_collide(self):
+        """The defect itself: the shared prefix used to be the whole name."""
+        a = "a" * 123 + "X"
+        b = "a" * 123 + "Y"
+        self.assertNotEqual(
+            self._name(a),
+            self._name(b),
+            "two task ids sharing a prefix landed in the same mirror queue",
+        )
+
+    def test_the_name_always_fits_the_queue_limits(self):
+        """The name is never longer than ``job_queue`` allows."""
+        for length in (1, 50, 122, 123, 124, 200, 256):
+            name = self._name("z" * length)
+            self.assertLessEqual(len(name), 128, "length %d" % length)
+            self.assertTrue(name.startswith("task:"), "length %d" % length)
+
+    def test_a_short_task_id_keeps_the_plain_name(self):
+        """The common case is unchanged: no digest, no surprise."""
+        self.assertEqual(self._name("t1"), "task:t1")
+
+    def test_the_digest_covers_the_whole_id_not_just_the_prefix(self):
+        """Two ids with the same truncated head get different digests."""
+        head = "a" * 123
+        a, b = head + "X", head + "Y"
+        self.assertNotEqual(self._name(a)[-16:], self._name(b)[-16:])
+
+    def test_the_name_is_injective_over_many_ids(self):
+        """A census, not a sample: no two ids share a name.
+
+        The ids span every length the ledger accepts (1..256) and
+        include prefix-sharing families, which are the ones that broke.
+        """
+        import random
+        import string
+
+        random.seed(7)
+        ids = set()
+        for length in range(1, 257):
+            for _ in range(6):
+                ids.add(
+                    "".join(
+                        random.choice(string.ascii_letters + string.digits)
+                        for _ in range(length)
+                    )
+                )
+        for length in (123, 124, 125, 200, 256):
+            for char in "ABCXYZ0123":
+                ids.add("a" * length + char)
+                ids.add("b" * length + char)
+        seen = {}
+        collisions = []
+        for task_id in ids:
+            name = self._name(task_id)
+            if name in seen and seen[name] != task_id:
+                collisions.append((seen[name], task_id, name))
+            seen[name] = task_id
+        self.assertEqual(
+            [],
+            collisions[:5],
+            "%d of %d ids collided on a mirror queue name"
+            % (len(collisions), len(ids)),
+        )
+
+    def test_the_mirror_hands_out_the_right_task_after_a_collision(self):
+        """The end-to-end shape: each task's claim takes its OWN job.
+
+        This is the guard that fails on the defect: with the shared
+        queue, claiming one task reserved the OTHER's job.
+        """
+        a = "a" * 123 + "X"
+        b = "a" * 123 + "Y"
+        self.manager.enqueue_task(b, "demo-task", payload="B")
+        self.manager.enqueue_task(a, "demo-task", payload="A")
+        self.manager.claim(a, "worker-A", ttl=10.0, now=100.0)
+        mirror = self.manager._queue
+        self.assertEqual(mirror.job(a).state, "reserved")
+        self.assertEqual(
+            mirror.job(b).state,
+            "ready",
+            "claiming a reserved ANOTHER task's mirror job",
+        )
+        self.assertEqual(self.manager.task(a).state, "leased")
+        self.assertEqual(self.manager.task(b).state, "ready")
+
+    def test_both_tasks_can_be_claimed_and_the_ledgers_stay_in_step(self):
+        """Neither task is starved, and the two ledgers agree."""
+        a = "a" * 123 + "X"
+        b = "a" * 123 + "Y"
+        self.manager.enqueue_task(b, "demo-task", payload="B")
+        self.manager.enqueue_task(a, "demo-task", payload="A")
+        self.manager.claim(a, "worker-A", ttl=10.0, now=100.0)
+        self.manager.claim(b, "worker-B", ttl=10.0, now=101.0)
+        mirror = self.manager._queue
+        for task_id in (a, b):
+            self.assertEqual(self.manager.task(task_id).state, "leased")
+            self.assertEqual(mirror.job(task_id).state, "reserved")
+
+    def test_the_queue_name_is_stored_and_reported_unchanged(self):
+        """The name the ledger books is the name the mirror uses."""
+        task_id = "a" * 123 + "X"
+        self.manager.enqueue_task(task_id, "demo-task", payload="A")
+        self.assertEqual(
+            self.manager.task(task_id).queue_name,
+            self._name(task_id),
+        )
+        self.assertEqual(
+            self.manager._queue.job(task_id).queue,
+            self._name(task_id),
+        )

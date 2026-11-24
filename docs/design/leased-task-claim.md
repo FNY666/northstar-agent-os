@@ -174,3 +174,126 @@ LeasedTaskClaim(*, path=":memory:", queue=None, dead_letters=None,
    deliver twice.
 5. **`heartbeat` extends but never shortens.** A worker that wants to give
    up early should call `release`.
+
+---
+
+## 6. AMENDED 2026-11-23 — the mirror's queue name was not injective
+
+### 6.1 The defect
+
+§1.2's extension N1 is the load-bearing one: `JobQueue.dequeue` reserves
+*the next eligible job in a queue*, not a job named by id, so a by-task
+claim needs a **by-task queue** — one task, one queue — so that the
+mirror's reservation can never pick up another task's job.
+
+The name was `"task:" + task_id`, **truncated** to the 128 characters
+`job_queue` allows.  But a task id may be up to **256** characters long
+(`enqueue_task` refuses more than 256).  So the plain form does not fit,
+the truncation dropped the distinguishing tail, and **two task ids that
+share their first 123 characters landed in the same mirror queue**.
+
+That breaks the invariant N1 exists to provide: the mirror's reservation
+stopped being by-task.
+
+Measured 2026-11-23, before the fix:
+
+```
+queue names equal: True
+queue name: 'task:aaaa...aaaa'      # 128 chars, BOTH tasks
+
+--- claim task a (b is at the head of the SHARED queue) ---
+claim raised: QueueMirrorError queue mirror refused to reserve aaa...X
+mirror states: [('aaaaX', 'ready'), ('aaaaY', 'reserved')]
+ledger states: [('aaaaX', 'ready'), ('aaaaY', 'ready')]
+```
+
+Read the two states lines: the mirror had **reserved `b`'s job** while
+the ledger still had **both** tasks `ready`.  And then `a`'s claim was
+refused — `QueueMirrorError`, "queue mirror refused to reserve a" —
+because the mirror would not hand a worker a job that was not `a`'s.
+
+So the collision did not merely fail a claim: it made the mirror reserve
+the **wrong task's** job.  The two ledgers disagreed in exactly the way
+`QueueMirrorError` exists to prevent, and it happened **inside** the
+mirror's own bookkeeping.
+
+A census over the accepted id space, before the fix: ids of length 1..256
+with six random ids each, plus prefix-sharing families at the boundary
+lengths — **10 ids of length 124 produced 1 distinct queue name**.
+
+### 6.2 The fix
+
+The name carries a **digest of the whole id** whenever the plain form
+would be truncated:
+
+```python
+name = f"task:{task_id}"
+if len(name) <= _MAX_QUEUE_NAME:
+    return name
+digest = digest_of(task_id).split(":", 1)[-1][:16]
+head = name[: _MAX_QUEUE_NAME - len(digest) - 1]
+return f"{head}:{digest}"
+```
+
+Three properties, and each one is load-bearing:
+
+* the digest is over the **whole** id, not the prefix — so two ids that
+  share a prefix still get different names;
+* the digest is **appended** to the truncated id — so the name still
+  reads like the task it belongs to, and the common case (a short id) is
+  **unchanged**: no digest, no surprise, `queue_name_for("t1")` is still
+  `"task:t1"`;
+* the head is shortened to make room, so the name **always** fits the
+  128-character limit.
+
+The name is never parsed back into a task id anywhere in the repo, so
+changing its shape breaks no reader.
+
+### 6.3 The guards, and why they can fail
+
+Eight new guards in `MirrorQueueNameIsInjectiveTests`
+(`tests/test_leased_task_claim.py`):
+
+| guard | what it pins |
+|---|---|
+| `test_two_long_task_ids_that_share_a_prefix_do_not_collide` | the defect itself: the shared prefix is not the whole name |
+| `test_the_name_always_fits_the_queue_limits` | the name never exceeds 128 characters, at any id length |
+| `test_a_short_task_id_keeps_the_plain_name` | the control: the common case is unchanged |
+| `test_the_digest_covers_the_whole_id_not_just_the_prefix` | the digest is over the whole id |
+| `test_the_name_is_injective_over_many_ids` | a **census**, not a sample: 1,636 ids, every accepted length, zero collisions |
+| `test_the_mirror_hands_out_the_right_task_after_a_collision` | the end-to-end shape: claiming `a` does not reserve `b`'s job |
+| `test_both_tasks_can_be_claimed_and_the_ledgers_stay_in_step` | neither task is starved, and the two ledgers agree |
+| `test_the_queue_name_is_stored_and_reported_unchanged` | the ledger books the same name the mirror uses |
+
+**The mutation run.**  Four mutants planted and re-run; all four killed:
+
+| mutant | verdict | killed by |
+|---|---|---|
+| M1 revert to the truncation | **KILLED** | 5 guards |
+| M2 digest only the **prefix**, not the whole id | **KILLED** | 5 guards |
+| M3 digest truncated to one character | **KILLED** | the census guard only |
+| M4 no digest for long ids | **KILLED** | 5 guards |
+
+**M3 is worth recording.**  A one-character digest still gives 16
+possibilities, so the *pairwise* guards (`a...X` vs `a...Y`) all passed
+on it — the collision needs 17 ids to show up.  Only the **census**
+guard caught it.  That is the same lesson as the acceptance metric's
+"not a census" finding: **a pairwise guard cannot see a collision that
+needs a wider family to appear.**  The census is what gives the mapping
+its guarantee; the pairwise guards only pin the specific defect.
+
+### 6.4 What this does NOT change
+
+* `leased_task_claim.py`'s version and schema pins are unchanged, and no
+  new column, table or audit kind is added.
+* The queue name of a task **up to 123 characters long** is unchanged:
+  the plain `"task:<id>"` form still fits, so the common case is
+  byte-identical to before.
+* The `ltc_task.queue_name` column is unchanged in shape; it now holds a
+  name with a digest suffix for the long ids that used to collide.
+* The ledger's own `task_id` column is unchanged — it always held the
+  **whole** id.  Only the *queue name* was lossy.
+* The refusal-hold wiring is unaffected: the queue namespace is keyed by
+  **job id** (`queue:<job id>:<action>`), and the job id is the task id,
+  not the queue name.  So a refusal recorded against a long task id
+  still matches the mirror's job.

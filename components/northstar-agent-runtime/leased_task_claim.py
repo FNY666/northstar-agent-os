@@ -147,6 +147,9 @@ STATE_DEAD = "dead"
 #: The queue ledger never self-deaths: this module owns the failure budget.
 QUEUE_MAX_RETRIES = 64
 
+#: The longest queue name ``job_queue`` accepts.
+_MAX_QUEUE_NAME = 128
+
 _MAX_INT = 2**53 - 1
 
 
@@ -685,12 +688,53 @@ class LeasedTaskClaim:
     def queue_name_for(task_id: str) -> str:
         """The queue-mirror queue name of a task.
 
-        ``JobQueue.dequeue`` reserves *the next eligible job in a queue*, so
-        a by-task claim needs a by-task queue.  The name is truncated to the
-        128 characters ``job_queue`` allows.
+        ``JobQueue.dequeue`` reserves *the next eligible job in a queue*, not
+        a job named by id.  A by-task claim therefore needs a by-task queue:
+        one task, one queue, so the mirror's reservation can never pick up
+        another task's job.
+
+        **The name is TRUNCATED, so it must stay INJECTIVE.**
+
+        ``job_queue`` allows a queue name of at most 128 characters, and a
+        task id may be up to 256 characters long.  The old name was
+        ``"task:" + task_id`` truncated to 128 -- so two task ids that
+        share their first 123 characters landed in the **same** queue, and
+        the mirror's by-task reservation stopped being by-task.
+
+        Measured 2026-11-23, before the fix::
+
+            queue names equal: True
+            queue name: 'task:aaaa...aaaa'      # 128 chars, both tasks
+
+            --- claim task a (b is at the head of the SHARED queue) ---
+            claim raised: QueueMirrorError queue mirror refused to reserve aaa...X
+            mirror states: [('aaaaX', 'ready'), ('aaaaY', 'reserved')]
+            ledger states: [('aaaaX', 'ready'), ('aaaaY', 'ready')]
+
+        The two ledgers disagreed in the worst way: the mirror had handed
+        **b**'s job to the worker while the ledger had **b**'s task still
+        ``ready`` -- and then ``a``'s claim was refused, because the mirror
+        would not give a worker a job that was not ``a``'s.
+
+        So the name now carries a **digest of the whole id** whenever the
+        plain form would be truncated.  The digest is what makes the
+        mapping injective over the ids the ledger accepts, and it is
+        appended to the *truncated* id -- so the name still reads like the
+        task it belongs to, and two different ids can never share it.
+
+        A short id keeps the plain ``"task:<id>"`` form, so the common
+        case is unchanged and the digest only appears where it is needed.
         """
         name = f"task:{task_id}"
-        return name[:128]
+        if len(name) <= _MAX_QUEUE_NAME:
+            return name
+        # The plain form does not fit.  Keep as much of the id as
+        # leaves room for the digest, and pin the WHOLE id in the
+        # digest -- so two ids that share a prefix still get different
+        # names.
+        digest = digest_of(task_id).split(":", 1)[-1][:16]
+        head = name[: _MAX_QUEUE_NAME - len(digest) - 1]
+        return f"{head}:{digest}"
 
     def _row(self, task_id: str) -> Optional[sqlite3.Row]:
         rows = self._store.read(
