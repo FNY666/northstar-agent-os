@@ -2138,5 +2138,239 @@ class RefusedCandidateDoesNotWedgeTheQueueTests(unittest.TestCase):
             manager.close()
 
 
+class RefusedCandidatesAreAllAuditedTests(unittest.TestCase):
+    """The queue's OWN trail must name EVERY candidate it refused.
+
+    §16 landed the skip: the gate is asked about the candidates in the
+    queue's own order and the first one it ALLOWS is handed out.  That
+    fix is correct, but it left the **audit trail** naming only the
+    FIRST refused candidate -- and naming NONE at all when a later
+    candidate was allowed.
+
+    Measured 2026-11-24, on the tree as §16 left it:
+
+        --- ONE refused head + 1 healthy -> handed j2
+           job.rejected rows: 0 -> []
+        --- BOTH refused -> raised RefusalRefusedError
+           job.rejected rows: 1 -> [(10, {'reason': 'RefusalRefusedError', 'job_id': 'j1'})]
+        --- THREE refused -> raised RefusalRefusedError
+           job.rejected rows: 1 -> [(10, {'reason': 'RefusalRefusedError', 'job_id': 'j1'})]
+
+    Read the middle and bottom rows together: **three** candidates were
+    refused and the trail named **one** of them.  And the top row is
+    worse: the refused head left NO trace at all in the queue's own
+    trail, because a healthy job was handed out instead and the
+    rejection was never booked.
+
+    So a host reading the queue's trail cannot tell "the queue skipped
+    a refused job" from "the queue never looked at it" -- the very
+    distinction the registry's `checked` event exists to make (§8).  The
+    registry's trail *does* carry the truth; the queue's own trail does
+    not.
+
+    The guard named ``test_every_refused_candidate_books_a_rejected_row``
+    claims the stronger property and does not hold it: it asserts
+    ``assertIn("job.rejected", kinds)``, which one row satisfies.  A
+    guard whose NAME says "every" must count them.
+
+    What the trail must now say, in both shapes:
+
+    * a candidate the gate refused is named -- **who** was refused and
+      **why**;
+    * and the rows are per-candidate: N refused candidates, N rows.
+    """
+
+    def setUp(self):
+        self.registry = RefusalHoldRegistry()
+        self.gate = RefusalHoldQueueGate(self.registry)
+
+    def _queue(self, job_ids, task="dispatch"):
+        queue = JobQueue(refusal_gate=self.gate)
+        for index, job_id in enumerate(job_ids):
+            queue.enqueue(job_id, "q", task, DIGEST, index + 1)
+        return queue
+
+    def _rejected(self, queue):
+        return [
+            row for row in queue.audit_log() if row["kind"] == "job.rejected"
+        ]
+
+    def test_a_skipped_candidate_is_named_in_the_queue_trail(self):
+        """The defect: a skipped head left NO row in the queue's trail."""
+        queue = self._queue(["j1", "j2"])
+        self.gate.record_queue("j1", "dispatch", row=make_row())
+        got = queue.dequeue("worker-1", "q", 10)
+        self.assertEqual(got.job_id, "j2", "the healthy job was not handed out")
+        rejected = self._rejected(queue)
+        self.assertEqual(
+            [row["detail"].get("job_id") for row in rejected],
+            ["j1"],
+            "the refused head left no trace in the queue's own trail",
+        )
+
+    def test_every_refused_candidate_is_named_not_just_the_first(self):
+        """N refused candidates, N rows -- not one row for the first."""
+        queue = self._queue(["j1", "j2", "j3"])
+        for job_id in ("j1", "j2", "j3"):
+            self.gate.record_queue(job_id, "dispatch", row=make_row())
+        with self.assertRaises(RefusalRefusedError):
+            queue.dequeue("worker-1", "q", 10)
+        rejected = self._rejected(queue)
+        self.assertEqual(
+            [row["detail"].get("job_id") for row in rejected],
+            ["j1", "j2", "j3"],
+            "the trail named one refused candidate out of three",
+        )
+
+    def test_the_rejected_row_names_the_reason_and_the_action(self):
+        """A row that says only "rejected" is not an audit trail.
+
+        The operator's question is "what was refused, and why".  So the
+        row names the job, the reason slug the gate gave, and the action
+        the refusal was about.
+        """
+        queue = self._queue(["j1", "j2"])
+        self.gate.record_queue("j1", "dispatch", row=make_row())
+        queue.dequeue("worker-1", "q", 10)
+        rejected = self._rejected(queue)
+        self.assertEqual(len(rejected), 1)
+        detail = rejected[0]["detail"]
+        self.assertEqual(detail.get("job_id"), "j1")
+        self.assertEqual(detail.get("reason"), "RefusalRefusedError")
+        self.assertEqual(
+            detail.get("action"),
+            "dispatch",
+            "the row does not name the action that was refused",
+        )
+
+    def test_the_refusal_slug_is_carried_not_just_the_class_name(self):
+        """The class name is not the reason.
+
+        ``RefusalRefusedError`` is the *shape* of the refusal; the
+        *slug* says which condition produced it
+        (``blocked_by_refusal``, ``blocked_store_unreadable``, ...).
+        The class name is the same for all of them, so a trail built
+        from the class name alone cannot tell a recorded refusal from
+        an unreadable store.
+        """
+        queue = self._queue(["j1", "j2"])
+        self.gate.record_queue("j1", "dispatch", row=make_row())
+        queue.dequeue("worker-1", "q", 10)
+        detail = self._rejected(queue)[0]["detail"]
+        self.assertEqual(
+            detail.get("refusal_reason"),
+            "blocked_by_refusal",
+            "the trail does not say WHICH condition refused the candidate",
+        )
+
+    def test_the_trail_and_the_registry_trail_agree_on_the_count(self):
+        """Two trails, one truth: they must not disagree.
+
+        The registry books one ``checked`` event per candidate (§8).  The
+        queue's own trail books one ``job.rejected`` row per REFUSED
+        candidate.  So the number of rejected rows must equal the number
+        of the registry's blocked checks -- no more, no fewer.
+        """
+        queue = self._queue(["j1", "j2", "j3"])
+        for job_id in ("j1", "j2"):
+            self.gate.record_queue(job_id, "dispatch", row=make_row())
+        queue.dequeue("worker-1", "q", 10)
+        blocked_checks = [
+            event for event in self.registry.events()
+            if event["kind"] == "checked" and event["blocked"]
+        ]
+        self.assertEqual(len(blocked_checks), 2)
+        self.assertEqual(
+            len(self._rejected(queue)),
+            len(blocked_checks),
+            "the two trails disagree about how many candidates were refused",
+        )
+
+    def test_an_allowed_candidate_books_no_rejected_row(self):
+        """The control: the trail does not invent refusals."""
+        queue = self._queue(["j1"])
+        queue.dequeue("worker-1", "q", 10)
+        self.assertEqual(self._rejected(queue), [])
+        kinds = [row["kind"] for row in queue.audit_log()]
+        self.assertIn("job.dequeued", kinds)
+
+    def test_a_broken_gate_books_no_rejected_row(self):
+        """A broken gate is not a refusal -- it must not be recorded as one.
+
+        A broken gate fails the whole call; it refuses nothing in
+        particular.  Booking a ``job.rejected`` row for it would put a
+        refusal in the trail that never happened.
+        """
+        class _Broken:
+            def require_queue_allowed(self, job_id, action, *, now=None):
+                raise RuntimeError("the gate cannot answer")
+
+        queue = JobQueue(refusal_gate=_Broken())
+        for index, job_id in enumerate(["j1", "j2"]):
+            queue.enqueue(job_id, "q", "dispatch", DIGEST, index + 1)
+        with self.assertRaises(RuntimeError):
+            queue.dequeue("worker-1", "q", 10)
+        self.assertEqual(self._rejected(queue), [])
+
+    def test_the_rejected_rows_come_before_the_hand_out(self):
+        """The trail is chronological: the refusals, then the hand-out."""
+        queue = self._queue(["j1", "j2"])
+        self.gate.record_queue("j1", "dispatch", row=make_row())
+        queue.dequeue("worker-1", "q", 10)
+        kinds = [row["kind"] for row in queue.audit_log()]
+        self.assertLess(
+            kinds.index("job.rejected"),
+            kinds.index("job.dequeued"),
+            "the trail shows the hand-out before the refusal that caused it",
+        )
+
+    def test_the_rejected_row_books_the_same_seq_as_the_call(self):
+        """One call, one seq -- and the refusals are booked under it."""
+        queue = self._queue(["j1", "j2"])
+        self.gate.record_queue("j1", "dispatch", row=make_row())
+        queue.dequeue("worker-1", "q", 10)
+        rejected = self._rejected(queue)
+        self.assertEqual(len(rejected), 1)
+        self.assertEqual(
+            rejected[0]["seq"],
+            10,
+            "the rejection was booked under a different seq than the call",
+        )
+
+    def test_the_rejected_row_carries_no_payload(self):
+        """The audit boundary still holds: no payload crosses it."""
+        queue = self._queue(["j1", "j2"])
+        self.gate.record_queue("j1", "dispatch", row=make_row())
+        queue.dequeue("worker-1", "q", 10)
+        detail = self._rejected(queue)[0]["detail"]
+        for banned in ("payload", "payload_bytes", "value", "raw"):
+            self.assertNotIn(banned, detail)
+
+    def test_a_malformed_identity_is_audited_as_a_refusal_not_a_hand_out(self):
+        """A malformed identity must not vanish from the trail.
+
+        A job whose task name cannot become a hold key (it carries a
+        colon) is refused by the gate with ``blocked_key_invalid``.  The
+        job cannot be handed out -- and the trail must say so, naming
+        the job, rather than leaving no trace at all.
+        """
+        queue = JobQueue(refusal_gate=self.gate)
+        queue.enqueue("j1", "q", "ns:op", DIGEST, 1)
+        queue.enqueue("j2", "q", "dispatch", DIGEST, 2)
+        got = queue.dequeue("worker-1", "q", 10)
+        self.assertEqual(got.job_id, "j2")
+        rejected = self._rejected(queue)
+        self.assertEqual(
+            [row["detail"].get("job_id") for row in rejected],
+            ["j1"],
+            "the malformed job left no trace in the queue's trail",
+        )
+        self.assertEqual(
+            rejected[0]["detail"].get("refusal_reason"),
+            "blocked_key_invalid",
+        )
+        self.assertEqual(queue.job("j1").state, "ready")
+
+
 if __name__ == "__main__":
     unittest.main()

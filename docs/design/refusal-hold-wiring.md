@@ -1984,7 +1984,7 @@ Twelve new guards in
 | `test_the_refused_candidate_is_still_ready_and_still_eligible` | the skipped job is not consumed -- still `ready`, no worker, no attempt |
 | `test_the_refused_candidate_is_asked_about_first` | the queue's order is kept: the head is asked about first |
 | `test_every_refused_candidate_raises_and_hands_nothing_out` | nothing is handed out when nothing is allowed |
-| `test_every_refused_candidate_books_a_rejected_row` | the trail records the refusal, not a hand-out |
+| `test_every_refused_candidate_books_a_rejected_row` | the trail records the refusal, not a hand-out — **AMENDED 2026-11-24, see §17.1: this guard asserted a predicate, not a count, so it could not see the under-count** |
 | `test_a_broken_gate_is_NOT_skipped` | a broken gate fails the whole call -- **not** skipped |
 | `test_a_gate_without_the_required_method_is_NOT_skipped` | an unusable gate is refused, not ignored and not skipped |
 | `test_an_unreadable_store_hands_out_nothing` | the hold's fail-closed direction survives the skip |
@@ -2000,7 +2000,7 @@ Twelve new guards in
 | M1 revert to head-only (the §15 defect) | **KILLED** | 5 guards |
 | M2 skip a **broken** gate as well (fail-open) | **KILLED** | `test_a_broken_gate_is_NOT_skipped` |
 | M3 never ask the gate at all | **KILLED** | 17 guards |
-| M4 do not book the `job.rejected` row | **KILLED** | `test_every_refused_candidate_books_a_rejected_row` |
+| M4 do not book the `job.rejected` row | **KILLED** | `test_every_refused_candidate_books_a_rejected_row` — **AMENDED 2026-11-24, see §17.3: this guard is a predicate, so it is killed by §17's count guards, not by this one** |
 | M5 reverse the candidate order | **KILLED** | 3 guards |
 
 **M2 needed a second pass, and that is worth recording.**  The first
@@ -2043,3 +2043,190 @@ raise".
   **withdrawn**.  §15's fix -- the gate is asked inside the queue's own
   lock, before the write -- stands; only the *scope* of the question
   changed.
+
+## 17. AMENDED 2026-11-24 — the queue's own trail named one refused candidate out of three
+
+### 17.1 The defect
+
+§16 landed the skip: the gate is asked about the candidates in the
+queue's own order, and the first one it **allows** is handed out.  That
+fix is correct, and it stands.  But it left the **queue's own audit
+trail** naming only the **first** refused candidate -- and naming
+**none at all** when a later candidate was allowed.
+
+Measured 2026-11-24, on the tree as §16 left it:
+
+```
+--- ONE refused head + 1 healthy -> handed j2
+   job.rejected rows: 0 -> []
+--- BOTH refused -> raised RefusalRefusedError
+   job.rejected rows: 1 -> [(10, {'reason': 'RefusalRefusedError', 'job_id': 'j1'})]
+--- THREE refused -> raised RefusalRefusedError
+   job.rejected rows: 1 -> [(10, {'reason': 'RefusalRefusedError', 'job_id': 'j1'})]
+```
+
+Read the middle and bottom rows together: **three** candidates were
+refused and the trail named **one** of them.  And the top row is worse
+than an under-count -- the refused head left **no trace at all** in
+the queue's trail, because a healthy job was handed out instead and
+the rejection was never booked.
+
+So a host reading the queue's trail could not tell "the queue skipped a
+refused job" from "the queue never looked at it".  That is the very
+distinction §8's `checked` event exists to make on the **registry's**
+side; the queue's own trail did not carry it.
+
+**Two things had to be true of a refusal row, and only one was.**
+
+1. *That* a candidate was refused.  -- only true for the first one.
+2. *Which* candidate, *what* action, and *why*.  -- true, but the row
+   carried only the error's **class name** and the job id.
+
+The second point is its own defect, and §16.2's own wording created
+it: the row was booked as `{"reason": type(first_refusal).__name__,
+"job_id": blocked[0]}`.  The class name is `RefusalRefusedError` for
+**every** refusal the hold can produce -- a recorded refusal
+(`blocked_by_refusal`), an unreadable store
+(`blocked_store_unreadable`), a tampered row
+(`blocked_row_tampered`), a row of the wrong family
+(`blocked_row_invalid`), and a malformed identity
+(`blocked_key_invalid`).  The hold's **reason slug** is what
+distinguishes them, and the trail threw it away.  A trail built from
+the class name alone cannot tell a policy refusal from a gate that
+could not read its own store -- which are opposite events for an
+operator.
+
+**And the guard that claimed to hold this down did not.**  §16.3's
+table lists
+
+> `test_every_refused_candidate_books_a_rejected_row` | the trail
+> records the refusal, not a hand-out
+
+and the guard's body was
+
+```python
+kinds = [row["kind"] for row in queue.audit_log()]
+self.assertNotIn("job.dequeued", kinds)
+self.assertIn("job.rejected", kinds)
+```
+
+`assertIn` is satisfied by **one** row.  A guard whose NAME says
+"every" must **count** them.  The guard passed, and the property it
+claimed was false.  That is the §16.3 M2 lesson in a third costume: a
+guard that asserts a *predicate* instead of a *count* cannot see an
+under-count.
+
+### 17.2 The fix
+
+Every refused candidate now books **its own** `job.rejected` row, in
+the queue's own trail, naming **who** was refused, **what** action,
+and **why**:
+
+```python
+self._reject_refusal(seq, candidate, candidate_action, exc)
+```
+
+```python
+{
+    "reason": type(exc).__name__,      # the SHAPE of the refusal
+    "refusal_reason": slug,            # the hold's reason SLUG
+    "job_id": job_id,                  # WHO was refused
+    "action": action,                  # WHAT was refused
+}
+```
+
+`job.rejected` is an **existing** kind -- no new kind is added, and the
+version and schema pins are unchanged.
+
+Three properties follow, and each is a guard:
+
+* **Per candidate.**  N refused candidates, N rows, in the queue's own
+  order.  The count of rejected rows now equals the count of the
+  registry's blocked `checked` events -- the two trails agree on how
+  many candidates were refused.
+* **Per refusal, not per call.**  A refused candidate that is *skipped*
+  (a healthy job behind it is handed out) is audited too.  Before the
+  fix, a skip booked **nothing**; now it books its row.
+* **The slug is carried.**  `refusal_reason` is the hold's slug
+  (`blocked_by_refusal`, `blocked_store_unreadable`,
+  `blocked_key_invalid`, ...), so the trail says *which* condition
+  refused the candidate, not merely that something did.  The slug is
+  optional: a host that re-implements the gate's contract may raise an
+  error carrying only the class name, and then the slug is `None` --
+  the row still says *that* the candidate was refused.
+
+**A broken gate books no row.**  A broken gate fails the whole call
+(§16.2) and refuses nothing in particular; booking a `job.rejected`
+row for it would put a refusal in the trail that never happened.
+The row is booked in the **refusal** branch only, so a broken gate
+leaves no `job.rejected` row.
+
+**The all-refused path books nothing more.**  Before the fix, the
+all-refused path booked one row naming `blocked[0]`.  Now every
+refused candidate has already booked its own row on the way through,
+so that path books no additional row -- a second row would
+double-count the first candidate's refusal.
+
+### 17.3 The guards
+
+Eleven new guards in `RefusedCandidatesAreAllAuditedTests`
+(`tests/test_refusal_hold_queue_wiring.py`):
+
+| guard | what it pins |
+|---|---|
+| `test_a_skipped_candidate_is_named_in_the_queue_trail` | the defect: a skipped head leaves **no** row today; now it leaves one |
+| `test_every_refused_candidate_is_named_not_just_the_first` | N refused candidates, N rows -- the count, not a predicate |
+| `test_the_rejected_row_names_the_reason_and_the_action` | the row names the job, the reason and the **action** |
+| `test_the_refusal_slug_is_carried_not_just_the_class_name` | `refusal_reason` is the hold's slug, not the class name |
+| `test_the_trail_and_the_registry_trail_agree_on_the_count` | the two trails disagree about neither the count nor the truth |
+| `test_an_allowed_candidate_books_no_rejected_row` | the control: the trail does not invent refusals |
+| `test_a_broken_gate_books_no_rejected_row` | a broken gate is not recorded as a refusal |
+| `test_the_rejected_rows_come_before_the_hand_out` | the trail is chronological |
+| `test_the_rejected_row_books_the_same_seq_as_the_call` | one call, one seq -- the refusals are booked under it |
+| `test_the_rejected_row_carries_no_payload` | the audit boundary still holds |
+| `test_a_malformed_identity_is_audited_as_a_refusal_not_a_hand_out` | a job whose task name cannot become a hold key is **named**, not vanished |
+
+**The mutation run.**  Five mutants planted and re-run; all five killed:
+
+| mutant | verdict | killed by |
+|---|---|---|
+| M1 never book the per-candidate rejection row | **KILLED** | 7 guards |
+| M2 book only the FIRST refusal (the old behaviour) | **KILLED** | 2 guards |
+| M3 drop the `refusal_reason` slug | **KILLED** | 2 guards |
+| M4 drop the `action` from the row | **KILLED** | 1 guard |
+| M5 double-book the all-refused path | **KILLED** | 1 guard |
+
+**M2 is the one worth recording.**  It restores §16's exact
+behaviour -- book the first refusal only -- and it is killed by
+**two** guards, both of which assert a **count**.  That is the point:
+the §16 guard asserted a *predicate* (`assertIn`), so it could not see
+the under-count, and M2 is exactly the mutant it was blind to.  A
+guard that asserts "the kind is present" cannot distinguish one row
+from three.
+
+### 17.4 What this does NOT change
+
+* `job_queue.py`'s version and schema pins are unchanged
+  (`job-queue.v1` / `northstar.job-queue.v1`), and **no audit kind is
+  added or changed**.  `job.rejected` is an existing kind.
+* `dequeue()`'s signature is unchanged, and every existing call site is
+  unchanged.
+* The **skip** is unchanged: the candidates are still asked about in
+  the queue's own order, and the first one the gate allows is still the
+  one handed out.  §16 stands.
+* The **broken gate** is still not skipped and still fails the whole
+  call, closed (§16.2).  The only change is that it books no row.
+* The gate is still asked **once per candidate**; the trail now books
+  one row per refused candidate, which is the same number.
+* `ack()`, `dead()`, `retry()` and `retry_allowed()` are unchanged,
+  including the "one check per job" count §10 established.  The rows
+  this section adds are booked by `dequeue()` only.
+* The lease side is unchanged: `claim()`, `fail()`, `release()` and
+  `reap()` ask exactly what they asked before, and the mirror's
+  `job.rejected` row (which §16.2 measured) is still booked by the
+  queue's own `dequeue()`.
+* `retry()`'s refusal is still **not** booked in the queue's trail.
+  That is a separate gap, and it is left open on purpose: booking a
+  row there changes the "one check per job" audit count §10 pinned, and
+  it belongs with the lease side's own refused-write rows (§14's
+  subject layer), not with this fix.

@@ -24,7 +24,10 @@ Public API:
     candidate's action **skips** that candidate -- a refusal is scoped
     to one (job, action) pair, so it must not deny the queue to every
     other job -- and when every candidate is refused the call raises
-    the gate's own refusal error and hands nothing out.
+    the gate's own refusal error and hands nothing out.  Every refused
+    candidate books its own ``job.rejected`` row, naming the job, the
+    action and the hold's reason slug, so the trail says which
+    candidates were refused rather than only that some were.
   - ``ack(job_id, seq)`` -> frozen ``AckRecord``: terminal success.
   - ``dead(job_id, seq)`` -> frozen ``DeadRecord``: terminal **failure**.
     The job is withdrawn and never handed out again.  A recorded
@@ -866,6 +869,47 @@ class JobQueue:
         self._audit.append(row)
         return row
 
+    def _reject_refusal(
+        self,
+        seq: int,
+        job_id: str,
+        action: str,
+        exc: BaseException,
+    ) -> Dict[str, Any]:
+        """Book ONE refused candidate in the queue's own audit trail.
+
+        ``job.rejected`` is an existing kind -- no new kind is added.
+
+        The row names **who** was refused (the job id), **what** was
+        refused (the action), and **why**: ``reason`` is the error's
+        class name, and ``refusal_reason`` is the hold's reason *slug*
+        (``blocked_by_refusal``, ``blocked_store_unreadable``,
+        ``blocked_key_invalid``, ...).  The two are not the same thing:
+        the class name is the same for every refusal, so a trail built
+        from the class name alone cannot tell a recorded refusal from
+        a gate that could not read its own store.
+
+        The slug is optional: a host that re-implements the gate's
+        contract may raise an error that carries only the class name.
+        Then the slug is ``None`` -- the row still says *that* the
+        candidate was refused.
+        """
+        slug = getattr(exc, "reason", None)
+        if not isinstance(slug, str):
+            slug = None
+        row = job_queue_audit_event(
+            KIND_REJECTED,
+            {
+                "reason": type(exc).__name__,
+                "refusal_reason": slug,
+                "job_id": job_id,
+                "action": action,
+            },
+            seq,
+        )
+        self._audit.append(row)
+        return row
+
     # -- pure views --------------------------------------------------------
 
     def job(self, job_id: str) -> Optional[JobView]:
@@ -1077,6 +1121,15 @@ class JobQueue:
         :meth:`_require_refusal_allows_dequeue` for the measurement that
         forced this.  When EVERY candidate is refused, the call raises
         the gate's own refusal error and nothing is handed out.
+
+        **Every refused candidate is audited, in this trail.**  Each one
+        books its own ``job.rejected`` row naming the job, the action
+        and the hold's reason slug -- including a candidate that was
+        *skipped* because a healthy job behind it was handed out.  The
+        registry books one ``checked`` event per candidate (§8); this
+        trail books one row per **refused** candidate, so the two
+        trails agree on how many candidates were refused.  A broken gate
+        is not a refusal and books no row.
         """
         with self._lock:
             self._claim(seq)
@@ -1103,25 +1156,40 @@ class JobQueue:
             # measurement that forced this, and for why the skip is safe
             # here in a way it is NOT safe in the mirror's case.
             first_refusal: Optional[BaseException] = None
-            blocked: list = []
             job_id = None
             entry = None
             for candidate in eligible:
                 candidate_entry = self._entries[candidate]
+                candidate_action = str(candidate_entry["task"])
                 try:
                     self._require_refusal_allows_dequeue(
-                        candidate, str(candidate_entry["task"]), now
+                        candidate, candidate_action, now
                     )
                 except Exception as exc:
                     if not _is_refusal(exc):
                         # Not a refusal: the gate itself is broken (or
                         # unusable).  That is NOT a per-job condition,
                         # so it is NOT skipped -- it fails the whole
-                        # call, closed.
+                        # call, closed.  And it is NOT recorded as a
+                        # refusal either: a broken gate refuses
+                        # nothing in particular, so a ``job.rejected``
+                        # row would put a refusal in the trail that
+                        # never happened.
                         raise
                     if first_refusal is None:
                         first_refusal = exc
-                    blocked.append(candidate)
+                    # AUDIT the skip, per candidate.  The registry
+                    # books a ``checked`` event for every candidate
+                    # (§8), but the queue's OWN trail had nothing at
+                    # all for a candidate that was passed over -- so a
+                    # host reading this trail could not tell "the
+                    # queue skipped a refused job" from "the queue
+                    # never looked at it".  Every refused candidate is
+                    # named here, so the trail and the registry's
+                    # trail agree on HOW MANY candidates were refused.
+                    self._reject_refusal(
+                        seq, candidate, candidate_action, exc
+                    )
                     continue
                 job_id = candidate
                 entry = candidate_entry
@@ -1133,11 +1201,12 @@ class JobQueue:
                 #
                 # The gate's OWN refusal error is raised, so the host
                 # catches it with the vocabulary it already knows.
+                #
+                # The refusals are ALREADY booked -- one row per
+                # refused candidate, above -- so this path books
+                # nothing more: a second row would double-count the
+                # first candidate's refusal.
                 assert first_refusal is not None
-                self._reject(
-                    seq, type(first_refusal).__name__,
-                    blocked[0] if blocked else "",
-                )
                 raise first_refusal
             entry["state"] = _STATE_RESERVED
             entry["worker_id"] = worker_id
