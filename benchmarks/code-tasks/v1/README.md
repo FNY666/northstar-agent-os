@@ -87,3 +87,24 @@ after installation into a separate directory. Its format follows the
 and uses [Python package resources](https://docs.python.org/3/library/importlib.resources.html).
 The complete task pack requires Python 3.11+ and Node 24; no npm install or
 package-index download is needed.
+
+## Measuring a real model against this pack
+
+The pack freezes *what* is measured. `scripts/run-code-task-baseline.py` freezes
+*how*: it records the model, the provider endpoint, the sandbox profile, the
+turn budget and the pack fingerprint in one receipt, runs every task, evaluates
+the delivered patch, and reports the outcome.
+
+    # A real model, against a live endpoint:
+    python3 scripts/run-code-task-baseline.py       --provider anthropic --model claude-sonnet-4-5       --output /tmp/baseline.json
+
+    # The same measurement, offline and deterministic:
+    python3 scripts/run-code-task-baseline.py       --provider scripted --script plan.json       --output /tmp/baseline.json
+
+The offline gate needs 20 of the 24 tasks to pass. The receipt reports
+`release_eligible` only when the measured pass count reaches that gate, and a run
+without provider credentials is recorded as `real_model_evaluated: false` rather
+than as a measurement -- a missing credential is never dressed up as a score.
+
+The runtime never sees the pack's hidden checks: host checks run in their own
+clean environment, and the provider credential is given only to the model call.
