@@ -60,9 +60,14 @@ class FrozenSweBenchSampleTests(unittest.TestCase):
         self.assertEqual(len(set(ids)), len(ids))
         for task in self.sample["tasks"]:
             with self.subTest(task=task["instance_id"]):
-                self.assertGreater(task["fail_to_pass_count"], 0)
-                self.assertGreater(task["pass_to_pass_count"], 0)
+                self.assertGreater(len(task["fail_to_pass"]), 0)
+                # PASS_TO_PASS is empty for some instances upstream; only
+                # FAIL_TO_PASS is required to be present.
+                self.assertIsInstance(task["pass_to_pass"], list)
                 self.assertEqual(len(task["fail_to_pass_sha256"]), 64)
+                # The upstream harness needs the raw test names, not just a
+                # fingerprint, so the sample has to carry both.
+                self.assertTrue(all(isinstance(t, str) for t in task["fail_to_pass"]))
                 self.assertEqual(len(task["problem_statement_sha256"]), 64)
                 self.assertEqual(len(task["base_commit"]), 40)
 

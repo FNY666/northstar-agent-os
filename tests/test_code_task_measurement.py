@@ -97,7 +97,13 @@ class RecordedMeasurementTests(unittest.TestCase):
         self.assertTrue(records, "no recorded measurement is present")
         for record in records:
             with self.subTest(record=record.get("schema")):
-                self.assertEqual(record["schema"], "northstar.code-task-measurement.v1")
+                self.assertIn(
+                    record["schema"],
+                    (
+                        "northstar.code-task-measurement.v1",
+                        "northstar.code-task-measurement-repeated.v1",
+                    ),
+                )
                 self.assertEqual(record["measurement"], "real_model_baseline")
                 self.assertTrue(record["real_model_evaluated"])
 
@@ -158,3 +164,50 @@ class RecordedMeasurementTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RepeatedMeasurementTests(unittest.TestCase):
+    """The lower of two runs is the number that counts."""
+
+    RECORD = (
+        Path(__file__).resolve().parent.parent
+        / "benchmarks" / "code-tasks" / "v1" / "measurements"
+        / "2026-11-24-gpt-6-astra-repeated.json"
+    )
+
+    def setUp(self) -> None:
+        self.record = json.loads(self.RECORD.read_text(encoding="utf-8"))
+
+    def test_the_recorded_number_is_the_lower_of_the_runs(self):
+        counts = self.record["summary"]["run_passed"]
+        self.assertGreaterEqual(len(counts), 2)
+        self.assertEqual(self.record["summary"]["passed"], min(counts))
+
+    def test_a_higher_run_does_not_raise_the_recorded_number(self):
+        self.assertEqual(
+            self.record["release_gate"]["passed"],
+            self.record["summary"]["lower_of_runs"],
+        )
+        self.assertTrue(
+            self.record["release_gate"]["eligible"]
+            == (self.record["summary"]["lower_of_runs"] >= self.record["release_gate"]["required_tasks"])
+        )
+
+    def test_both_runs_are_kept_so_the_fold_can_be_checked(self):
+        self.assertEqual(len(self.record["runs"]), self.record["summary"]["runs"])
+        for run in self.record["runs"]:
+            self.assertIn("passed", run)
+            self.assertIn("tasks", run)
+
+    def test_the_runs_measured_the_same_thing(self):
+        self.assertTrue(self.record["conditions_identical_across_runs"])
+
+    def test_tasks_that_differed_between_runs_are_named(self):
+        unstable = self.record["unstable_tasks"]
+        self.assertTrue(unstable)
+        for entry in unstable:
+            self.assertIn("task_id", entry)
+            self.assertGreater(len(set(entry["outcomes"])), 1)
+
+    def test_a_single_run_cannot_be_reported_as_a_repeated_measurement(self):
+        self.assertGreater(self.record["summary"]["runs"], 1)

@@ -383,9 +383,9 @@ M0/M1 先交付独立的编程安全脚本入口：攻击载荷仅作用于临�
 
 1. 固定真实模型、版本、沙箱、网络、预算和容器摘要；**已落地** —— `scripts/run-code-task-baseline.py` 把这些条件写进每份收据，并拒绝把没有凭据的运行记成测量。
 2. 用当前 `northstar code` 在已经冻结的 24 题上测出真实模型基线；**已落地** —— 真实模型在 24 题上实测 20/24，门槛 20/24，记录见 `benchmarks/code-tasks/v1/measurements/`。
-3. 冻结 50 题 SWE-bench 样本和运行环境；**样本已冻结** —— `benchmarks/swe-bench/verified-50.json` 锁定 50 个实例、基准提交、评测测试指纹与容器镜像 digest；**运行环境未落地** —— 官方环境镜像只有 `linux/amd64`，arm64 主机无法运行，评测执行器还没写。
+3. 冻结 50 题 SWE-bench 样本和运行环境；**已落地** —— `benchmarks/swe-bench/verified-50.json` 锁定 50 个实例、基准提交、评测测试与容器镜像 manifest digest；`scripts/run_swe_bench_eval.py` 直接复用上游 `swebench.harness` 判定，不自研评测逻辑。官方环境镜像只有 `linux/amd64`，在 arm64 主机经 QEMU 用户态模拟运行，已核对三条判定路径：gold patch→`RESOLVED_FULL`、语义错误补丁→`RESOLVED_NO`（补丁能应用但测试仍失败）、无补丁→`no_patch_delivered`。
 4. 补齐阶段恢复与未知副作用 reconcile；**已落地** —— 见 `components/northstar-agent-runtime/code_resume.py`。
-5. 达到 24 题离线门槛后再扩展长任务和 Labs。
+5. 达到 24 题离线门槛后再扩展长任务和 Labs；**离线门槛已按「两次取低」达成** —— 同一条件下运行两次得 20/24 与 22/24（条件逐字段比对确认一致），发布基线取较低值 20/24，门槛 20/24；5 题两次结果不同，属模型非确定性，已在记录中标明。
 
 这五步同步保留编程攻防双轨：每个有害样本配一个有效的良性对照，验证证据由宿主检查，不以模型自述或平均安全分替代硬门。来源雷达与本轮候选裁决见 [2026-10-17 生态研究](../research/2026-10-17/00-ecosystem-synthesis.md)。
 

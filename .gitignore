@@ -18,3 +18,6 @@ dist/
 .DS_Store
 .vscode/
 .idea/
+
+# Upstream SWE-bench harness logs
+logs/
