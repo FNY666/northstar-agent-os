@@ -361,6 +361,21 @@ class RunHappyPathTests(unittest.TestCase):
         self.assertIn("sandbox", out)
         self.assertIn("process", out)
 
+    def test_doctor_does_not_claim_landlock_tcp_on_abi2(self):
+        import doctor
+
+        args = doctor.build_parser().parse_args(["--sandbox", "process"])
+        findings = []
+        with mock.patch(
+            "tools.sandbox.probe_landlock",
+            return_value={"supported": True, "abi": 2, "detail": "Landlock ABI v2"},
+        ):
+            doctor._check_landlock(args, findings, "process")
+        finding = next(item for item in findings if item.name == "landlock")
+        self.assertEqual(finding.level, "ok", "path enforcement remains available")
+        self.assertIn("TCP rights unavailable", finding.message)
+        self.assertNotIn("TCP denied by Landlock", finding.message)
+
     def test_doctor_fails_bwrap_when_default_capability_drop_probe_fails(self):
         import doctor
         from tools.os_sandbox import SandboxCapabilities

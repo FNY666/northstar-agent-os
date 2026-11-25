@@ -6,6 +6,7 @@ for one.
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import subprocess
@@ -46,6 +47,10 @@ class _CapturingHandler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
 
+@unittest.skipUnless(
+    importlib.util.find_spec("openai") is not None,
+    "requires the optional openai SDK (runtime[openai])",
+)
 class ProviderTemperatureTests(unittest.TestCase):
     def _run(self, extra_args: list[str]) -> list[dict]:
         handler = type("Handler", (_CapturingHandler,), {"payloads": []})

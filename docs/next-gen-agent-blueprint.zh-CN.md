@@ -220,7 +220,7 @@ Labs 包含攻击语料、模拟探针、外部基准适配器、研究性防御
 
 迁移依据是从 CLI/SDK 出发的静态与运行时调用图。任何模块在移动前都必须分类为 Core、Labs、兼容层或待审查；待审查不等于可删除。
 
-首轮可复现静态清单见 [`architecture/runtime-module-inventory.md`](architecture/runtime-module-inventory.md)。它识别出 1,569 个模块，其中 178 个被当前生产入口静态触达，1,391 个留待人工复核，另有 24 处动态导入。入口可达集合中已经混入行业、基准和研究模块，因此“可达”只表示当前存在耦合，不代表已经批准进入 Core。下一步必须结合离线任务运行时导入轨迹，为可达模块逐个给出 Core、Labs、兼容层或待审查裁决。
+首轮可复现静态清单见 [`architecture/runtime-module-inventory.md`](architecture/runtime-module-inventory.md)。首轮快照识别出 1,569 个模块，其中 178 个被当前生产入口静态触达，1,391 个留待人工复核，另有 24 处动态导入。入口可达集合中已经混入行业、基准和研究模块，因此“可达”只表示当前存在耦合，不代表已经批准进入 Core。2026-11-25 的复算为 1,579 个模块、189 个静态可达、1,390 个待人工复核和 29 个动态加载站点；盘点器覆盖常见 importlib / builtins 别名及文件位置加载，并新增显式运行时 import trace 工具。一次离线 `northstar bench` trace 发现 `bash_parser.py` 经 `spec_from_file_location` 加载，静态图已纳入；仍需对多个产品路径采集 trace，再逐个给出 Core、Labs、兼容层或待审查裁决。
 
 ---
 
