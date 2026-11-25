@@ -35,12 +35,9 @@ from dataclasses import dataclass, asdict
 from typing import Any, Dict, List, Optional, Tuple
 
 try:  # the single canonicalizer
-    from canonical_json import jcs_canonical_json
-except ImportError:  # pragma: no cover - fallback for standalone import
-    import json
-
-    def jcs_canonical_json(obj: Any) -> bytes:  # type: ignore[no-redef]
-        return json.dumps(obj, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    import canonical_json as _cj  # type: ignore
+except Exception:  # pragma: no cover - fallback for standalone import
+    _cj = None  # type: ignore
 
 
 _MODULE_VERSION = "graphql-gateway.v1"
@@ -50,6 +47,16 @@ _AUDIT_TYPE = "audit.ndjson/1"
 # SDL / id caps.
 _MAX_TYPE_DEFS = 65536
 _MAX_ID_LEN = 128
+
+#: Largest integer JCS pins exactly (RFC 8785 Appendix B note (1)):
+#: (-(2**53)+1) .. ((2**53)-1).  The house bound -- `job_queue.py`,
+#: `graph_database.py`, `status_page.py`, `zero_knowledge.py`,
+#: `ai_constitution.py`, `ai_interpretability.py`, `ai_perturbation.py`,
+#: `grant_pin_ledger.py` and `profiler.py` all use the same value.
+#: Above it JCS serializes an IEEE-754 double (Appendix B note (2)), so
+#: 2**53 and 2**53+1 canonicalize to the SAME bytes and the digest
+#: stops pinning.
+_MAX_INT = 2 ** 53 - 1
 
 # GraphQL name shape: [_A-Za-z][_0-9A-Za-z]*
 _NAME_RE = re.compile(r"[_A-Za-z][_0-9A-Za-z]*")
@@ -134,6 +141,13 @@ def _check_seq_kind(seq: Any) -> None:
     # bool is an int subclass; reject it explicitly (house discipline).
     if isinstance(seq, bool) or not isinstance(seq, int) or seq <= 0:
         raise _reject("seq")
+    if seq > _MAX_INT:
+        # A seq above the safe range cannot be pinned: JCS serializes it
+        # as an IEEE-754 double, so 2**53 and 2**53+1 canonicalize to
+        # the same bytes and the record digest stops pinning the seq.
+        # Refuse it at the door -- a malformed SEQ consumes nothing and
+        # books nothing.
+        raise _reject("seq")
 
 
 def _check_id(value: Any, name: str) -> str:
@@ -169,12 +183,106 @@ def _check_digest(value: Any, name: str) -> str:
     return value
 
 
+def _refuse_unsafe_int(value: Any) -> None:
+    """Refuse an integer outside the safe range, anywhere in a payload.
+
+    ``canonical_json`` serializes an integer outside the safe range as an
+    IEEE-754 double (RFC 8785 Appendix B note (2)), so 2**53 and
+    2**53+1 canonicalize to the SAME bytes -- above the range the digest
+    stops pinning what it claims to pin.  The stdlib fallback already
+    refused such an integer; this makes the shipped path agree with it,
+    and extends the refusal to integers nested in lists and mappings.
+    """
+    if isinstance(value, bool):
+        return
+    if isinstance(value, int):
+        if abs(value) > _MAX_INT:
+            raise GraphQLGatewayError("integer outside safe range")
+        return
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            _refuse_unsafe_int(item)
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            _refuse_unsafe_int(key)
+            _refuse_unsafe_int(item)
+
+
+def _canonical(payload: Any) -> bytes:
+    """Canonical bytes for a pin payload, under either configuration.
+
+    The shipped path is RFC 8785 JCS.  The stdlib fallback is the
+    module's own tagged form -- deliberately a different string, but it
+    must agree about LEGALITY: a value one refuses must be refused by
+    both (RFC 8785 §3.2.2.3 requires a lone surrogate to terminate with
+    an error).
+    """
+    if _cj is not None:
+        _refuse_unsafe_int(payload)
+        try:
+            return _cj.jcs_canonical_json(payload)  # type: ignore
+        except ValueError as exc:
+            # `canonical_json.JcsError` is a ValueError, but NOT a
+            # `GraphQLGatewayError` -- so the module's own guards would
+            # be dead for it.  Translate it into this module's taxonomy.
+            raise GraphQLGatewayError(f"unencodable payload: {exc}") from exc
+
+    import json
+
+    def _tag(v: Any) -> Any:
+        if isinstance(v, bool):
+            return {"t": "bool", "v": v}
+        if isinstance(v, int):
+            if abs(v) > _MAX_INT:
+                raise GraphQLGatewayError("integer outside safe range")
+            return {"t": "int", "v": v}
+        if isinstance(v, float):
+            if v != v or v in (float("inf"), float("-inf")):
+                raise GraphQLGatewayError("non-finite float refused")
+            return {"t": "float", "v": repr(v)}
+        if isinstance(v, str):
+            for char in v:
+                code = ord(char)
+                if 0xD800 <= code <= 0xDFFF:
+                    raise GraphQLGatewayError(
+                        f"lone surrogate U+{code:04X} is not JCS-serializable"
+                    )
+            return {"t": "str", "v": v}
+        if isinstance(v, (list, tuple)):
+            return {"t": "list", "v": [_tag(i) for i in v]}
+        if isinstance(v, dict):
+            return {"t": "dict", "v": [[k, _tag(v[k])] for k in sorted(v)]}
+        if v is None:
+            return {"t": "null"}
+        raise GraphQLGatewayError(f"unencodable type: {type(v).__name__}")
+
+    return json.dumps(_tag(payload), sort_keys=True,
+                      separators=(",", ":")).encode("utf-8")
+
+
 def _digest(kind: str, payload: Any) -> str:
     h = hashlib.sha256()
     h.update(kind.encode("utf-8"))
     h.update(b"\x00")
-    h.update(jcs_canonical_json(payload))
+    h.update(_canonical(payload))
     return "sha256:" + h.hexdigest()
+
+
+def _verify_digest(digest: str, kind: str, payload: Any) -> bool:
+    """Does ``digest`` pin this payload?  Answer, never raise.
+
+    A record whose payload cannot be canonicalized (a lone surrogate, an
+    integer outside the safe range) is NOT intact -- the answer is
+    ``False``.  Recomputing the pin for such a record would raise the
+    canonicalizer's error out of a method whose whole job is to answer
+    a question about integrity.
+    """
+    try:
+        recomputed = _digest(kind, payload)
+    except GraphQLGatewayError:
+        return False
+    return digest == recomputed
 
 
 # ---------------------------------------------------------------------------
@@ -194,7 +302,7 @@ class SchemaRecord:
 
     def verify_digest(self) -> bool:
         payload = {k: v for k, v in asdict(self).items() if k != "digest"}
-        return self.digest == _digest("schema", payload)
+        return _verify_digest(self.digest, "schema", payload)
 
 
 @dataclass(frozen=True)
@@ -208,7 +316,7 @@ class ResolverRecord:
 
     def verify_digest(self) -> bool:
         payload = {k: v for k, v in asdict(self).items() if k != "digest"}
-        return self.digest == _digest("resolver", payload)
+        return _verify_digest(self.digest, "resolver", payload)
 
 
 @dataclass(frozen=True)
@@ -220,7 +328,7 @@ class FederationRecord:
 
     def verify_digest(self) -> bool:
         payload = {k: v for k, v in asdict(self).items() if k != "digest"}
-        return self.digest == _digest("federation", payload)
+        return _verify_digest(self.digest, "federation", payload)
 
 
 @dataclass(frozen=True)
@@ -233,7 +341,7 @@ class DefederationRecord:
 
     def verify_digest(self) -> bool:
         payload = {k: v for k, v in asdict(self).items() if k != "digest"}
-        return self.digest == _digest("defederation", payload)
+        return _verify_digest(self.digest, "defederation", payload)
 
 
 @dataclass(frozen=True)
@@ -253,7 +361,7 @@ class QueryPlan:
     def verify_digest(self) -> bool:
         payload = {k: v for k, v in asdict(self).items() if k != "digest"}
         # asdict() freezes tuples into lists; pin the canonical form.
-        return self.digest == _digest("plan", payload)
+        return _verify_digest(self.digest, "plan", payload)
 
 
 # ---------------------------------------------------------------------------

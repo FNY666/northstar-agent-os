@@ -231,3 +231,199 @@ def test_main_self_check():
     assert proc.returncode == 0, proc.stderr
     assert "graphql-gateway OK" in proc.stdout
     assert main() == 0
+
+
+# ---------------------------------------------------------------------------
+# The digest-pin defects (B173 slice, measured 2026-11-25)
+#
+# `graphql_gateway.py` carried the same four defects of the family that
+# `graph_database.py`, `status_page.py`, `zero_knowledge.py`,
+# `ai_constitution.py`, `ai_interpretability.py` and `ai_perturbation.py`
+# carried before their slices.
+#
+# NOTE the per-module shape: this module has NO `_pin`; its digest
+# helper is `_digest(kind, payload)`, and the fallback was a bare
+# `json.dumps` shim with no surrogate check.  `plan()` is a **pure read
+# view**: it consumes no seq and books no row of its own, so "no
+# rejected row" is the CORRECT shape there, not a defect.  What fails
+# open in `plan()` is the seq: `planned_at_seq` rides in the plan
+# payload, and above the safe range the digest stops pinning it.
+
+
+SURROGATE = "\ud800"
+
+
+def test_a_refusal_raises_the_modules_own_error_type():
+    """The module's own taxonomy, not the sibling helper's.
+
+    `JcsError` is a `ValueError`, so a caller guarding on
+    `except ValueError` would treat a refused mutation as a parse
+    error.  The module's error must be what escapes.
+    """
+    gw, _ = new_gw()
+    with pytest.raises(GraphQLGatewayError):
+        gw.plan(SURROGATE, 1)
+
+
+def test_the_shipped_path_and_the_fallback_agree_about_legality():
+    """Both configurations must refuse a lone surrogate.
+
+    They need not agree about the resulting digest bytes -- the
+    fallback's tagged form is deliberately its own string -- but a
+    value one refuses must be refused by both.  RFC 8785 §3.2.2.3
+    requires a compliant implementation to terminate with an error.
+    """
+    import graphql_gateway as gqm
+    saved = gqm._cj
+    try:
+        assert gqm._cj is not None, "the shipped path is not installed"
+
+        gqm._cj = saved
+        with pytest.raises(GraphQLGatewayError):
+            gqm._canonical([SURROGATE])
+
+        gqm._cj = None
+        with pytest.raises(GraphQLGatewayError):
+            gqm._canonical([SURROGATE])
+    finally:
+        gqm._cj = saved
+
+
+def test_both_configurations_accept_a_value_both_can_canonicalize():
+    """The control: the fallback must not refuse everything.
+
+    Without this, a fallback that refused every input would satisfy
+    the test above vacuously.
+    """
+    import graphql_gateway as gqm
+    saved = gqm._cj
+    try:
+        for cfg in (saved, None):
+            gqm._cj = cfg
+            assert gqm._canonical(["ordinary", 7, ["a"]])
+    finally:
+        gqm._cj = saved
+
+
+def test_a_seq_above_the_safe_range_is_refused():
+    """A seq that cannot be pinned must not be accepted.
+
+    Without this bound, 2**53 and 2**53+1 canonicalize to the same
+    bytes, so the digest stops pinning the seq.
+    """
+    gw, _ = new_gw()
+    with pytest.raises(GraphQLGatewayError):
+        gw.plan("op", 2 ** 53)
+
+
+def test_an_oversized_seq_is_refused_as_a_malformed_seq():
+    """The refusal's SHAPE, not just its type.
+
+    A malformed SEQ consumes nothing and books nothing -- the call
+    never reached the ledger.  `plan()` is a pure read view, so it
+    books no row for ANY refusal; the seq is what must not be
+    consumed.
+    """
+    gw, events = new_gw()
+    with pytest.raises(GraphQLGatewayError):
+        gw.plan("op", 2 ** 53)
+    # nothing booked
+    assert [e for e in events if e["event"] == "graphql.planned"] == []
+    # a later, valid seq still works: the oversized one was not consumed
+    gw.schema("s1", "n", 1)
+    assert gw.schema_record("s1").schema_id == "s1"
+
+
+def test_a_tampered_seq_above_the_safe_range_cannot_verify():
+    """The control: the digest must pin the seq.
+
+    This is the property the bound protects.  The seq rides in the
+    record payload, so a record whose seq was bumped must not still
+    verify -- and the digest cannot even be MINTED over an
+    out-of-range seq.
+    """
+    import graphql_gateway as gqm
+    from dataclasses import asdict
+    rec = gqm.SchemaRecord(
+        schema_id="s1", name="n", type_defs_digest="d", url="u",
+        federated=False, created_at_seq=2 ** 53 - 1,
+    )
+    payload = {k: v for k, v in asdict(rec).items() if k != "digest"}
+    digest = gqm._digest("schema", payload)
+    tampered = gqm.SchemaRecord(
+        schema_id="s1", name="n", type_defs_digest="d", url="u",
+        federated=False, created_at_seq=2 ** 53 + 1, digest=digest,
+    )
+    assert tampered.verify_digest() is False
+    # and the digest cannot be minted over an out-of-range seq at all
+    with pytest.raises(GraphQLGatewayError):
+        gqm._digest("schema", {
+            "schema_id": "s1", "name": "n", "type_defs_digest": "d",
+            "url": "u", "federated": False, "created_at_seq": 2 ** 53,
+        })
+
+
+def test_the_safe_range_boundary_is_accepted():
+    """The control: the bound must not over-refuse.
+
+    2**53 - 1 is the last integer JCS pins exactly.
+    """
+    gw, _ = new_gw()
+    gw.schema("s1", "n", 2 ** 53 - 1)
+    assert gw.schema_record("s1").created_at_seq == 2 ** 53 - 1
+
+
+def test_a_pin_refuses_an_integer_outside_the_safe_range():
+    """A payload integer that cannot be pinned must be refused.
+
+    The shipped path loses the distinction between 2**53 and
+    2**53+1, so a pin over such a payload stops pinning it.
+    """
+    import graphql_gateway as gqm
+    with pytest.raises(GraphQLGatewayError):
+        gqm._canonical([2 ** 53])
+    with pytest.raises(GraphQLGatewayError):
+        gqm._canonical([2 ** 53 + 1])
+
+
+def test_a_pin_still_accepts_the_last_safe_integer():
+    """The control: the pin refusal must not over-reach."""
+    import graphql_gateway as gqm
+    assert gqm._canonical([2 ** 53 - 1])
+
+
+def test_verify_answers_false_for_a_record_it_cannot_canonicalize():
+    """`verify_digest()` answers a question; a question is not an
+    exception.
+
+    The record's digest cannot be recomputed over a lone surrogate, so
+    the answer is "not intact" -- `False`.  It must not raise.
+    """
+    import graphql_gateway as gqm
+    rec = gqm.SchemaRecord(
+        schema_id=SURROGATE, name="n", type_defs_digest="d", url="u",
+        federated=False, created_at_seq=1, digest="sha256:" + "0" * 64,
+    )
+    assert rec.verify_digest() is False
+
+
+def test_an_oversized_seq_is_refused_before_the_digest_would():
+    """The refusal's SHAPE distinguishes the layers.
+
+    A malformed SEQ consumes nothing and books nothing -- the call never
+    reached the ledger.  A failed DIGEST at a valid seq consumes the seq
+    and books a `rejected` row.  Both raise `GraphQLGatewayError`, so
+    "the call raised" cannot tell them apart; only the shape can.
+
+    Without this test, removing the seq bound is invisible: the digest's
+    own integer refusal raises the same error type, so every test that
+    only asserted "it raised" still passed.
+    """
+    gw, events = new_gw()
+    with pytest.raises(GraphQLGatewayError):
+        gw.schema("s1", "n", 2 ** 53)
+    # a malformed SEQ books NO rejected row
+    assert [e for e in events if e["event"] == "graphql.rejected"] == []
+    # and consumes NO seq: seq 1 is still claimable
+    gw.schema("s2", "n", 1)
+    assert gw.schema_record("s2").created_at_seq == 1
