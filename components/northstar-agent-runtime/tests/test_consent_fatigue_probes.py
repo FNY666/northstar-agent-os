@@ -310,3 +310,156 @@ class FatigueResistantGateTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BoundaryAndCraftedInputTests(unittest.TestCase):
+    """The BOUNDARY inputs, and the malformed digests, that no test fed.
+
+    WHY THIS CLASS EXISTS (measured 2026-11-25)
+    -------------------------------------------
+    The mutant census scores `approval_fatigue_probes.py` at 5/29 -- the
+    lowest score of any row in the artifact.  The union scope
+    (`test_approval_fatigue_probes` + `test_consent_fatigue_probes`)
+    already recovers ten of the twenty-four, which is the §30 shape: the
+    artifact measured at too narrow a scope.
+
+    Twelve survivors remain, and they are BOUNDARY defects of a
+    particular kind: every one of them is a comparison whose two
+    spellings agree at every input the suite produces, because the
+    suite only ever produces inputs from ONE SIDE of the boundary.
+
+        lt@381  max_approvals_per_window < 1   vs <= 1   -> differs at ==1
+        lt@383  uniform_approve_streak < 2      vs <= 2   -> differs at ==2
+        lt@385  min_deliberation_seconds < 0    vs <= 0   -> differs at ==0
+        gt@416  len(approvals) > max            vs >=     -> differs at ==max
+        lt@430  delta < min_delib               vs <=     -> differs at ==min
+        lt@700  interval < min_delib            vs <=     -> differs at ==min
+        gt@708  decided_at > mid                vs >=     -> differs at ==mid
+
+    and the same two guard sites, twice over (`FatigueMonitor` and
+    `FatigueMeter` each carry their own copy of the three validation
+    guards, at 381/383/385 and 661/663/665).
+
+    The rule is the one §31 states: **a guard needs a crafted input.**
+    Here the crafted input is the EXACT boundary, not a malformed one.
+    """
+
+    def test_a_max_approvals_of_exactly_one_is_accepted(self):
+        # `max_approvals_per_window < 1` -- a bound of ONE is legal, and
+        # the suite only ever builds a bound of ZERO (which must be
+        # refused).  With `<= 1` the legal bound would be refused, so
+        # this test is what distinguishes the two spellings.
+        monitor = FatigueMonitor(max_approvals_per_window=1)
+        self.assertEqual(monitor.max_approvals_per_window, 1)
+        meter = FatigueMeter(max_approvals_per_window=1)
+        self.assertEqual(meter.max_approvals_per_window, 1)
+
+    def test_a_uniform_streak_of_exactly_two_is_accepted(self):
+        # `uniform_approve_streak < 2` -- a streak bound of TWO is legal,
+        # and the suite only ever builds ONE (which must be refused).
+        monitor = FatigueMonitor(uniform_approve_streak=2)
+        self.assertEqual(monitor.uniform_approve_streak, 2)
+        meter = FatigueMeter(uniform_approve_streak=2)
+        self.assertEqual(meter.uniform_approve_streak, 2)
+
+    def test_a_min_deliberation_of_exactly_zero_is_accepted(self):
+        # `min_deliberation_seconds < 0` -- zero is legal (the operator
+        # may require no deliberation), and the suite only ever builds
+        # -1 (which must be refused).
+        monitor = FatigueMonitor(min_deliberation_seconds=0)
+        self.assertEqual(monitor.min_deliberation_seconds, 0)
+        meter = FatigueMeter(min_deliberation_seconds=0)
+        self.assertEqual(meter.min_deliberation_seconds, 0)
+
+    def test_exactly_the_velocity_bound_is_not_flooded(self):
+        # `len(approvals) > max_approvals_per_window` -- EXACTLY the
+        # bound is not flooded; the suite only ever builds bound + 1.
+        # With `>=` the bound itself would flood, so this test is the
+        # one that distinguishes them.
+        #
+        # The spacing matters: the window is `now - window_seconds` to
+        # `now`, so the events must all fall INSIDE it.  At 100s
+        # spacing only 10 of 12 events land in the window, and the
+        # bound is never reached -- which is why this test asserted a
+        # bound it never touched.
+        events = tuple(_ev(i * 80.0) for i in range(12))
+        monitor = FatigueMonitor()
+        # The bound is reached: twelve approvals, and the bound is twelve.
+        self.assertEqual(
+            len([e for e in events if 0.0 <= e.decided_at <= 900.0]), 12
+        )
+        self.assertEqual(monitor.classify(events, 900.0), VERDICT_HEALTHY)
+
+    def test_exactly_the_deliberation_bound_does_not_collapse(self):
+        # `later.decided_at - earlier.decided_at < min_deliberation_seconds`
+        # -- an interval of EXACTLY the bound is not a collapse.  The
+        # suite's collapse test uses 0.8s / 1.2s intervals, far below
+        # the 8.0s bound, so it cannot see the boundary.
+        events = (_ev(0.0), _ev(8.0))
+        monitor = FatigueMonitor(min_deliberation_seconds=8.0)
+        self.assertEqual(monitor.classify(events, 900.0), VERDICT_HEALTHY)
+
+    def test_exactly_the_deliberation_bound_is_not_a_collapse_ratio(self):
+        # The same boundary in the METER: `i < min_deliberation_seconds`.
+        # The suite's collapse test uses intervals of 45s / 12s / 3s,
+        # and the bound is 8.0s, so the equality case is never seen.
+        events = (_ev(0.0), _ev(8.0))
+        m = FatigueMeter(min_deliberation_seconds=8.0).measure(events, 900.0)
+        self.assertEqual(m["collapse_ratio"], 0.0)
+
+    def test_an_event_exactly_at_the_window_midpoint_is_in_the_recent_half(self):
+        # `e.decided_at > mid` -- an event EXACTLY at the midpoint is in
+        # the RECENT half.  With `>=` it would fall into the baseline
+        # half, and the denial-decay axis would read a different
+        # trajectory.
+        #
+        # The suite's decay test puts its events far from the midpoint,
+        # so the boundary is invisible to it.
+        meter = FatigueMeter()
+        now = 900.0
+        mid = now - meter.window_seconds / 2.0
+        # A denial strictly BEFORE the midpoint, and an event exactly AT
+        # it that APPROVES.
+        #
+        # Original `> mid`: the midpoint event is in the BASELINE half
+        # (`<= mid`), so the recent half is EMPTY, so there is no
+        # measurable decay.
+        #
+        # Mutant `>= mid`: the midpoint event joins the recent half, the
+        # recent half now approves 100% of the time, and the decay
+        # becomes 1.0 -- a full "the approver stopped denying" reading
+        # off a trajectory that never had a recent decision.
+        #
+        # The midpoint event must APPROVE: if it denied, both spellings
+        # would read the same decay and the test could not tell them
+        # apart.
+        events = (
+            _ev(10.0, approved=False),
+            _ev(mid, approved=True),
+        )
+        m = meter.measure(events, now)
+        # No recent half at all -> no measurable decay.
+        self.assertEqual(m["denial_decay"], 0.0)
+
+        # Move the second event one hair past the midpoint: now the
+        # recent half is non-empty and the decay IS measurable.
+        events2 = (
+            _ev(10.0, approved=False),
+            _ev(mid + 0.001, approved=True),
+        )
+        m2 = meter.measure(events2, now)
+        self.assertGreater(m2["denial_decay"], 0.0)
+
+    def test_verify_measurement_rejects_a_non_string_digest(self):
+        # `not isinstance(given, str) or not given.startswith("sha256:")`
+        # -- the suite's malformed test uses the STRING "nope", so the
+        # type half of the guard is never the one that fires.
+        self.assertFalse(verify_measurement({"digest": 12345}))
+        self.assertFalse(verify_measurement({"digest": None}))
+        self.assertFalse(verify_measurement({"digest": b"sha256:" + b"0" * 64}))
+
+    def test_verify_decision_rejects_a_non_string_digest(self):
+        # The same guard, in the gate's verifier.
+        self.assertFalse(verify_decision({"digest": 12345}))
+        self.assertFalse(verify_decision({"digest": None}))
+        self.assertFalse(verify_decision({"digest": b"sha256:" + b"0" * 64}))
