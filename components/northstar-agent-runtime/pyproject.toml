@@ -1492,6 +1492,7 @@ py-modules = [
     "state_mgmt_28",
     "state_mgmt_29",
     "state_mgmt_30",
+    "state_transfer_audit",
     "stateful_veto",
     "static_verify",
     "status_page",

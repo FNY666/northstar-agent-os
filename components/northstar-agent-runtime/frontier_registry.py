@@ -383,12 +383,17 @@ SEED_ENTRIES: Tuple[FrontierEntry, ...] = (
         source_url="https://arxiv.org/html/2611.23346v1",
         category="observability / auditability",
         verdict="absorb-now",
-        status="proposed",
+        status="implemented",
         linked_slice="state-transfer-audit",
         notes=(
             "Record S5. Says critical failures occur during state transfers, and "
             "that current traces omit what crosses those boundaries, so failure "
-            "attribution and runtime monitors fail on multi-step trajectories."
+            "attribution and runtime monitors fail on multi-step trajectories. "
+            "Implemented by the state-transfer-audit slice: state_transfer_audit.py "
+            "makes the four state boundaries enumerable, requires every transfer "
+            "event to carry a digest, a provenance and (where required) an "
+            "approval, makes a compaction declare the user constraints it "
+            "dropped, and refuses to let an unverified event downstream."
         ),
     ),
     FrontierEntry(

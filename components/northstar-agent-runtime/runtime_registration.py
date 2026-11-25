@@ -1613,6 +1613,7 @@ REGISTRY = (
     _registration("state_mgmt_28", "worker", "2026-10-09", "State 28: LWW-map CRDT."),
     _registration("state_mgmt_29", "worker", "2026-10-09", "State 29: CRDT counters (G-counter + PN-counter)."),
     _registration("state_mgmt_30", "worker", "2026-10-09", "State 30: CRDT graphs (mock), Simulated."),
+    _registration("state_transfer_audit", "state-transfer-audit", "2026-11-25", "State-transfer auditing: every transfer across a state boundary is an event with a digest, a provenance and an approval, and an unverified event cannot be treated as verified downstream."),
     _registration("stateful_veto", "stateful-veto", "2026-10-08", "Stateful veto: deny is a signal, not an endpoint (D8), Simulated."),
     _registration("static_verify", "ninety-first", "2026-10-04", "Static pre-dispatch verification of tool-call policies (ninety-first batch)."),
     _registration("status_page", "runtime", "2026-10-08", "Status page — Statuspage.io-shaped incident bookkeeping (batch-34 interface)."),
