@@ -51666,6 +51666,10 @@ Caller seq did not strictly increase.
 
 Unknown audit kind for job_queue_audit_event.
 
+#### `UnnamedRefusalError`
+
+The refusal gate refused without saying WHY.
+
 #### `EnqueueRecord`
 
 Booked arrival of a job in a named queue.

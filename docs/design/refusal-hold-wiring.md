@@ -3354,3 +3354,242 @@ The one survivor that remains everywhere is the **self-check** shape:
 `main()` asserts what the author believed, and each conjunct of an
 `assert a and b` is individually untested.  That is a separate
 category, and it is recorded rather than folded in.
+
+## 24. AMENDED 2026-11-24 — the batch form asked a DIFFERENT question than the raising form
+
+### 24.1 The defect
+
+§18 gave the batch form (`retry_allowed()`) its reason, and its
+docstring says the gate "is consulted **once**, by the same writer that
+:meth:`retry` uses".  But the two forms did **not** ask the gate the
+same question.
+
+`retry()` asks the **raising** form:
+
+```python
+require = getattr(gate, "require_queue_allowed", None)
+...
+require(job_id, action, now=now)
+```
+
+`retry_allowed()` asked the **boolean** form first, and only fell back
+to the raising one when the gate did not offer the boolean one:
+
+```python
+allows = getattr(gate, "queue_allowed", None)
+if callable(allows):
+    try:
+        return bool(allows(job_id, action, now=now)), None
+    except Exception as exc:
+        return False, exc
+require = getattr(gate, "require_queue_allowed", None)
+```
+
+A host gate that offers **both** is expected to answer both the same
+way -- they are the same question -- but nothing enforced it, so the
+batch form could be **more permissive** than the raising form.
+
+Measured 2026-11-24, on the tree as §23 left it, with a gate whose
+boolean form allows and whose raising form refuses:
+
+```
+--- the RAISING form ---
+retry raised: RuntimeError refused
+state j1: reserved
+
+--- the BATCH form, the SAME gate, the SAME job, the SAME action ---
+retry_allowed -> RetryRecord(job_id='j1', attempts=1, ..., state='ready')
+state j1: ready
+```
+
+The gate **refused** the re-dispatch and the batch form re-dispatched it
+anyway.  The job went back to `ready` -- so the refused action was
+offered again.
+
+**And the boolean branch was dead code against the real contract.**
+The repo's own queue gate offers **only** `require_queue_allowed`; the
+queue side has no boolean method at all.  Measured over the whole
+repository:
+
+```
+$ grep -rn "def queue_allowed" --include=*.py . | grep -v build/
+components/northstar-agent-runtime/tests/test_refusal_hold_queue_wiring.py:89
+```
+
+Every hit is a **test** helper.  So the one path that could fail open
+was a path **no host takes** -- and the path that every host *does*
+take was the one the batch form used only as a fallback.
+
+That is the same shape §22 and §23 found elsewhere in the chain: a
+branch that the repo's own code never takes, verified by nothing.
+
+### 24.2 Two further consequences of the same wrong question
+
+The boolean form could not tell a refusal from a broken gate, because
+the hold **fails closed**: both answer `False`.  So the batch form
+booked a `job.rejected` row for a gate that "refused nothing in
+particular" -- the exact row §17's rule forbids.
+
+```
+--- a BROKEN gate, the RAISING form ---
+retry raised: RuntimeError the gate cannot answer
+audit: [('job.enqueued', ...), ('job.dequeued', ...)]            <- no row
+
+--- a BROKEN gate, the BATCH form ---
+retry_allowed -> None
+audit: [..., ('job.rejected', {'reason': 'RuntimeError', ...})]   <- a row
+```
+
+Same broken gate; two forms; two different trails.  §18's rule -- "a
+broken gate books no row" -- was implemented on the raising form only.
+
+And when the boolean form answered `False` **without raising**, the
+helper's exception slot was empty, so the row's `reason` was the class
+name of the *missing* exception:
+
+```
+the row: {'reason': 'NoneType', 'refusal_reason': None, 'job_id': 'j1', 'action': 'dispatch'}
+```
+
+A reader of the trail sees a refusal whose reason is the **absence** of
+an exception.
+
+### 24.3 The fix
+
+`_refusal_allows()` now asks the **raising** form first, and falls back
+to the boolean form only when the gate offers no raising one:
+
+```python
+require = getattr(gate, "require_queue_allowed", None)
+if not callable(require):
+    allows = getattr(gate, "queue_allowed", None)
+    if not callable(allows):
+        raise TypeError(...)
+    ...
+```
+
+That fixes all three consequences at once:
+
+* the batch form is no longer **more permissive** than the raising form
+  -- both ask the same question, of the same gate;
+* the reason comes from an **exception**, so it names a real class and a
+  real refusal;
+* `_is_refusal` can tell a refusal from a broken gate, because the
+  raising form distinguishes them by what it raises.
+
+The batch form's **booking** now uses the same rule the raising form
+uses -- a broken gate books no row:
+
+```python
+if not allowed:
+    if exc is not None and _is_refusal(exc):
+        self._reject_refusal(seq, job_id, retry_action, exc)
+    return None
+```
+
+**A gate that offers ONLY the boolean form** still works, because a
+host that implements the contract partially must not be broken by the
+queue.  Its refusal carries no reason, so the queue raises its own
+`UnnamedRefusalError` -- a **real** class, named in the row -- instead
+of the class name of a missing exception:
+
+```python
+class UnnamedRefusalError(JobQueueError):
+    """The refusal gate refused without saying WHY."""
+```
+
+`_is_refusal` recognises it, so the row is still booked.
+
+**No version, schema, or audit kind is added or changed.**  The gate is
+still asked **once** per job on both forms -- §13.4's "one check per
+job" count is the count of the **gate's** calls, and it is unchanged.
+The registry's `checked` events are unaffected.
+
+### 24.4 The guards
+
+Eight new guards in two classes
+(`tests/test_refusal_hold_queue_wiring.py`):
+
+| guard | what it pins |
+|---|---|
+| `test_the_batch_form_refuses_what_the_raising_form_refuses` | the defect: the batch form re-dispatched a REFUSED action |
+| `test_the_batch_form_leaves_a_refused_job_where_it_was` | the job keeps its state and its attempts |
+| `test_the_two_forms_agree_on_a_gate_that_offers_only_the_raising_one` | a one-form gate is unchanged |
+| `test_an_allowed_gate_still_re_dispatches` | the control: the ordinary path is intact |
+| `test_a_broken_gate_books_no_rejected_row_on_the_batch_form` | a broken gate is not recorded as a refusal |
+| `test_a_refused_row_names_a_reason_that_is_not_the_absence_of_one` | the row never says `NoneType` |
+| `test_a_refused_row_still_names_the_job_and_the_action` | the control: WHO and WHAT survive |
+| `test_the_raising_form_and_the_batch_form_book_the_same_rows` | two forms, one trail |
+
+### 24.5 The measurements
+
+**The whole-file census** over `job_queue.py`, run over the union of
+every suite that references it (`test_refusal_hold_queue_wiring`,
+`test_job_queue`, `test_leased_task_claim`, `test_refusal_hold_wiring`):
+
+| | before | after |
+|---|---|---|
+| sites | 82 | **84** |
+| killed | **73/82** | **75/84** |
+
+The two new sites are the two new constructs in `_refusal_allows` --
+the reordered `if not callable(require)` and the `if allowed:` inside
+the boolean-only fallback -- and **both are killed**.  The survivor set
+is **unchanged**: the same nine survivors, shifted by the line offsets
+of this change:
+
+| before | after | what it is |
+|---|---|---|
+| `or@1273` | `or@1353` | the `or` in the dequeue skip loop |
+| `and@1681`, `and@1685`, `and@1686`, `and@1691`, `and@1696`, `and@1701`, `and@1718`, `and@1725` | `and@1771`, `and@1775`, `and@1776`, `and@1781`, `and@1786`, `and@1791`, `and@1808`, `and@1815` | the `and` in the module's own `main()` self-check's assertion chains |
+
+Those nine are §22.8's survivors, and §22.8 says why they are a
+separate category (each conjunct of an `assert a and b` is
+individually untested).  This slice does not claim them.
+
+**Four targeted mutants** were planted into the changed code and
+re-run against the four suites.  All four are **killed**:
+
+| mutant | verdict |
+|---|---|
+| never prefer the raising form (fall back to the boolean one always) | **KILLED** |
+| book a row for a broken gate too (drop the `_is_refusal` check) | **KILLED** |
+| `UnnamedRefusalError` is not a refusal (drop the `_is_refusal` special case) | **KILLED** |
+| `UnnamedRefusalError` is an ordinary error (swap the class) | **KILLED** |
+
+### 24.6 What this does NOT change
+
+* **No version, schema, or audit kind** is added or changed.  The only
+  new public name is `UnnamedRefusalError`, and it is a `JobQueueError`
+  subclass like every other error in the module's taxonomy.
+* The gate is still asked **once** per job on both forms -- §13.4's
+  "one check per job" count is the count of the **gate's** calls, and
+  it is unchanged.  The registry's `checked` events are unaffected.
+* `dequeue()`'s hand-out path is untouched: it already asked the
+  raising form.
+* `leased_task_claim.py`, `refusal_hold.py` and `refusal_hold_wiring.py`
+  are **unchanged** by this slice.
+* §17's through §23's guards are unaffected -- the four suites are
+  green.
+
+### 24.7 The bench baseline is stale, and that is a SEPARATE slice
+
+This slice's bench artifact is `169/169, 0 failed`.  The bench baseline
+the referee compares against -- `b173-bench-baseline-CURRENT` ->
+`b173-bench-baseline-2db42e93....failures.txt` -- names **eight**
+failing items, so `BENCH_DIFF` compares an empty set against an
+eight-item set and fails.
+
+The baseline is not wrong for its commit: measured on `2db42e93` in a
+throwaway worktree, the bench scores **161/169, 8 failed** -- exactly
+the eight items.  The baseline is simply pinned to a commit from
+**2026-11-06**, and the slice `1b2b0ad9` ("make the five live sandbox
+cases actually executable", 2026-11-22) moved the score from 161/169
+to **169/169** without re-pinning the baseline.
+
+So this is a **baseline-attribution** question, not a refusal-hold
+question, and it is reported here rather than fixed by this slice:
+re-pinning the baseline is the coordinator's call, and every slice
+that lands after `1b2b0ad9` will fail `BENCH_DIFF` for the same
+reason.  The refusal-hold chain's own bench never touched the sandbox
+cases.
