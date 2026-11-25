@@ -168,6 +168,7 @@ def _run_model(
     model: str,
     base_url: str,
     provider_environment: dict[str, str],
+    temperature: float | None = None,
     script: str = "",
     limits: dict[str, Any],
 ) -> dict[str, Any]:
@@ -193,6 +194,8 @@ def _run_model(
         "--evidence-dir", str(evidence_root),
         "--json",
     ]
+    if temperature is not None:
+        command.extend(("--temperature", str(temperature)))
     if script:
         command.extend(("--script", script))
     for check in checks:
@@ -287,6 +290,7 @@ def run_baseline(
     model: str,
     base_url: str,
     output: Path,
+    temperature: float | None = None,
     only: list[str],
     limits: dict[str, Any] | None = None,
     keep_workdir: Path | None = None,
@@ -310,6 +314,7 @@ def run_baseline(
             "provider": provider,
             "model": model,
             "base_url": _receipt_base_url(base_url),
+            "temperature": temperature,
             "script": Path(script).name if script else "",
             "sandbox": SANDBOX_PROFILE,
             "limits": limits,
@@ -366,6 +371,7 @@ def run_baseline(
                 task_id, fixture, checks, evidence_root,
                 provider=provider, model=model, base_url=base_url, limits=limits,
                 provider_environment=provider_environment,
+                temperature=temperature,
                 script=script,
             )
             evaluation = None
@@ -466,6 +472,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--model", default="")
     parser.add_argument("--base-url", default="")
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=None,
+        help="sampling temperature; recorded in the receipt and passed to the model",
+    )
     parser.add_argument("--output", default=str(ROOT / "benchmarks" / "code-tasks" / "v1" / "baseline.json"))
     parser.add_argument("--task", action="append", default=[])
     parser.add_argument("--max-turns", type=int, default=TASK_LIMITS["max_turns"])
@@ -491,6 +503,7 @@ def main(argv: list[str] | None = None) -> int:
         model=model,
         base_url=args.base_url,
         output=Path(args.output),
+        temperature=args.temperature,
         only=list(args.task),
         limits=limits,
         keep_workdir=Path(args.keep_workdir) if args.keep_workdir else None,

@@ -1,0 +1,661 @@
+{
+  "conditions_identical_across_runs": true,
+  "limits": {
+    "max_output_tokens": 4096,
+    "max_tool_calls": 60,
+    "max_turns": 25,
+    "wall_time_seconds": 300
+  },
+  "measurement": "real_model_baseline",
+  "model": {
+    "base_url": "https://www.inroi.shop/_redacted-path-sha256/2d234c97703ce824eaa4d98fbd2701668ef5e63e46f1574f2ea72e7927b1f57e",
+    "endpoint_note": "third-party relay (www.inroi.shop); not a vendor endpoint",
+    "model": "gpt-6-astra",
+    "provider": "openai",
+    "temperature": 0.0
+  },
+  "pack_id": "northstar-offline-code-v1",
+  "pack_manifest_sha256": "2875a2eb211f2505d18bab2941c163cef17c9b5987a56872f0139a40846ce9f3",
+  "real_model_evaluated": true,
+  "release_eligible": true,
+  "release_gate": {
+    "eligible": true,
+    "measured": true,
+    "passed": 23,
+    "required_tasks": 20
+  },
+  "runs": [
+    {
+      "checked": 24,
+      "failure_kinds": {
+        "hidden_check_failed": 1
+      },
+      "median_elapsed_seconds": 68.186,
+      "passed": 23,
+      "run": 1,
+      "tasks": [
+        {
+          "elapsed_seconds": 43.52,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 1673,
+          "patch_sha256": "e1256aed067f1536d20f73f5692a122b53c6c3a4225a281e62b4f5941a773762",
+          "task_id": "py-bug-001-bounded-retry"
+        },
+        {
+          "elapsed_seconds": 22.408,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 424,
+          "patch_sha256": "67dd41bd5bb1bcf37bfbe9dacf05786ae60707432d37d8e2d8eebb4104ddfcd7",
+          "task_id": "py-bug-002-cache-expiry"
+        },
+        {
+          "elapsed_seconds": 55.288,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 1603,
+          "patch_sha256": "e7c64c0d59792331f6064efd826b379da55f8621783041f1c73bce53795277c7",
+          "task_id": "py-bug-003-csv-empty"
+        },
+        {
+          "elapsed_seconds": 57.205,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 3037,
+          "patch_sha256": "1ec398daf4960752c2a0632b10cce9b25c76baae4cc8e51ebe12f2616d63cf2e",
+          "task_id": "py-bug-004-pagination-cursor"
+        },
+        {
+          "elapsed_seconds": 134.042,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 798,
+          "patch_sha256": "e6e8b8fdcc1f4b273cfc5b217318697598df855bef370ce51be7ddb2cf5f5db8",
+          "task_id": "py-feat-001-batch-normalize"
+        },
+        {
+          "elapsed_seconds": 48.385,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 863,
+          "patch_sha256": "a95bde1c25c6244bf472b0e13f296626d586405cd071eba6f7d9284acfa90360",
+          "task_id": "py-feat-002-config-precedence"
+        },
+        {
+          "elapsed_seconds": 67.539,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 3155,
+          "patch_sha256": "7a4eb1674a483a44ec5dac33ec523672e2fc692899b287774bfa9bfae5f12365",
+          "task_id": "py-feat-003-jsonl-summary"
+        },
+        {
+          "elapsed_seconds": 142.066,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 1653,
+          "patch_sha256": "3feec0379b7bc82370307b2d73c275338102375608c9cc634e1986854f46798c",
+          "task_id": "py-refactor-001-clock-injection"
+        },
+        {
+          "elapsed_seconds": 93.277,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 3535,
+          "patch_sha256": "866755d0c846bedd24f4c52687b8eb87f2dfa8d2f4a63183355fcb31276596be",
+          "task_id": "py-refactor-002-parser-dispatch"
+        },
+        {
+          "elapsed_seconds": 135.185,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 310,
+          "patch_sha256": "9f0dd0e3e41a18e9fa4f891606ee02ec8e7184c448923dd7a66d3dd36ca54d71",
+          "task_id": "py-build-001-package-data"
+        },
+        {
+          "elapsed_seconds": 20.211,
+          "evaluation_ok": false,
+          "outcome": "hidden_check_failed",
+          "patch_bytes": 715,
+          "patch_sha256": "754ede9afe48e34980838ae970e9080dd9b60fac05c1b4b486f027bcce73a65a",
+          "task_id": "py-build-002-flaky-clock-test"
+        },
+        {
+          "elapsed_seconds": 127.985,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 7706,
+          "patch_sha256": "e5917f6a1bf2c499614abf54155e14369287826b0b0c8fb46f3e12b34cb098f2",
+          "task_id": "py-sec-001-archive-path"
+        },
+        {
+          "elapsed_seconds": 83.274,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 2265,
+          "patch_sha256": "cd79b3698608fbf22e2b2a635f6ece1dcd340f6fb9501e7ecaf0b44539a82124",
+          "task_id": "ts-bug-001-utf8-chunks"
+        },
+        {
+          "elapsed_seconds": 68.834,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 1420,
+          "patch_sha256": "ec0a26918fb1ae858268674b98968a066765deb8b0a9961a2b34e49078e5115c",
+          "task_id": "ts-bug-002-zero-timeout"
+        },
+        {
+          "elapsed_seconds": 52.516,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 2012,
+          "patch_sha256": "5e774d628d95c14281b35de37e633870172965cfda2e0b073ecad2cad05310df",
+          "task_id": "ts-bug-003-query-encoding"
+        },
+        {
+          "elapsed_seconds": 54.86,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 517,
+          "patch_sha256": "0b79fba08b08138ff054b6e7b7d00229f9a59a97ab3220492c848032a96c4de8",
+          "task_id": "ts-bug-004-stable-sort"
+        },
+        {
+          "elapsed_seconds": 108.694,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 4162,
+          "patch_sha256": "71e3629bb703a7d4c24d408c5970a7023250123b1a8ab393ab8ebfc6aa3f09df",
+          "task_id": "ts-feat-001-bounded-map"
+        },
+        {
+          "elapsed_seconds": 82.72,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 4399,
+          "patch_sha256": "dbd7fed43ea1468bac145acfc3bd8deae20955029df31deeb1298c06fea9b1cd",
+          "task_id": "ts-feat-002-redact-fields"
+        },
+        {
+          "elapsed_seconds": 55.692,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 2841,
+          "patch_sha256": "f3e542144640908fffc39949df97e1131eb48992c2819a58ea6cc2b519232d32",
+          "task_id": "ts-feat-003-ndjson-parser"
+        },
+        {
+          "elapsed_seconds": 72.516,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 3437,
+          "patch_sha256": "4e88fc03a0494aabe5206df5cc55290f0e4f7590408eb14ffe27a674b56092e7",
+          "task_id": "ts-refactor-001-transport-interface"
+        },
+        {
+          "elapsed_seconds": 74.913,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 2984,
+          "patch_sha256": "56557851867ada99e4e28c7216688277a08f679889160f6a9147b47b0562ba84",
+          "task_id": "ts-refactor-002-error-taxonomy"
+        },
+        {
+          "elapsed_seconds": 32.1,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 398,
+          "patch_sha256": "1fb867bcbcb099a1e6811b451d63d70579df517c01cffae337e01d1d0362468a",
+          "task_id": "ts-build-001-esm-exports"
+        },
+        {
+          "elapsed_seconds": 60.622,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 3150,
+          "patch_sha256": "347d046b91c923f22cf46cc470d670b67d1541032c005014cbc487329f50d073",
+          "task_id": "ts-sec-001-url-allowlist"
+        },
+        {
+          "elapsed_seconds": 95.075,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 4548,
+          "patch_sha256": "9504451a6cf9303157be4cf0dc9ce7a4cfa67517252c37d259a352e8aab62642",
+          "task_id": "ts-sec-002-prototype-pollution"
+        }
+      ]
+    },
+    {
+      "checked": 24,
+      "failure_kinds": {
+        "hidden_check_failed": 1
+      },
+      "median_elapsed_seconds": 64.727,
+      "passed": 23,
+      "run": 2,
+      "tasks": [
+        {
+          "elapsed_seconds": 30.884,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 628,
+          "patch_sha256": "bde37e02d60aba0b0da77eda3b6c12e62a22279c57e6eb93c36345262f187854",
+          "task_id": "py-bug-001-bounded-retry"
+        },
+        {
+          "elapsed_seconds": 21.967,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 424,
+          "patch_sha256": "67dd41bd5bb1bcf37bfbe9dacf05786ae60707432d37d8e2d8eebb4104ddfcd7",
+          "task_id": "py-bug-002-cache-expiry"
+        },
+        {
+          "elapsed_seconds": 34.169,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 1411,
+          "patch_sha256": "5050795a99ba83f47a493299de48813ac2a56010ad536b07cc948f4c8a732ff3",
+          "task_id": "py-bug-003-csv-empty"
+        },
+        {
+          "elapsed_seconds": 63.41,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 2924,
+          "patch_sha256": "5453e3234e5d05c89a4676001f1e473736fbdfbd874a9636dd4015b331a9d846",
+          "task_id": "py-bug-004-pagination-cursor"
+        },
+        {
+          "elapsed_seconds": 22.901,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 1084,
+          "patch_sha256": "844143cf61de4951a4023249d77fd007f78f0f65b6c2c354c58b8c849352306c",
+          "task_id": "py-feat-001-batch-normalize"
+        },
+        {
+          "elapsed_seconds": 33.016,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 2742,
+          "patch_sha256": "59cc92584d1cf721f01081e4f8eeaf2c6ba89ad6322552bc1f083507cbd5c9f6",
+          "task_id": "py-feat-002-config-precedence"
+        },
+        {
+          "elapsed_seconds": 85.196,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 3155,
+          "patch_sha256": "0d0efb2661da9195ac5a36a694752842cae478f8126f97b2f10fb080708a8e0a",
+          "task_id": "py-feat-003-jsonl-summary"
+        },
+        {
+          "elapsed_seconds": 66.045,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 1611,
+          "patch_sha256": "287ae0984dbe517ef8ceb81c6143dd50fb00ad0ca822f73a7e55d261ad96c65a",
+          "task_id": "py-refactor-001-clock-injection"
+        },
+        {
+          "elapsed_seconds": 108.599,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 3867,
+          "patch_sha256": "a687f9fe364c6cf1ad6994cd6b7fc5a41908fc708c4189f7bcec46f5b069647d",
+          "task_id": "py-refactor-002-parser-dispatch"
+        },
+        {
+          "elapsed_seconds": 52.305,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 310,
+          "patch_sha256": "9f0dd0e3e41a18e9fa4f891606ee02ec8e7184c448923dd7a66d3dd36ca54d71",
+          "task_id": "py-build-001-package-data"
+        },
+        {
+          "elapsed_seconds": 22.459,
+          "evaluation_ok": false,
+          "outcome": "hidden_check_failed",
+          "patch_bytes": 740,
+          "patch_sha256": "075ccfd496c511a450b9861f2b371279f7e45abff80e51d65fd613b8b3738f29",
+          "task_id": "py-build-002-flaky-clock-test"
+        },
+        {
+          "elapsed_seconds": 151.913,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 7568,
+          "patch_sha256": "14321535dc98356caa6e9fb2fb4d63b3d1d1c734b7a7698aabed2e5281e8bc32",
+          "task_id": "py-sec-001-archive-path"
+        },
+        {
+          "elapsed_seconds": 93.39,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 2207,
+          "patch_sha256": "1640aec46c63258942c39d5989b2a77f12a06478ca6b60130819b72e754a641e",
+          "task_id": "ts-bug-001-utf8-chunks"
+        },
+        {
+          "elapsed_seconds": 60.276,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 1434,
+          "patch_sha256": "60d42085d3ab3a3a720d335837b3530c44e47d2fba093f0256130888e9c528b4",
+          "task_id": "ts-bug-002-zero-timeout"
+        },
+        {
+          "elapsed_seconds": 93.489,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 2320,
+          "patch_sha256": "41c9c028639629f7b0f43e0abd5477c4b0460a99b97f5468cf17809ed409a572",
+          "task_id": "ts-bug-003-query-encoding"
+        },
+        {
+          "elapsed_seconds": 51.207,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 517,
+          "patch_sha256": "0b79fba08b08138ff054b6e7b7d00229f9a59a97ab3220492c848032a96c4de8",
+          "task_id": "ts-bug-004-stable-sort"
+        },
+        {
+          "elapsed_seconds": 107.46,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 4768,
+          "patch_sha256": "ff0d65257d5b5b3888b1ecf7b36729d0a810aeb5861055e172831312c4fbb81c",
+          "task_id": "ts-feat-001-bounded-map"
+        },
+        {
+          "elapsed_seconds": 71.29,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 3574,
+          "patch_sha256": "41cca1439aafb95fc9c7780d77a070c504f26d7b036499231c61ba9993a98a94",
+          "task_id": "ts-feat-002-redact-fields"
+        },
+        {
+          "elapsed_seconds": 66.777,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 2997,
+          "patch_sha256": "e61e5aeb63cd38fd21fb31f63dcb7d6f1cf8725c2143497b11fb772c8c5ba69d",
+          "task_id": "ts-feat-003-ndjson-parser"
+        },
+        {
+          "elapsed_seconds": 66.18,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 2636,
+          "patch_sha256": "1dfe0efeeada29543b2efd138965e7795beef452c1833aab255bd78645a2a502",
+          "task_id": "ts-refactor-001-transport-interface"
+        },
+        {
+          "elapsed_seconds": 57.761,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 3263,
+          "patch_sha256": "b550d2e3842f12187812854713d66a22ab6ac4b5fb83e52c2c5e7a659bce6e53",
+          "task_id": "ts-refactor-002-error-taxonomy"
+        },
+        {
+          "elapsed_seconds": 42.564,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 398,
+          "patch_sha256": "1fb867bcbcb099a1e6811b451d63d70579df517c01cffae337e01d1d0362468a",
+          "task_id": "ts-build-001-esm-exports"
+        },
+        {
+          "elapsed_seconds": 83.479,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 2973,
+          "patch_sha256": "dcc53821bd57620ef4229cc8bc1145f2c6f3c247729f6b9f8558b32175fc0ccd",
+          "task_id": "ts-sec-001-url-allowlist"
+        },
+        {
+          "elapsed_seconds": 131.721,
+          "evaluation_ok": true,
+          "outcome": "passed",
+          "patch_bytes": 5744,
+          "patch_sha256": "b6fd7f7d7d9d32f54ef99f1e8424bdca95d74c5e95919927d3cf00433f08efbf",
+          "task_id": "ts-sec-002-prototype-pollution"
+        }
+      ]
+    }
+  ],
+  "sandbox": {
+    "backend": "process",
+    "capdrop": "off",
+    "landlock": "off",
+    "memory": false,
+    "network": "disabled",
+    "plugins": false,
+    "policy_file": "none",
+    "seccomp": "off",
+    "skills": false,
+    "workspace_agents": false
+  },
+  "schema": "northstar.code-task-measurement-repeated.v1",
+  "summary": {
+    "checked": 24,
+    "failed": 1,
+    "lower_of_runs": 23,
+    "passed": 23,
+    "run_passed": [
+      23,
+      23
+    ],
+    "runs": 2,
+    "unstable_tasks": 0
+  },
+  "tasks": [
+    {
+      "elapsed_seconds": 43.52,
+      "evaluation_ok": true,
+      "outcome": "passed",
+      "patch_bytes": 1673,
+      "patch_sha256": "e1256aed067f1536d20f73f5692a122b53c6c3a4225a281e62b4f5941a773762",
+      "task_id": "py-bug-001-bounded-retry"
+    },
+    {
+      "elapsed_seconds": 22.408,
+      "evaluation_ok": true,
+      "outcome": "passed",
+      "patch_bytes": 424,
+      "patch_sha256": "67dd41bd5bb1bcf37bfbe9dacf05786ae60707432d37d8e2d8eebb4104ddfcd7",
+      "task_id": "py-bug-002-cache-expiry"
+    },
+    {
+      "elapsed_seconds": 55.288,
+      "evaluation_ok": true,
+      "outcome": "passed",
+      "patch_bytes": 1603,
+      "patch_sha256": "e7c64c0d59792331f6064efd826b379da55f8621783041f1c73bce53795277c7",
+      "task_id": "py-bug-003-csv-empty"
+    },
+    {
+      "elapsed_seconds": 57.205,
+      "evaluation_ok": true,
+      "outcome": "passed",
+      "patch_bytes": 3037,
+      "patch_sha256": "1ec398daf4960752c2a0632b10cce9b25c76baae4cc8e51ebe12f2616d63cf2e",
+      "task_id": "py-bug-004-pagination-cursor"
+    },
+    {
+      "elapsed_seconds": 134.042,
+      "evaluation_ok": true,
+      "outcome": "passed",
+      "patch_bytes": 798,
+      "patch_sha256": "e6e8b8fdcc1f4b273cfc5b217318697598df855bef370ce51be7ddb2cf5f5db8",
+      "task_id": "py-feat-001-batch-normalize"
+    },
+    {
+      "elapsed_seconds": 48.385,
+      "evaluation_ok": true,
+      "outcome": "passed",
+      "patch_bytes": 863,
+      "patch_sha256": "a95bde1c25c6244bf472b0e13f296626d586405cd071eba6f7d9284acfa90360",
+      "task_id": "py-feat-002-config-precedence"
+    },
+    {
+      "elapsed_seconds": 67.539,
+      "evaluation_ok": true,
+      "outcome": "passed",
+      "patch_bytes": 3155,
+      "patch_sha256": "7a4eb1674a483a44ec5dac33ec523672e2fc692899b287774bfa9bfae5f12365",
+      "task_id": "py-feat-003-jsonl-summary"
+    },
+    {
+      "elapsed_seconds": 142.066,
+      "evaluation_ok": true,
+      "outcome": "passed",
+      "patch_bytes": 1653,
+      "patch_sha256": "3feec0379b7bc82370307b2d73c275338102375608c9cc634e1986854f46798c",
+      "task_id": "py-refactor-001-clock-injection"
+    },
+    {
+      "elapsed_seconds": 93.277,
+      "evaluation_ok": true,
+      "outcome": "passed",
+      "patch_bytes": 3535,
+      "patch_sha256": "866755d0c846bedd24f4c52687b8eb87f2dfa8d2f4a63183355fcb31276596be",
+      "task_id": "py-refactor-002-parser-dispatch"
+    },
+    {
+      "elapsed_seconds": 135.185,
+      "evaluation_ok": true,
+      "outcome": "passed",
+      "patch_bytes": 310,
+      "patch_sha256": "9f0dd0e3e41a18e9fa4f891606ee02ec8e7184c448923dd7a66d3dd36ca54d71",
+      "task_id": "py-build-001-package-data"
+    },
+    {
+      "elapsed_seconds": 20.211,
+      "evaluation_ok": false,
+      "outcome": "hidden_check_failed",
+      "patch_bytes": 715,
+      "patch_sha256": "754ede9afe48e34980838ae970e9080dd9b60fac05c1b4b486f027bcce73a65a",
+      "task_id": "py-build-002-flaky-clock-test"
+    },
+    {
+      "elapsed_seconds": 127.985,
+      "evaluation_ok": true,
+      "outcome": "passed",
+      "patch_bytes": 7706,
+      "patch_sha256": "e5917f6a1bf2c499614abf54155e14369287826b0b0c8fb46f3e12b34cb098f2",
+      "task_id": "py-sec-001-archive-path"
+    },
+    {
+      "elapsed_seconds": 83.274,
+      "evaluation_ok": true,
+      "outcome": "passed",
+      "patch_bytes": 2265,
+      "patch_sha256": "cd79b3698608fbf22e2b2a635f6ece1dcd340f6fb9501e7ecaf0b44539a82124",
+      "task_id": "ts-bug-001-utf8-chunks"
+    },
+    {
+      "elapsed_seconds": 68.834,
+      "evaluation_ok": true,
+      "outcome": "passed",
+      "patch_bytes": 1420,
+      "patch_sha256": "ec0a26918fb1ae858268674b98968a066765deb8b0a9961a2b34e49078e5115c",
+      "task_id": "ts-bug-002-zero-timeout"
+    },
+    {
+      "elapsed_seconds": 52.516,
+      "evaluation_ok": true,
+      "outcome": "passed",
+      "patch_bytes": 2012,
+      "patch_sha256": "5e774d628d95c14281b35de37e633870172965cfda2e0b073ecad2cad05310df",
+      "task_id": "ts-bug-003-query-encoding"
+    },
+    {
+      "elapsed_seconds": 54.86,
+      "evaluation_ok": true,
+      "outcome": "passed",
+      "patch_bytes": 517,
+      "patch_sha256": "0b79fba08b08138ff054b6e7b7d00229f9a59a97ab3220492c848032a96c4de8",
+      "task_id": "ts-bug-004-stable-sort"
+    },
+    {
+      "elapsed_seconds": 108.694,
+      "evaluation_ok": true,
+      "outcome": "passed",
+      "patch_bytes": 4162,
+      "patch_sha256": "71e3629bb703a7d4c24d408c5970a7023250123b1a8ab393ab8ebfc6aa3f09df",
+      "task_id": "ts-feat-001-bounded-map"
+    },
+    {
+      "elapsed_seconds": 82.72,
+      "evaluation_ok": true,
+      "outcome": "passed",
+      "patch_bytes": 4399,
+      "patch_sha256": "dbd7fed43ea1468bac145acfc3bd8deae20955029df31deeb1298c06fea9b1cd",
+      "task_id": "ts-feat-002-redact-fields"
+    },
+    {
+      "elapsed_seconds": 55.692,
+      "evaluation_ok": true,
+      "outcome": "passed",
+      "patch_bytes": 2841,
+      "patch_sha256": "f3e542144640908fffc39949df97e1131eb48992c2819a58ea6cc2b519232d32",
+      "task_id": "ts-feat-003-ndjson-parser"
+    },
+    {
+      "elapsed_seconds": 72.516,
+      "evaluation_ok": true,
+      "outcome": "passed",
+      "patch_bytes": 3437,
+      "patch_sha256": "4e88fc03a0494aabe5206df5cc55290f0e4f7590408eb14ffe27a674b56092e7",
+      "task_id": "ts-refactor-001-transport-interface"
+    },
+    {
+      "elapsed_seconds": 74.913,
+      "evaluation_ok": true,
+      "outcome": "passed",
+      "patch_bytes": 2984,
+      "patch_sha256": "56557851867ada99e4e28c7216688277a08f679889160f6a9147b47b0562ba84",
+      "task_id": "ts-refactor-002-error-taxonomy"
+    },
+    {
+      "elapsed_seconds": 32.1,
+      "evaluation_ok": true,
+      "outcome": "passed",
+      "patch_bytes": 398,
+      "patch_sha256": "1fb867bcbcb099a1e6811b451d63d70579df517c01cffae337e01d1d0362468a",
+      "task_id": "ts-build-001-esm-exports"
+    },
+    {
+      "elapsed_seconds": 60.622,
+      "evaluation_ok": true,
+      "outcome": "passed",
+      "patch_bytes": 3150,
+      "patch_sha256": "347d046b91c923f22cf46cc470d670b67d1541032c005014cbc487329f50d073",
+      "task_id": "ts-sec-001-url-allowlist"
+    },
+    {
+      "elapsed_seconds": 95.075,
+      "evaluation_ok": true,
+      "outcome": "passed",
+      "patch_bytes": 4548,
+      "patch_sha256": "9504451a6cf9303157be4cf0dc9ce7a4cfa67517252c37d259a352e8aab62642",
+      "task_id": "ts-sec-002-prototype-pollution"
+    }
+  ],
+  "toolchain": {
+    "git": "git version 2.53.0",
+    "node": "v22.23.4",
+    "platform": "Linux-aarch64",
+    "python": "Python 3.12.16"
+  },
+  "unstable_tasks": []
+}

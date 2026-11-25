@@ -391,6 +391,12 @@ def _add_prompt_provider_arguments(parser: argparse.ArgumentParser) -> None:
         provider.add_argument("--script", default="", help="JSON file of scripted turns (scripted provider only)")
         provider.add_argument("--scripted-text", default="", help="single scripted answer; shorthand for a one-turn script")
         provider.add_argument("--max-output-tokens", type=int, default=4096, help="generation cap")
+        provider.add_argument(
+            "--temperature",
+            type=float,
+            default=None,
+            help="sampling temperature; omitted leaves the endpoint default alone",
+        )
         provider.add_argument("--system-prompt", default="", help="override the runtime system prompt")
 
 def _add_limits_transport_arguments(parser: argparse.ArgumentParser) -> None:
@@ -743,7 +749,11 @@ def _build_provider(args: argparse.Namespace) -> Any:
     if args.provider == "anthropic":
         from providers.anthropic import AnthropicProvider
 
-        return AnthropicProvider(model=args.model, max_tokens=args.max_output_tokens)
+        return AnthropicProvider(
+            model=args.model,
+            max_tokens=args.max_output_tokens,
+            temperature=args.temperature,
+        )
     if args.provider == "openai":
         import os
 
@@ -756,6 +766,7 @@ def _build_provider(args: argparse.Namespace) -> Any:
             model=args.model,
             base_url=base_url,
             max_tokens=args.max_output_tokens,
+            temperature=args.temperature,
         )
     raise ValueError(f"unknown provider {args.provider!r}")
 
