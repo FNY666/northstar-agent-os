@@ -54,6 +54,8 @@ export type DataflowPermissionDetails = {
   audience_count: number;
   source_rule?: string;
   sink_escalated?: boolean;
+  untrusted_tainted?: boolean;
+  untrusted_source_count?: number;
 };
 
 export type PermissionDetails = {
@@ -249,6 +251,8 @@ function permissionDetailsOf(value: unknown): PermissionDetails | undefined {
     audience_count: typeof raw.audience_count === "number" ? raw.audience_count : 0,
     ...(typeof raw.source_rule === "string" ? { source_rule: raw.source_rule } : {}),
     ...(typeof raw.sink_escalated === "boolean" ? { sink_escalated: raw.sink_escalated } : {}),
+    ...(typeof raw.untrusted_tainted === "boolean" ? { untrusted_tainted: raw.untrusted_tainted } : {}),
+    ...(typeof raw.untrusted_source_count === "number" ? { untrusted_source_count: raw.untrusted_source_count } : {}),
   };
   return { dataflow };
 }
