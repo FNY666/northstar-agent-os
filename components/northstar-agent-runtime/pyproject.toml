@@ -980,6 +980,7 @@ py-modules = [
     "memory_fact_belief",
     "memory_flat_vs_graph",
     "memory_integrity",
+    "memory_provenance",
     "memory_safety",
     "merged_tree_review",
     "merkle_tree",

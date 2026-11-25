@@ -55822,6 +55822,121 @@ Build both stores from the same corpus, run queries, score F1@k.
 
 #### `main()`
 
+### `memory_provenance`
+
+Source: `components/northstar-agent-runtime/memory_provenance.py`
+
+Memory provenance: every memory record says where it came from, and a revocation is computable.
+
+#### `MemoryProvenanceError`
+
+Raised when a record, a write or a merge is not well formed.
+
+#### `Origin`
+
+Where the text of a memory candidate actually came from.
+
+#### `Disposition`
+
+Where a stored memory sits in its lifecycle.
+
+#### `MemoryRecord`
+
+One durable memory, with its provenance. Immutable by construction.
+
+- `digest` (property)
+  - The sha256 pin of this record's text.
+- `to_dict()`
+  - Return the record as a plain dict (for the ledger and for audit).
+#### `LedgerRow`
+
+One row of the hash-chained ledger. Immutable.
+
+- `to_dict()`
+#### `compute_row_hash(seq: int, event: str, payload: Dict[str, Any], prev_hash: str)`
+
+The chain hash of one row: sha256 over its canonical body.
+
+#### `ProvenanceLedger`
+
+An append-only, hash-chained ledger of memory lifecycle events.
+
+- `head` (property)
+  - The chain hash of the last row, or the genesis pin.
+- `append(event: str, payload: Optional[Dict[str, Any]]=None)`
+  - Append one event row and return it.
+- `rows()`
+  - Every row, in order.
+- `verify()`
+  - Return ``(ok, first_bad_index)``.
+- `events(event: Optional[str]=None)`
+  - Every row, optionally filtered by event name.
+#### `ProvenanceGraph`
+
+The ``(memory_id, parent_ids)`` graph, traversed cycle-safely.
+
+- `add(record: MemoryRecord)`
+  - Add one record's edges to the graph.
+- `ancestors(memory_id: str)`
+  - Every id reachable *up* the parent edges, including ``memory_id``.
+- `descendants(memory_id: str)`
+  - Every id reachable *down* the child edges, including ``memory_id``.
+- `nodes()`
+  - Every id the graph knows.
+#### `GateDecision`
+
+The outcome of a write or a merge attempt.
+
+- `memory_id` (property)
+  - The id of the stored record (empty when nothing was stored).
+#### `PromotionResult`
+
+The outcome of a promotion attempt.
+
+#### `WriteGate`
+
+The boundary a memory crosses to become durable.
+
+- `ledger` (property)
+  - The ledger this gate writes to.
+- `records()`
+  - Every stored record, in write order.
+- `get(memory_id: str)`
+  - The stored record for ``memory_id``, or ``None``.
+- `disposition_of(memory_id: str)`
+  - The disposition of a stored record, or ``None`` if unknown.
+- `promoted(user_id: str)`
+  - Every PROMOTED record for one tenant -- the preload set.
+- `submit(record: MemoryRecord)`
+  - Write one memory record through the gate.
+- `promote(memory_id: str, approver: str, justification: str)`
+  - Release one quarantined record into the promoted set.
+#### `MergeGate`
+
+The boundary many memories cross to become one.
+
+- `gate` (property)
+  - The write gate a merged record goes through.
+- `merge(input_ids: Sequence[str], merged_text: str, user_id: str, memory_id: str, source_session_id: str, source_turn: int=0, created_at: str='')`
+  - Merge promoted records into one new record.
+- `rescan_markers(merged_text: str, inputs: Sequence[MemoryRecord])`
+  - Re-scan the merged text for the provenance markers of its inputs.
+#### `revoke_session(gate: WriteGate, session_id: str)`
+
+Revoke a compromised session and every memory derived from it.
+
+#### `taint_closure(gate: WriteGate, session_ids: Iterable[str])`
+
+Every memory id whose provenance touches one of ``session_ids``.
+
+#### `revoke_sessions_of(gate: WriteGate, session_id: str)`
+
+The tainted set for one session id, without changing any disposition.
+
+#### `stdlib_only()`
+
+Whether this module imports nothing outside the standard library.
+
 ### `memory_safety`
 
 Source: `components/northstar-agent-runtime/memory_safety.py`
