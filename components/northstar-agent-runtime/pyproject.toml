@@ -60,6 +60,7 @@ py-modules = [
     "abuse_limits",
     "abuse_reporter",
     "account_recovery",
+    "acp_server",
     "action_card",
     "action_verifier",
     "active_learning",

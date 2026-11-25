@@ -411,6 +411,68 @@ class Checker:
         self.integrity.extend(errors)
         self.gate("snapshot_contract", "evidence_integrity", not errors, errors)
 
+    def _validate_admission(self, admission: dict[str, Any] | None) -> None:
+        if admission is None:
+            return
+        errors: list[str] = []
+        if admission.get("schema") != "northstar.repository-admission.v1":
+            errors.append("unsupported repository admission schema")
+        if admission.get("start_commit") != self.manifest.get("start_commit"):
+            errors.append("repository admission start_commit does not match manifest")
+        if admission.get("source_relative") != self.manifest.get("source_relative") or not _safe_repo_path(
+            admission.get("source_relative"), dot_ok=True
+        ):
+            errors.append("repository admission source_relative does not match manifest")
+        for key, expected in (
+            ("non_executing_scan", True),
+            ("repo_config_auto_loaded", False),
+            ("secrets_content_read", False),
+            ("git_hooks_disabled", True),
+            ("git_filters_neutralized", True),
+            ("submodules_disabled", True),
+        ):
+            if admission.get(key) is not expected:
+                errors.append(f"repository admission {key} must be {expected}")
+        if admission.get("network_default") != "denied":
+            errors.append("repository admission network_default must be 'denied'")
+        count = admission.get("discovered_count")
+        truncated = admission.get("discovered_truncated")
+        if not _is_int(count) or count < 0:
+            errors.append("repository admission discovered_count is invalid")
+        if not _is_bool(truncated):
+            errors.append("repository admission discovered_truncated must be boolean")
+        counts = admission.get("category_counts")
+        if not isinstance(counts, dict) or len(counts) > 32 or any(
+            not _string(k, nonempty=True) or not _is_int(v) or v < 0 for k, v in counts.items()
+        ):
+            errors.append("repository admission category_counts is invalid")
+        elif _is_int(count) and sum(counts.values()) != count:
+            errors.append("repository admission category_counts sum does not match discovered_count")
+        surfaces = admission.get("surfaces")
+        if not isinstance(surfaces, list) or len(surfaces) > 256:
+            errors.append("repository admission surfaces must be an array of at most 256 items")
+            surfaces = []
+        elif _is_bool(truncated) and not truncated and _is_int(count) and len(surfaces) != count:
+            errors.append("untruncated repository admission surfaces count does not match discovered_count")
+        for index, surface in enumerate(surfaces):
+            if not isinstance(surface, dict):
+                errors.append(f"admission surfaces[{index}] is not an object")
+                continue
+            if not _safe_repo_path(surface.get("path")):
+                errors.append(f"admission surfaces[{index}] has an invalid path")
+            for field_name in ("category", "decision", "authority"):
+                if not _string(surface.get(field_name), max_chars=128, nonempty=True):
+                    errors.append(f"admission surfaces[{index}] has an invalid {field_name}")
+            size = surface.get("size_bytes")
+            if size is not None and (not _is_int(size) or size < 0):
+                errors.append(f"admission surfaces[{index}] has an invalid size_bytes")
+            if surface.get("content_read") is not False:
+                errors.append(f"admission surfaces[{index}] must not read untrusted content")
+            if surface.get("category") == "secret_file" and surface.get("sha256") is not None:
+                errors.append(f"admission surfaces[{index}] must not hash secret_file content")
+        self.integrity.extend(errors)
+        self.gate("admission_contract", "evidence_integrity", not errors, errors)
+
     def _validate_plan(self, plan: Any, errors: list[str]) -> None:
         if not isinstance(plan, dict):
             errors.append("phase plan is missing or not an object")
@@ -741,8 +803,10 @@ class Checker:
         task = self._artifact_json("task", "task.json", required=True)
         verification = self._artifact_json("verification", "verification.json", required=True)
         snapshot = self._artifact_json("repository_snapshot", "repository-snapshot.json", required=True)
+        admission = self._artifact_json("admission", "admission.json", required=False)
         self._validate_task(task)
         self._validate_snapshot(snapshot)
+        self._validate_admission(admission)
         self._validate_phases(phases)
         self._validate_verification(verification)
         patch = self._artifact_raw("patch", "changes.patch", required=successish and not self.task_plan_only, maximum=MAX_PATCH_BYTES)

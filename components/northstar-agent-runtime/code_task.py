@@ -26,10 +26,59 @@ MAX_DELIVERY_PATCH_BYTES = 8 * 1024 * 1024
 MAX_DELIVERY_FILE_BYTES = 1024 * 1024
 MAX_DELIVERY_FILES = 200
 MAX_CHECK_INPUTS = 64
+MAX_ADMISSION_SURFACES = 256
 
 _GENERATED_PARTS = frozenset({"build", "dist", "node_modules", "__pycache__"})
 _GENERATED_SUFFIXES = frozenset(
     {".class", ".dll", ".dylib", ".exe", ".o", ".obj", ".pyc", ".so", ".whl", ".zip"}
+)
+_PYTHON_STARTUP_HOOK_NAMES = frozenset({"sitecustomize.py", "usercustomize.py"})
+_AGENT_CONFIG_POISON_PATHS = frozenset(
+    {
+        ".mcp.json",
+        "mcp.json",
+        "mcp.config.json",
+        "opencode.json",
+        ".claude/settings.json",
+        ".claude/settings.local.json",
+        ".gemini/settings.json",
+        ".codex/config.toml",
+        ".cursor/mcp.json",
+        ".opencode/config.json",
+        ".vscode/mcp.json",
+        ".vscode/tasks.json",
+    }
+)
+_AGENT_CONFIG_POISON_PREFIXES = (
+    ".claude/hooks/",
+    ".githooks/",
+)
+_ADMISSION_SECRET_NAMES = frozenset(
+    {".env", ".npmrc", ".pypirc", ".netrc", "id_rsa", "id_ed25519", "id_ecdsa", "id_dsa"}
+)
+_ADMISSION_SECRET_EXAMPLE_NAMES = frozenset(
+    {".env.example", ".env.sample", ".env.template", ".env.dist"}
+)
+_ADMISSION_SECRET_SUFFIXES = frozenset({".pem", ".key", ".p12", ".pfx"})
+_ADMISSION_MCP_PATHS = frozenset(
+    {".mcp.json", "mcp.json", "mcp.config.json", ".cursor/mcp.json", ".vscode/mcp.json"}
+)
+_ADMISSION_AGENT_DIRS = frozenset(
+    {".claude", ".codex", ".gemini", ".cursor", ".opencode", ".goose", ".clinerules"}
+)
+_ADMISSION_AGENT_PATHS = frozenset(
+    {".clinerules", "opencode.json", ".vscode/tasks.json", ".vscode/settings.json"}
+)
+_ADMISSION_INSTRUCTION_NAMES = frozenset(
+    {"agents.md", "claude.md", "gemini.md", "copilot-instructions.md"}
+)
+_ADMISSION_GIT_EXEC_NAMES = frozenset({".gitmodules", ".gitattributes"})
+
+_PYTEST_MAKEREPORT_RE = re.compile(r"\bdef\s+pytest_runtest_makereport\b")
+_PYTEST_FORCE_PASS_RE = re.compile(r"\.outcome\s*=\s*['\"]passed['\"]")
+_PYTEST_SESSIONFINISH_RE = re.compile(r"\bdef\s+pytest_sessionfinish\b")
+_PYTEST_FORCE_ZERO_EXIT_RE = re.compile(
+    r"(?:\.exitstatus\s*=\s*0\b|(?:os\._exit|sys\.exit)\s*\(\s*0\s*\))"
 )
 _SECRET_PATTERNS = (
     ("private_key", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----")),
@@ -766,6 +815,71 @@ def _changed_paths(worktree: Path) -> tuple[str, ...]:
     )
 
 
+def _added_lines_by_path(patch_text: str) -> dict[str, list[str]]:
+    """Collect added patch lines keyed by repository-relative target path."""
+    per_file: dict[str, list[str]] = {}
+    current_path: str | None = None
+    for line in patch_text.splitlines():
+        if line.startswith("+++ "):
+            target = line[4:].strip()
+            if target == "/dev/null":
+                current_path = None
+            else:
+                if target.startswith('"') and target.endswith('"'):
+                    target = target[1:-1]
+                if target.startswith("b/"):
+                    target = target[2:]
+                current_path = target
+                per_file.setdefault(current_path, [])
+            continue
+        if line.startswith("diff --git "):
+            current_path = None
+            continue
+        if current_path is not None and line.startswith("+") and not line.startswith("+++"):
+            per_file[current_path].append(line[1:])
+    return per_file
+
+
+def classify_repository_surface(relative_path: str) -> tuple[str, str, str] | None:
+    """Classify an untrusted repository path without reading or executing it.
+
+    Returns ``(category, decision, authority)`` for surfaces that could carry
+    secrets, agent/MCP configuration, project instructions, Git execution hooks,
+    or interpreter startup hooks; returns ``None`` for ordinary source files.
+    """
+    path = Path(relative_path)
+    normalized = path.as_posix().lower()
+    parts_lower = tuple(part.lower() for part in path.parts)
+    name_lower = path.name.lower()
+    suffix_lower = path.suffix.lower()
+
+    if parts_lower and parts_lower[0] == ".northstar":
+        return ("governance_surface", "host_protected_unwritable", "host_only")
+    if (
+        name_lower in _ADMISSION_SECRET_NAMES
+        or (
+            name_lower.startswith(".env.")
+            and name_lower not in _ADMISSION_SECRET_EXAMPLE_NAMES
+        )
+        or suffix_lower in _ADMISSION_SECRET_SUFFIXES
+    ):
+        return ("secret_file", "quarantined_secret_unreadable", "none")
+    if normalized in _ADMISSION_MCP_PATHS:
+        return ("mcp_config", "not_auto_loaded", "untrusted_data_only")
+    if (
+        (parts_lower and parts_lower[0] in _ADMISSION_AGENT_DIRS)
+        or normalized in _ADMISSION_AGENT_PATHS
+    ):
+        return ("agent_config", "not_auto_loaded", "untrusted_data_only")
+    if name_lower in _ADMISSION_INSTRUCTION_NAMES:
+        return ("agent_instructions", "untrusted_data_only", "none")
+    if name_lower in _ADMISSION_GIT_EXEC_NAMES or (parts_lower and parts_lower[0] == ".githooks"):
+        return ("git_execution_surface", "neutralized_by_host_git_env", "none")
+    if name_lower in _PYTHON_STARTUP_HOOK_NAMES or suffix_lower == ".pth":
+        return ("python_startup_hook", "flagged_execution_surface", "none")
+    return None
+
+
 def audit_delivery_patch(
     worktree: str | Path,
     *,
@@ -797,11 +911,27 @@ def audit_delivery_patch(
     for raw_path in paths[: MAX_DELIVERY_FILES + 1]:
         path = Path(raw_path)
         parts = set(path.parts)
+        normalized_lower = path.as_posix().lower()
+        name_lower = path.name.lower()
         if path.parts and path.parts[0] in {".git", ".northstar"}:
             finding(
                 "governance_path_changed",
                 raw_path,
                 "delivery may not modify repository metadata or Northstar governance",
+            )
+        if name_lower in _PYTHON_STARTUP_HOOK_NAMES or path.suffix.lower() == ".pth":
+            finding(
+                "python_startup_hook",
+                raw_path,
+                "Python interpreter startup hooks (sitecustomize/usercustomize/.pth) are excluded from delivery",
+            )
+        if normalized_lower in _AGENT_CONFIG_POISON_PATHS or any(
+            normalized_lower.startswith(prefix) for prefix in _AGENT_CONFIG_POISON_PREFIXES
+        ):
+            finding(
+                "agent_config_poisoning",
+                raw_path,
+                "external AI agent, MCP, or editor execution config files are excluded from delivery",
             )
         if parts & _GENERATED_PARTS or path.suffix.lower() in _GENERATED_SUFFIXES:
             finding(
@@ -830,6 +960,25 @@ def audit_delivery_patch(
     patch_text = patch.decode("utf-8", errors="replace")
     if any(marker in patch_text for marker in ("new file mode 120000", "new file mode 160000")):
         finding("special_file", "(patch)", "symlinks and submodules are excluded from delivery")
+    added_by_path = _added_lines_by_path(patch_text)
+    for file_path, added_lines in added_by_path.items():
+        if Path(file_path).name.lower() != "conftest.py":
+            continue
+        added_block = "\n".join(added_lines)
+        if _PYTEST_MAKEREPORT_RE.search(added_block) and _PYTEST_FORCE_PASS_RE.search(added_block):
+            finding(
+                "test_runner_hijack",
+                file_path,
+                "conftest.py adds a pytest_runtest_makereport hook that forces passed test outcomes",
+            )
+        elif _PYTEST_SESSIONFINISH_RE.search(added_block) and _PYTEST_FORCE_ZERO_EXIT_RE.search(
+            added_block
+        ):
+            finding(
+                "test_runner_hijack",
+                file_path,
+                "conftest.py adds a pytest_sessionfinish hook that forces zero exit status",
+            )
     added_text = "\n".join(
         line[1:]
         for line in patch_text.splitlines()
@@ -1248,6 +1397,7 @@ class IsolatedCodeWorkspace:
             self._temporary_parent = parent
             self._write_manifest({"status": "prepared"})
             self.record_repository_snapshot()
+            self.record_admission_receipt()
         except Exception:
             # Preparing evidence is part of preparing the run. Do not leak a
             # registered worktree when that second half cannot complete.
@@ -1351,6 +1501,83 @@ class IsolatedCodeWorkspace:
             {
                 "repository_snapshot": path.name,
                 "repository_snapshot_sha256": hashlib.sha256(raw_payload).hexdigest(),
+            }
+        )
+        return path
+
+    def record_admission_receipt(self) -> Path:
+        """Persist a non-executing untrusted-repository admission preflight receipt.
+
+        Enumerates tracked files from Git's index and classifies potential secret,
+        agent-config, MCP-config, project-instruction, Git-hook, and Python startup
+        surfaces using path metadata and ``lstat`` only. Never executes repository
+        hooks, MCP servers, skills, or scripts, and never reads secret file contents.
+        """
+        if self.worktree is None or self.evidence_dir is None:
+            raise CodeTaskError("code workspace has not been prepared")
+        arguments = ["ls-files", "--cached", "-z"]
+        prefix = "" if self.source_relative == "." else self.source_relative.rstrip("/") + "/"
+        if prefix:
+            arguments.extend(("--", self.source_relative))
+        raw = _run_git(self.worktree, *arguments).stdout.decode("utf-8", errors="replace")
+        repository_paths = sorted(item for item in raw.split("\0") if item)
+        files = [
+            item[len(prefix) :] if prefix and item.startswith(prefix) else item
+            for item in repository_paths
+        ]
+        execution_root = self.execution_root
+        discovered: list[dict[str, Any]] = []
+        category_counts: Counter[str] = Counter()
+        for relative in files:
+            classified = classify_repository_surface(relative)
+            if classified is None:
+                continue
+            category, decision, authority = classified
+            category_counts[category] += 1
+            if len(discovered) < MAX_ADMISSION_SURFACES:
+                size_bytes: int | None = None
+                try:
+                    entry_stat = (execution_root / relative).lstat()
+                    size_bytes = int(entry_stat.st_size)
+                except OSError:
+                    size_bytes = None
+                discovered.append(
+                    {
+                        "path": relative,
+                        "category": category,
+                        "decision": decision,
+                        "authority": authority,
+                        "size_bytes": size_bytes,
+                        "content_read": False,
+                        "sha256": None,
+                    }
+                )
+        total_discovered = sum(category_counts.values())
+        payload = {
+            "schema": "northstar.repository-admission.v1",
+            "start_commit": self.start_commit,
+            "source_relative": self.source_relative,
+            "non_executing_scan": True,
+            "repo_config_auto_loaded": False,
+            "secrets_content_read": False,
+            "git_hooks_disabled": True,
+            "git_filters_neutralized": True,
+            "submodules_disabled": True,
+            "network_default": "denied",
+            "discovered_count": total_discovered,
+            "discovered_truncated": total_discovered > len(discovered),
+            "category_counts": dict(sorted(category_counts.items())),
+            "surfaces": discovered,
+        }
+        path = self.evidence_dir / "admission.json"
+        raw_payload = (
+            json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
+        ).encode("utf-8")
+        _atomic_write(path, raw_payload)
+        self._write_manifest(
+            {
+                "admission": path.name,
+                "admission_sha256": hashlib.sha256(raw_payload).hexdigest(),
             }
         )
         return path
@@ -1511,6 +1738,7 @@ class CodeRunReport:
     patch_replay_path: str = ""
     patch_audit_path: str = ""
     delivery_seal_path: str = ""
+    admission_path: str = ""
 
     @property
     def ok(self) -> bool:
@@ -1531,4 +1759,5 @@ class CodeRunReport:
             "patch_replay_path": self.patch_replay_path,
             "patch_audit_path": self.patch_audit_path,
             "delivery_seal_path": self.delivery_seal_path,
+            "admission_path": self.admission_path,
         }

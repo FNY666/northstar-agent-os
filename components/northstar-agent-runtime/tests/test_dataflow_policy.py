@@ -483,5 +483,278 @@ class TestGateIntegration(unittest.TestCase):
         self.assertEqual(decision.source, "mode")
 
 
+class TestCamelIntegrityAndSubagentTaint(unittest.TestCase):
+    """CaMeL-style untrusted-input integrity taint across tools, subagents, and resume."""
+
+    def test_camel_default_taints_after_external_source_and_escalates_sinks(self):
+        policy = DataflowPolicy.camel_default()
+        self.assertTrue(policy.has_integrity_rules)
+        tracker = SessionDataflow(policy)
+
+        # Clean trajectory allows initial Fetch without integrity escalation.
+        self.assertFalse(tracker.check_sink("Fetch", {"host": "example.com"}).escalate)
+
+        # Observing Fetch taints the trajectory.
+        tracker.observe("Fetch", {"host": "example.com"})
+        self.assertTrue(tracker.untrusted_tainted)
+        self.assertIn("tool:Fetch", tracker.untrusted_sources)
+
+        for sink_name in ("Shell", "Edit", "Write", "Task", "Fetch", "mcp__slack__post"):
+            verdict = tracker.check_sink(sink_name, {})
+            self.assertTrue(verdict.escalate, f"{sink_name} should escalate after untrusted Fetch")
+            self.assertIn("CaMeL integrity taint", verdict.reason)
+
+    def test_camel_toml_strict_parsing_accepts_rules_and_rejects_unknown_fields(self):
+        valid = DataflowPolicy.from_toml(
+            """
+            [policy]
+            version = 1
+            trust_chain = ["public", "restricted"]
+
+            [[policy.untrusted_source]]
+            tool = "mcp__*"
+            label = "external_mcp"
+
+            [[policy.untrusted_source]]
+            tool = "*"
+            match_trust = ["untrusted"]
+            label = "runtime_untrusted"
+
+            [[policy.privileged_sink]]
+            tool = "Shell"
+            description = "host command"
+            """
+        )
+        self.assertTrue(valid.has_integrity_rules)
+        tracker = SessionDataflow(valid)
+        tracker.observe_provenance("CustomTool", source="tool:CustomTool", trust="untrusted")
+        self.assertTrue(tracker.untrusted_tainted)
+        self.assertTrue(tracker.check_sink("Shell", {"command": "id"}).escalate)
+
+        with self.assertRaises(DataflowPolicyError):
+            DataflowPolicy.from_toml(
+                """
+                [policy]
+                version = 1
+                trust_chain = ["public"]
+
+                [[policy.untrusted_source]]
+                tool = "Fetch"
+                bogus = true
+                """
+            )
+
+    def test_camel_strict_blocks_edit_after_workspace_read_and_consults_callback(self):
+        import tempfile
+        from pathlib import Path
+        import sdk
+        from providers.scripted import ScriptedTurn
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp)
+            target = ws / "notes.txt"
+            target.write_text("untrusted repo content\n", encoding="utf-8")
+
+            turns = (
+                ScriptedTurn.tool("Read", {"path": "notes.txt"}),
+                ScriptedTurn.tool("Write", {"path": "out.txt", "content": "injected"}),
+                ScriptedTurn.text("done"),
+            )
+
+            # 1) Without callback: even acceptEdits fails closed after untrusted Read.
+            blocked = sdk.run(
+                sdk.RunOptions(
+                    prompt="read then write",
+                    workspace=str(ws),
+                    provider="scripted",
+                    scripted_turns=turns,
+                    permission_mode="acceptEdits",
+                    dataflow_policy=DataflowPolicy.camel_strict(),
+                    shell_backend="process",
+                    shell_seccomp="off",
+                    shell_capdrop="off",
+                    workspace_agents=False,
+                )
+            )
+            self.assertFalse((ws / "out.txt").exists())
+            self.assertTrue(blocked.permission_denials)
+            self.assertIn("CaMeL integrity taint", blocked.permission_denials[0]["reason"])
+
+            # 2) With host callback: callback sees the CaMeL escalation reason and approves.
+            seen_hints: list[str] = []
+
+            def _approve(tool_name, tool_input, ctx):
+                seen_hints.append(ctx.reason_hint)
+                return {"allowed": True, "reason": "operator approved tainted write"}
+
+            approved = sdk.run(
+                sdk.RunOptions(
+                    prompt="read then write",
+                    workspace=str(ws),
+                    provider="scripted",
+                    scripted_turns=turns,
+                    permission_mode="acceptEdits",
+                    dataflow_policy=DataflowPolicy.camel_strict(),
+                    can_use_tool=_approve,
+                    shell_backend="process",
+                    shell_seccomp="off",
+                    shell_capdrop="off",
+                    workspace_agents=False,
+                )
+            )
+            self.assertEqual(approved.subtype, "success")
+            self.assertEqual((ws / "out.txt").read_text(encoding="utf-8"), "injected")
+            self.assertTrue(any("CaMeL integrity taint" in h for h in seen_hints))
+
+    def test_camel_taint_propagates_across_subagents_both_directions(self):
+        import tempfile
+        from pathlib import Path
+        from loop import AgentRuntime, RuntimeConfig
+        from providers.scripted import ScriptedProvider, ScriptedTurn
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp)
+            (ws / "notes.txt").write_text("untrusted payload\n", encoding="utf-8")
+
+            # Direction 1: Child reads untrusted file -> returns to parent -> parent Write blocked!
+            parent_turns = [
+                ScriptedTurn.tool("Task", {"agent": "explorer", "prompt": "read notes.txt"}),
+                ScriptedTurn.tool("Write", {"path": "from_parent.txt", "content": "pwned"}),
+                ScriptedTurn.text("parent finished"),
+            ]
+            child_turns = [
+                ScriptedTurn.tool("Read", {"path": "notes.txt"}),
+                ScriptedTurn.text("child read notes"),
+            ]
+            # ScriptedProvider shares one script or per-agent provider via providers dict.
+            rt1 = AgentRuntime(
+                provider=ScriptedProvider(parent_turns),
+                providers={"scripted": ScriptedProvider(child_turns)},
+                config=RuntimeConfig(
+                    workspace=str(ws),
+                    permission_mode="acceptEdits",
+                    dataflow_policy=DataflowPolicy.camel_strict(),
+                    shell_backend="process",
+                    shell_seccomp="off",
+                    shell_capdrop="off",
+                ),
+            )
+            # Run via child_provider factory: explorer uses parent's provider unless overridden,
+            # so supply a provider that serves parent + child turns sequentially.
+            combined_turns = [
+                ScriptedTurn.tool("Task", {"agent": "explorer", "prompt": "read notes.txt"}),
+                # Child turns execute before parent's next turn:
+                ScriptedTurn.tool("Read", {"path": "notes.txt"}),
+                ScriptedTurn.text("child read notes"),
+                # Back in parent:
+                ScriptedTurn.tool("Write", {"path": "from_parent.txt", "content": "pwned"}),
+                ScriptedTurn.text("parent finished"),
+            ]
+            rt_child_to_parent = AgentRuntime(
+                provider=ScriptedProvider(combined_turns),
+                config=RuntimeConfig(
+                    workspace=str(ws),
+                    permission_mode="acceptEdits",
+                    dataflow_policy=DataflowPolicy.camel_strict(),
+                    shell_backend="process",
+                    shell_seccomp="off",
+                    shell_capdrop="off",
+                ),
+            )
+            events1 = list(rt_child_to_parent.run("delegate read then write"))
+            self.assertTrue(rt_child_to_parent.dataflow.untrusted_tainted)
+            self.assertTrue(
+                any("subagent:explorer" in src for src in rt_child_to_parent.dataflow.untrusted_sources)
+            )
+            self.assertFalse((ws / "from_parent.txt").exists())
+            result1 = [e for e in events1 if type(e).__name__ == "ResultMessage"][-1]
+            self.assertTrue(
+                any("CaMeL integrity taint" in d["reason"] for d in result1.permission_denials)
+            )
+
+            # Direction 2: Parent reads untrusted file -> delegates to general subagent
+            # (approved for Task only) -> child's Write is STILL blocked by inherited taint!
+            seen_calls: list[tuple[str, str]] = []
+
+            def _approve_only_task(tool_name, tool_input, ctx):
+                seen_calls.append((tool_name, ctx.agent))
+                if tool_name == "Task":
+                    return {"allowed": True, "reason": "allow delegation"}
+                return {"allowed": False, "reason": "deny child write under taint"}
+
+            parent_to_child_turns = [
+                ScriptedTurn.tool("Read", {"path": "notes.txt"}),
+                ScriptedTurn.tool("Task", {"agent": "general", "prompt": "write a file"}),
+                # Child turns:
+                ScriptedTurn.tool("Write", {"path": "from_child.txt", "content": "pwned"}),
+                ScriptedTurn.text("child done"),
+                # Parent finish:
+                ScriptedTurn.text("parent done"),
+            ]
+            rt_parent_to_child = AgentRuntime(
+                provider=ScriptedProvider(parent_to_child_turns),
+                can_use_tool=_approve_only_task,
+                config=RuntimeConfig(
+                    workspace=str(ws),
+                    permission_mode="acceptEdits",
+                    dataflow_policy=DataflowPolicy.camel_strict(),
+                    shell_backend="process",
+                    shell_seccomp="off",
+                    shell_capdrop="off",
+                ),
+            )
+            list(rt_parent_to_child.run("read then delegate write"))
+            self.assertFalse((ws / "from_child.txt").exists())
+            self.assertIn(("Task", "main"), seen_calls)
+            self.assertIn(("Write", "general"), seen_calls)
+
+    def test_camel_resumed_session_marks_untrusted_taint_conservatively(self):
+        import tempfile
+        from pathlib import Path
+        import sdk
+        from providers.scripted import ScriptedTurn
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp)
+            sess_dir = ws / ".sessions"
+            r1 = sdk.run(
+                sdk.RunOptions(
+                    prompt="first turn",
+                    workspace=str(ws),
+                    provider="scripted",
+                    scripted_turns=(ScriptedTurn.text("ok"),),
+                    permission_mode="acceptEdits",
+                    dataflow_policy=DataflowPolicy.camel_default(),
+                    session_dir=str(sess_dir),
+                    shell_backend="process",
+                    shell_seccomp="off",
+                    shell_capdrop="off",
+                    workspace_agents=False,
+                )
+            )
+            # Resumed turn under camel_default conservatively treats prior context as tainted.
+            r2 = sdk.run(
+                sdk.RunOptions(
+                    prompt="second turn write",
+                    workspace=str(ws),
+                    provider="scripted",
+                    scripted_turns=(
+                        ScriptedTurn.tool("Write", {"path": "resumed.txt", "content": "x"}),
+                        ScriptedTurn.text("done"),
+                    ),
+                    permission_mode="acceptEdits",
+                    dataflow_policy=DataflowPolicy.camel_default(),
+                    session_dir=str(sess_dir),
+                    shell_backend="process",
+                    shell_seccomp="off",
+                    shell_capdrop="off",
+                    workspace_agents=False,
+                ),
+                resume=r1.session_id,
+            )
+            self.assertFalse((ws / "resumed.txt").exists())
+            self.assertTrue(r2.permission_denials)
+
+
 if __name__ == "__main__":
     unittest.main()

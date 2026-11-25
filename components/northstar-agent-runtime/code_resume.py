@@ -353,6 +353,9 @@ def resume_code_run(
         delivery_seal_path=(
             str(root / "delivery-seal.json") if (root / "delivery-seal.json").is_file() else ""
         ),
+        admission_path=(
+            str(root / "admission.json") if (root / "admission.json").is_file() else ""
+        ),
     )
 
 

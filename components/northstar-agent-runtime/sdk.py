@@ -58,6 +58,7 @@ class RunOptions:
     scripted_turns: Sequence[Any] | None = None  # scripted provider turns; None -> one text reply
     permission_mode: str = "default"
     dataflow_policy: Any = None  # a validated dataflow_policy.DataflowPolicy; opt-in
+    can_use_tool: Any = None  # optional host approval callback (tool_name, tool_input, PermissionRequestContext) -> verdict
     allowed_tools: Sequence[str] = ()
     disallowed_tools: Sequence[str] = ()
     read_only: bool = False
@@ -291,6 +292,7 @@ def _build(options: RunOptions, resume: str | None = None) -> tuple[Any, Any, li
         provider=provider,
         config=RuntimeConfig(**config_kwargs),
         tools=registry,
+        can_use_tool=options.can_use_tool,
         sessions=store,
         agents=agents,
         budget=budget,
@@ -404,6 +406,7 @@ def run_code(
         plan_only=task.plan_only,
         worktree=isolated.worktree,
         start_commit=isolated.start_commit,
+        check_inputs=task.check_inputs,
     )
     phases.start()
 
@@ -485,6 +488,7 @@ def run_code(
         patch_replay_path=str(isolated.evidence_dir / "patch-replay.json") if (isolated.evidence_dir / "patch-replay.json").is_file() else "",
         patch_audit_path=str(isolated.evidence_dir / "patch-audit.json") if (isolated.evidence_dir / "patch-audit.json").is_file() else "",
         delivery_seal_path=str(isolated.evidence_dir / "delivery-seal.json") if (isolated.evidence_dir / "delivery-seal.json").is_file() else "",
+        admission_path=str(isolated.evidence_dir / "admission.json") if (isolated.evidence_dir / "admission.json").is_file() else "",
     )
 
 

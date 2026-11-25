@@ -212,6 +212,92 @@ class SinkVerdict:
 
 
 @dataclass(frozen=True)
+class UntrustedSourceRule:
+    """A tool or provenance trust level that introduces untrusted data (CaMeL).
+
+    Once an allowed call matches an ``UntrustedSourceRule`` (either by tool/arg
+    glob or by runtime ``ToolProvenance.trust``), the trajectory becomes
+    integrity-tainted so downstream privileged sinks escalate to host approval
+    (or deny fail-closed when no callback exists).
+    """
+
+    tool: str
+    match_args: tuple[tuple[str, str], ...] = ()
+    match_trust: tuple[str, ...] = ()
+    label: str = "untrusted"
+
+    def matches(
+        self,
+        tool_name: str,
+        arguments: Mapping[str, Any] | None = None,
+        *,
+        trust: str = "",
+    ) -> bool:
+        if not fnmatch.fnmatchcase(tool_name, self.tool):
+            return False
+        if self.match_trust:
+            if not trust or trust not in self.match_trust:
+                return False
+        args = arguments or {}
+        for name, pattern in self.match_args:
+            value = args.get(name)
+            if value is None or not fnmatch.fnmatchcase(str(value), pattern):
+                return False
+        return True
+
+
+@dataclass(frozen=True)
+class PrivilegedSinkRule:
+    """A privileged control-plane or exfiltration sink guarded against untrusted taint."""
+
+    tool: str
+    match_args: tuple[tuple[str, str], ...] = ()
+    description: str = ""
+
+    def matches(self, tool_name: str, arguments: Mapping[str, Any] | None = None) -> bool:
+        if not fnmatch.fnmatchcase(tool_name, self.tool):
+            return False
+        args = arguments or {}
+        for name, pattern in self.match_args:
+            value = args.get(name)
+            if value is None or not fnmatch.fnmatchcase(str(value), pattern):
+                return False
+        return True
+
+
+_MAX_UNTRUSTED_ORIGINS = 64
+
+_CAMEL_UNTRUSTED_SOURCES: tuple[UntrustedSourceRule, ...] = (
+    UntrustedSourceRule(tool="Fetch", label="external_fetch"),
+    UntrustedSourceRule(tool="mcp__*", label="external_mcp"),
+    UntrustedSourceRule(tool="mcp/*", label="external_mcp"),
+)
+
+_CAMEL_STRICT_EXTRA_SOURCES: tuple[UntrustedSourceRule, ...] = (
+    UntrustedSourceRule(tool="Read", label="untrusted_workspace_read"),
+    UntrustedSourceRule(tool="Grep", label="untrusted_workspace_search"),
+    UntrustedSourceRule(tool="SearchCode", label="untrusted_workspace_search"),
+    UntrustedSourceRule(tool="GitInspect", label="untrusted_workspace_git"),
+    UntrustedSourceRule(tool="RepoMap", label="untrusted_workspace_map"),
+)
+
+_CAMEL_PRIVILEGED_SINKS: tuple[PrivilegedSinkRule, ...] = (
+    PrivilegedSinkRule(tool="Shell", description="host shell execution"),
+    PrivilegedSinkRule(tool="RunCheck", description="host verification command"),
+    PrivilegedSinkRule(tool="Edit", description="workspace file mutation"),
+    PrivilegedSinkRule(tool="Write", description="workspace file creation/overwrite"),
+    PrivilegedSinkRule(tool="ApplyPatch", description="workspace patch application"),
+    PrivilegedSinkRule(tool="Fetch", description="external network egress"),
+    PrivilegedSinkRule(tool="Task", description="subagent delegation"),
+    PrivilegedSinkRule(tool="mcp__*", description="external MCP tool invocation"),
+    PrivilegedSinkRule(tool="mcp/*", description="external MCP tool invocation"),
+    PrivilegedSinkRule(tool="send_mail", description="outbound email"),
+    PrivilegedSinkRule(tool="post_slack", description="outbound chat message"),
+    PrivilegedSinkRule(tool="http_post", description="outbound HTTP POST"),
+)
+
+
+@dataclass(frozen=True)
 class DataflowPolicy:
     """A compiled, deterministic dataflow policy."""
 
@@ -219,6 +305,12 @@ class DataflowPolicy:
     trust_chain: tuple[str, ...]
     sources: tuple[SourceRule, ...]
     sinks: tuple[SinkRule, ...]
+    untrusted_sources: tuple[UntrustedSourceRule, ...] = ()
+    privileged_sinks: tuple[PrivilegedSinkRule, ...] = ()
+
+    @property
+    def has_integrity_rules(self) -> bool:
+        return bool(self.untrusted_sources and self.privileged_sinks)
 
     def rank_index(self, rank: str) -> int:
         return self.trust_chain.index(rank)
@@ -237,7 +329,11 @@ class DataflowPolicy:
             raise DataflowPolicyError(f"{source}: invalid TOML: {error}") from error
         _check_no_unknown(raw, frozenset({"policy"}), source)
         policy = _expect_mapping(raw.get("policy"), f"{source} [policy]")
-        _check_no_unknown(policy, frozenset({"version", "trust_chain", "source", "sink"}), f"{source} [policy]")
+        _check_no_unknown(
+            policy,
+            frozenset({"version", "trust_chain", "source", "sink", "untrusted_source", "privileged_sink"}),
+            f"{source} [policy]",
+        )
 
         version = policy.get("version")
         if version != POLICY_VERSION:
@@ -308,11 +404,61 @@ class DataflowPolicy:
                 )
             )
 
+        untrusted_sources: list[UntrustedSourceRule] = []
+        for i, entry in enumerate(policy.get("untrusted_source", []) or []):
+            where = f"{source} [[policy.untrusted_source]] #{i}"
+            entry = _expect_mapping(entry, where)
+            _check_no_unknown(entry, frozenset({"tool", "match_args", "match_trust", "label"}), where)
+            tool = entry.get("tool")
+            if not isinstance(tool, str) or not tool:
+                raise DataflowPolicyError(f"{where}: tool must be a non-empty string")
+            match_args = _expect_mapping(entry.get("match_args", {}), f"{where} match_args")
+            for name, pattern in match_args.items():
+                if not isinstance(pattern, str):
+                    raise DataflowPolicyError(f"{where} match_args.{name}: glob must be a string")
+            match_trust = _expect_str_list(entry.get("match_trust", []), f"{where} match_trust")
+            label = entry.get("label", "untrusted")
+            if not isinstance(label, str) or not label:
+                raise DataflowPolicyError(f"{where}: label must be a non-empty string")
+            untrusted_sources.append(
+                UntrustedSourceRule(
+                    tool=tool,
+                    match_args=tuple(sorted(match_args.items())),
+                    match_trust=match_trust,
+                    label=label,
+                )
+            )
+
+        privileged_sinks: list[PrivilegedSinkRule] = []
+        for i, entry in enumerate(policy.get("privileged_sink", []) or []):
+            where = f"{source} [[policy.privileged_sink]] #{i}"
+            entry = _expect_mapping(entry, where)
+            _check_no_unknown(entry, frozenset({"tool", "match_args", "description"}), where)
+            tool = entry.get("tool")
+            if not isinstance(tool, str) or not tool:
+                raise DataflowPolicyError(f"{where}: tool must be a non-empty string")
+            match_args = _expect_mapping(entry.get("match_args", {}), f"{where} match_args")
+            for name, pattern in match_args.items():
+                if not isinstance(pattern, str):
+                    raise DataflowPolicyError(f"{where} match_args.{name}: glob must be a string")
+            description = entry.get("description", "")
+            if not isinstance(description, str):
+                raise DataflowPolicyError(f"{where}: description must be a string")
+            privileged_sinks.append(
+                PrivilegedSinkRule(
+                    tool=tool,
+                    match_args=tuple(sorted(match_args.items())),
+                    description=description,
+                )
+            )
+
         return cls(
             version=POLICY_VERSION,
             trust_chain=chain,
             sources=tuple(sources),
             sinks=tuple(sinks),
+            untrusted_sources=tuple(untrusted_sources),
+            privileged_sinks=tuple(privileged_sinks),
         )
 
     @classmethod
@@ -332,6 +478,43 @@ class DataflowPolicy:
             return cls.from_toml_file(_DEFAULT_POLICY_PATH)
         return cls.from_toml(_DEFAULT_POLICY_TOML, source="<embedded default>")
 
+    @classmethod
+    def camel_default(cls) -> DataflowPolicy:
+        """Default confidentiality policy plus CaMeL external-untrusted integrity taint.
+
+        Any allowed ``Fetch`` / ``mcp__*`` / ``untrusted``-provenance result taints the
+        session (and its parent/child subagents) so subsequent privileged sinks
+        (``Shell``, ``Edit``, ``Write``, ``ApplyPatch``, ``Fetch``, ``Task``, ``mcp__*``)
+        escalate to host approval (or deny fail-closed without a callback).
+        """
+        base = cls.default()
+        return cls(
+            version=base.version,
+            trust_chain=base.trust_chain,
+            sources=base.sources,
+            sinks=base.sinks,
+            untrusted_sources=_CAMEL_UNTRUSTED_SOURCES,
+            privileged_sinks=_CAMEL_PRIVILEGED_SINKS,
+        )
+
+    @classmethod
+    def camel_strict(cls) -> DataflowPolicy:
+        """Strict CaMeL preset: treats workspace reads/searches as untrusted data too.
+
+        Designed for untrusted repositories where reading files (``Read``/``Grep``/
+        ``SearchCode``) may carry prompt-injection payloads; every subsequent
+        privileged sink escalates to host approval or denies fail-closed.
+        """
+        base = cls.default()
+        return cls(
+            version=base.version,
+            trust_chain=base.trust_chain,
+            sources=base.sources,
+            sinks=base.sinks,
+            untrusted_sources=_CAMEL_UNTRUSTED_SOURCES + _CAMEL_STRICT_EXTRA_SOURCES,
+            privileged_sinks=_CAMEL_PRIVILEGED_SINKS,
+        )
+
 
 @dataclass
 class SessionDataflow:
@@ -348,6 +531,8 @@ class SessionDataflow:
     audience: frozenset[str] = frozenset()
     audience_labeled: bool = False
     audience_unknown: bool = False
+    untrusted_tainted: bool = False
+    untrusted_sources: list[str] = field(default_factory=list)
     events: list[dict[str, Any]] = field(default_factory=list)
 
     @classmethod
@@ -377,9 +562,47 @@ class SessionDataflow:
             ),
         )
 
+    def _record_untrusted_origin(
+        self,
+        origin: str,
+        *,
+        tool_name: str,
+        label: str,
+        trust: str = "",
+        agent: str = "main",
+        depth: int = 0,
+    ) -> None:
+        self.untrusted_tainted = True
+        scoped = f"subagent:{agent}->{origin}" if depth > 0 and not origin.startswith("subagent:") else origin
+        if scoped not in self.untrusted_sources and len(self.untrusted_sources) < _MAX_UNTRUSTED_ORIGINS:
+            self.untrusted_sources.append(scoped)
+        self.events.append(
+            {
+                "kind": "integrity_taint",
+                "tool": tool_name,
+                "origin": scoped,
+                "label": label,
+                "trust": trust or "untrusted",
+                "agent": agent,
+                "depth": depth,
+            }
+        )
+
+    def mark_resumed_untrusted(self) -> None:
+        """Conservatively mark a resumed session as untrusted-tainted."""
+        if not self.policy.has_integrity_rules:
+            return
+        self._record_untrusted_origin(
+            "resumed_session",
+            tool_name="session_resume",
+            label="resumed_unproven_provenance",
+            trust="untrusted",
+        )
+
     def observe(self, tool_name: str, arguments: Mapping[str, Any]) -> SourceRule | None:
         """Attach the first matching source rule's label to the trajectory.
-        Returns the rule applied, or None."""
+        Returns the confidentiality SourceRule applied, or None."""
+        matched_source: SourceRule | None = None
         for rule in self.policy.sources:
             if rule.matches(tool_name, arguments):
                 if rule.delta_trust > self.trust_index:
@@ -400,16 +623,61 @@ class SessionDataflow:
                         "audience_labeled": self.audience_labeled,
                     }
                 )
+                matched_source = rule
+                break
+        for u_rule in self.policy.untrusted_sources:
+            if not u_rule.match_trust and u_rule.matches(tool_name, arguments):
+                self._record_untrusted_origin(
+                    f"tool:{tool_name}",
+                    tool_name=tool_name,
+                    label=u_rule.label,
+                )
+                break
+        return matched_source
+
+    def observe_provenance(
+        self,
+        tool_name: str,
+        *,
+        source: str = "",
+        trust: str = "",
+        agent: str = "main",
+        depth: int = 0,
+        arguments: Mapping[str, Any] | None = None,
+    ) -> UntrustedSourceRule | None:
+        """Observe a completed tool result's runtime provenance (CaMeL integrity)."""
+        if not self.policy.has_integrity_rules:
+            return None
+        for rule in self.policy.untrusted_sources:
+            if rule.matches(tool_name, arguments, trust=trust):
+                origin = source or f"tool:{tool_name}"
+                self._record_untrusted_origin(
+                    origin,
+                    tool_name=tool_name,
+                    label=rule.label,
+                    trust=trust,
+                    agent=agent,
+                    depth=depth,
+                )
                 return rule
         return None
+
+    def integrity_summary(self) -> dict[str, Any]:
+        """Content-free summary suitable for audit logs and ACP metadata."""
+        return {
+            "trust": self.policy.rank_name(self.trust_index),
+            "audienceLabeled": self.audience_labeled,
+            "audienceUnknown": self.audience_unknown,
+            "untrustedTainted": self.untrusted_tainted,
+            "untrustedSources": list(self.untrusted_sources[:16]),
+        }
 
     def check_sink(self, tool_name: str, arguments: Mapping[str, Any]) -> SinkVerdict:
         """Decide whether this sink call must escalate given the trajectory.
 
-        Include the matching source delta for this same call in the check.
-        A tool can be both a source and a sink (for example, a proxy that
-        reads from one store and forwards to another); checking only the
-        pre-call trajectory would otherwise let that flow skip its label.
+        Checks both confidentiality (``trust_chain`` + ``audience``) and, when
+        configured, CaMeL integrity taint (``untrusted_tainted`` against
+        ``privileged_sinks``).
         """
         projected_trust = self.trust_index
         projected_audience = self.audience
@@ -466,31 +734,47 @@ class SessionDataflow:
                             f"trajectory audience is {sorted(projected_audience)}"
                         ),
                     )
-            return SinkVerdict(escalate=False, reason="sink requirements satisfied")
-        if (projected_audience_labeled or self.audience_unknown) and not matching_source:
-            return SinkVerdict(
-                escalate=True,
-                reason=(
-                    (
-                        f"no audience-aware sink rule matches {tool_name!r} for a "
-                        "resumed trajectory whose audience is unknown"
+            break
+        else:
+            if (projected_audience_labeled or self.audience_unknown) and not matching_source:
+                return SinkVerdict(
+                    escalate=True,
+                    reason=(
+                        (
+                            f"no audience-aware sink rule matches {tool_name!r} for a "
+                            "resumed trajectory whose audience is unknown"
+                        )
+                        if self.audience_unknown
+                        else (
+                            f"no audience-aware sink rule matches {tool_name!r} for a "
+                            f"trajectory restricted to {sorted(projected_audience)}"
+                        )
+                    ),
+                )
+
+        if self.untrusted_tainted and self.policy.privileged_sinks:
+            for sink_rule in self.policy.privileged_sinks:
+                if sink_rule.matches(tool_name, arguments):
+                    origins = ", ".join(self.untrusted_sources[:4]) or "untrusted source"
+                    suffix = f" ({sink_rule.description})" if sink_rule.description else ""
+                    return SinkVerdict(
+                        escalate=True,
+                        reason=(
+                            f"CaMeL integrity taint: trajectory observed untrusted data from "
+                            f"[{origins}]; privileged sink {tool_name!r}{suffix} requires host approval"
+                        ),
                     )
-                    if self.audience_unknown
-                    else (
-                        f"no audience-aware sink rule matches {tool_name!r} for a "
-                        f"trajectory restricted to {sorted(projected_audience)}"
-                    )
-                ),
-            )
-        return SinkVerdict(escalate=False, reason="no sink rule matches")
+        return SinkVerdict(escalate=False, reason="sink requirements satisfied")
 
 
 __all__ = [
     "POLICY_VERSION",
     "DataflowPolicy",
     "DataflowPolicyError",
+    "PrivilegedSinkRule",
     "SessionDataflow",
     "SinkRule",
     "SinkVerdict",
     "SourceRule",
+    "UntrustedSourceRule",
 ]

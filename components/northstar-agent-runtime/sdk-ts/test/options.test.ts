@@ -7,6 +7,7 @@ import test from "node:test";
 
 import {
   ConfigurationError,
+  DATAFLOW_POLICIES,
   MCP_PROTOCOLS,
   PERMISSION_MODES,
   POLICY_ONLY_RETRY_KEYS,
@@ -88,11 +89,24 @@ test("`--plan` is not duplicated behind `--permission-mode plan`, because the CL
 test("the closed sets are the CLI's closed sets", () => {
   assert.deepEqual(RETRYABLE_FAULTS, ["rate_limited", "overloaded", "network", "timeout", "server_error"]);
   assert.deepEqual(PROVIDERS, ["scripted", "anthropic", "openai"]);
+  assert.deepEqual(DATAFLOW_POLICIES, ["default", "camel", "camel-strict"]);
   assert.deepEqual([...PERMISSION_MODES], ["default", "acceptEdits", "plan", "bypassPermissions"]);
   assert.deepEqual([...MCP_PROTOCOLS], ["auto", "legacy", "modern"]);
   assert.deepEqual([...VERIFY_KINDS], ["exists", "absent", "changed", "unchanged", "contains"]);
   assert.ok(RETRYABLE_FAULTS.includes("rate_limited"));
   assert.equal(RETRYABLE_FAULTS.includes("auth"), false);
+});
+
+test("dataflowPolicy accepts CaMeL presets or a TOML path and refuses empty strings", () => {
+  for (const preset of DATAFLOW_POLICIES) {
+    const argv = argvOf({ prompt: "p", dataflowPolicy: preset });
+    assert.equal(flagValue(argv, "--dataflow-policy"), preset);
+  }
+  const custom = argvOf({ prompt: "p", dataflowPolicy: "/tmp/custom-dataflow.toml" });
+  assert.equal(flagValue(custom, "--dataflow-policy"), "/tmp/custom-dataflow.toml");
+  assert.throws(() => argvOf({ prompt: "p", dataflowPolicy: "   " }), ConfigurationError);
+  assert.throws(() => argvOf({ prompt: "p", dataflowPolicy: 42 }), ConfigurationError);
+  assert.ok(supportedFlags().includes("--dataflow-policy"));
 });
 
 test("a permission mode outside the four is refused by name, and so is a provider outside three", () => {
