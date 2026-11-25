@@ -129,6 +129,8 @@ _GENESIS = "genesis"
 _DIGEST_PREFIX = "sha256:"
 _MAX_ID_LEN = 128
 _MAX_TEXT_LEN = 4096
+#: The safe-integer range for a pinned ``seq``.  See ``_check_seq``.
+_MAX_INT = 2**53 - 1
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +190,35 @@ class SeqOrderError(StatusPageError):
 def _check_seq(value: Any, field_name: str = "seq") -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise StatusPageError(f"{field_name} must be a non-negative int")
+    if value > _MAX_INT:
+        # A seq above the safe range cannot be PINNED by a digest.
+        #
+        # ``canonical_json`` serializes an integer outside the safe
+        # range as an IEEE-754 double (RFC 8785 Appendix B note (2)),
+        # so 2**53 and 2**53+1 canonicalize to the SAME bytes:
+        #
+        #     jcs_dumps([2**53])   == b'[9007199254740992]'
+        #     jcs_dumps([2**53+1]) == b'[9007199254740992]'
+        #
+        # So a record's digest would stop pinning its seq, and a
+        # *tampered* seq would still verify -- measured 2026-11-25: the
+        # seq was changed from 9007199254740992 to 9007199254740993, the
+        # digest was unchanged, and ``verify()`` said True.  That is a
+        # fail-OPEN integrity defect: the digest IS the tamper pin, and
+        # above the safe range it silently stops pinning.
+        #
+        # The stdlib fallback refuses such an integer outright, so
+        # without this bound the two configurations also disagreed
+        # about whether a large seq is legal at all.
+        #
+        # The bound matches the repo's house pattern: see
+        # ``job_queue.py`` (``_MAX_INT = 2**53 - 1``, same rule, same
+        # reasoning), ``graph_database.py`` (same rule, same module
+        # family), ``grant_pin_ledger.py`` (``_MAX_COUNTER``) and
+        # ``profiler.py`` (``record_digest()`` refuses a huge integral
+        # fail-closed).  ``seq`` was the one integer in a digest here
+        # that was unbounded.
+        raise StatusPageError(f"{field_name} exceeds the safe range")
     return value
 
 
@@ -207,9 +238,73 @@ def _check_id(value: Any, field_name: str) -> str:
     return value
 
 
+def _refuse_unsafe_int(value: Any) -> None:
+    """Refuse an integer outside the safe range, anywhere in a payload.
+
+    Above ``2**53 - 1`` the canonical form is lossy -- RFC 8785
+    Appendix B note (2) serializes such an integer as an IEEE-754
+    double -- so two different integers canonicalize to the same
+    bytes.  A digest over lossy bytes stops pinning its input.
+
+    This walks containers rather than only the top-level value,
+    because the payload is a nested list of pin parts.
+    """
+    if isinstance(value, bool):
+        return
+    if isinstance(value, int):
+        if abs(value) > _MAX_INT:
+            raise StatusPageError("integer outside safe range")
+        return
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            _refuse_unsafe_int(item)
+        return
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            _refuse_unsafe_int(key)
+            _refuse_unsafe_int(item)
+
+
 def _canonical(payload: Any) -> bytes:
     if _cj is not None:
-        return _cj.jcs_dumps(payload).encode("utf-8")  # type: ignore
+        # An integer outside the safe range cannot be canonicalized
+        # injectively: ``canonical_json`` serializes it as an IEEE-754
+        # double (RFC 8785 Appendix B note (2)), so 2**53 and 2**53+1
+        # produce the SAME bytes.  The stdlib fallback refuses such an
+        # integer outright, so the shipped path must refuse it too --
+        # otherwise the two configurations disagree about what is
+        # LEGAL, and a digest pinned under one does not verify under
+        # the other.
+        _refuse_unsafe_int(payload)
+        try:
+            return _cj.jcs_dumps(payload).encode("utf-8")  # type: ignore
+        except ValueError as exc:
+            # The sibling helper refuses input it cannot canonicalize
+            # (a lone surrogate, a non-finite float, an unsupported
+            # type) with ITS OWN error type -- ``JcsError``, which is
+            # a ``ValueError``.  That type is not part of this module's
+            # taxonomy, and it must not escape: every guard here
+            # catches ``StatusPageError``, and the stdlib fallback
+            # raises exactly that.
+            #
+            # Left untranslated, the shipped path's error escaped the
+            # clauses written to catch it -- measured 2026-11-25:
+            #
+            #   >>> StatusPage().component(component_id="\ud800", name="n", seq=1)
+            #   JcsError: lone surrogate U+D800 is not JCS-serializable
+            #
+            # The caller asked the page to refuse a bad component id and
+            # got an exception type from a DIFFERENT module's taxonomy
+            # instead -- so a caller guarding on ``except ValueError``
+            # would treat a refused mutation as a parse error, and a
+            # caller guarding on ``except StatusPageError`` would not
+            # catch it at all.
+            #
+            # The same translation is already in ``job_queue.py``'s and
+            # ``graph_database.py``'s ``_canonical``; this is the same
+            # shape, in the same repo.
+            raise StatusPageError(f"unencodable payload: {exc}") from exc
+
     import json
 
     def _tag(v: Any) -> Any:
@@ -224,6 +319,27 @@ def _canonical(payload: Any) -> bytes:
                 raise StatusPageError("non-finite float refused")
             return {"t": "float", "v": repr(v)}
         if isinstance(v, str):
+            # A lone surrogate is not a Unicode scalar value: RFC 8785
+            # section 3.2.2.3 requires a compliant implementation to
+            # TERMINATE with an error, because it "breaks signatures
+            # silently".
+            #
+            # The shipped path (``canonical_json``) refuses it.  The
+            # stdlib fallback would NOT: ``json.dumps`` escapes it as
+            # ``\ud800`` and emits bytes that are not JCS at all.  So
+            # the fallback must refuse it too -- otherwise the two
+            # configurations disagree about what is LEGAL, and a digest
+            # pinned under the fallback does not verify under the
+            # shipped path.  Measured 2026-11-25: the fallback accepted
+            # a lone surrogate and produced
+            # ``b'{"t":"list","v":[{"t":"str","v":"\\ud800"}]}'``.
+            for char in v:
+                code = ord(char)
+                if 0xD800 <= code <= 0xDFFF:
+                    raise StatusPageError(
+                        f"lone surrogate U+{code:04X} is not "
+                        "JCS-serializable"
+                    )
             return {"t": "str", "v": v}
         if isinstance(v, (list, tuple)):
             return {"t": "list", "v": [_tag(i) for i in v]}
@@ -244,6 +360,27 @@ def _pin(payload: Any, seed: str = "") -> str:
     ).hexdigest()
 
 
+def _verify_pin(digest: str, payload: Any, seed: str = "") -> bool:
+    """Does ``digest`` pin ``payload``?  Answer, never raise.
+
+    A record whose fields cannot be canonicalized (a lone surrogate, an
+    out-of-safe-range integer) has no recomputable digest, so the
+    answer is "not intact" -- ``False``.
+
+    Without this, ``verify()`` RAISED instead of answering, so a
+    caller asking "is this record intact?" got an exception; and
+    because the canonicalizer's error is a ``ValueError``, a caller
+    guarding on ``except ValueError`` treated a TAMPERED record as a
+    PARSE error and moved on -- the record was neither verified nor
+    rejected.
+    """
+    try:
+        recomputed = _pin(payload, seed)
+    except StatusPageError:
+        return False
+    return hmac.compare_digest(digest, recomputed)
+
+
 # ---------------------------------------------------------------------------
 # Records
 # ---------------------------------------------------------------------------
@@ -261,19 +398,17 @@ class ComponentRecord:
     digest: str
 
     def verify(self, seed: str = "") -> bool:
-        return hmac.compare_digest(
+        return _verify_pin(
             self.digest,
-            _pin(
-                [
-                    "component",
-                    self.component_id,
-                    self.name,
-                    self.status,
-                    self.group,
-                    self.seq,
-                ],
-                seed,
-            ),
+            [
+                "component",
+                self.component_id,
+                self.name,
+                self.status,
+                self.group,
+                self.seq,
+            ],
+            seed,
         )
 
 
@@ -290,20 +425,18 @@ class StatusChangeRecord:
     digest: str
 
     def verify(self, seed: str = "") -> bool:
-        return hmac.compare_digest(
+        return _verify_pin(
             self.digest,
-            _pin(
-                [
-                    "status-change",
-                    self.change_id,
-                    self.component_id,
-                    self.old_status,
-                    self.new_status,
-                    self.seq,
-                    self.prev_digest,
-                ],
-                seed,
-            ),
+            [
+                "status-change",
+                self.change_id,
+                self.component_id,
+                self.old_status,
+                self.new_status,
+                self.seq,
+                self.prev_digest,
+            ],
+            seed,
         )
 
 
@@ -320,20 +453,18 @@ class IncidentRecord:
     digest: str
 
     def verify(self, seed: str = "") -> bool:
-        return hmac.compare_digest(
+        return _verify_pin(
             self.digest,
-            _pin(
-                [
-                    "incident",
-                    self.incident_id,
-                    self.title,
-                    self.impact,
-                    self.status,
-                    sorted(self.component_ids),
-                    self.seq,
-                ],
-                seed,
-            ),
+            [
+                "incident",
+                self.incident_id,
+                self.title,
+                self.impact,
+                self.status,
+                sorted(self.component_ids),
+                self.seq,
+            ],
+            seed,
         )
 
 
@@ -350,20 +481,18 @@ class IncidentUpdate:
     digest: str
 
     def verify(self, seed: str = "") -> bool:
-        return hmac.compare_digest(
+        return _verify_pin(
             self.digest,
-            _pin(
-                [
-                    "incident-update",
-                    self.update_id,
-                    self.incident_id,
-                    self.status,
-                    self.message,
-                    self.seq,
-                    self.prev_digest,
-                ],
-                seed,
-            ),
+            [
+                "incident-update",
+                self.update_id,
+                self.incident_id,
+                self.status,
+                self.message,
+                self.seq,
+                self.prev_digest,
+            ],
+            seed,
         )
 
 
@@ -378,18 +507,16 @@ class IncidentResolution:
     digest: str
 
     def verify(self, seed: str = "") -> bool:
-        return hmac.compare_digest(
+        return _verify_pin(
             self.digest,
-            _pin(
-                [
-                    "incident-resolution",
-                    self.resolution_id,
-                    self.incident_id,
-                    self.message,
-                    self.seq,
-                ],
-                seed,
-            ),
+            [
+                "incident-resolution",
+                self.resolution_id,
+                self.incident_id,
+                self.message,
+                self.seq,
+            ],
+            seed,
         )
 
 
@@ -405,19 +532,17 @@ class PageStatus:
     digest: str
 
     def verify(self, seed: str = "") -> bool:
-        return hmac.compare_digest(
+        return _verify_pin(
             self.digest,
-            _pin(
-                [
-                    "page-status",
-                    self.overall,
-                    [list(c) for c in self.counts],
-                    self.component_count,
-                    self.open_incidents,
-                    self.seq,
-                ],
-                seed,
-            ),
+            [
+                "page-status",
+                self.overall,
+                [list(c) for c in self.counts],
+                self.component_count,
+                self.open_incidents,
+                self.seq,
+            ],
+            seed,
         )
 
 
@@ -525,16 +650,14 @@ class StatusPage:
                     raise DuplicateComponentError(
                         f"component already registered: {component_id!r}"
                     )
-            except StatusPageError as exc:
-                self._reject(seq, str(exc))
-                raise
-            rec = ComponentRecord(
-                component_id=component_id,
-                name=name,
-                status=STATUS_OPERATIONAL,
-                group=group,
-                seq=seq,
-                digest=_pin(
+                # The pin belongs INSIDE the guarded region: a value
+                # that cannot be canonicalized is a refusal, and a
+                # refusal books a row.  Measured 2026-11-25: with the
+                # pin outside, ``component(component_id="\ud800", ...)``
+                # raised and booked NO row, so the trail could not tell
+                # "the page refused this component" from "the page never
+                # saw it".
+                digest = _pin(
                     [
                         "component",
                         component_id,
@@ -544,7 +667,17 @@ class StatusPage:
                         seq,
                     ],
                     self._seed,
-                ),
+                )
+            except StatusPageError as exc:
+                self._reject(seq, str(exc))
+                raise
+            rec = ComponentRecord(
+                component_id=component_id,
+                name=name,
+                status=STATUS_OPERATIONAL,
+                group=group,
+                seq=seq,
+                digest=digest,
             )
             self._components[component_id] = rec
             self._emit(
@@ -570,6 +703,32 @@ class StatusPage:
                     raise UnknownComponentError(
                         f"unknown component: {component_id!r}"
                     )
+                # The pins belong INSIDE the guarded region -- see
+                # ``component()``: a failed pin is a refusal, and a
+                # refusal books a row.
+                change_digest = _pin(
+                    [
+                        "status-change",
+                        f"chg-{self._change_n + 1}",
+                        component_id,
+                        current.status,
+                        status,
+                        seq,
+                        self._last_change_digest,
+                    ],
+                    self._seed,
+                )
+                component_digest = _pin(
+                    [
+                        "component",
+                        current.component_id,
+                        current.name,
+                        status,
+                        current.group,
+                        seq,
+                    ],
+                    self._seed,
+                )
             except StatusPageError as exc:
                 self._reject(seq, str(exc))
                 raise
@@ -581,18 +740,7 @@ class StatusPage:
                 new_status=status,
                 seq=seq,
                 prev_digest=self._last_change_digest,
-                digest=_pin(
-                    [
-                        "status-change",
-                        f"chg-{self._change_n}",
-                        component_id,
-                        current.status,
-                        status,
-                        seq,
-                        self._last_change_digest,
-                    ],
-                    self._seed,
-                ),
+                digest=change_digest,
             )
             self._last_change_digest = change.digest
             self._changes.append(change)
@@ -602,17 +750,7 @@ class StatusPage:
                 status=status,
                 group=current.group,
                 seq=seq,
-                digest=_pin(
-                    [
-                        "component",
-                        current.component_id,
-                        current.name,
-                        status,
-                        current.group,
-                        seq,
-                    ],
-                    self._seed,
-                ),
+                digest=component_digest,
             )
             self._emit(
                 KIND_COMPONENT_STATUS_SET,
@@ -659,17 +797,10 @@ class StatusPage:
                     raise DuplicateIncidentError(
                         f"incident already exists: {incident_id!r}"
                     )
-            except StatusPageError as exc:
-                self._reject(seq, str(exc))
-                raise
-            rec = IncidentRecord(
-                incident_id=incident_id,
-                title=title,
-                impact=impact,
-                status=INCIDENT_INVESTIGATING,
-                component_ids=component_ids,
-                seq=seq,
-                digest=_pin(
+                # The pin belongs INSIDE the guarded region -- see
+                # ``component()``: a failed pin is a refusal, and a
+                # refusal books a row.
+                digest = _pin(
                     [
                         "incident",
                         incident_id,
@@ -680,7 +811,18 @@ class StatusPage:
                         seq,
                     ],
                     self._seed,
-                ),
+                )
+            except StatusPageError as exc:
+                self._reject(seq, str(exc))
+                raise
+            rec = IncidentRecord(
+                incident_id=incident_id,
+                title=title,
+                impact=impact,
+                status=INCIDENT_INVESTIGATING,
+                component_ids=component_ids,
+                seq=seq,
+                digest=digest,
             )
             self._incidents[incident_id] = rec
             self._updates[incident_id] = []
@@ -710,24 +852,16 @@ class StatusPage:
                         f"status must be one of {UPDATABLE_STATUSES}, got {status!r}"
                     )
                 message = _check_nonempty_str(message, "message", _MAX_TEXT_LEN)
-            except StatusPageError as exc:
-                self._reject(seq, str(exc))
-                raise
-            prev = self._updates[incident_id][-1].digest if self._updates[
-                incident_id
-            ] else _GENESIS
-            self._update_n += 1
-            upd = IncidentUpdate(
-                update_id=f"upd-{self._update_n}",
-                incident_id=incident_id,
-                status=status,
-                message=message,
-                seq=seq,
-                prev_digest=prev,
-                digest=_pin(
+                # The pins belong INSIDE the guarded region -- see
+                # ``component()``: a failed pin is a refusal, and a
+                # refusal books a row.
+                prev = self._updates[incident_id][-1].digest if self._updates[
+                    incident_id
+                ] else _GENESIS
+                update_digest = _pin(
                     [
                         "incident-update",
-                        f"upd-{self._update_n}",
+                        f"upd-{self._update_n + 1}",
                         incident_id,
                         status,
                         message,
@@ -735,17 +869,8 @@ class StatusPage:
                         prev,
                     ],
                     self._seed,
-                ),
-            )
-            self._updates[incident_id].append(upd)
-            self._incidents[incident_id] = IncidentRecord(
-                incident_id=inc.incident_id,
-                title=inc.title,
-                impact=inc.impact,
-                status=status,
-                component_ids=inc.component_ids,
-                seq=seq,
-                digest=_pin(
+                )
+                incident_digest = _pin(
                     [
                         "incident",
                         inc.incident_id,
@@ -756,7 +881,29 @@ class StatusPage:
                         seq,
                     ],
                     self._seed,
-                ),
+                )
+            except StatusPageError as exc:
+                self._reject(seq, str(exc))
+                raise
+            self._update_n += 1
+            upd = IncidentUpdate(
+                update_id=f"upd-{self._update_n}",
+                incident_id=incident_id,
+                status=status,
+                message=message,
+                seq=seq,
+                prev_digest=prev,
+                digest=update_digest,
+            )
+            self._updates[incident_id].append(upd)
+            self._incidents[incident_id] = IncidentRecord(
+                incident_id=inc.incident_id,
+                title=inc.title,
+                impact=inc.impact,
+                status=status,
+                component_ids=inc.component_ids,
+                seq=seq,
+                digest=incident_digest,
             )
             self._emit(
                 KIND_INCIDENT_UPDATED,
@@ -780,35 +927,20 @@ class StatusPage:
                         f"incident already resolved: {incident_id!r}"
                     )
                 message = _check_nonempty_str(message, "message", _MAX_TEXT_LEN)
-            except StatusPageError as exc:
-                self._reject(seq, str(exc))
-                raise
-            self._resolution_n += 1
-            res = IncidentResolution(
-                resolution_id=f"res-{self._resolution_n}",
-                incident_id=incident_id,
-                message=message,
-                seq=seq,
-                digest=_pin(
+                # The pins belong INSIDE the guarded region -- see
+                # ``component()``: a failed pin is a refusal, and a
+                # refusal books a row.
+                resolution_digest = _pin(
                     [
                         "incident-resolution",
-                        f"res-{self._resolution_n}",
+                        f"res-{self._resolution_n + 1}",
                         incident_id,
                         message,
                         seq,
                     ],
                     self._seed,
-                ),
-            )
-            self._resolutions[incident_id] = res
-            self._incidents[incident_id] = IncidentRecord(
-                incident_id=inc.incident_id,
-                title=inc.title,
-                impact=inc.impact,
-                status=INCIDENT_RESOLVED,
-                component_ids=inc.component_ids,
-                seq=seq,
-                digest=_pin(
+                )
+                incident_digest = _pin(
                     [
                         "incident",
                         inc.incident_id,
@@ -819,7 +951,27 @@ class StatusPage:
                         seq,
                     ],
                     self._seed,
-                ),
+                )
+            except StatusPageError as exc:
+                self._reject(seq, str(exc))
+                raise
+            self._resolution_n += 1
+            res = IncidentResolution(
+                resolution_id=f"res-{self._resolution_n}",
+                incident_id=incident_id,
+                message=message,
+                seq=seq,
+                digest=resolution_digest,
+            )
+            self._resolutions[incident_id] = res
+            self._incidents[incident_id] = IncidentRecord(
+                incident_id=inc.incident_id,
+                title=inc.title,
+                impact=inc.impact,
+                status=INCIDENT_RESOLVED,
+                component_ids=inc.component_ids,
+                seq=seq,
+                digest=incident_digest,
             )
             self._emit(
                 KIND_INCIDENT_RESOLVED,

@@ -280,3 +280,258 @@ def test_main_subprocess():
     )
     assert proc.returncode == 0, proc.stderr
     assert "status-page OK" in proc.stdout
+
+
+# -- the digest pin must pin --------------------------------------------
+#
+# Four defects, the same four `graph_database.py` carried (see
+# `docs/design/graph-database-digest-pin.md` and
+# `docs/design/refusal-hold-wiring.md` section 20.6, which left
+# "the identical clause ... for a slice that owns" that module).
+# Measured 2026-11-25 on the tree as it stood:
+#
+# 1. `StatusPage.component(component_id="\ud800", ...)` raised
+#    `canonical_json.JcsError` -- a `ValueError`, but NOT a
+#    `StatusPageError` -- so the module's guards did not catch it, and
+#    the caller's own error taxonomy was bypassed.
+# 2. The stdlib fallback ACCEPTED a lone surrogate and produced
+#    non-JCS bytes: `b'{"t":"list","v":[{"t":"str","v":"\\ud800"}]}'`.
+# 3. `canonical_json` serializes an integer outside the safe range as
+#    an IEEE-754 double (RFC 8785 Appendix B note (2)), so 2**53 and
+#    2**53+1 canonicalize to the SAME bytes -- and `_check_seq` has no
+#    bound at all, so a TAMPERED seq above the safe range still
+#    verified.
+# 4. A failed pin booked NO `rejected` row: the `_pin(...)` calls sit
+#    outside the `try` that books the row.
+
+
+SURROGATE = "\ud800"
+
+
+def test_verify_answers_false_for_a_record_it_cannot_canonicalize():
+    """`verify()` answers a question; a question is not an exception.
+
+    The record's digest cannot be recomputed over a lone surrogate, so
+    the answer is "not intact" -- `False`.  It must not raise.
+    """
+    rec = sp.ComponentRecord(
+        component_id=SURROGATE,
+        name="n",
+        status=sp.STATUS_OPERATIONAL,
+        group="g",
+        seq=1,
+        digest="sha256:" + "0" * 64,
+    )
+    assert rec.verify() is False
+
+
+def test_a_refusal_raises_the_modules_own_error_type():
+    """The module's own taxonomy, not the sibling helper's.
+
+    `JcsError` is a `ValueError`, so a caller guarding on
+    `except ValueError` would treat a refused mutation as a parse
+    error.  The module's error must be what escapes.
+    """
+    page = fresh()
+    with pytest.raises(sp.StatusPageError):
+        page.component(component_id=SURROGATE, name="n", seq=1)
+
+
+def test_both_configurations_refuse_a_lone_surrogate():
+    """The shipped path and the fallback must agree about LEGALITY.
+
+    They need not agree about the resulting digest bytes -- the
+    fallback's tagged form is deliberately its own string -- but a value
+    one refuses must be refused by both.
+    """
+    saved = sp._cj
+    try:
+        assert sp._cj is not None, "the shipped path is not installed"
+
+        sp._cj = saved
+        with pytest.raises(sp.StatusPageError):
+            sp._canonical([SURROGATE])
+
+        sp._cj = None
+        with pytest.raises(sp.StatusPageError):
+            sp._canonical([SURROGATE])
+    finally:
+        sp._cj = saved
+
+
+def test_both_configurations_accept_a_value_both_can_canonicalize():
+    """The control: the fallback must not refuse everything.
+
+    Without this, a fallback that refused every input would satisfy
+    the test above vacuously.
+    """
+    saved = sp._cj
+    try:
+        for cfg in (saved, None):
+            sp._cj = cfg
+            assert sp._canonical(["ordinary", 7, ["a"]])
+    finally:
+        sp._cj = saved
+
+
+def test_a_seq_above_the_safe_range_is_refused():
+    """A seq that cannot be pinned must not be accepted.
+
+    Without this bound, 2**53 and 2**53+1 canonicalize to the same
+    bytes, so the digest stops pinning the seq.
+    """
+    page = fresh()
+    with pytest.raises(sp.StatusPageError):
+        page.component(component_id="c", name="n", seq=2**53)
+
+
+def test_a_tampered_seq_above_the_safe_range_cannot_verify():
+    """The control: the digest must pin the seq.
+
+    This is the property the bound protects -- a record whose seq was
+    bumped by one must not still verify.
+    """
+    digest = sp._pin(["component", "c", "n", sp.STATUS_OPERATIONAL, "g", 1])
+    tampered = sp.ComponentRecord(
+        component_id="c",
+        name="n",
+        status=sp.STATUS_OPERATIONAL,
+        group="g",
+        seq=2**53 + 1,
+        digest=digest,
+    )
+    assert tampered.verify() is False
+
+
+def test_the_safe_range_boundary_is_accepted():
+    """The control: the bound must not over-refuse.
+
+    `2**53 - 1` is the last pin-able integer.
+    """
+    page = fresh()
+    page.component(component_id="c", name="n", seq=2**53 - 1)
+    with pytest.raises(sp.StatusPageError):
+        page.component(component_id="c2", name="n", seq=2**53)
+
+
+def test_a_failed_mutation_books_a_rejected_row():
+    """A refused mutation must leave a trace.
+
+    The class docstring promises that failed mutations consume their
+    seq and book a `rejected` audit row.  A failed PIN is a refusal
+    too, and it must book one.
+    """
+    page = fresh()
+    before = len(page.audit_log())
+
+    with pytest.raises(sp.StatusPageError):
+        page.component(component_id=SURROGATE, name="n", seq=1)
+
+    rows = page.audit_log()
+    assert len(rows) == before + 1, (
+        "a failed mutation booked no row: the trail cannot tell a "
+        "refusal from a never-seen request"
+    )
+    assert rows[-1]["kind"] == sp.KIND_REJECTED
+    assert rows[-1]["detail"].get("reason"), "the rejection row names no reason"
+
+
+def test_a_failed_mutation_still_consumes_its_seq():
+    """The other half of the promise: the seq is consumed."""
+    page = fresh()
+    with pytest.raises(sp.StatusPageError):
+        page.component(component_id=SURROGATE, name="n", seq=1)
+
+    with pytest.raises(sp.StatusPageError):
+        page.component(component_id="c", name="n", seq=1)
+    page.component(component_id="c", name="n", seq=2)
+    assert "c" in page.component_ids()
+
+
+def test_a_pin_refuses_an_integer_outside_the_safe_range():
+    """No digest may ever be minted over a lossy integer.
+
+    THIS is the property that closes the collision.  Without it,
+    `_pin([..., 2**53])` and `_pin([..., 2**53+1])` produce the SAME
+    digest -- both canonicalize to the bytes `9007199254740992` -- and
+    a record carrying either digest verifies against either seq.
+
+    The tampered-seq test above cannot see this: it was false because
+    the digest did not match, not because the pin refused.  So it
+    asserts the MECHANISM here.
+
+    The recursion matters: the payload is a nested list of pin parts,
+    so a top-level-only check would miss the integer entirely.
+    """
+    for part in (2**53, 2**53 + 1, 2**60, -(2**53)):
+        with pytest.raises(sp.StatusPageError):
+            sp._pin(["component", "c", "n", sp.STATUS_OPERATIONAL, "g", part])
+
+
+def test_a_pin_still_accepts_the_last_safe_integer():
+    """The control: the refusal must not over-reach.
+
+    `2**53 - 1` is the last integer whose canonical form is exact.
+    """
+    pinned = sp._pin(["component", "c", "n", sp.STATUS_OPERATIONAL, "g", 2**53 - 1])
+    assert pinned.startswith("sha256:")
+
+
+def test_an_oversized_seq_is_refused_as_a_malformed_seq():
+    """The refusal's SHAPE must match the repo's convention.
+
+    An oversized seq is a malformed **seq**, not a malformed
+    argument: the call never reached the ledger, so it consumes
+    nothing and books nothing.  A malformed **argument** at a valid
+    seq consumes the seq and books a row.
+
+    This is the repo's house rule -- see
+    ``docs/design/refusal-hold-wiring.md`` section 21.3, and
+    ``job_queue.py``'s ``_check_seq``.
+
+    Why this test distinguishes the bound from the pin refusal: BOTH
+    raise ``StatusPageError``, so "it raised" cannot tell them apart.
+    What tells them apart is whether the seq was CONSUMED and whether
+    a ROW was booked.  A refusal at the door consumes nothing and
+    books nothing.
+    """
+    page = fresh()
+    with pytest.raises(sp.StatusPageError):
+        page.component(component_id="c", name="n", seq=2**53)
+
+    # nothing was booked -- the call never reached the ledger
+    assert page.audit_log() == (), (
+        "an oversized seq booked a row: it was refused at the door, "
+        "so the ledger never saw it"
+    )
+    # and the seq was not consumed, so a normal seq still works
+    page.component(component_id="c", name="n", seq=1)
+    assert "c" in page.component_ids()
+
+
+def test_the_seq_bound_refuses_before_the_pin_would():
+    """The control: the bound is what refuses, not the pin.
+
+    Without the bound, the oversized seq would reach ``_pin``, and
+    the pin's own refusal (``_refuse_unsafe_int``) would raise the
+    SAME error type -- so the caller could not tell whether the seq
+    was checked at the door or caught later.
+
+    The distinguishing fact: with the bound, the seq is NOT consumed
+    and NO row is booked (the call never reached the ledger).  Without
+    it, the pin failure would happen inside the mutation and would
+    consume the seq and book a row.
+
+    So: an oversized seq that books a row, or that consumes the seq,
+    means the bound is missing.
+    """
+    page = fresh()
+    with pytest.raises(sp.StatusPageError):
+        page.component(component_id="c", name="n", seq=2**53)
+    # If the bound were missing, the pin would have failed INSIDE the
+    # mutation, consuming the seq and booking a row.  Assert both are
+    # absent.
+    assert page.audit_log() == ()
+    # seq 1 must still be usable -- the oversized seq never took it.
+    page.component(component_id="c", name="n", seq=1)
+    assert "c" in page.component_ids()
