@@ -875,6 +875,7 @@ REGISTRY = (
     _registration("forward_seal_ledger", "forward-seal-ledger", "2026-10-08", "Forward-secure sealed decision ledger, Simulated."),
     _registration("fragile_watermark", "runtime", "2026-10-08", "Fragile watermark interface: tamper-evident marking for byte carriers."),
     _registration("fraud_detector", "runtime", "2026-10-08", "Transaction fraud detection interface (deterministic rules + additive scoring)."),
+    _registration("frontier_registry", "northstar-expand-search", "2026-11-23", "Frontier registry: the cumulative, machine-readable record of surveyed AI approaches."),
     _registration("frontmatter", "repository-defined agents and read-only agent skills for the gov", "2026-09-07", "Tiny, strict frontmatter reader for workspace extension files."),
     _registration("full_text_search", "runtime", "2026-10-08", "Full-text search with an explicit analyzed tokenizer and ranked retrieval."),
     _registration("fulltext_search", "runtime", "2026-10-07", "Full-text search with TF-IDF ranking over an inverted index."),
