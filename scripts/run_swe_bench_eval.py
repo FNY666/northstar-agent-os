@@ -105,9 +105,18 @@ def evaluate(
         try:
             # The upstream runner owns the container, the patch application
             # and the evaluation script; its verdict is the upstream verdict.
-            _, report = run_instance(
+            result = run_instance(
                 spec, pred, client, run_id, timeout=timeout,
             )
+            if result is None:
+                # The upstream runner returns nothing when the run times
+                # out.  That is a timeout, not a verdict about the patch,
+                # and the receipt has to say which it is.
+                row["outcome"] = "evaluation_timeout"
+                row["resolved"] = False
+                rows.append(row)
+                continue
+            _, report = result
             # The upstream runner returns a report keyed by instance id;
             # the grading detail sits under "tests_status".
             entry = report.get(instance_id, report)
@@ -192,6 +201,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run-id", default="northstar")
     parser.add_argument("--timeout", type=int, default=1800)
     parser.add_argument("--task", action="append", help="limit to one instance; repeatable")
+    parser.add_argument("--workdir", help="where the upstream harness writes its logs")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
 
@@ -202,6 +212,12 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
+    # The upstream harness writes its logs to a path relative to the
+    # working directory; keep them out of the repository.
+    workdir = Path(args.workdir or f"/tmp/swe-eval-{os.getpid()}")
+    workdir.mkdir(parents=True, exist_ok=True)
+    os.chdir(workdir)
+
     sample = load_sample(Path(args.sample))
     patches = json.loads(Path(args.patches).read_text(encoding="utf-8"))
     receipt = evaluate(
