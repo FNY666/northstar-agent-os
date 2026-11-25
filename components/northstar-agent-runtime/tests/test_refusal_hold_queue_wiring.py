@@ -34,6 +34,7 @@ House style: stdlib only, no wall-clock reads, caller-supplied time.
 
 from __future__ import annotations
 
+import dataclasses
 import tempfile
 import threading
 import time
@@ -4958,3 +4959,322 @@ class TheDequeueSkipLoopIsEquivalentTests(unittest.TestCase):
                     "the guard's two operands disagreed, so the 'or' and the "
                     "'and' forms are NOT equivalent",
                 )
+
+
+class TheSelfCheckAssertionChainsAreKilledTests(unittest.TestCase):
+    """The eight `main()` self-check survivors, killed.
+
+    THE SURVIVORS
+    -------------
+    The census at the four-suite union scope reports eight survivors in
+    ``job_queue.py``'s ``main()`` **self-check**'s assertion chains:
+    ``and@1860``, ``and@1864``, ``and@1865``, ``and@1870``,
+    ``and@1875``, ``and@1880``, ``and@1897``, ``and@1904``.
+
+    A self-check assertion of the form ``assert A and B`` becomes
+    ``assert A or B`` under the mutation probe.  The two agree whenever
+    A is true -- and in the self-check A is ALWAYS true, because the
+    self-check has just performed the operation that makes it true.  So
+    the mutant survives.
+
+    **They are not a coverage gap in the product.**  Measured
+    2026-11-25: breaking each PROPERTY the conjuncts assert -- the
+    attempts counter, the priority order, the backoff, the ``done``
+    and ``dead`` terminal states -- makes MANY real tests fail, and
+    ``test_main_self_check`` among them.  The properties are covered;
+    the self-check's own redundancy is not.
+
+    So this class kills them the way the repository already kills
+    ``leased_task_claim.py``'s: the accessor the assertion reads is
+    **patched** so the FIRST operand is false and the SECOND is still
+    true.  Then the original raises ``AssertionError`` and the mutant
+    (``or``) passes -- so the test kills the mutant.
+
+    (The repository's convention for this is
+    ``test_leased_task_claim.py``'s ``SelfCheckAndAssertKillerTests``.)
+
+    WHY THE SELF-CHECK IS WORTH KILLING
+    -----------------------------------
+    A self-check is not a test: it asserts what the author believed,
+    and it runs only when the module runs as a script.  A conjunct that
+    can never be false is never checked, so the self-check's claim
+    "the module behaves this way" is weaker than it reads.  Killing
+    these makes the self-check's assertions mean what they say.
+    """
+
+    def _run(self):
+        import io
+        from contextlib import redirect_stdout
+
+        import job_queue
+
+        with redirect_stdout(io.StringIO()):
+            job_queue.main()
+
+    def _assert_killed(self, patched):
+        """``patched`` is a context manager that installs the patch."""
+        with patched:
+            with self.assertRaises(AssertionError):
+                self._run()
+
+    # -- and@1860: `rec_lo.verify() and rec_hi.verify()` ------------------
+
+    def test_and_at_1860_fails_when_the_low_priority_record_does_not_verify(self):
+        """``and@1860``: the enqueue records' verification.
+
+        The assertion is ``rec_lo.verify() and rec_hi.verify()``.  The
+        low-priority record's digest is patched so it does NOT verify,
+        while the high-priority one still does -- so the first operand
+        is false and the second is true.
+
+        The original raises ``AssertionError``; the mutant (``or``)
+        passes, so this test kills it.
+        """
+        import job_queue
+
+        original = job_queue.EnqueueRecord.verify
+
+        def patched(self):
+            if self.job_id == "j-low":
+                return False
+            return original(self)
+
+        job_queue.EnqueueRecord.verify = patched
+        try:
+            with self.assertRaises(AssertionError):
+                self._run()
+        finally:
+            job_queue.EnqueueRecord.verify = original
+
+    # -- and@1864: `got is not None and got.job_id == "j-high"` ---------
+
+    def test_and_at_1864_fails_when_the_hand_out_is_the_wrong_job(self):
+        """``and@1864``: the priority hand-out.
+
+        The assertion is ``got is not None and got.job_id == "j-high"``.
+        The dequeue is patched so it hands out a DIFFERENT job -- so the
+        first operand is true (the job was handed out) and the second is
+        false.
+
+        The original raises ``AssertionError``; the mutant (``or``)
+        passes, so this test kills it.
+        """
+        import job_queue
+
+        original = job_queue.JobQueue.dequeue
+        original_verify = job_queue.DequeuedJob.verify
+
+        def patched(self, worker_id, queue, seq, now=None):
+            job = original(self, worker_id, queue, seq, now)
+            if job is not None and job.job_id == "j-high":
+                return dataclasses.replace(job, job_id="j-low")
+            return job
+
+        # The record's verification is patched to hold, so the SECOND
+        # operand stays true and the first one is the only false one.
+        # Without that, BOTH operands would be false and the mutant
+        # would fail too -- and the test would kill nothing.
+        job_queue.JobQueue.dequeue = patched
+        job_queue.DequeuedJob.verify = lambda self: True
+        try:
+            with self.assertRaises(AssertionError):
+                self._run()
+        finally:
+            job_queue.JobQueue.dequeue = original
+            job_queue.DequeuedJob.verify = original_verify
+
+    # -- and@1865: `got.attempts == 1 and got.verify()` -----------------
+
+    def test_and_at_1865_fails_when_the_attempt_count_is_wrong(self):
+        """``and@1865``: the attempt counter and the record's digest.
+
+        The assertion is ``got.attempts == 1 and got.verify()``.  The
+        dequeued job's attempts are patched to a wrong value while its
+        digest still verifies -- so the first operand is false and the
+        second is true.
+
+        The original raises ``AssertionError``; the mutant (``or``)
+        passes, so this test kills it.
+        """
+        import job_queue
+
+        original = job_queue.JobQueue.dequeue
+        original_verify = job_queue.DequeuedJob.verify
+
+        def patched(self, worker_id, queue, seq, now=None):
+            job = original(self, worker_id, queue, seq, now)
+            # ONLY the first hand-out -- the one `got` names.  Patching
+            # every dequeue would also change the later ones' attempt
+            # counts, and the self-check would then raise on a
+            # DIFFERENT assertion -- which would kill the mutant for
+            # the wrong reason.
+            if job is None or worker_id != "w-1" or seq != 3:
+                return job
+            return dataclasses.replace(job, attempts=job.attempts + 1)
+
+        # The record's verification is patched to hold, so the SECOND
+        # operand stays true and the first one is the only false one.
+        # Without that, BOTH operands would be false and the mutant
+        # would fail too -- and the test would kill nothing.
+        job_queue.JobQueue.dequeue = patched
+        job_queue.DequeuedJob.verify = lambda self: True
+        try:
+            with self.assertRaises(AssertionError):
+                self._run()
+        finally:
+            job_queue.JobQueue.dequeue = original
+            job_queue.DequeuedJob.verify = original_verify
+
+    # -- and@1870: `got2 is not None and got2.job_id == "j-low"` --------
+
+    def test_and_at_1870_fails_when_the_second_hand_out_is_the_wrong_job(self):
+        """``and@1870``: the FIFO hand-out.
+
+        The assertion is ``got2 is not None and got2.job_id == "j-low"``.
+        The SECOND dequeue is patched to hand out the wrong job -- so the
+        first operand is true and the second is false.
+
+        The original raises ``AssertionError``; the mutant (``or``)
+        passes, so this test kills it.
+        """
+        import job_queue
+
+        original = job_queue.JobQueue.dequeue
+        seen = {"n": 0}
+
+        def patched(self, worker_id, queue, seq, now=None):
+            job = original(self, worker_id, queue, seq, now)
+            seen["n"] += 1
+            if seen["n"] == 2 and job is not None:
+                return dataclasses.replace(job, job_id="j-high")
+            return job
+
+        job_queue.JobQueue.dequeue = patched
+        try:
+            with self.assertRaises(AssertionError):
+                self._run()
+        finally:
+            job_queue.JobQueue.dequeue = original
+
+    # -- and@1875: `r.verify() and r.state == "ready" and r.attempts == 1`
+
+    def test_and_at_1875_fails_when_the_retry_record_does_not_verify(self):
+        """``and@1875``: the retry record's verification.
+
+        The assertion is ``r.verify() and r.state == "ready" and
+        r.attempts == 1``.  The retry record's verification is patched
+        to False while its state and attempts are still right -- so the
+        first operand is false and the rest hold.
+
+        The original raises ``AssertionError``; the mutant (``or``)
+        passes, so this test kills it.
+        """
+        import job_queue
+
+        original = job_queue.RetryRecord.verify
+
+        def patched(self):
+            return False
+
+        job_queue.RetryRecord.verify = patched
+        try:
+            with self.assertRaises(AssertionError):
+                self._run()
+        finally:
+            job_queue.RetryRecord.verify = original
+
+    # -- and@1880: `got3 is not None and got3.job_id == "j-low"` --------
+
+    def test_and_at_1880_fails_when_the_backed_off_hand_out_is_the_wrong_job(self):
+        """``and@1880``: the hand-out after the backoff elapses.
+
+        The assertion is ``got3 is not None and got3.job_id == "j-low"``.
+        The dequeue at the backoff's seq -- the one that hands the job
+        out -- is patched to hand out the wrong job -- so the first
+        operand is true and the second is false.
+
+        The dequeue is identified by its SEQ rather than by counting
+        calls: the self-check makes several dequeues that return
+        ``None`` first, and the counting would land on the wrong one.
+
+        The original raises ``AssertionError``; the mutant (``or``)
+        passes, so this test kills it.
+        """
+        import job_queue
+
+        original = job_queue.JobQueue.dequeue
+
+        def patched(self, worker_id, queue, seq, now=None):
+            job = original(self, worker_id, queue, seq, now)
+            # the dequeue at the backoff's seq -- the one that hands out
+            if job is not None and job.job_id == "j-low" and seq >= 16:
+                return dataclasses.replace(job, job_id="j-high")
+            return job
+
+        job_queue.JobQueue.dequeue = patched
+        try:
+            with self.assertRaises(AssertionError):
+                self._run()
+        finally:
+            job_queue.JobQueue.dequeue = original
+
+    # -- and@1897: `a.verify() and jq.job("j-high").state == "done"` ---
+
+    def test_and_at_1897_fails_when_the_acked_job_is_not_done(self):
+        """``and@1897``: the terminal success.
+
+        The assertion is ``a.verify() and jq.job("j-high").state ==
+        "done"``.  The job view is patched so the acked job's state is
+        not ``done`` while the ack record still verifies -- so the first
+        operand is true and the second is false.
+
+        The original raises ``AssertionError``; the mutant (``or``)
+        passes, so this test kills it.
+        """
+        import job_queue
+
+        original = job_queue.JobQueue.job
+
+        def patched(self, job_id):
+            view = original(self, job_id)
+            if view is not None and view.job_id == "j-high":
+                return dataclasses.replace(view, state="reserved")
+            return view
+
+        job_queue.JobQueue.job = patched
+        try:
+            with self.assertRaises(AssertionError):
+                self._run()
+        finally:
+            job_queue.JobQueue.job = original
+
+    # -- and@1904: `killed.verify() and jq3.job("j-kill").state == "dead"`
+
+    def test_and_at_1904_fails_when_the_dead_job_is_not_dead(self):
+        """``and@1904``: the terminal failure.
+
+        The assertion is ``killed.verify() and
+        jq3.job("j-kill").state == "dead"``.  The job view is patched so
+        the dead job's state is not ``dead`` while the dead record still
+        verifies -- so the first operand is true and the second is
+        false.
+
+        The original raises ``AssertionError``; the mutant (``or``)
+        passes, so this test kills it.
+        """
+        import job_queue
+
+        original = job_queue.JobQueue.job
+
+        def patched(self, job_id):
+            view = original(self, job_id)
+            if view is not None and view.job_id == "j-kill":
+                return dataclasses.replace(view, state="reserved")
+            return view
+
+        job_queue.JobQueue.job = patched
+        try:
+            with self.assertRaises(AssertionError):
+                self._run()
+        finally:
+            job_queue.JobQueue.job = original

@@ -3228,7 +3228,49 @@ Guards: `TheDequeueSkipLoopIsEquivalentTests` in
 So the nine survivors are now: **one equivalent mutant** (`or@1405`) and
 **eight self-check assertion chains** (`and@1860`, `and@1864`,
 `and@1865`, `and@1870`, `and@1875`, `and@1880`, `and@1897`,
-`and@1904`).  The eight are a separate, still-open category.
+`and@1904`).
+
+**AMENDED 2026-11-25 -- the eight are KILLED, and they were never a
+product gap.**  Two measurements, in this order, because the order
+matters:
+
+1. **The PROPERTIES are covered.**  Breaking each property the eight
+   conjuncts assert -- the attempts counter, the priority order, the
+   backoff, the ``done`` and ``dead`` terminal states, the records'
+   digests -- makes MANY real tests fail at the four-suite scope, and
+   ``test_main_self_check`` among them.  (Measured: breaking the
+   attempts counter fails 3 tests; breaking the ``done`` state fails
+   13; breaking the priority order fails 2; breaking the backoff fails
+   2.)  So the product's behaviour is covered, and the eight survivors
+   weaken only the self-check's own redundancy.
+
+2. **The self-check's redundancy is now killed.**  A self-check is not
+   a test: it asserts what the author believed, and a conjunct that can
+   never be false is never checked.  So the eight are killed the way
+   the repository already kills ``leased_task_claim.py``'s
+   (``SelfCheckAndAssertKillerTests``): the accessor the assertion
+   reads is **patched** so the FIRST operand is false and the SECOND is
+   still true.  The original then raises ``AssertionError`` and the
+   mutant (``or``) passes -- so the test kills it.
+
+   Two traps, both found by planting the mutant and re-running:
+
+   * a patch that makes **both** operands false kills nothing -- the
+     mutant fails too, for the wrong reason.  So the record's
+     ``verify()`` is patched to hold alongside the counter;
+   * a patch that is **too broad** kills for the wrong reason: patching
+     every dequeue's attempt count made the self-check raise on a
+     *different* assertion.  So each patch is narrowed to the exact
+     hand-out its assertion names.
+
+   Measured: **8 of 8 killed** at the four-suite scope, with every
+   mutant planted and re-run.
+
+Guards: `TheSelfCheckAssertionChainsAreKilledTests` in
+`components/northstar-agent-runtime/tests/test_refusal_hold_queue_wiring.py`.
+
+So the census over `job_queue.py` at the union scope now reports **one**
+survivor -- the equivalent mutant `or@1405`, which no guard can kill.
 
 ### 22.9 The scope was a CLAIM until the census script agreed with it
 
@@ -3455,8 +3497,10 @@ gap.**  Reporting it as one would be a false finding.
 
 ### 23.6 What the census still reports
 
-* `job_queue.py`: nine survivors (§22.8) -- the dequeue skip loop's
-  `or`, and the `main()` self-check's assertion chains.
+* `job_queue.py`: **one** survivor (§22.8, amended 2026-11-25) -- the
+  dequeue skip loop's `or`, which is EQUIVALENT.  It was nine when
+  this section was written: the other eight were the `main()`
+  self-check's assertion chains, and they are now KILLED (§22.8).
 * `leased_task_claim.py`: **none**.
 * `refusal_hold_wiring.py`: **one**, and it is EQUIVALENT -- the
   event cap's `>` -> `>=`, which changes no observable behaviour
