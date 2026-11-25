@@ -35,6 +35,7 @@ House style: stdlib only, no wall-clock reads, caller-supplied time.
 from __future__ import annotations
 
 import dataclasses
+import re
 import tempfile
 import threading
 import time
@@ -4445,6 +4446,209 @@ class TheEventCapIsHonouredTests(unittest.TestCase):
             )
 
 
+class TheEventCapIsEquivalentTests(unittest.TestCase):
+    """``gt@753`` -- the event cap's ``>`` -> ``>=`` is EQUIVALENT.
+
+    The census reports this site as SURVIVED, and
+    `docs/design/mutant-evidence-closure.md` §9.1 carries it as an
+    equivalent mutant.  That claim needs a PROOF IN A TEST FILE, not a
+    paragraph: `test_equivalence_table_coverage.py` reads the table and
+    requires every site it names to be proved by code.
+
+    So here is the proof, as code.
+
+    The registry's cap is:
+
+        if len(self._events) > MAX_WIRING_EVENTS:
+            del self._events[: len(self._events) - MAX_WIRING_EVENTS]
+
+    At ``len(self._events) == MAX_WIRING_EVENTS`` the deletion is
+    ``self._events[:0]`` -- a no-op.  So the two variants keep exactly
+    the same trail for every number of events, and the mutation changes
+    no observable behaviour.
+
+    THE HARNESS
+    ------------
+    The module is loaded TWICE -- once as it is on disk, once with the
+    mutation applied -- and the two are driven through the same
+    sequence of recordings.  Their trails must be IDENTICAL, for every
+    number of events.
+
+    THE NON-VACUITY CONTROL
+    ------------------------
+    A proof that cannot fail proves nothing, so a second mutation is
+    applied that IS observable: the cap is lowered to ``MAX - 1``, so
+    the two forms delete at different lengths and the trails diverge.
+    The harness must notice that one.  Without it, a harness that
+    compared nothing would satisfy the equivalence.
+    """
+
+    #: The cap's GUARD, matched by SHAPE rather than by spelling.
+    #:
+    #: Anchoring on the literal ``>`` spelling is what made the
+    #: `or@1405` proof kill its own mutant for the wrong reason (see
+    #: `docs/design/refusal-hold-wiring.md` §27.1): with the mutation
+    #: planted on disk the literal is GONE, the anchor does not match,
+    #: and the failure reads as a behavioural one.  The comparison is
+    #: symmetric -- the two forms are built from whatever is on disk --
+    #: so it holds whichever spelling is there.
+    CAP_GUARD = re.compile(
+        r"^(?P<indent>[ \t]*)if len\(self\._events\) >=? ?MAX_WIRING_EVENTS:$",
+        re.MULTILINE,
+    )
+
+    #: The cap's DELETION, likewise matched by shape.
+    CAP_DELETE = re.compile(
+        r"^(?P<indent>[ \t]*)del self\._events\[: len\(self\._events\)"
+        r" - MAX_WIRING_EVENTS(?P<extra>[^\]]*)\]$",
+        re.MULTILINE,
+    )
+
+    #: The CONTROL: the cap deletes ONE MORE event than it should.
+    #:
+    #: Lowering the BOUND is not a control -- the deletion's length is
+    #: ``len(self._events) - MAX_WIRING_EVENTS``, which does not depend
+    #: on the bound, so ``> MAX - 1`` still deletes ``[:0]`` at the cap
+    #: and is EQUIVALENT too.  (Measured: that mutation changed no
+    #: trail for any count, which is how the wrong control was caught.)
+    #: The control has to change what is DELETED: deleting one extra
+    #: event shrinks the trail by one, so the two forms must diverge.
+    CONTROL_EXTRA = " + 1"
+
+    def _load_source(self, text, name):
+        """Load ``text`` as a module named ``name``."""
+        import sys
+        import types
+
+        source = Path(__file__).resolve().parents[1] / "refusal_hold_wiring.py"
+        module = types.ModuleType(name)
+        module.__file__ = str(source)
+        # A dataclass decorator resolves its own module through
+        # `sys.modules`, so the module has to be REGISTERED before
+        # its body runs.
+        sys.modules[name] = module
+        exec(compile(text, str(source), "exec"), module.__dict__)
+        return module
+
+    def _the_two_spellings(self):
+        """The module with the ``>`` guard, and with the ``>=`` guard.
+
+        Both are built from the file on disk, so whichever spelling is
+        there, the OTHER is produced by the swap -- and the comparison
+        is the census's own.
+        """
+        source = Path(__file__).resolve().parents[1] / "refusal_hold_wiring.py"
+        text = source.read_text(encoding="utf-8")
+        match = self.CAP_GUARD.search(text)
+        self.assertIsNotNone(match, "the cap's guard changed shape")
+        line = match.group(0)
+        if ">=" in line:
+            with_ge, with_gt = text, text.replace(line, line.replace(">=", ">"), 1)
+        else:
+            with_gt, with_ge = text, text.replace(line, line.replace(">", ">=", 1), 1)
+        self.assertNotEqual(with_ge, with_gt)
+        return (
+            self._load_source(with_gt, "rhw_cap_gt"),
+            self._load_source(with_ge, "rhw_cap_ge"),
+        )
+
+    def _the_control_pair(self):
+        """The module as it is, and the module deleting one event too many."""
+        source = Path(__file__).resolve().parents[1] / "refusal_hold_wiring.py"
+        text = source.read_text(encoding="utf-8")
+        match = self.CAP_DELETE.search(text)
+        self.assertIsNotNone(match, "the cap's deletion changed shape")
+        mutant = self.CAP_DELETE.sub(
+            lambda m: m.group(0)[:-1] + self.CONTROL_EXTRA + "]", text, count=1
+        )
+        self.assertNotEqual(mutant, text)
+        return (
+            self._load_source(text, "rhw_cap_control_a"),
+            self._load_source(mutant, "rhw_cap_control_b"),
+        )
+
+    def _trail(self, module, count, cap):
+        """The registry's trail after ``count`` recordings.
+
+        The registry is driven directly, so the proof does not depend on
+        the queue gate's behaviour -- only on the CAP, which is the site
+        under test.
+        """
+        registry = module.RefusalHoldRegistry()
+        registry._events = []
+        # The cap is a module-level constant, so the module under test
+        # is driven with the cap it declares.
+        original_cap = module.MAX_WIRING_EVENTS
+        module.MAX_WIRING_EVENTS = cap
+        try:
+            for index in range(count):
+                registry._record_event("check", None, None)
+            return tuple(
+                (event["kind"], event["key"], event["blocked"])
+                for event in registry.events()
+            )
+        finally:
+            module.MAX_WIRING_EVENTS = original_cap
+
+    def test_gt_at_753_the_cap_mutant_is_equivalent(self):
+        """``gt@753``: the differential proof.
+
+        For every number of events, the two spellings of the cap keep
+        the SAME trail.
+        """
+        original, mutant = self._the_two_spellings()
+        for cap in (1, 2, 3, 5, 64):
+            for count in range(0, cap + 12):
+                with self.subTest(cap=cap, count=count):
+                    self.assertEqual(
+                        self._trail(original, count, cap),
+                        self._trail(mutant, count, cap),
+                        "the cap mutant changed the trail",
+                    )
+
+    def test_gt_at_753_the_harness_notices_a_mutation_that_IS_observable(self):
+        """THE NON-VACUITY CONTROL.
+
+        With the cap deleting one event too many, the trail shrinks by
+        one, so the two forms must DIVERGE.  If the harness does not
+        notice, it is blind, and the equivalence above is worthless.
+        """
+        original, mutant = self._the_control_pair()
+        diverged = False
+        for cap in (2, 3, 5, 64):
+            for count in range(0, cap + 12):
+                if self._trail(original, count, cap) != self._trail(mutant, count, cap):
+                    diverged = True
+                    break
+            if diverged:
+                break
+        self.assertTrue(
+            diverged,
+            "the harness did not notice a mutation that IS observable, so "
+            "it cannot certify an equivalence",
+        )
+
+    def test_gt_at_753_the_operands_really_do_agree(self):
+        """The premise, checked directly.
+
+        The equivalence rests on the deletion being a NO-OP at
+        ``len(self._events) == MAX_WIRING_EVENTS``: the slice
+        ``self._events[: len(self._events) - MAX_WIRING_EVENTS]`` is
+        ``self._events[:0]``.  So at exactly the cap, the two forms must
+        leave the same number of events.
+        """
+        original, mutant = self._the_two_spellings()
+        for cap in (1, 2, 3, 5, 64):
+            with self.subTest(cap=cap):
+                self.assertEqual(
+                    len(self._trail(original, cap, cap)),
+                    len(self._trail(mutant, cap, cap)),
+                    "at exactly the cap the two forms kept different numbers "
+                    "of events, so the deletion is not a no-op and the "
+                    "equivalence does not hold",
+                )
+
+
 class TheBatchFormAgreesWithTheRaisingFormTests(unittest.TestCase):
     """``retry_allowed()`` and ``retry()`` must answer the SAME question.
 
@@ -4931,14 +5135,39 @@ class TheDequeueSkipLoopIsEquivalentTests(unittest.TestCase):
 
         source = Path(__file__).resolve().parents[1] / "job_queue.py"
         original_source = source.read_text(encoding="utf-8")
-        instrumented = original_source.replace(
-            "            if job_id is None or entry is None:",
-            "            with open(_OPERAND_LOG, 'a') as _f:\n"
-            "                _f.write('%s %s\\n' % (job_id is None, entry is None))\n"
-            "            if job_id is None or entry is None:",
-            1,
+        # The anchor is a REGEX, not a literal spelling.  Anchoring on the
+        # literal `or` form made this test fail -- for the WRONG reason --
+        # whenever the `and` mutant was planted on disk: the anchor text
+        # vanished, `instrumented == original_source`, and the
+        # `assertNotEqual` below fired.  That is a SPELLING failure
+        # masquerading as a behavioural one, and it is a FALSE KILL: it
+        # certified the mutant as "detected" when the mutants are
+        # equivalent.  Anchor on the SHAPE of the guard instead, so the
+        # instrumentation lands on whichever form is on disk.
+        pattern = re.compile(
+            r"^(?P<indent>[ \t]*)if job_id is None (?:or|and) entry is None:$",
+            re.MULTILINE,
         )
-        self.assertNotEqual(instrumented, original_source)
+        match = pattern.search(original_source)
+        self.assertIsNotNone(
+            match, "the skip guard's shape changed, so the premise cannot be checked"
+        )
+        indent = match.group("indent")
+        instrumented = pattern.sub(
+            lambda m: (
+                f"{indent}with open(_OPERAND_LOG, 'a') as _f:\n"
+                f"{indent}    _f.write('%s %s\\n' % (job_id is None, entry is None))\n"
+                f"{m.group(0)}"
+            ),
+            original_source,
+            count=1,
+        )
+        self.assertNotEqual(
+            instrumented,
+            original_source,
+            "the instrumentation did not land, so the premise check would be vacuous",
+        )
+        self.assertIn("_OPERAND_LOG", instrumented)
         with tempfile.TemporaryDirectory() as directory:
             log = Path(directory) / "operands.log"
             module = self._exec_pair(instrumented, instrumented)[0]

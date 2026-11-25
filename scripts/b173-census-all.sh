@@ -86,6 +86,26 @@ fi
 WT="/tmp/b173-census-${SLUG}"
 rm -rf "$WT"; mkdir -p "$WT/components"
 cp -a "$RUNTIME_DIR" "$WT/components/"
+# The suites in a scope may read files OUTSIDE the component directory --
+# `test_finding_gate.py`'s `DesignDocTests` reads
+# `docs/design/bughunter-finding-gate.md` from the REPO ROOT via
+# `Path(__file__).resolve().parents[3]`.  17 of the runtime's suites
+# resolve a path that way, and 16 of the runtime's 1620 modules have a
+# scope that includes one.
+#
+# Without the repo's `docs/`, `scripts/` and `tests/` in the worktree,
+# those suites ERROR AT SETUP on the PRISTINE source -- so the suite's
+# exit code is non-zero before any mutant is applied, and every mutant in
+# the scope is reported KILLED.  Measured 2026-11-25:
+# `refusal_hold_wiring.py` reported "killed 23/23" that way, while
+# planting the mutation by hand showed it SURVIVES (which §23.4 had
+# already proved arithmetically).
+#
+# So the worktree carries the repo-root directories those suites read.
+cp -a "$REPO_ROOT/docs" "$WT/docs" 2>/dev/null || true
+cp -a "$REPO_ROOT/scripts" "$WT/scripts" 2>/dev/null || true
+cp -a "$REPO_ROOT/tests" "$WT/tests" 2>/dev/null || true
+[ -f "$REPO_ROOT/CLAUDE.md" ] && cp -a "$REPO_ROOT/CLAUDE.md" "$WT/CLAUDE.md"
 find "$WT" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null
 
 if [ ! -f "$PROBE" ]; then

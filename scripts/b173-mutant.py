@@ -252,6 +252,35 @@ def main():
         print("MUTANT SKIP: the suite collected no tests on the pristine "
               "source; no mutant can be measured against it", flush=True)
         return 2
+    # A suite that ALREADY FAILS on the pristine source cannot certify
+    # anything.  Its exit code is non-zero BEFORE any mutant is applied,
+    # so every round's non-zero exit is read as "mutant killed" -- and
+    # the census reports a perfect score off a scope that was broken from
+    # the start.
+    #
+    # Measured 2026-11-25: `refusal_hold_wiring.py`'s scope includes
+    # `test_finding_gate`, whose `DesignDocTests` reads
+    # `docs/design/bughunter-finding-gate.md` from the REPO ROOT
+    # (`Path(__file__).resolve().parents[3]`).  The census worktree
+    # copies only the component directory, so that doc is absent and the
+    # five doc tests ERROR at setup -- on the PRISTINE source.  The
+    # census reported "killed 23/23"; planting the `>` -> `>=` cap
+    # mutation and running the same suites by hand showed 359 passed,
+    # 5 errors -- i.e. the mutation SURVIVES, which is what §23.4
+    # already proved by arithmetic.  All 23 kills were FALSE KILLS.
+    #
+    # `preflight_collection_failed` was computed here and then NEVER USED.
+    # The probe had the signal and ignored it.  It is used now: a suite
+    # that cannot even be COLLECTED on the pristine source is a stronger
+    # statement of the same fact, and it is reported as such, so the log
+    # says WHY the scope cannot measure.
+    if _pf_rc != 0:
+        detail = "it could not be collected" if preflight_collection_failed \
+            else "its tests failed"
+        print("MUTANT SKIP: the suite FAILS on the pristine source "
+              f"(exit {_pf_rc}; {detail}); it cannot certify a kill.  "
+              "Fix the scope or the suite before measuring.", flush=True)
+        return 2
     # Crash-safe restore.  The probe writes a mutant into the file under
     # test, runs the suite, then restores the original.  If the process is
     # KILLED between the write and the restore -- a wall-clock timeout, a

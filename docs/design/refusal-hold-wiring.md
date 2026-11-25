@@ -2912,6 +2912,8 @@ is the union, and a narrower scope understates it:
 before §19-§21:  MUTANT RESULT: killed 45/81
 after  §19-§21:  MUTANT RESULT: killed 54/82
 after  §22:      MUTANT RESULT: killed 73/82
+after  §22.8:    MUTANT RESULT: killed 76/85   (the scope fix, §22.9)
+after  §22.8 + §27.1:  MUTANT RESULT: killed 84/85  (the spelling fix, §27.1)
 ```
 
 The survivor count fell from **36** (81 candidates, 45 killed) to
@@ -2919,6 +2921,22 @@ The survivor count fell from **36** (81 candidates, 45 killed) to
 killed) across §22.
 
 §22 closed **nineteen** of the twenty-eight §19-§21 left open.
+
+**AMENDED 2026-11-25.**  The `73/82` above was measured at the
+four-suite scope but with the census SCRIPT pairing the module with
+**one** suite -- so the scope the script used was not the scope this
+section describes.  Re-measured at the union scope, with the script
+fixed (§22.9), the same tree reads `76/85`: **33** of the narrow
+scope's "survivors" were caught by the sibling suites and were false
+accusations.  Then the eight self-check survivors were killed (§22.8),
+each killed mutant verified by planting it and re-running the scope.
+Then the equivalence PROOF was fixed, because it had been killing the
+last survivor for the wrong reason (§27.1), and the tree reads `84/85`.
+
+So the four-suite scope's final reading over `job_queue.py` leaves
+**one** survivor -- the equivalent mutant `or@1405`, which no guard can
+kill.  A survivor count is meaningless without its scope: at the narrow
+scope the same tree reads 43/85.
 
 (§19 and §20 recorded the **narrower two-suite** scope
 (`test_refusal_hold_queue_wiring,test_job_queue`).  Re-measured at
@@ -3341,9 +3359,21 @@ over the union of every suite that references each one:
 
 | module | suites | before | after |
 |---|---|---|---|
-| `refusal_hold.py` | `test_refusal_hold`, `test_finding_gate`, `test_refusal_hold_wiring`, `test_refusal_hold_queue_wiring` | **killed 14/14** | 14/14 |
-| `refusal_hold_wiring.py` | `test_finding_gate`, `test_refusal_hold_wiring`, `test_refusal_hold_queue_wiring` | **killed 22/23** | **killed 22/23** -- the one survivor is an EQUIVALENT mutant (§23.4), so no guard can close it |
+| `refusal_hold.py` | `test_refusal_hold`, `test_refusal_hold_queue_wiring`, `test_refusal_hold_wiring` | **killed 14/14** | 14/14 |
+| `refusal_hold_wiring.py` | `test_refusal_hold_wiring`, `test_finding_gate`, `test_refusal_hold_queue_wiring` | **killed 22/23** | **killed 22/23** -- the one survivor is an EQUIVALENT mutant (§23.4), so no guard can close it |
 | `leased_task_claim.py` | `test_leased_task_claim`, `test_refusal_hold`, `test_refusal_hold_queue_wiring` | **killed 38/42** | **42/42** |
+
+**AMENDED 2026-11-25 — the `refusal_hold.py` row named a suite that does
+not reference it.**  The row listed `test_finding_gate`, but
+`test_finding_gate.py` imports `refusal_hold_wiring` and **not**
+`refusal_hold`; the resolver (`scripts/census-scope.py`, an AST import
+read, not a grep) reports the union as the three suites in the row now.
+The other two rows already matched the resolver exactly.  The measurement
+is unchanged -- `refusal_hold.py` was clean either way -- but a scope row
+that names a suite outside the scope is the same defect as §22.9's, in a
+place where it was not caught: **the row was a claim, not a
+measurement.**  Every scope row in this document now comes from the
+resolver.
 
 `refusal_hold.py` was already clean.  The other two had **five**
 survivors between them, and they are the same shape: **branches the
@@ -3501,16 +3531,27 @@ gap.**  Reporting it as one would be a false finding.
   dequeue skip loop's `or`, which is EQUIVALENT.  It was nine when
   this section was written: the other eight were the `main()`
   self-check's assertion chains, and they are now KILLED (§22.8).
+  **RE-MEASURED 2026-11-25 at killed 84/85 (§27.5)** -- the census had
+  reported 85/85 because the equivalence proof asserted a SPELLING and
+  so killed the mutant for the wrong reason (§27.1).
 * `leased_task_claim.py`: **none**.
 * `refusal_hold_wiring.py`: **one**, and it is EQUIVALENT -- the
   event cap's `>` -> `>=`, which changes no observable behaviour
-  (§23.4).  It is reported, not closed.
+  (§23.4).  It is reported, not closed.  **RE-MEASURED 2026-11-25 at
+  killed 22/23 (§27.5)** -- the census had reported 23/23 because the
+  scope was already failing on the pristine source (§27.2).
 * `refusal_hold.py`: **none**.
 
 The one survivor that remains everywhere is the **self-check** shape:
 `main()` asserts what the author believed, and each conjunct of an
 `assert a and b` is individually untested.  That is a separate
 category, and it is recorded rather than folded in.
+
+**AMENDED 2026-11-25 (§27):** the last sentence is now HISTORICAL.  The
+self-check shape is closed -- the eight assertion chains are KILLED
+(§22.8) -- and the survivors that remain are the two EQUIVALENT mutants
+above, which no guard can kill because they change no observable
+behaviour.
 
 ## 24. AMENDED 2026-11-24 — the batch form asked a DIFFERENT question than the raising form
 
@@ -4156,3 +4197,221 @@ The measure that found it was not reading the code.  It was asking
 gate, and running the queue against it.  The existing guard had
 already tested "a broken gate" -- but with a broken gate the queue had
 never been given.
+
+## 27. AMENDED 2026-11-25 — the census had a FALSE KILL, and it was in the PROBE
+
+This round started by checking a number that looked too good: the
+`job_queue.py` census reported **killed 85/85**.  Nine mutants had been
+closed in §22.8 and the last one, `or@1405`, had been *proved* equivalent
+(§9.1's table).  A proved-equivalent mutant cannot also be killed, so one
+of the two was wrong.
+
+It was the census.  This section records why, because the defect is not
+in the product -- it is in the **measuring instrument**, and it produced
+false evidence in the exact direction that flatters.
+
+### 27.1 DEFECT 1 — an equivalence proof that asserted a SPELLING
+
+`tests/test_refusal_hold_queue_wiring.py`'s
+`test_or_at_1405_the_operands_really_do_agree` instrumented the guard by
+matching a **literal**:
+
+```python
+instrumented = original_source.replace(
+    "            if job_id is None or entry is None:",
+    "            with open(_OPERAND_LOG, 'a') as _f:\n" ... )
+self.assertNotEqual(instrumented, original_source)
+```
+
+When the `or` -> `and` mutant was planted on disk, that literal was
+**gone**.  So `instrumented == original_source`, the `assertNotEqual`
+fired, and the test failed -- **for a spelling reason, not a behavioural
+one**.  The census read that failure as "the mutant was killed".
+
+Measured, on the same tree, by hand:
+
+| tree | result |
+|---|---|
+| pristine | 402 passed |
+| `or@1405` planted, **before** the fix | **1 failed** -- the spelling assertion |
+| `or@1405` planted, **after** the fix | **402 passed** -- the mutant survives |
+
+So the honest `job_queue.py` figure is **killed 84/85**, with `or@1405`
+SURVIVED -- exactly what §9.1's equivalence table says it should be.
+
+The fix anchors the instrumentation on the guard's **shape** (a regex
+over the `if job_id is None (or|and) entry is None:` line) instead of one
+spelling of it, so it lands on whichever form is on disk.
+
+This is the second time this exact trap has been hit in this repo, and
+the first time it was hit **by the proof itself**: see
+`docs/design/mutant-evidence-closure.md` §9.1 and the note that a proof
+of equivalence must be run against a mutation that IS observable.  The
+control here was already present and it did not fire -- because the
+control used a DIFFERENT mutation (the broken pairing invariant), not the
+one the census applies.  **A non-vacuity control must be run against the
+mutant the census actually applies**, not merely against some observable
+mutation.
+
+### 27.2 DEFECT 2 — a scope that was broken BEFORE the probe started
+
+The `refusal_hold_wiring.py` census reported **killed 23/23**.  §23.4
+had proved the event cap's `>` -> `>=` an equivalent mutant -- by
+arithmetic, at the real numbers.  It cannot be both.
+
+Planting it and running the scope's suites by hand:
+
+```
+359 passed, 5 errors        # the MUTANT tree
+359 passed, 5 errors        # the PRISTINE tree -- the SAME 5 errors
+```
+
+The five errors are `test_finding_gate.py`'s `DesignDocTests`, which
+read `docs/design/bughunter-finding-gate.md` from the **repo root** via
+`Path(__file__).resolve().parents[3]`.  The census worktree copies only
+the component directory, so the doc is absent and those tests error at
+setup.
+
+And that error is on the **pristine** source -- so the suite's exit code
+was non-zero **before any mutant was applied**.  `scripts/b173-mutant.py`
+took a pre-flight reading of the pristine suite for exactly this
+distinction, and it computed the signal:
+
+```python
+preflight_collection_failed = collection_failed(_pf_out)
+```
+
+and then **never used it**.  The probe only skipped when the suite
+collected NOTHING.  A suite that COLLECTS tests but FAILS passed
+straight through, and every round's non-zero exit was read as "mutant
+killed".
+
+**All 23 kills were false.**  With the worktree fixed to carry the repo
+root, and the probe treating a pristine-source failure as a SKIP, the
+census reports `gt@753 SURVIVED` -- which is what §23.4 said.
+
+### 27.3 The scale
+
+The defect is not confined to one module.  **17** of the runtime's
+suites resolve a path that leaves the component directory, and **16** of
+the runtime's **1620** modules have a census scope that includes one:
+
+```
+audit_export   cli   code_task   events   ed25519   finding_gate
+audit_chain    hlc   loop        postconditions   runtime_evidence
+sdk   blind_rerunner   dataflow_policy   refusal_hold_wiring
+```
+
+For each of those, every mutant in the scope could have been reported
+killed by a suite that was already failing.
+
+### 27.4 The fix, and its guards
+
+Two defects, two fixes:
+
+1. **`scripts/b173-census-all.sh`** now copies the repo root's `docs/`,
+   `scripts/` and `tests/` into the census worktree, so the suites that
+   read outside the component can actually run.
+2. **`scripts/b173-mutant.py`** now treats a pristine-source FAILURE as a
+   SKIP.  The exit code is the primary signal, because a setup error
+   leaves tests COLLECTED but failing -- which `collected_nothing` cannot
+   see.
+
+`tests/test_mutant_probe_pristine_failure.py` pins both, with a
+**non-vacuity control**: a synthetic worktree where the suite FAILS on
+the pristine source must produce a SKIP and no kill, and **the same
+probe against a healthy suite must still kill the mutant**.  Without the
+second half, a probe that skipped everything would satisfy the first.
+
+Both halves were verified load-bearing: breaking the probe's fix fails
+the first test, and breaking the census's copy fails the second.  The
+probe is also pinned to leave the module it mutated pristine.
+
+**A THIRD GUARD CAUGHT A VIOLATION OF THIS SECTION'S OWN RULE.**
+`test_equivalence_table_coverage.py` requires every site §9.1's table
+names to be proved by CODE in a test file -- a comment naming a site is
+a note about the site, not a test of it.  Adding `gt@753` to that table
+with only §23.4's prose proof made the repo suite red:
+
+```
+FAILED tests/test_ci_runner_artifacts.py::
+  CoordinatorArtifactSimulationTests::test_the_files_that_read_the_coordinator_survive_its_absence
+  -> tests/FAILED (failures=1, skipped=105)
+```
+
+The guard fired from inside the CI simulation, because
+`test_equivalence_table_coverage.py` is one of the files that read the
+coordinator's directory.  The fix was to write the proof as code
+(§27.5), not to weaken the guard.
+
+### 27.5 The corrected measurements
+
+| module | before | after | the survivor |
+|---|---|---|---|
+| `job_queue.py` | 85/85 | **84/85** | `or@1405` -- EQUIVALENT (§9.1), proved |
+| `refusal_hold_wiring.py` | 23/23 | **22/23** | the event cap's `>` -> `>=` -- EQUIVALENT (§23.4), proved |
+| `leased_task_claim.py` | 42/42 | **42/42** | none -- the scope was not contaminated |
+| `refusal_hold.py` | 14/14 | **14/14** | none -- the scope was not contaminated |
+
+**§23.6 is corrected by this section.**  It said `job_queue.py` had one
+survivor (`or@1405`) and `refusal_hold_wiring.py` had one (the cap) --
+both right, and both right for a reason the census had hidden.  The two
+survivors are EQUIVALENT mutants, so no guard can close them; they are
+reported, not claimed as gaps.
+
+**THE TWO PROOFS ARE NOW EXECUTABLE, NOT PROSE.**  §9.1's table names
+every site it carries, and `test_equivalence_table_coverage.py` requires
+each named site to be proved by **code** in a test file -- a comment
+naming a site is a note about the site, not a test of it.  Adding
+`gt@753` to that table therefore required writing the §23.4 arithmetic
+proof as a test, and that is now
+`TheEventCapIsEquivalentTests` in
+`tests/test_refusal_hold_queue_wiring.py`:
+
+* the **differential proof** loads the module twice -- once with the
+  `>` guard and once with the `>=` guard -- and drives both through the
+  same sequence of recordings for every count from 0 to ``cap + 12``,
+  at caps 1, 2, 3, 5 and 64, requiring IDENTICAL trails;
+* the **non-vacuity control** deletes one event too many, which shrinks
+  the trail, so the two forms must DIVERGE -- the harness has to notice
+  it, or it is blind and the equivalence is worthless;
+* the **premise** is checked directly: at exactly the cap the two forms
+  keep the same number of events, so the deletion is a no-op.
+
+**THE CONTROL WAS WRONG ON THE FIRST PASS, AND THAT MATTERED.**
+Lowering the cap's BOUND is not a control: the deletion's length is
+``len(self._events) - MAX_WIRING_EVENTS``, which does not depend on the
+bound, so ``> MAX - 1`` still deletes ``[:0]`` at the cap and is
+EQUIVALENT too.  The measured control showed no divergence, and the
+fix was to change what is DELETED rather than when.
+
+**AND THE PROOF ANCHORS ON SHAPE, NOT SPELLING -- THE §27.1 TRAP,
+TWICE.**  The first version of this proof matched the literal
+``"if len(self._events) > MAX_WIRING_EVENTS:"``, and planting the
+mutant made it fail -- for the same spelling reason as `or@1405`.  The
+anchor is now a regex over the guard's shape, so it lands on whichever
+spelling is on disk.  **Verified by planting:** with the `>=` mutant on
+disk, all three proof tests PASS (the mutant correctly survives).
+
+### 27.6 What this does NOT change
+
+* **No product code changed.**  `job_queue.py`, `refusal_hold_wiring.py`,
+  `refusal_hold.py` and `leased_task_claim.py` are byte-identical to
+  their pre-round state.
+* No version, schema, or audit kind is added or changed.
+* No digest changes.
+* No branch, tag, or release was touched.
+
+### 27.7 The general lesson
+
+**A perfect score is the shape a broken instrument makes.**  Both false
+certs ran the same way: the census reported a number with no survivors,
+which is exactly what a measuring tool reports when it cannot measure.
+The pre-flight existed to catch that and computed the signal without
+using it.
+
+Three separate defects in this round -- the scope that was a claim
+(§22.9), the spelling assertion (§27.1), the pristine failure that was
+counted as a kill (§27.2) -- all produced the SAME artefact: a clean
+number that no longer described the tree.  A census figure is evidence
+only if the thing that produced it was itself measured.

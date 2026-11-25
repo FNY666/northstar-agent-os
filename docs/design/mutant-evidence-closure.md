@@ -1193,6 +1193,7 @@ the planted fault.
 | `openhands-stuck-detector` | `gt@681` | the source-index line with a ONE-element message key |
 | `refusal-hold-wiring` | `gt@640` | the differential harness planted with a mutation that IS observable -- the delete removes one event too many at the boundary |
 | `refusal-hold-chain-close` | `or@1405` | the same differential harness pointed at the dequeue skip loop's PAIRING INVARIANT -- `entry` set to `None` while `job_id` holds the candidate, so the guard's two operands DISAGREE and the two forms must select different branches |
+| `refusal-hold-wiring` | `gt@753` | the event cap's `>` -> `>=`, proved equivalent by ARITHMETIC rather than by a differential harness: at `len(self._events) == MAX_WIRING_EVENTS` the deletion is `self._events[:0]`, a no-op, so the two variants keep exactly the same trail.  The proof is EXECUTABLE -- `TheEventCapIsEquivalentTests` in `components/northstar-agent-runtime/tests/test_refusal_hold_queue_wiring.py` loads the module twice (once with `>`, once with `>=`), drives both through the same recordings for every count from 0 to `cap + 12` at caps 1, 2, 3, 5 and 64, and requires identical trails.  Its non-vacuity control deletes one event too many, which shrinks the trail, so the two forms must diverge |
 | `orphan-adoption` / `scope-verbatim-compaction` | `lt@390` | the end-marker guard moved to a bound that never fires |
 | `scorer-disagreement` | `gt@533` | the threshold comparison widened instead of the scorer-count one |
 | `step-reliability-budget` | `lt@152` | the final formula of `max_steps` shifted by one |
@@ -1200,7 +1201,7 @@ the planted fault.
 | `merged-tree-review` | `eq@494` | the same harness, over the class-membership half the equivalence rests on |
 | `c58` / `slice3` | `lt@547`, `lt@552`, `lt@557`, `lt@620`, `lt@686`, `lt@690`, `lt@709`, `lt@756`, `lt@773` | the same differential harness pointed at the bound turned the OTHER way (`< 0` -> `> 0`) -- a delimiter found at index 1 exists, so the two copies MUST differ there |
 
-**The table has 18 rows for 27 sites.**  `diviner` /
+**The table has 19 rows for 28 sites.**  `diviner` /
 `scope-verb-canonical` carries TWO sites (`lt@667` and `gt@669`) in one
 row, and `c58` / `slice3` carries NINE (`lt@547`, `lt@552`, `lt@557`,
 `lt@620`, `lt@686`, `lt@690`, `lt@709`, `lt@756`, `lt@773`) in one row,
@@ -1234,6 +1235,37 @@ ever touched, and a diff between the two scopes is not a finding --
 it is a reach difference.  `job_queue.py`'s `or@1405` is one of the
 sites that only the module census reaches; it is in this table because
 it HAS a proof, not because the slice census named it.
+
+**AMENDED 2026-11-25 -- TWO FALSE KILLS, and both of them made this
+table look unnecessary.**  For two rounds this table carried
+equivalence proofs for mutants the census reported as KILLED.  A proved
+equivalent mutant cannot also be killed, so one of the two was wrong,
+and in both cases it was the census:
+
+1. **`or@1405` was reported killed by its OWN PROOF.**  The proof's
+   instrumentation was anchored on a literal spelling of the `or` form,
+   so with the `and` mutant planted the anchor was gone, the
+   instrumentation did not land, and the proof failed -- for a
+   SPELLING reason.  The census read that as a kill.  The fix anchors on
+   the guard's shape.  **A non-vacuity control must be run against the
+   mutant the census actually applies**, not merely against SOME
+   observable mutation: the control here was present, and it did not
+   fire, because it used a different mutation than the census does.
+2. **`gt@753` was reported killed by a scope that was ALREADY FAILING.**
+   The scope included a suite that reads a file outside the component
+   directory, which the census worktree does not carry, so the suite
+   errored at setup on the PRISTINE source.  The probe's exit code was
+   therefore non-zero before any mutant was applied, and every round's
+   non-zero exit was read as "mutant killed".  The probe computed the
+   signal that would have caught this and then did not use it.
+
+Both defects pushed in the SAME direction: a census figure with no
+survivors, which is what a measuring tool reports when it cannot
+measure.  **A census figure is evidence only if the thing that produced
+it was itself measured** -- and the measurement of a proof has to be
+planted against the very mutant the census applies.
+
+The full write-up is `docs/design/refusal-hold-wiring.md` §27.
 
 **AMENDED 2026-11-22 (i) -- the census grew a ninth distinct site
 family, and the table grew a row for it.**  The census above reports
