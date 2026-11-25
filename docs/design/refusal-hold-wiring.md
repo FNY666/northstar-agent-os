@@ -3593,3 +3593,162 @@ re-pinning the baseline is the coordinator's call, and every slice
 that lands after `1b2b0ad9` will fail `BENCH_DIFF` for the same
 reason.  The refusal-hold chain's own bench never touched the sandbox
 cases.
+
+## 25. AMENDED 2026-11-25 — the two forms did not leave the SAME trail
+
+§24 fixed the batch form's *question*.  It did not fix the
+*trail*: §18.2 states the rule —
+
+> **The two forms agree.**  The raising form and the batch form are one
+> writer (`_retry`), so a refusal must leave the same trail whichever
+> form asked.  A guard asserts that the two rows are equal.
+
+— and the guard it names did not hold it.  §24's guard compared the
+two forms' *row counts* for a **broken** gate, where both are zero.
+For a **refusal**, the two forms left **different** trails.
+
+This section was found by measurement, not by reading: the guards
+were moved into `tests/test_job_queue.py` (the file that owns the
+`retry_allowed` API and that the slice's own manifest names), and
+the first run of the moved guards failed.  Three distinct
+asymmetries, all in the RAISING form's favour or against it.
+
+### 25.1 DEFECT 1 — one refusal booked TWO rows
+
+The raising form books the refusal inside its own `except` block and
+then **re-raises**.  The exception continues into the generic
+`except JobQueueError` handler further out, which books a **second**
+`job.rejected` row for the same refusal -- with a different shape.
+
+Measured 2026-11-25, on the tree as §24 left it:
+
+```
+raising form, one refused job:
+  job.rejected {'reason': 'RefusalRefusedError',
+                'refusal_reason': 'blocked_by_refusal',
+                'job_id': 'j1', 'action': 'send_email'}
+  job.rejected {'reason': 'RefusalRefusedError', 'job_id': 'j1'}
+```
+
+Two rows, one refusal, and **two different stories about it**: only
+one of the rows names the ACTION, and only one names the reason.  Which
+one a reader picked determined what they learned.  The batch form
+booked one row, so the two forms disagreed.
+
+### 25.2 DEFECT 2 — a broken gate booked a row on the raising form only
+
+The generic handler books a row for **any** `JobQueueError`, including
+one that came out of the **gate**.  But §16.2's rule is explicit: a
+broken gate refuses nothing in particular, so a `job.rejected` row
+would put a refusal in the trail that never happened.
+
+The batch form honoured that (it asks `_is_refusal`); the raising
+form did not, for a gate whose vocabulary `_is_refusal` does not
+recognise.
+
+Measured 2026-11-25, on the tree as §24 left it:
+
+```
+plain JobQueueError gate   raising rows=1  batch rows=0
+RuntimeError gate          raising rows=0  batch rows=0
+```
+
+The first row is the asymmetry: the SAME gate, the SAME refusal, and
+the two forms disagreed about whether it happened.
+
+### 25.3 DEFECT 3 — a dead job booked a rejection on the raising form only
+
+The **dead** path (the job's retry budget is spent) raises
+`MaxRetriesExceededError` on the raising form, and the generic handler
+booked the rejection.  The batch form returns `None` — "not
+re-dispatched" — and booked **nothing**.
+
+Measured 2026-11-25, on the tree as §24 left it:
+
+```
+RAISING dead  rejected rows: [('job.rejected',
+                                {'reason': 'MaxRetriesExceededError',
+                                 'job_id': 'j-1'})]
+BATCH   dead  rejected rows: []
+```
+
+The `job.dead` row is booked on both forms, so the trail did name the
+death -- but the REJECTION was on one form only, and the rejection is
+what says the job was not re-dispatched.
+
+### 25.4 The fix
+
+Three changes, all in `_retry`:
+
+1. **The gate's exception is not a queue-level rejection.**  A flag
+   (`_gate_raised`) records that the exception reaching the generic
+   handler came from the gate, so the generic handler does not book a
+   row for it.  A REFUSAL books its own row in the refusal branch,
+   where the reason AND the action are both in hand; a BROKEN gate
+   books no row at all.
+2. **The dead path books the same row on both forms.**  The batch
+   form books `MaxRetriesExceededError` explicitly before returning
+   `None`, because the raising form's row arrives through the generic
+   handler.
+3. **The batch form's row is booked once.**  Unchanged from §24, but
+   now the two forms agree on the row's *shape* too: the surviving
+   row is the one that names the action and the reason.
+
+### 25.5 The guards
+
+Ten new guards in `tests/test_job_queue.py` — the file that owns the
+`retry_allowed` API, and that this slice's manifest names.  They live
+beside the other `retry_allowed` tests rather than in the wiring
+suite, because a test file that another slice introduced is not
+evidence for this one (see `test_r8_commit_attribution.py`'s rule:
+a manifest file is accounted for only when the commit that introduced
+it also introduced one of the manifest's files, or is the slice's own
+subject commit).
+
+| guard | what it pins | RED before the fix |
+|---|---|---|
+| `test_the_batch_form_refuses_what_the_raising_form_refuses` | the §24 defect: a refused action was re-dispatched | §24's fix |
+| `test_the_batch_form_leaves_a_refused_job_where_it_was` | the job keeps its state and its attempts | §24's fix |
+| `test_the_two_forms_agree_on_a_gate_that_offers_only_the_raising_one` | a one-form gate is unchanged | §24's fix |
+| `test_a_boolean_only_gate_still_refuses` | a gate with no raising form is not treated as allowing | §24's fix |
+| `test_an_allowed_gate_still_re_dispatches` | the control: the ordinary path is intact | §24's fix |
+| `test_the_batch_form_asks_the_gate_exactly_once_on_the_refused_path` | one job is ONE check | §24's fix |
+| `test_a_broken_gate_books_no_rejected_row_on_the_batch_form` | a broken gate is not recorded as a refusal | §24's fix |
+| `test_a_refused_row_names_a_reason_that_is_not_the_absence_of_one` | the row never says `NoneType` | §24's fix |
+| `test_a_refused_row_still_names_the_job_and_the_action` | WHO and WHAT survive | **RED** |
+| `test_the_raising_form_books_exactly_ONE_row_for_one_refusal` | **DEFECT 1**: one refusal, one row | **RED** |
+| `test_a_plain_queue_error_gate_is_booked_the_same_way_on_both_forms` | **DEFECT 2**: the forms agree on an unrecognised vocabulary | **RED** |
+| `test_the_dead_path_books_the_same_rows_on_both_forms` | **DEFECT 3**: the dead path agrees | **RED** |
+
+**Verified RED against the pre-fix tree.**  The four guards marked
+**RED** were run against `job_queue.py` as of `481d2366` (the tree as
+§24 left it), with this round's test file in place:
+
+```
+$ python3 -m pytest -q tests/test_job_queue.py     # pre-fix job_queue.py
+FAILED tests/test_job_queue.py::test_the_raising_form_and_the_batch_form_book_the_same_rows
+FAILED tests/test_job_queue.py::test_the_raising_form_books_exactly_ONE_row_for_one_refusal
+FAILED tests/test_job_queue.py::test_a_plain_queue_error_gate_is_booked_the_same_way_on_both_forms
+FAILED tests/test_job_queue.py::test_the_dead_path_books_the_same_rows_on_both_forms
+4 failed, 38 passed
+```
+
+and against the fixed tree: `42 passed`.
+
+### 25.6 What this does NOT change
+
+* **The refusal's vocabulary is unchanged.**  `_is_refusal` still draws
+  the line on the error's own vocabulary: a `reason` attribute whose
+  value is one of the hold's `blocked_*` reasons, or the class name
+  `RefusalRefusedError`.  §25.2 does not widen it -- it makes the two
+  forms agree on an UNRECOGNISED vocabulary, and the only consistent
+  answer there is **neither** books a row, because a gate the queue
+  cannot answer refuses nothing in particular.  A host that wants its
+  refusals recorded raises the shape the wiring raises.
+* **The raising form still raises**, and the batch form still returns
+  a bare `None` for "not re-dispatched".
+* **The queue's own validation errors still book a row.**  A
+  `BadDelayError` from `retry()`'s own argument check is a
+  queue-level rejection, and it is still booked.
+* **`dequeue()` is unchanged.**  It has its own refusal path (§15,
+  §16), and it books one row per refused candidate.

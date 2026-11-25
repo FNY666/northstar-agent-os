@@ -593,6 +593,456 @@ def test_retry_allowed_returns_none_for_a_job_that_is_not_reserved():
 
 
 # ---------------------------------------------------------------------------
+# 17b. the two forms must ask the SAME question
+# ---------------------------------------------------------------------------
+#
+# ``retry()`` asks the gate's RAISING form
+# (``require_queue_allowed``); ``retry_allowed()`` asked the BOOLEAN
+# form (``queue_allowed``).  A host gate that offers both is expected to
+# answer both the same way -- they are the same question -- but nothing
+# in the contract said so and nothing checked it, so the two forms could
+# disagree and the disagreement was invisible: the same gate, the same
+# job, the same action, two answers.
+#
+# The batch form existed so that one refused job could not abandon a
+# sweep.  It did not exist to answer a DIFFERENT question, and asking a
+# different question made it MORE PERMISSIVE: it took the boolean
+# answer and re-dispatched an action the raising form had refused.
+#
+# These guards live here, beside the other ``retry_allowed`` tests,
+# because this file is where the batch form's API is specified.
+
+
+class RefusalRefusedError(job_queue.JobQueueError):
+    """The refusal shape the queue's taxonomy recognises.
+
+    ``_is_refusal`` draws the line between a refusal and a broken gate
+    on the error's own VOCABULARY: a ``reason`` attribute whose value is
+    one of the hold's ``blocked_*`` reasons, or the class name
+    ``RefusalRefusedError``.
+
+    This is the second shape -- what a host that re-implements the
+    gate's contract without importing the wiring raises.  It is
+    declared here so this file can exercise the queue's contract
+    without importing the wiring (the queue must not drag the wiring
+    in; the wiring imports the hold, and the hold must not drag the
+    queue in).
+    """
+
+    def __init__(self, message, reason=None):
+        super().__init__(message)
+        self.reason = reason
+
+
+class _LyingGate:
+    """A gate whose two forms answer the SAME question DIFFERENTLY.
+
+    ``queue_allowed`` says "allowed"; ``require_queue_allowed`` raises.
+    A host gate whose two forms disagree is a **host's** bug -- but the
+    queue must not be more permissive because it happened to ask the
+    permissive one.
+    """
+
+    def __init__(self):
+        self.asked = 0
+
+    def queue_allowed(self, job_id, action, *, now=None):
+        return True
+
+    def require_queue_allowed(self, job_id, action, *, now=None):
+        self.asked += 1
+        raise RefusalRefusedError(
+            "this action is refused", reason="blocked_by_refusal"
+        )
+
+
+class _BooleanOnlyGate:
+    """A gate that offers ONLY the boolean form, and refuses.
+
+    The boolean form carries no reason -- a refusal and a gate that
+    cannot answer are both ``False`` -- so the queue must still name a
+    real class in the trail's ``reason`` slot, and must still refuse.
+    """
+
+    def queue_allowed(self, job_id, action, *, now=None):
+        return False
+
+
+class _BrokenGate:
+    """A gate that CANNOT ANSWER.
+
+    It refuses nothing in particular: it is broken, not refusing.  The
+    raising form books no row for it, so the batch form must book no
+    row either -- a ``job.rejected`` row would put a refusal in the
+    trail that never happened.
+    """
+
+    def require_queue_allowed(self, job_id, action, *, now=None):
+        raise RuntimeError("the gate is broken")
+
+
+def _reserved_with_gate(gate):
+    """A job that is enqueued and RESERVED, with the gate installed."""
+    jq = JobQueue(refusal_gate=gate)
+    _enqueue(jq, seq=1)
+    _dequeue_around_the_gate(jq)
+    return jq
+
+
+def test_the_batch_form_refuses_what_the_raising_form_refuses():
+    """The defect: the batch form re-dispatched a REFUSED action.
+
+    The gate offers both methods.  The raising one refuses; the
+    boolean one allows.  The batch form took the boolean answer and put
+    the job back to ``ready`` -- so the refused action was offered
+    again.
+    """
+    jq = _reserved_with_gate(_LyingGate())
+    record = jq.retry_allowed("j-1", 3)
+    assert record is None, (
+        "the batch form re-dispatched an action the raising form refuses"
+    )
+    assert jq.job("j-1").state == "reserved", (
+        "the refused action went back to 'ready' and would be offered again"
+    )
+
+
+def test_the_batch_form_leaves_a_refused_job_where_it_was():
+    """The job keeps its state and its attempts."""
+    jq = _reserved_with_gate(_LyingGate())
+    before = jq.job("j-1")
+    jq.retry_allowed("j-1", 3)
+    after = jq.job("j-1")
+    assert after.state == before.state
+    assert after.attempts == before.attempts
+
+
+def test_the_two_forms_agree_on_a_gate_that_offers_only_the_raising_one():
+    """The control: a gate with ONE form is unchanged."""
+    jq = _reserved_with_gate(_RefusingGate())
+    assert jq.retry_allowed("j-1", 3) is None
+    assert jq.job("j-1").state == "reserved"
+
+
+def test_a_boolean_only_gate_still_refuses():
+    """A gate with no raising form must not be treated as allowing."""
+    jq = _reserved_with_gate(_BooleanOnlyGate())
+    assert jq.retry_allowed("j-1", 3) is None
+    assert jq.job("j-1").state == "reserved"
+
+
+def test_an_allowed_gate_still_re_dispatches():
+    """The control: the fix must not break the ordinary path."""
+    jq = _reserved_with_gate(_CountingGate())
+    record = jq.retry_allowed("j-1", 3)
+    assert record is not None, "an allowed job was not re-dispatched"
+    assert jq.job("j-1").state == "ready"
+
+
+def test_the_batch_form_asks_the_gate_exactly_once_on_the_refused_path():
+    """One job is ONE check, on the refused path too.
+
+    The refused path returns before the write, so a double ask would
+    not show up in the trail's event count on that path -- but it would
+    show up in the GATE's own count, and it would double the gate's
+    cost for a job that was never re-dispatched.
+    """
+    gate = _LyingGate()
+    jq = JobQueue(refusal_gate=gate)
+    _enqueue(jq, seq=1)
+    asked_after_dequeue = _dequeue_around_the_gate(jq)
+    jq.retry_allowed("j-1", 3)
+    assert getattr(gate, "asked", 0) - asked_after_dequeue == 1, (
+        "the gate was asked more than once for one job"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 17c. what the batch form BOOKS
+# ---------------------------------------------------------------------------
+#
+# A refusal is booked in the queue's own trail, so the trail names the
+# refused re-dispatch.  Two rules follow from that, and the batch form
+# broke both:
+#
+# 1. A **broken** gate books no row.  It refuses nothing in particular,
+#    so a ``job.rejected`` row would put a refusal in the trail that
+#    never happened.  The raising form already books no row for it.
+# 2. A booked row names a **real class** in its ``reason`` slot.  The
+#    boolean form carries no reason, and the batch form had nothing to
+#    put there -- so it put the class name of the MISSING exception
+#    there, and the row read ``"NoneType"``.
+
+
+def _rejected_rows(jq):
+    """The ``job.rejected`` rows in the queue's own trail."""
+    return [
+        row for row in jq.audit_log()
+        if row.get("kind") == "job.rejected"
+    ]
+
+
+def _row_detail(row):
+    """The payload of an audit row.
+
+    An audit row is ``{schema, kind, module, detail, seq}`` -- the
+    fields a reader of the trail actually looks at live in ``detail``,
+    so a test that reads ``row["job_id"]`` is reading a key that is not
+    there.
+    """
+    detail = row.get("detail")
+    return detail if isinstance(detail, dict) else row
+
+
+def test_a_broken_gate_books_no_rejected_row_on_the_batch_form():
+    """A gate that cannot answer is not a refusal.
+
+    The raising form books no row for a broken gate.  The batch form
+    did: the trail showed a refusal that never happened, and a reader
+    of the trail could not tell it from a real one.
+    """
+    jq = _reserved_with_gate(_BrokenGate())
+    assert jq.retry_allowed("j-1", 3) is None
+    assert _rejected_rows(jq) == [], (
+        "the batch form booked a rejection for a gate that refused "
+        "nothing in particular"
+    )
+
+
+def test_a_refused_row_names_a_reason_that_is_not_the_absence_of_one():
+    """The ``reason`` slot must name a real class.
+
+    The boolean form refuses without saying why, so there was no reason
+    to hand back -- and the row put the class name of the MISSING
+    exception there, which read ``"NoneType"``.
+    """
+    jq = _reserved_with_gate(_BooleanOnlyGate())
+    assert jq.retry_allowed("j-1", 3) is None
+    rows = _rejected_rows(jq)
+    assert len(rows) == 1, (
+        "the refusal was not booked in the queue's own trail: %r" % (rows,)
+    )
+    reason = _row_detail(rows[0]).get("reason")
+    assert reason and reason != "NoneType", (
+        "the refused row names the absence of a reason, not a class: %r"
+        % (reason,)
+    )
+
+
+def test_a_refused_row_still_names_the_job_and_the_action():
+    """The row names WHO was refused and WHAT was refused."""
+    jq = _reserved_with_gate(_LyingGate())
+    assert jq.retry_allowed("j-1", 3) is None
+    rows = _rejected_rows(jq)
+    assert len(rows) == 1, (
+        "the refusal was not booked in the queue's own trail: %r" % (rows,)
+    )
+    detail = _row_detail(rows[0])
+    assert detail.get("job_id") == "j-1", rows[0]
+    assert detail.get("action") == "send_email", rows[0]
+
+
+def test_the_raising_form_and_the_batch_form_book_the_same_rows():
+    """The two forms must agree about the TRAIL, not only the outcome.
+
+    The trail is the record of what happened.  If the two forms book
+    different rows for the same refusal, then a reader of the trail
+    cannot tell which form a caller used -- and the batch form is the
+    one that sweeps many jobs, so its rows are the ones an operator
+    would read.
+    """
+    jq = _reserved_with_gate(_RefusalRaisingGate())
+    assert jq.retry_allowed("j-1", 3) is None
+    batch_rows = _rejected_rows(jq)
+
+    jq2 = _reserved_with_gate(_RefusalRaisingGate())
+    with pytest.raises(job_queue.JobQueueError):
+        jq2.retry("j-1", 3)
+    raising_rows = _rejected_rows(jq2)
+
+    assert len(batch_rows) == len(raising_rows) == 1, (
+        "the two forms booked different numbers of rows: batch=%r "
+        "raising=%r" % (batch_rows, raising_rows)
+    )
+    assert batch_rows[0].get("kind") == raising_rows[0].get("kind")
+    batch_detail = _row_detail(batch_rows[0])
+    raising_detail = _row_detail(raising_rows[0])
+    assert batch_detail.get("job_id") == raising_detail.get("job_id")
+    assert batch_detail.get("action") == raising_detail.get("action")
+
+
+def test_the_raising_form_books_exactly_ONE_row_for_one_refusal():
+    """One refusal is ONE row.
+
+    The raising form books the refusal inside its own ``except``
+    block, and then the exception continues into the ``except
+    JobQueueError`` handler further out -- which books a SECOND
+    ``job.rejected`` row for the same refusal, with a different shape
+    (no ``action``, no ``refusal_reason``).
+
+    So a reader of the trail saw two rejections for one refused
+    re-dispatch, and the two rows disagreed about what happened: only
+    one of them named the ACTION, and only one of them named the
+    reason.  Which one a reader picked determined what they learned.
+
+    Measured 2026-11-25 on the tree as the chain-close slice left it::
+
+        raising form, one refused job:
+          job.rejected {'reason': 'RefusalRefusedError',
+                        'refusal_reason': 'blocked_by_refusal',
+                        'job_id': 'j1', 'action': 'send_email'}
+          job.rejected {'reason': 'RefusalRefusedError', 'job_id': 'j1'}
+
+    Two rows, one refusal, two different stories.
+    """
+    jq = _reserved_with_gate(_RefusalRaisingGate())
+    with pytest.raises(job_queue.JobQueueError):
+        jq.retry("j-1", 3)
+    rows = _rejected_rows(jq)
+    assert len(rows) == 1, (
+        "one refusal booked %d rows: %r" % (len(rows), rows)
+    )
+    detail = _row_detail(rows[0])
+    assert detail.get("action") == "send_email", (
+        "the surviving row must be the one that names the action: %r"
+        % (detail,)
+    )
+    assert detail.get("refusal_reason") == "blocked_by_refusal", (
+        "the surviving row must be the one that names the reason: %r"
+        % (detail,)
+    )
+
+
+def test_a_plain_queue_error_gate_is_booked_the_same_way_on_both_forms():
+    """A host gate whose vocabulary the queue does not recognise.
+
+    ``_is_refusal`` draws the line between a refusal and a broken gate
+    on the error's VOCABULARY: a ``reason`` attribute whose value is
+    one of the hold's ``blocked_*`` reasons, or the class name
+    ``RefusalRefusedError``.  A host gate that raises the queue's own
+    ``JobQueueError`` -- which is what a host that does not import the
+    wiring has to hand, since ``JobQueueError`` is the base class of
+    this module's taxonomy -- falls OUTSIDE that vocabulary.
+
+    So the queue cannot tell it from a broken gate.  And that is the
+    only consistent answer: **both** forms must treat it the same way.
+    Before the fix they did not -- the raising form booked a rejection
+    (through the generic ``except JobQueueError`` handler) and the
+    batch form booked none (it asks ``_is_refusal``).
+
+    Measured 2026-11-25 on the tree as the chain-close slice left it::
+
+        plain JobQueueError gate   raising rows=1  batch rows=0
+
+    So the trail said the two forms saw different events, for one
+    refusal.
+
+    The rule this pins: the two forms book the SAME rows, whatever
+    vocabulary the host's gate uses.  When the vocabulary is
+    unrecognised, that means **neither** books a row -- because an
+    unrecognised exception is a gate the queue cannot answer, and a
+    gate that cannot answer refuses nothing in particular.
+    """
+    jq = _reserved_with_gate(_PlainQueueErrorGate())
+    with pytest.raises(job_queue.JobQueueError):
+        jq.retry("j-1", 3)
+    raising_rows = _rejected_rows(jq)
+
+    jq2 = _reserved_with_gate(_PlainQueueErrorGate())
+    assert jq2.retry_allowed("j-1", 3) is None
+    batch_rows = _rejected_rows(jq2)
+
+    assert len(raising_rows) == len(batch_rows), (
+        "the two forms booked different rows for one refusal: "
+        "raising=%r batch=%r" % (raising_rows, batch_rows)
+    )
+    assert raising_rows == [], (
+        "a gate whose vocabulary the queue cannot recognise must book "
+        "no row at all: it refuses nothing in particular"
+    )
+
+
+def test_the_dead_path_books_the_same_rows_on_both_forms():
+    """A job that runs out of retry budget is a rejection on BOTH forms.
+
+    The raising form raised ``MaxRetriesExceededError``, and the
+    generic handler booked a ``job.rejected`` row for it.  The batch
+    form returned ``None`` -- "not re-dispatched" -- and booked
+    NOTHING, so the trail said the two forms saw different events for
+    the same job reaching the end of its budget.
+
+    Measured 2026-11-25 on the tree as the chain-close slice left it::
+
+        RAISING dead  rejected rows: [('job.rejected',
+                                        {'reason': 'MaxRetriesExceededError',
+                                         'job_id': 'j-1'})]
+        BATCH   dead  rejected rows: []
+
+    The ``job.dead`` row is booked on both forms, so the trail did
+    name the death -- but the REJECTION was on one form only, and the
+    rejection is what says the job was not re-dispatched.
+    """
+    jq = _dead_job()
+    with pytest.raises(MaxRetriesExceededError):
+        jq.retry("j-1", 5)
+    raising_rows = _rejected_rows(jq)
+
+    jq2 = _dead_job()
+    assert jq2.retry_allowed("j-1", 5) is None
+    batch_rows = _rejected_rows(jq2)
+
+    assert len(raising_rows) == len(batch_rows) == 1, (
+        "the two forms booked different rows for the same dead job: "
+        "raising=%r batch=%r" % (raising_rows, batch_rows)
+    )
+    assert _row_detail(batch_rows[0]).get("reason") == "MaxRetriesExceededError"
+
+
+def _dead_job():
+    """A job that has used up its retry budget."""
+    jq = JobQueue()
+    _enqueue(jq, seq=1, max_retries=2)
+    jq.dequeue("w-1", "default", 2)   # attempt 1
+    jq.retry("j-1", 3)                # 1 < 2: requeued
+    jq.dequeue("w-1", "default", 4)   # attempt 2
+    return jq
+
+
+class _RefusalRaisingGate:
+    """A gate that refuses the way the wiring's own gate refuses.
+
+    It raises the shape ``_is_refusal`` recognises -- the class name
+    ``RefusalRefusedError`` and the ``reason`` attribute -- so the row
+    can name both the class and the hold's reason slug.
+    """
+
+    def __init__(self):
+        self.asked = 0
+
+    def require_queue_allowed(self, job_id, action, *, now=None):
+        self.asked += 1
+        raise RefusalRefusedError(
+            "this action is refused", reason="blocked_by_refusal"
+        )
+
+
+class _PlainQueueErrorGate:
+    """A gate that refuses with the queue's OWN base error.
+
+    A host that does not import the wiring has nothing else to raise:
+    ``JobQueueError`` is the base class of this module's taxonomy, and
+    it is what a host reading this module's docstring would reach for.
+    """
+
+    def __init__(self):
+        self.asked = 0
+
+    def require_queue_allowed(self, job_id, action, *, now=None):
+        self.asked += 1
+        raise job_queue.JobQueueError("this action is refused")
+
+
+# ---------------------------------------------------------------------------
 # 15. main() self-check
 # ---------------------------------------------------------------------------
 

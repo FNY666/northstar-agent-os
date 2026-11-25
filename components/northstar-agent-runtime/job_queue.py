@@ -1604,6 +1604,15 @@ class JobQueue:
         """
         with self._lock:
             self._claim(seq)
+            # Set when the exception that reached the generic handler
+            # below came from the REFUSAL GATE, rather than from the
+            # queue's own validation.  The gate's exception is not a
+            # queue-level rejection: a refusal books its own row (in
+            # the refusal branch, where the reason and the action are
+            # both in hand), and a broken gate books NO row at all --
+            # it refuses nothing in particular.  So the generic
+            # handler must not book a second row for it.
+            _gate_raised = False
             try:
                 job_id = _check_job_id(job_id)
                 delay_seqs = _check_delay(delay_seqs)
@@ -1665,13 +1674,29 @@ class JobQueue:
                             job_id, retry_action, now
                         )
                     except Exception as exc:
+                        # The gate's exception is NOT a queue-level
+                        # rejection, so the generic ``except
+                        # JobQueueError`` handler below must not book
+                        # a row for it.
+                        #
+                        # A REFUSAL is booked here, where the reason
+                        # and the action are both in hand.  A BROKEN
+                        # gate is not booked at all: it refuses nothing
+                        # in particular, so a ``job.rejected`` row
+                        # would put a refusal in the trail that never
+                        # happened.  ``_is_refusal`` draws that line.
+                        #
+                        # The flag is what keeps the two forms
+                        # agreeing.  Without it the raising form
+                        # booked a SECOND row for the same refusal
+                        # (through the generic handler) -- with a
+                        # different shape, so a reader of the trail
+                        # got two different stories about one event --
+                        # and booked a row for a BROKEN gate that
+                        # raised the queue's own base error, which
+                        # the batch form did not.
+                        _gate_raised = True
                         if _is_refusal(exc):
-                            # A REFUSAL is booked in the queue's own
-                            # trail, so the trail names the refused
-                            # re-dispatch.  A BROKEN gate is not: it
-                            # refuses nothing in particular, so a
-                            # ``job.rejected`` row would put a refusal
-                            # in the trail that never happened.
                             self._reject_refusal(
                                 seq, job_id, retry_action, exc
                             )
@@ -1715,13 +1740,25 @@ class JobQueue:
                         )
                     )
                     if batch:
+                        # The batch form books the same row the raising
+                        # form books below, so the two forms leave the
+                        # same trail for the same event.  The raising
+                        # form's row arrives through the generic
+                        # ``except JobQueueError`` handler; the batch
+                        # form returns ``None`` instead of raising, so
+                        # it must book it here or the trail would say
+                        # the two forms saw different things.
+                        self._reject(
+                            seq, MaxRetriesExceededError.__name__, job_id
+                        )
                         return None
                     raise MaxRetriesExceededError(
                         f"max_retries={entry['max_retries']} exceeded "
                         f"for {job_id}"
                     )
             except JobQueueError as exc:
-                self._reject(seq, type(exc).__name__, job_id)
+                if not _gate_raised:
+                    self._reject(seq, type(exc).__name__, job_id)
                 if batch:
                     return None
                 raise
