@@ -686,10 +686,56 @@ class JudgeHygieneCensusPairingTests(unittest.TestCase):
     def test_the_census_script_names_the_module_it_is_censusing(self):
         """The pairing must be derived from the module's own basename."""
         self.assertIn("MODBASE=$(basename", self.text)
-        self.assertIn("test_${MODBASE}.py", self.text)
+        # The pairing used to be a literal `test_${MODBASE}.py` lookup in
+        # this script.  It is now RESOLVED by scripts/census-scope.py,
+        # which finds every suite that genuinely imports the module -- a
+        # module's real coverage is the UNION of its suites, and the
+        # single-suite pairing understated it.  Measured 2026-11-25 on
+        # `job_queue.py`: the own-suite-only scope reports 42 survivors,
+        # the union reports 9.  So the guard is that the SCOPE is
+        # resolved, not that a particular string is present.
+        self.assertIn("SCOPE_RESOLVER", self.text,
+                      "the census does not resolve the module's test scope")
+        self.assertIn("census-scope.py", self.text,
+                      "the census does not name the scope resolver")
+
+    def test_the_census_scope_is_the_union_of_the_referencing_suites(self):
+        """The scope must be the UNION, not the module's own suite alone.
+
+        This is a BEHAVIOUR check, and it replaces a string check that
+        could not fail: the old guard asserted that the script contained
+        the literal ``tests/test_${MODBASE}.py"``, which says nothing
+        about whether the pairing is correct -- a comment containing
+        that string satisfies it, and a correct implementation that
+        spells it differently fails it.
+
+        The behaviour that matters: for a module exercised by several
+        suites, the scope the census uses is all of them.
+        """
+        resolver = REPO_ROOT / "scripts" / "census-scope.py"
+        if not resolver.exists():
+            self.skipTest(f"scope resolver missing: {resolver}")
+        runtime = REPO_ROOT / "components" / "northstar-agent-runtime"
+        spec = importlib.util.spec_from_file_location(
+            "census_scope_judge_hygiene", resolver
+        )
+        if spec is None or spec.loader is None:
+            self.skipTest(f"cannot load {resolver}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        suites = module.referencing_suites(runtime, "job_queue")
+        self.assertIn("test_job_queue", suites,
+                      "the module's own suite is not in its scope")
+        self.assertIn("test_refusal_hold_queue_wiring", suites,
+                      "a suite that exercises job_queue is missing from its "
+                      "scope, so the census understates its coverage and "
+                      "reports false survivors")
+        # the census script must pass the resolved scope to the probe
+        self.assertIn('--test-module "$TMOD"', self.text,
+                      "the census does not pass the resolved scope to the probe")
 
     def test_the_census_prefers_the_modules_own_test_file(self):
-        """A file that merely MENTIONS the module must not win the race.
+        """The module's own suite must come FIRST in the scope.
 
         The first-mention rule loses to a test file that imports one
         constant from the module.  Measured 2026-11-22, 144 of the
@@ -702,19 +748,58 @@ class JudgeHygieneCensusPairingTests(unittest.TestCase):
         The lower number is a false accusation of a weak test suite --
         the mirror image of the stale-bytecode false kill, in which a
         mutant looked SURVIVING when the tests had actually caught it.
+
+        The order is what makes the scope comparable between runs, so
+        this is checked by RESOLVING the scope, not by reading the
+        script's text.
+
+        And it is checked on a SYNTHETIC tree, where the own suite does
+        NOT sort first.  On the real tree ``test_job_queue`` happens to
+        sort ahead of its siblings, so a resolver that never reordered
+        at all would pass -- a guard that cannot fail proves nothing.
+        The synthetic tree puts a sibling ahead of the own suite
+        alphabetically, so the reordering is load-bearing.
         """
-        own = 'tests/test_${MODBASE}.py"'
-        self.assertIn(own, self.text,
-                      "the census does not look for the module's own test file")
-        # The own-file lookup must come BEFORE the first-mention scan.
-        own_at = self.text.find(own)
-        scan_at = self.text.find("for cand in")
-        self.assertNotEqual(own_at, -1, "no own-test-file lookup in the census")
-        self.assertNotEqual(scan_at, -1, "no first-mention scan in the census")
-        self.assertLess(
-            own_at, scan_at,
-            "the module's own test file must be tried BEFORE the "
-            "first-mention scan, or the scan still wins the race",
+        resolver = REPO_ROOT / "scripts" / "census-scope.py"
+        if not resolver.exists():
+            self.skipTest(f"scope resolver missing: {resolver}")
+        runtime = REPO_ROOT / "components" / "northstar-agent-runtime"
+        spec = importlib.util.spec_from_file_location(
+            "census_scope_judge_hygiene_own", resolver
+        )
+        if spec is None or spec.loader is None:
+            self.skipTest(f"cannot load {resolver}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        with tempfile.TemporaryDirectory(prefix="b173-scope-own-") as tmp:
+            root = Path(tmp)
+            (root / "tests").mkdir()
+            # `test_aaa` sorts BEFORE `test_thing`, so a resolver that
+            # did not hoist the own suite would put it second.
+            (root / "tests" / "test_aaa.py").write_text(
+                "import thing\n", encoding="utf-8"
+            )
+            (root / "tests" / "test_thing.py").write_text(
+                "import thing\n", encoding="utf-8"
+            )
+            synthetic = module.referencing_suites(root, "thing")
+        self.assertEqual(
+            synthetic, ["test_thing", "test_aaa"],
+            "the module's own suite must come FIRST in the scope, even "
+            "when a sibling sorts ahead of it alphabetically",
+        )
+
+        suites = module.referencing_suites(runtime, "job_queue")
+        self.assertTrue(suites, "job_queue resolved to no suite at all")
+        self.assertEqual(
+            suites[0], "test_job_queue",
+            "the module's own suite must come FIRST in the scope",
+        )
+        self.assertEqual(
+            suites[1:], sorted(suites[1:]),
+            "the remaining suites must be in a stable order, so a census "
+            "log is comparable between runs",
         )
 
     def test_the_census_script_restores_the_module_after_each_census(self):

@@ -34,6 +34,7 @@ House style: stdlib only, no wall-clock reads, caller-supplied time.
 
 from __future__ import annotations
 
+import tempfile
 import threading
 import time
 import unittest
@@ -4702,3 +4703,258 @@ class TheBatchFormNamesWhatItBookedTests(unittest.TestCase):
             len(self._rejected(batch)),
             "the two forms booked a different number of refusal rows",
         )
+
+
+class TheDequeueSkipLoopIsEquivalentTests(unittest.TestCase):
+    """``or@1405`` is an EQUIVALENT mutant -- and saying so is the finding.
+
+    THE SITE
+    --------
+    ``job_queue.py``'s ``dequeue()`` walks the eligible candidates and
+    hands out the first one the refusal gate ALLOWS.  A refused
+    candidate is skipped, not fatal.  When every candidate is refused,
+    the call raises the gate's own refusal error and nothing is handed
+    out::
+
+        job_id = None
+        entry = None
+        for candidate in eligible:
+            ...
+            job_id = candidate
+            entry = candidate_entry
+            break
+        if job_id is None or entry is None:      # <-- or@1405
+            raise first_refusal
+
+    The mutation probe reports ``or`` -> ``and`` as SURVIVED.
+
+    WHY IT IS EQUIVALENT
+    --------------------
+    The two operands are **always equal**, so ``a or b`` and ``a and b``
+    cannot disagree:
+
+    * ``job_id`` and ``entry`` are assigned only in two places, and
+      always TOGETHER -- ``(None, None)`` before the loop, and
+      ``(candidate, candidate_entry)`` after it.  There is no path that
+      sets one without the other.
+    * ``candidate_entry`` is ``self._entries[candidate]``, and
+      ``candidate`` comes from ``_ordered_ready()``, which builds its
+      list from ``self._entries.items()``.  So ``candidate_entry`` is
+      never ``None``.
+
+    So the test is ``job_id is None`` iff ``entry is None``, and the
+    ``or`` and the ``and`` select the same branch on every input.
+
+    THE NON-VACUITY CONTROL
+    -----------------------
+    A proof that cannot fail proves nothing.  So the harness is run a
+    second time against a mutation that IS observable: breaking the
+    pairing invariant by assigning ``entry = None`` alone.  With the
+    invariant broken the mutant must be DETECTED -- otherwise the
+    harness is blind and the equivalence result is worthless.
+
+    The comparison is SYMMETRIC: the harness loads the module twice, as
+    it is on disk and with the mutation applied, and compares the two.
+    So the result holds whichever form is on disk -- including when the
+    mutation probe has already applied the fault -- and a spurious
+    "the mutation site moved" failure cannot be mistaken for a
+    behavioural difference.
+
+    (The repository's own convention for this is
+    ``test_cancellation_gate.py``'s ``or@504`` case.)
+    """
+
+    #: The site, in both forms.  The probe plants the ``and`` form.
+    SKIP_GUARD_OR = "if job_id is None or entry is None:"
+    SKIP_GUARD_AND = "if job_id is None and entry is None:"
+
+    #: The CONTROL mutation: the pairing invariant broken.  ``entry`` is
+    #: set to ``None`` while ``job_id`` holds the candidate, so the two
+    #: operands DISAGREE and the ``or``/``and`` forms must select
+    #: different branches.  This one IS observable, so the harness has to
+    #: notice it.
+    PAIRING_BROKEN = (
+        "                job_id = candidate\n                entry = candidate_entry",
+        "                job_id = candidate\n                entry = None",
+    )
+
+    def _exec_pair(self, original_source, mutant_source):
+        """Load the module twice: as it is, and with the mutation applied."""
+        import sys
+        import types
+
+        source = Path(__file__).resolve().parents[1] / "job_queue.py"
+        modules = []
+        for index, text in enumerate((original_source, mutant_source)):
+            name = f"job_queue_equiv_{index}"
+            module = types.ModuleType(name)
+            module.__file__ = str(source)
+            # A dataclass decorator resolves its own module through
+            # `sys.modules`, so the module has to be REGISTERED before
+            # its body runs -- otherwise the decorator reads
+            # `sys.modules.get(cls.__module__)` and finds nothing.
+            sys.modules[name] = module
+            exec(compile(text, str(source), "exec"), module.__dict__)
+            modules.append(module)
+        return modules
+
+    def _load_original_and_mutant(self, mutation):
+        source = Path(__file__).resolve().parents[1] / "job_queue.py"
+        original_source = source.read_text(encoding="utf-8")
+        self.assertIn(mutation[0], original_source, "the mutation site moved")
+        mutant_source = original_source.replace(mutation[0], mutation[1], 1)
+        self.assertNotEqual(mutant_source, original_source)
+        return self._exec_pair(original_source, mutant_source)
+
+    def _load_forms(self):
+        """The module in its two spellings, whichever is on disk."""
+        source = Path(__file__).resolve().parents[1] / "job_queue.py"
+        on_disk = source.read_text(encoding="utf-8")
+        if self.SKIP_GUARD_OR in on_disk:
+            form_a, form_b = self.SKIP_GUARD_OR, self.SKIP_GUARD_AND
+        else:
+            self.assertIn(self.SKIP_GUARD_AND, on_disk, "the skip guard moved")
+            form_a, form_b = self.SKIP_GUARD_AND, self.SKIP_GUARD_OR
+        return self._exec_pair(on_disk, on_disk.replace(form_a, form_b, 1))
+
+    def _corpus(self):
+        """The situations that reach the skip guard, and what they leave.
+
+        Each case is a queue state plus the gate's answer, and each
+        produces an OUTCOME: the job handed out, the exception raised,
+        or ``None`` for "nothing eligible".
+        """
+        class _Allow:
+            def queue_allowed(self, job_id, action, *, now=None):
+                return True
+
+            def require_queue_allowed(self, job_id, action, *, now=None):
+                return None
+
+        class _Deny:
+            def __init__(self, denied):
+                self.denied = set(denied)
+
+            def queue_allowed(self, job_id, action, *, now=None):
+                return job_id not in self.denied
+
+            def require_queue_allowed(self, job_id, action, *, now=None):
+                if job_id in self.denied:
+                    raise RefusalRefusedError("refused")
+
+        class _Broken:
+            def queue_allowed(self, job_id, action, *, now=None):
+                raise RuntimeError("the gate cannot answer")
+
+            def require_queue_allowed(self, job_id, action, *, now=None):
+                raise RuntimeError("the gate cannot answer")
+
+        cases = [
+            ("empty queue", [], _Allow()),
+            ("one allowed", ["job-1"], _Allow()),
+            ("two allowed", ["job-1", "job-2"], _Allow()),
+            ("one denied", ["job-1"], _Deny({"job-1"})),
+            ("one allowed one denied", ["job-1", "job-2"], _Deny({"job-1"})),
+            ("all denied", ["job-1", "job-2"], _Deny({"job-1", "job-2"})),
+            ("broken gate", ["job-1"], _Broken()),
+        ]
+        return cases
+
+    def _run_case(self, module, job_ids, gate):
+        """What one module does with one case."""
+        queue = module.JobQueue()
+        for index, job_id in enumerate(job_ids):
+            queue.enqueue(job_id, "q", "dispatch", DIGEST, index + 1)
+        queue.set_refusal_gate(gate)
+        try:
+            got = queue.dequeue("worker-1", "q", len(job_ids) + 10)
+        except Exception as exc:  # the refusal is the outcome
+            return ("raised", type(exc).__name__)
+        if got is None:
+            return ("none",)
+        return ("handed-out", got.job_id)
+
+    def _outcomes(self, original, mutant, cases):
+        original_outcomes = []
+        mutant_outcomes = []
+        for _name, job_ids, gate in cases:
+            original_outcomes.append(self._run_case(original, job_ids, gate))
+            mutant_outcomes.append(self._run_case(mutant, job_ids, gate))
+        return original_outcomes, mutant_outcomes
+
+    def test_or_at_1405_the_skip_guard_mutant_is_equivalent(self):
+        """``or@1405``: the differential proof.
+
+        The two spellings of the skip guard are loaded as two modules and
+        run over the same corpus of crafted queue states.  Every input
+        must produce the same outcome: the same job handed out, the same
+        exception, or ``None``.
+        """
+        original, mutant = self._load_forms()
+        cases = self._corpus()
+        original_outcomes, mutant_outcomes = self._outcomes(original, mutant, cases)
+        self.assertEqual(
+            original_outcomes,
+            mutant_outcomes,
+            "the skip-guard mutant changed the outcome for some queue state",
+        )
+
+    def test_or_at_1405_the_harness_notices_a_mutation_that_IS_observable(self):
+        """The NON-VACUITY CONTROL.
+
+        The pairing invariant is broken -- ``entry`` is set to ``None``
+        while ``job_id`` holds the candidate -- so the two operands of
+        the guard DISAGREE and the ``or``/``and`` forms must select
+        different branches.  If the harness does not notice this, it is
+        blind, and the equivalence result above would be worthless.
+        """
+        original, mutant = self._load_original_and_mutant(self.PAIRING_BROKEN)
+        cases = self._corpus()
+        original_outcomes, mutant_outcomes = self._outcomes(original, mutant, cases)
+        self.assertNotEqual(
+            original_outcomes,
+            mutant_outcomes,
+            "the harness did not notice a mutation that IS observable, so "
+            "it cannot certify an equivalence",
+        )
+
+    def test_or_at_1405_the_operands_really_do_agree(self):
+        """The premise, checked directly: the two operands are EQUAL.
+
+        The equivalence rests on ``job_id is None`` iff ``entry is None``.
+        So the two are recorded at the guard, over the same corpus, and
+        must agree every time.  If they ever disagreed, the premise
+        would be false and the equivalence would not hold.
+        """
+        import re
+
+        source = Path(__file__).resolve().parents[1] / "job_queue.py"
+        original_source = source.read_text(encoding="utf-8")
+        instrumented = original_source.replace(
+            "            if job_id is None or entry is None:",
+            "            with open(_OPERAND_LOG, 'a') as _f:\n"
+            "                _f.write('%s %s\\n' % (job_id is None, entry is None))\n"
+            "            if job_id is None or entry is None:",
+            1,
+        )
+        self.assertNotEqual(instrumented, original_source)
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "operands.log"
+            module = self._exec_pair(instrumented, instrumented)[0]
+            original, mutant = self._load_forms()
+            for _name, job_ids, gate in self._corpus():
+                for target in (module, original, mutant):
+                    target.__dict__["_OPERAND_LOG"] = str(log)
+                    try:
+                        self._run_case(target, job_ids, gate)
+                    except Exception:
+                        pass
+            self.assertTrue(log.exists(), "the instrumented module never ran")
+            pairs = [line.split() for line in log.read_text().splitlines()]
+            self.assertTrue(pairs, "the instrumented module recorded nothing")
+            for left, right in pairs:
+                self.assertEqual(
+                    left, right,
+                    "the guard's two operands disagreed, so the 'or' and the "
+                    "'and' forms are NOT equivalent",
+                )

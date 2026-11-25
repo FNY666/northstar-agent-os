@@ -1192,6 +1192,7 @@ the planted fault.
 | `jido-statebudget` | `gt@304` | a deliberately wrong expression -- the original with the bound one step further |
 | `openhands-stuck-detector` | `gt@681` | the source-index line with a ONE-element message key |
 | `refusal-hold-wiring` | `gt@640` | the differential harness planted with a mutation that IS observable -- the delete removes one event too many at the boundary |
+| `refusal-hold-chain-close` | `or@1405` | the same differential harness pointed at the dequeue skip loop's PAIRING INVARIANT -- `entry` set to `None` while `job_id` holds the candidate, so the guard's two operands DISAGREE and the two forms must select different branches |
 | `orphan-adoption` / `scope-verbatim-compaction` | `lt@390` | the end-marker guard moved to a bound that never fires |
 | `scorer-disagreement` | `gt@533` | the threshold comparison widened instead of the scorer-count one |
 | `step-reliability-budget` | `lt@152` | the final formula of `max_steps` shifted by one |
@@ -1199,11 +1200,40 @@ the planted fault.
 | `merged-tree-review` | `eq@494` | the same harness, over the class-membership half the equivalence rests on |
 | `c58` / `slice3` | `lt@547`, `lt@552`, `lt@557`, `lt@620`, `lt@686`, `lt@690`, `lt@709`, `lt@756`, `lt@773` | the same differential harness pointed at the bound turned the OTHER way (`< 0` -> `> 0`) -- a delimiter found at index 1 exists, so the two copies MUST differ there |
 
-**The table has 17 rows for 26 sites.**  `diviner` /
+**The table has 18 rows for 27 sites.**  `diviner` /
 `scope-verb-canonical` carries TWO sites (`lt@667` and `gt@669`) in one
 row, and `c58` / `slice3` carries NINE (`lt@547`, `lt@552`, `lt@557`,
 `lt@620`, `lt@686`, `lt@690`, `lt@709`, `lt@756`, `lt@773`) in one row,
-so the row count and the site count differ by eight.
+so the row count and the site count differ by nine.
+
+**AMENDED 2026-11-25 -- the table grew a row for `job_queue.py`'s
+dequeue skip loop.**  The census at the four-suite union scope reports
+`or@1405` (`if job_id is None or entry is None:`) as SURVIVED.  It is
+an **equivalent mutant**, and no guard can kill it: the two operands
+are always equal, because `job_id` and `entry` are assigned only
+together -- `(None, None)` before the candidate loop and `(candidate,
+candidate_entry)` after it -- and `candidate_entry` is
+`self._entries[candidate]` for a candidate `_ordered_ready()` drew from
+`self._entries.items()`, so it is never `None`.
+
+The **control** is the harness pointed at the pairing INVARIANT: the
+pairing broken (`entry = None` while `job_id` holds the candidate), so
+the two operands DISAGREE and the two forms must select different
+branches.  The harness must notice that, and it does -- which is what
+licenses the "no difference" conclusion at the planted fault.  The
+comparison is symmetric, so the result holds whichever form is on disk,
+including when the mutation probe has already applied the fault.
+
+Guards: `TheDequeueSkipLoopIsEquivalentTests` in
+`components/northstar-agent-runtime/tests/test_refusal_hold_queue_wiring.py`.
+The full write-up is `docs/design/refusal-hold-wiring.md` §22.8.
+
+**A NOTE ON THE SCOPE OF THIS TABLE.**  This table covers the **slice**
+census's scope.  A module census at a wider scope reports sites no slice
+ever touched, and a diff between the two scopes is not a finding --
+it is a reach difference.  `job_queue.py`'s `or@1405` is one of the
+sites that only the module census reaches; it is in this table because
+it HAS a proof, not because the slice census named it.
 
 **AMENDED 2026-11-22 (i) -- the census grew a ninth distinct site
 family, and the table grew a row for it.**  The census above reports

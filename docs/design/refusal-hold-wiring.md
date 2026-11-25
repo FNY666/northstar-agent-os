@@ -3176,6 +3176,119 @@ false is never checked.
 That is a separate category (the self-check's own assertions are
 untested), and it is recorded here rather than folded in.
 
+**AMENDED 2026-11-25 -- `or@1405` (the dequeue skip loop) is EQUIVALENT.**
+The nine are not all the same kind, and saying so is the finding rather
+than a fix.  The skip loop's guard is
+
+```python
+job_id = None
+entry = None
+for candidate in eligible:
+    ...
+    job_id = candidate
+    entry = candidate_entry
+    break
+if job_id is None or entry is None:      # or@1405
+    raise first_refusal
+```
+
+and its two operands are **always equal**:
+
+* `job_id` and `entry` are assigned in exactly two places, and always
+  **together** -- `(None, None)` before the loop, `(candidate,
+  candidate_entry)` after it.  There is no path that sets one without
+  the other.
+* `candidate_entry` is `self._entries[candidate]`, and `candidate`
+  comes from `_ordered_ready()`, which builds its list from
+  `self._entries.items()` -- so `candidate_entry` is never `None`.
+
+So `job_id is None` iff `entry is None`, and `a or b` and `a and b`
+select the same branch on every input.  **No guard can kill it.**
+
+Proved, not asserted, and with a **non-vacuity control**:
+
+* the differential harness loads the module twice -- as it is on disk and
+  with the mutation applied -- and compares the outcomes over a corpus of
+  crafted queue states (empty, one allowed, one denied, one allowed and
+  one denied, all denied, broken gate).  Every outcome is identical.
+* the **control** breaks the pairing invariant (`entry = None` while
+  `job_id` holds the candidate), so the two operands DISAGREE and the
+  `or`/`and` forms must select different branches.  The harness must
+  notice it, and it does -- so the harness is not blind, and the
+  equivalence result is worth something.
+* the **premise** is checked directly: the two operands are recorded at
+  the guard over the same corpus, and they agree every time.
+
+The comparison is symmetric, so the result holds whichever form is on
+disk -- including when the mutation probe has already applied the fault.
+
+Guards: `TheDequeueSkipLoopIsEquivalentTests` in
+`components/northstar-agent-runtime/tests/test_refusal_hold_queue_wiring.py`.
+
+So the nine survivors are now: **one equivalent mutant** (`or@1405`) and
+**eight self-check assertion chains** (`and@1860`, `and@1864`,
+`and@1865`, `and@1870`, `and@1875`, `and@1880`, `and@1897`,
+`and@1904`).  The eight are a separate, still-open category.
+
+### 22.9 The scope was a CLAIM until the census script agreed with it
+
+§22.1 prescribed the four-suite scope in prose.  But
+`scripts/b173-census-all.sh` -- the script that actually runs the census
+-- paired each module with **one** test file: the module's own, or the
+first suite whose text mentioned the module's name.  So the scope the
+docs described and the scope the census ran were **different scopes**, and
+the census log never said which one it used.
+
+Measured 2026-11-25 on `job_queue.py`, same tree, same probe, same
+tries:
+
+| scope | result | survivors |
+|---|---|---|
+| `test_job_queue` alone | **killed 43/85** | **42** |
+| the four-suite union | **killed 76/85** | **9** |
+
+**Thirty-three of the narrow scope's 42 "survivors" were caught by the
+sibling suites.**  Every one of them was a false accusation of a weak
+test suite -- the same shape as the stale-bytecode false kill, only
+pointed the other way.
+
+The nine that remain at the union scope are §22.8's nine, reproduced
+exactly: `or@1405` (the dequeue skip loop) and the eight `and`s in the
+`main()` self-check's assertion chains.
+
+Two things this exposed, and both are now fixed:
+
+* **The scope is now RESOLVED, not typed.** `scripts/census-scope.py`
+  finds every suite that genuinely **imports** the module, read from the
+  AST.  A grep cannot do this: `test_graph_database.py` and
+  `test_status_page.py` both *mention* `job_queue.py` -- they quote its
+  rules in a comment -- and neither imports it or exercises it.  A
+  grep-based scope would have counted two suites that never touch the
+  module.  The module's own suite comes first, so a census log is
+  comparable between runs.
+* **A scope must be STATED with its measurement.** A survivor count is
+  meaningless without the scope it was taken at: 42 and 9 are both true
+  of the same tree, and quoting either alone is a claim, not a
+  measurement.  §22.1 already says this about the two-suite and
+  four-suite series; it now says it about the census script too.
+
+**The defect is not confined to `job_queue.py`.**  Measured 2026-11-25
+over the runtime's **1620** top-level modules, **123** of them are
+referenced by MORE THAN ONE test suite -- so the old single-suite
+pairing understated the scope for **7.6%** of the runtime.  `agents.py`
+alone is exercised by **eleven** suites (`test_agents`,
+`test_context_budget_subagent`, `test_hooks`, `test_plugin_install`,
+`test_plugin_metadata_bytes`, `test_run_setup`, `test_scaffold`,
+`test_session_lease`, `test_streaming`, `test_tracing`,
+`test_workspace_ext`).  A census that paired `agents.py` with
+`test_agents` alone reports survivors that eleven suites would have
+caught.
+
+`tests/test_census_scope.py` pins the resolver's definition -- both
+import shapes, prose-mention-is-not-a-reference, own-suite-first,
+determinism, and the empty scope (which must SKIP rather than fall back
+to an arbitrary suite).
+
 ## 23. AMENDED 2026-11-24 — the census found four unreached branches in the chain's own modules
 
 ### 23.1 The measurement
