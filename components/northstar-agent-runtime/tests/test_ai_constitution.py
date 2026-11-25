@@ -63,7 +63,11 @@ def test_stdlib_only_ast():
         if isinstance(node, ast.Import):
             for alias in node.names:
                 root = alias.name.split(".")[0]
-                assert root in allowed, f"non-stdlib import: {alias.name}"
+                # canonical_json is the one blessed sibling-convention
+                # fallback (the same shape `status_page.py` and
+                # `graph_database.py` use).
+                assert root in allowed or root == "canonical_json", \
+                    f"non-stdlib import: {alias.name}"
         elif isinstance(node, ast.ImportFrom):
             assert node.module is not None
             root = node.module.split(".")[0]
@@ -367,3 +371,214 @@ def test_main_subprocess():
     )
     assert proc.returncode == 0, proc.stderr
     assert "ai-constitution OK" in proc.stdout
+
+
+# ---------------------------------------------------------------------------
+# 16. The digest-pin defects (B173 slice, measured 2026-11-25)
+#
+# `ai_constitution.py` carried four defects of the same family that
+# `graph_database.py`, `status_page.py` and `zero_knowledge.py` carried
+# before their slices (commits 66e6ccd4, 9f01f1ef and the
+# zero-knowledge slice).  Measured on the tree as it stood:
+#
+# 1. `AIConstitution.declare(constitution_id="\ud800", ...)` raised
+#    `canonical_json.JcsError` -- a ValueError, but NOT an
+#    `AIConstitutionError` -- so the module's own guards did not catch
+#    it and the caller's taxonomy was bypassed.
+# 2. The stdlib fallback ACCEPTED a lone surrogate and emitted non-JCS
+#    bytes: b'{"domain":"northstar.ai-constitution.v1","parts":["\\ud800"]}'.
+# 3. `canonical_json` serializes an integer outside the safe range as
+#    an IEEE-754 double (RFC 8785 Appendix B note (2)), so 2**53 and
+#    2**53+1 canonicalize to the SAME bytes.  The seq rides in the
+#    declaration pin, so a record whose seq was bumped from 2**53 to
+#    2**53+1 still verified True.
+# 4. A failed pin booked NO `rejected` row: `declare()`'s `_pin(...)`
+#    call sat outside the `try` that burns the seq.
+#
+# NOTE the per-method shape: `ai_constitution_audit_event` carries NO
+# digest pin at all, so the seq's fail-open shows up on the RECORD
+# pin, not on the audit row.
+
+
+SURROGATE = "\ud800"
+
+
+def test_a_refusal_raises_the_modules_own_error_type():
+    """The module's own taxonomy, not the sibling helper's.
+
+    `JcsError` is a `ValueError`, so a caller guarding on
+    `except ValueError` would treat a refused mutation as a parse
+    error.  The module's error must be what escapes.
+    """
+    ac = new()
+    with pytest.raises(acm.AIConstitutionError):
+        ac.declare(SURROGATE, 1, principle_digest=GOOD_DIGEST)
+
+
+def test_a_failed_mutation_still_consumes_its_seq():
+    """A failed pin at a valid seq burns the seq and books a row.
+
+    This is the second refusal convention (`docs/design/
+    refusal-hold-wiring.md` §21.3): a malformed ARGUMENT at a valid
+    seq consumes the seq and books a `rejected` row.  Without this, the
+    trail cannot tell "the ledger refused this constitution" from "the
+    ledger never saw it".
+    """
+    ac = new()
+    with pytest.raises(acm.AIConstitutionError):
+        ac.declare(SURROGATE, 1, principle_digest=GOOD_DIGEST)
+    kinds = [e["kind"] for e in ac.audit_log()]
+    assert acm.KIND_REJECTED in kinds
+    # the seq was consumed: the next claim must be strictly greater
+    with pytest.raises(SeqOrderError):
+        ac.declare("cai-1", 1, principle_digest=GOOD_DIGEST)
+    ac.declare("cai-1", 2, principle_digest=GOOD_DIGEST)
+    assert len(ac.declarations_for("cai-1", 3)) == 1
+
+
+def test_the_shipped_path_and_the_fallback_agree_about_legality():
+    """Both configurations must refuse a lone surrogate.
+
+    They need not agree about the resulting digest bytes -- the
+    fallback's tagged form is deliberately its own string -- but a
+    value one refuses must be refused by both.  RFC 8785 §3.2.2.3
+    requires a compliant implementation to terminate with an error.
+    """
+    saved = acm._cj
+    try:
+        assert acm._cj is not None, "the shipped path is not installed"
+
+        acm._cj = saved
+        with pytest.raises(acm.AIConstitutionError):
+            acm._canonical([SURROGATE])
+
+        acm._cj = None
+        with pytest.raises(acm.AIConstitutionError):
+            acm._canonical([SURROGATE])
+    finally:
+        acm._cj = saved
+
+
+def test_both_configurations_accept_a_value_both_can_canonicalize():
+    """The control: the fallback must not refuse everything.
+
+    Without this, a fallback that refused every input would satisfy
+    the test above vacuously.
+    """
+    saved = acm._cj
+    try:
+        for cfg in (saved, None):
+            acm._cj = cfg
+            assert acm._canonical(["ordinary", 7, ["a"]])
+    finally:
+        acm._cj = saved
+
+
+def test_a_seq_above_the_safe_range_is_refused():
+    """A seq that cannot be pinned must not be accepted.
+
+    Without this bound, 2**53 and 2**53+1 canonicalize to the same
+    bytes, so the digest stops pinning the seq.
+    """
+    ac = new()
+    with pytest.raises(acm.AIConstitutionError):
+        ac.declare("cai-1", 2 ** 53, principle_digest=GOOD_DIGEST)
+
+
+def test_an_oversized_seq_is_refused_as_a_malformed_seq():
+    """The refusal's SHAPE, not just its type.
+
+    A malformed SEQ consumes nothing and books nothing -- the call
+    never reached the ledger.  A failed PIN at a valid seq consumes the
+    seq and books a row.  Both raise `AIConstitutionError`, so only the
+    shape distinguishes them.
+    """
+    ac = new()
+    with pytest.raises(acm.AIConstitutionError):
+        ac.declare("cai-1", 2 ** 53, principle_digest=GOOD_DIGEST)
+    # nothing booked
+    assert ac.audit_log() == ()
+    # nothing consumed: seq 1 is still claimable
+    ac.declare("cai-1", 1, principle_digest=GOOD_DIGEST)
+    assert len(ac.declarations_for("cai-1", 2)) == 1
+
+
+def test_a_tampered_seq_above_the_safe_range_cannot_verify():
+    """The control: the digest must pin the seq.
+
+    This is the property the bound protects.  The seq rides in the
+    declaration pin, so a record whose seq was bumped must not still
+    verify -- and the pin cannot even be MINTED over an out-of-range
+    seq, because `_refuse_unsafe_int` refuses the payload.
+    """
+    digest = acm._pin(
+        "declaration", "dec-1", "cai-1", acm.ARTICLE_PUBLIC_SAFETY,
+        acm.STANDING_ADOPTED, GOOD_DIGEST, 2 ** 53 - 1,
+    )
+    tampered = acm.DeclarationRecord(
+        declaration_id="dec-1",
+        constitution_id="cai-1",
+        article_kind=acm.ARTICLE_PUBLIC_SAFETY,
+        standing=acm.STANDING_ADOPTED,
+        principle_digest=GOOD_DIGEST,
+        seq=2 ** 53 + 1,
+        digest=digest,
+    )
+    assert tampered.verify(
+        "dec-1", "cai-1", acm.ARTICLE_PUBLIC_SAFETY,
+        acm.STANDING_ADOPTED, GOOD_DIGEST,
+    ) is False
+    # and the pin cannot be minted over an out-of-range seq at all
+    with pytest.raises(acm.AIConstitutionError):
+        acm._pin(
+            "declaration", "dec-1", "cai-1", acm.ARTICLE_PUBLIC_SAFETY,
+            acm.STANDING_ADOPTED, GOOD_DIGEST, 2 ** 53,
+        )
+
+
+def test_the_safe_range_boundary_is_accepted():
+    """The control: the bound must not over-refuse.
+
+    2**53 - 1 is the last integer JCS pins exactly.
+    """
+    ac = new()
+    ac.declare("cai-1", 2 ** 53 - 1, principle_digest=GOOD_DIGEST)
+    assert len(ac.declarations_for("cai-1", 2 ** 53 - 1)) == 1
+
+
+def test_a_pin_refuses_an_integer_outside_the_safe_range():
+    """A payload integer that cannot be pinned must be refused.
+
+    The shipped path loses the distinction between 2**53 and
+    2**53+1, so a pin over such a payload stops pinning it.
+    """
+    with pytest.raises(acm.AIConstitutionError):
+        acm._canonical([2 ** 53])
+    with pytest.raises(acm.AIConstitutionError):
+        acm._canonical([2 ** 53 + 1])
+
+
+def test_a_pin_still_accepts_the_last_safe_integer():
+    """The control: the pin refusal must not over-reach."""
+    assert acm._canonical([2 ** 53 - 1])
+
+
+def test_verify_answers_false_for_a_record_it_cannot_canonicalize():
+    """`verify()` answers a question; a question is not an exception.
+
+    The record's digest cannot be recomputed over a lone surrogate, so
+    the answer is "not intact" -- `False`.  It must not raise.
+    """
+    rec = acm.DeclarationRecord(
+        declaration_id="dec-1",
+        constitution_id=SURROGATE,
+        article_kind=acm.ARTICLE_PUBLIC_SAFETY,
+        standing=acm.STANDING_ADOPTED,
+        principle_digest=GOOD_DIGEST,
+        seq=1,
+        digest="sha256:" + "0" * 64,
+    )
+    assert rec.verify(
+        "dec-1", SURROGATE, acm.ARTICLE_PUBLIC_SAFETY,
+        acm.STANDING_ADOPTED, GOOD_DIGEST,
+    ) is False

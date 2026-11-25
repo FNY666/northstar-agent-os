@@ -85,16 +85,9 @@ from dataclasses import dataclass
 from typing import Dict, Tuple
 
 try:  # the single canonicalizer
-    from canonical_json import jcs_canonical_json, jcs_sha256_hex
+    import canonical_json as _cj  # type: ignore
 except Exception:  # pragma: no cover - module must stay importable standalone
-    import json as _json
-
-    def jcs_canonical_json(obj: object) -> bytes:  # type: ignore[no-redef]
-        return _json.dumps(obj, sort_keys=True, separators=(",", ":"),
-                           ensure_ascii=True).encode("utf-8")
-
-    def jcs_sha256_hex(obj: object) -> str:  # type: ignore[no-redef]
-        return hashlib.sha256(jcs_canonical_json(obj)).hexdigest()
+    _cj = None  # type: ignore
 
 
 #: Version pin for this module's record shape.
@@ -244,6 +237,13 @@ def _check_seq(value: object, name: str = "seq") -> int:
         raise SeqOrderError(f"{name} must be int, got {type(value).__name__}")
     if value < 0:
         raise SeqOrderError(f"{name} must be >= 0, got {value}")
+    if value > _MAX_INT:
+        # A seq above the safe range cannot be pinned: JCS serializes it
+        # as an IEEE-754 double, so 2**53 and 2**53+1 canonicalize to
+        # the same bytes and the declaration pin stops pinning the seq.
+        # Refuse it at the door -- a malformed SEQ consumes nothing and
+        # books nothing.
+        raise SeqOrderError(f"{name} exceeds the safe range (max {_MAX_INT})")
     return value
 
 
@@ -273,12 +273,117 @@ def _check_digest(value: object, label: str, allow_empty: bool = False) -> str:
     return value
 
 
+#: Largest integer JCS pins exactly (RFC 8785 Appendix B note (1)):
+#: (-(2**53)+1) .. ((2**53)-1).  The house bound -- `job_queue.py`,
+#: `graph_database.py`, `status_page.py`, `zero_knowledge.py`,
+#: `grant_pin_ledger.py` and `profiler.py` all use the same value.
+#: Above it JCS serializes an IEEE-754 double (Appendix B note (2)), so
+#: 2**53 and 2**53+1 canonicalize to the SAME bytes and the digest
+#: stops pinning.
+_MAX_INT = 2 ** 53 - 1
+
+
+def _refuse_unsafe_int(value: object) -> None:
+    """Refuse an integer outside the safe range, anywhere in a payload.
+
+    ``canonical_json`` serializes an integer outside the safe range as an
+    IEEE-754 double (RFC 8785 Appendix B note (2)), so 2**53 and
+    2**53+1 canonicalize to the SAME bytes -- above the range the digest
+    stops pinning what it claims to pin.  The stdlib fallback already
+    refused such an integer; this makes the shipped path agree with it,
+    and extends the refusal to integers nested in lists and mappings.
+    """
+    if isinstance(value, bool):
+        return
+    if isinstance(value, int):
+        if abs(value) > _MAX_INT:
+            raise AIConstitutionError("integer outside safe range")
+        return
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            _refuse_unsafe_int(item)
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            _refuse_unsafe_int(key)
+            _refuse_unsafe_int(item)
+
+
+def _canonical(payload: object) -> bytes:
+    """Canonical bytes for a pin payload, under either configuration.
+
+    The shipped path is RFC 8785 JCS.  The stdlib fallback is the
+    module's own tagged form -- deliberately a different string, but it
+    must agree about LEGALITY: a value one refuses must be refused by
+    both (RFC 8785 §3.2.2.3 requires a lone surrogate to terminate with
+    an error).
+    """
+    if _cj is not None:
+        _refuse_unsafe_int(payload)
+        try:
+            return _cj.jcs_dumps(payload).encode("utf-8")  # type: ignore
+        except ValueError as exc:
+            # `canonical_json.JcsError` is a ValueError, but NOT an
+            # `AIConstitutionError` -- so the module's own guards would
+            # be dead for it.  Translate it into this module's taxonomy.
+            raise AIConstitutionError(f"unencodable payload: {exc}") from exc
+
+    import json as _json
+
+    def _tag(v: object) -> object:
+        if isinstance(v, bool):
+            return {"t": "bool", "v": v}
+        if isinstance(v, int):
+            if abs(v) > _MAX_INT:
+                raise AIConstitutionError("integer outside safe range")
+            return {"t": "int", "v": v}
+        if isinstance(v, float):
+            if v != v or v in (float("inf"), float("-inf")):
+                raise AIConstitutionError("non-finite float refused")
+            return {"t": "float", "v": repr(v)}
+        if isinstance(v, str):
+            for char in v:
+                code = ord(char)
+                if 0xD800 <= code <= 0xDFFF:
+                    raise AIConstitutionError(
+                        f"lone surrogate U+{code:04X} is not JCS-serializable"
+                    )
+            return {"t": "str", "v": v}
+        if isinstance(v, (list, tuple)):
+            return {"t": "list", "v": [_tag(i) for i in v]}
+        if isinstance(v, dict):
+            return {"t": "dict", "v": [[k, _tag(v[k])] for k in sorted(v)]}
+        if v is None:
+            return {"t": "null"}
+        raise AIConstitutionError(f"unencodable type: {type(v).__name__}")
+
+    return _json.dumps(_tag(payload), sort_keys=True,
+                       separators=(",", ":")).encode("utf-8")
+
+
 def _pin(*parts: object) -> str:
     """Digest pin over a domain-separated canonical tuple."""
-    return "sha256:" + jcs_sha256_hex({
+    payload = {
         "domain": AI_CONSTITUTION_SCHEMA,
         "parts": list(parts),
-    })
+    }
+    return "sha256:" + hashlib.sha256(_canonical(payload)).hexdigest()
+
+
+def _verify_pin(digest: str, *parts: object) -> bool:
+    """Does ``digest`` pin these parts?  Answer, never raise.
+
+    A record whose payload cannot be canonicalized (a lone surrogate, an
+    integer outside the safe range) is NOT intact -- the answer is
+    ``False``.  Recomputing the pin for such a record would raise the
+    canonicalizer's error out of a method whose whole job is to answer
+    a question about integrity.
+    """
+    try:
+        recomputed = _pin(*parts)
+    except AIConstitutionError:
+        return False
+    return digest == recomputed
 
 
 def ai_constitution_audit_event(kind: str, detail: Dict[str, object],
@@ -321,9 +426,9 @@ class DeclarationRecord:
                article_kind: str, standing: str,
                principle_digest: str) -> bool:
         """Recompute the pin and compare (True = untampered)."""
-        return self.digest == _pin(
-            "declaration", declaration_id, constitution_id, article_kind,
-            standing, principle_digest, self.seq)
+        return _verify_pin(
+            self.digest, "declaration", declaration_id, constitution_id,
+            article_kind, standing, principle_digest, self.seq)
 
 
 @dataclass(frozen=True)
@@ -336,8 +441,8 @@ class VerificationReport:
 
     def verify(self, declaration_id: str, verdict: str) -> bool:
         """Recompute the pin and compare (True = untampered)."""
-        return self.digest == _pin(
-            "verification", declaration_id, verdict, self.seq)
+        return _verify_pin(
+            self.digest, "verification", declaration_id, verdict, self.seq)
 
 
 @dataclass(frozen=True)
@@ -356,8 +461,8 @@ class EvaluationReport:
 
     def verify(self, constitution_id: str, posture: str) -> bool:
         """Recompute the pin and compare (True = untampered)."""
-        return self.digest == _pin(
-            "evaluation", constitution_id, posture, self.seq)
+        return _verify_pin(
+            self.digest, "evaluation", constitution_id, posture, self.seq)
 
 
 @dataclass(frozen=True)
@@ -370,7 +475,8 @@ class RetireRecord:
 
     def verify(self, constitution_id: str, reason: str) -> bool:
         """Recompute the pin and compare (True = untampered)."""
-        return self.digest == _pin("retire", constitution_id, reason, self.seq)
+        return _verify_pin(
+            self.digest, "retire", constitution_id, reason, self.seq)
 
 
 class AIConstitution:
@@ -448,6 +554,13 @@ class AIConstitution:
                 if declaration_id in self._declarations:
                     raise DuplicateDeclarationError(
                         f"declaration id collision: {declaration_id!r}")
+                # The pin lives INSIDE the guarded region: a pin that
+                # cannot be computed is a refusal at a valid seq, so it
+                # burns the seq and books a `rejected` row.  Outside the
+                # region it would escape with no trace.
+                digest = _pin("declaration", declaration_id,
+                              constitution_id, article_kind, standing,
+                              principle_digest, seq)
                 record = DeclarationRecord(
                     declaration_id=declaration_id,
                     constitution_id=constitution_id,
@@ -455,9 +568,7 @@ class AIConstitution:
                     standing=standing,
                     principle_digest=principle_digest,
                     seq=seq,
-                    digest=_pin("declaration", declaration_id,
-                                constitution_id, article_kind, standing,
-                                principle_digest, seq),
+                    digest=digest,
                 )
                 self._declarations[declaration_id] = record
                 self._declaration_ids = (
@@ -562,11 +673,15 @@ class AIConstitution:
                 if constitution_id in self._retired:
                     raise DoubleRetireError(
                         f"constitution already retired: {constitution_id!r}")
+                # The pin lives INSIDE the guarded region, so a pin that
+                # cannot be computed burns the seq and books a
+                # `rejected` row rather than escaping with no trace.
+                digest = _pin("retire", constitution_id, reason, seq)
                 record = RetireRecord(
                     constitution_id=constitution_id,
                     reason=reason,
                     seq=seq,
-                    digest=_pin("retire", constitution_id, reason, seq),
+                    digest=digest,
                 )
                 self._retired[constitution_id] = record
         except AIConstitutionError:
