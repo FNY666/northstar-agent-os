@@ -320,12 +320,14 @@ SEED_ENTRIES: Tuple[FrontierEntry, ...] = (
         source_url="https://arxiv.org/abs/2606.30306",
         category="memory / state governance",
         verdict="absorb-now",
-        status="proposed",
+        status="implemented",
         linked_slice="memory-provenance-axis",
         notes=(
             "Record S1. Names six diagnostic axes for persistent agent state and a "
             "nine-step lifecycle; says the field can write and retrieve state but "
-            "not audit, roll back, or govern authority over it."
+            "not audit, roll back, or govern authority over it. "
+            "Implemented by the memory-provenance-axis slice: the provenance and "
+            "recoverability axes are now executable in memory_provenance.py."
         ),
     ),
     FrontierEntry(
@@ -333,12 +335,14 @@ SEED_ENTRIES: Tuple[FrontierEntry, ...] = (
         source_url="https://github.com/rajesamp/sentinel-mem",
         category="memory / provenance",
         verdict="absorb-now",
-        status="proposed",
+        status="implemented",
         linked_slice="memory-provenance-axis",
         notes=(
             "Record S2. Applies the Biba integrity model to the memory-write "
             "boundary; says revocation is computable over a hash-chained ledger "
-            "that reaches transitively tainted memories."
+            "that reaches transitively tainted memories. "
+            "Implemented by the memory-provenance-axis slice: the write boundary "
+            "and the transitive revocation closure are now memory_provenance.py."
         ),
     ),
     FrontierEntry(

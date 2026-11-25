@@ -247,6 +247,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "mechanistic", "media_forensics", "membership_inference", "membership_inference_detector",
         "memory", "memory_admission", "memory_bitemporal", "memory_budget_combo",
         "memory_capability", "memory_combo", "memory_fact_belief", "memory_flat_vs_graph",
+        "memory_provenance",
         "memory_safety", "merkle_tree", "mesa_optimization", "message_broker",
         "message_queue", "message_signing", "mfa_manager", "migration_runner",
         "mining_agents", "ml_model_registry", "model_card", "model_checker",
