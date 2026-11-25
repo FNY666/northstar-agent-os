@@ -196,14 +196,47 @@ class PristineFailureIsNotAKillTests(unittest.TestCase):
 
 
 class TheCensusWorktreeCarriesTheRepoRootTests(unittest.TestCase):
-    """The worktree must hold the files the suites in a scope read.
+    """The worktree must be able to RUN the suites in a scope.
 
     Fixing the probe alone would make every affected scope a permanent
-    SKIP -- an honest "cannot measure", but no evidence.  The census has
-    to carry the repo-root directories the suites resolve.
+    SKIP -- an honest "cannot measure", but no evidence.  So the census
+    worktree has to hold what those suites need, and there are TWO kinds
+    of thing:
+
+    * **FILES at the repo root.**  `test_finding_gate.py`'s
+      `DesignDocTests` reads `docs/design/bughunter-finding-gate.md`
+      from the repo root via `Path(__file__).resolve().parents[3]`.  17
+      of the runtime's suites resolve a path that way, and 16 of the
+      runtime's 1620 modules have a scope that includes one.
+    * **GIT HISTORY.**  `test_blind_rerunner.py` runs `git rev-parse` on
+      a NAMED COMMIT and builds a delivery bundle from the range, so it
+      needs a repository whose history contains that commit.
+
+    A `git clone` gives both.  Copying the directories by hand gave
+    only the first, and `blind_rerunner`'s census row stayed false.
     """
 
+    def test_the_census_worktree_is_a_git_repository(self):
+        """A clone gives the history the git-dependent suites need."""
+        script = CENSUS.read_text(encoding="utf-8")
+        self.assertIn(
+            "git clone",
+            script,
+            "the census worktree must be a clone: a suite that resolves a "
+            "named commit needs the repository's HISTORY, and a plain copy "
+            "of the component directory has none -- so that suite fails on "
+            "the pristine source and every mutant in its scope is a false "
+            "kill",
+        )
+
     def test_the_census_script_copies_the_repo_root_directories(self):
+        """The repo-root files must be present in the worktree.
+
+        A clone already carries them, but the script must not depend on
+        that silently: the copy is what makes the requirement explicit,
+        and it is what keeps the worktree correct if the clone step is
+        ever replaced.
+        """
         script = CENSUS.read_text(encoding="utf-8")
         for needle in ('"$REPO_ROOT/docs"', '"$REPO_ROOT/scripts"', '"$REPO_ROOT/tests"'):
             self.assertIn(
@@ -214,8 +247,8 @@ class TheCensusWorktreeCarriesTheRepoRootTests(unittest.TestCase):
                 "and every mutant in its scope would be a false kill",
             )
 
-    def test_the_worktree_copy_precedes_the_probe_run(self):
-        """The copy must happen BEFORE the probe runs, not after."""
+    def test_the_worktree_preparation_precedes_the_probe_run(self):
+        """The preparation must happen BEFORE the probe runs, not after."""
         script = CENSUS.read_text(encoding="utf-8")
         self.assertIn(
             '"$REPO_ROOT/docs"',
@@ -229,6 +262,55 @@ class TheCensusWorktreeCarriesTheRepoRootTests(unittest.TestCase):
             run_at,
             "the repo-root copy must precede the probe invocation",
         )
+
+
+class TheCensusWorktreeCanRunAGitDependentSuiteTests(unittest.TestCase):
+    """The worktree must be able to run a suite that needs git history.
+
+    This is the property the plain copy could not provide, and it is
+    what made `blind_runner`'s census row false: the suite failed on
+    the pristine source, so every mutant was reported killed.
+    """
+
+    def test_the_census_worktree_resolves_a_named_commit(self):
+        """The worktree must be a repository whose history has the commit."""
+        import subprocess
+
+        with tempfile.TemporaryDirectory(prefix="b173-census-wt-") as tmp:
+            worktree = Path(tmp) / "wt"
+            result = subprocess.run(
+                [
+                    "git",
+                    "clone",
+                    "--quiet",
+                    "--shared",
+                    "--no-checkout",
+                    str(REPO_ROOT),
+                    str(worktree),
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=600,
+            )
+            if result.returncode != 0:
+                self.skipTest(f"git clone is unavailable here: {result.stdout}")
+            head = subprocess.run(
+                ["git", "-C", str(worktree), "rev-parse", "HEAD"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=120,
+            )
+            self.assertEqual(
+                head.returncode,
+                0,
+                f"the clone must resolve HEAD:\n{head.stdout}",
+            )
+            self.assertTrue(
+                (worktree / ".git").exists(),
+                "the worktree must be a git repository, not a plain copy",
+            )
 
 
 class TheScopeDoesNotIncludeSuitesThatCannotRunTests(unittest.TestCase):

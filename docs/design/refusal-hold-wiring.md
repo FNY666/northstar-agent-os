@@ -4415,3 +4415,157 @@ Three separate defects in this round -- the scope that was a claim
 counted as a kill (§27.2) -- all produced the SAME artefact: a clean
 number that no longer described the tree.  A census figure is evidence
 only if the thing that produced it was itself measured.
+
+## 28. AMENDED 2026-11-25 — the census found the SECOND false kill, in a different module
+
+§27 fixed the probe and the worktree, and re-measured the chain's own
+modules.  But the defect was not confined to them: the census's master
+artifact carries a row for **every** module of the runtime, and 16 of
+the runtime's 1620 modules have a scope that includes a suite reading
+outside the component directory.  Those rows were measured through the
+broken worktree.
+
+### 28.1 `blind_rerunner.py` — 13/13 was FALSE; the real figure was 6/13
+
+`docs/baseline/mutant-census/census-v3.txt` records:
+
+```
+blind_rerunner MUTANT RESULT: killed 13/13
+```
+
+A perfect score.  But `test_blind_rerunner.py` runs `git rev-parse` on
+a NAMED COMMIT and builds a delivery bundle from the range -- so it
+needs a repository, and the census worktree (a plain copy of the
+component directory) had none.  The suite therefore failed on the
+**pristine** source, and every non-zero exit was read as "mutant
+killed".
+
+With the worktree fixed (a `git clone`, so it has the history), the
+same tree reads:
+
+```
+MUTANT RESULT: killed 6/13
+```
+
+**Seven survivors**, and they are seven branches that reject malformed
+input and were never exercised with malformed input:
+
+| site | what it rejects | why it was untested |
+|---|---|---|
+| `or@47` | a `BlindCheck`'s empty id / blank description / multiline command | every `BlindCheck` in the suite is constructed VALID |
+| `or@183` | a claim that is not a trimmed single-line sentence | every claim in the suite is well-formed |
+| `or@200` | a candidate-material path or content that is not a string | the suite passes string paths with EXCLUDED names, which the evidence-path check rejects first |
+| `or@232` | a delivery seal whose `check_inputs_unchanged` is false | the suite's seal has an empty pin LIST, which the NEXT check rejects |
+| `or@237` | a seal whose `start_commit` is not a full object id | the suite always supplies `"a" * 40`, which MATCHES |
+| `or@239` | a seal whose `start_tree_hash` is not a usable digest | the suite always supplies `"c" * 40`, which MATCHES |
+| `retT@163` | a path inside an evidence DIRECTORY | only the evidence BASENAME check was tested, and the TEXT check does not catch a directory |
+
+All seven are now killed: **13/13**, with `TestTheInputValidationIsExercised`
+in `tests/test_blind_rerunner.py` driving each branch with the
+malformed input it exists to reject.
+
+### 28.2 TWO of the seven killers passed for the WRONG reason
+
+Both were caught by planting the mutant and re-running, and both are
+the same shape as §27.1: **a test that passes for the wrong reason is
+worse than no test.**
+
+1. **The claim's validation (`or@183`).**  The first version of the
+   test passed `"  " + CLAIM + "  "` -- a claim with trailing
+   whitespace.  But `CLAIM` ends in a full stop, so the
+   single-sentence regex fired FIRST and raised -- in BOTH the original
+   and the mutant.  The mutation survived.  The distinguishing input is
+   the **EMPTY** claim: the mutation flips the FIRST `or` to `and`, so
+   the two forms differ only when `not isinstance(claim, str)` and
+   `not claim.strip()` disagree -- and with an empty claim the third
+   disjunct (`claim != claim.strip()`) is also False, so it cannot mask
+   the difference.  A whitespace-only claim does NOT work, because
+   `"   " != ""` makes the third disjunct raise anyway.
+2. **The start commit.**  The first version passed `"a" * 40`, which
+   fails the check ABOVE the claim's -- so the claim's own check was
+   never reached.  The test now builds a real repository and uses its
+   real commit.
+
+### 28.2b EVERY one of the seven killers is LOAD-BEARING
+
+A test that never fails is decoration, so each of the seven was
+measured the hard way: **plant the mutant, re-run, and confirm the
+expected test -- and only that test -- goes red.**  Measured
+2026-11-25, one at a time, with the module restored between rounds:
+
+| planted mutant | the test that caught it | other tests that went red |
+|---|---|---|
+| `or@47` (`or` -> `and` in `BlindCheck.__post_init__`) | `test_a_blind_check_rejects_an_empty_id` | `test_a_blind_check_rejects_a_blank_description` (same check, same branch) |
+| `or@183` (`or` -> `and` in the claim guard) | `test_a_claim_must_be_a_single_trimmed_sentence` | none |
+| `or@200` (`or` -> `and` in the candidate-material guard) | `test_candidate_material_paths_must_be_strings` | none |
+| `or@232` (`or` -> `and` in the seal's pin guard) | `test_a_seal_without_both_pins_is_unavailable` | none |
+| `or@237` (`or` -> `and` in the seal's start-commit guard) | `test_a_seal_with_an_unusable_start_commit_is_unavailable` | none |
+| `or@239` (`or` -> `and` in the seal's tree-hash guard) | `test_a_seal_with_an_unusable_tree_hash_is_unavailable` | none |
+| `retT@163` (the evidence-directory `any(...)` -> `False`) | `test_candidate_material_in_an_evidence_DIRECTORY_is_rejected` | none |
+
+Two of the seven (`or@47`'s two tests) are the same BRANCH reached by
+two inputs, so they are one killer with two witnesses -- which is why
+the table records the other failing test rather than hiding it.  The
+remaining five each kill exactly one mutant, which is the strongest
+statement a test can make: **the mutant changes nothing else in the
+suite's behaviour.**
+
+The census agrees, and the two numbers are independent: the census
+counts a mutant as killed when the suite's exit code changes, and this
+table identifies WHICH test changed it.  A census score alone cannot
+distinguish "the right test caught it" from "some unrelated test
+tripped" -- which is exactly the trap §27.1 walked into.
+
+Note the second row of `or@183`: with the FIRST version of that test
+(the whitespace-only claim), planting the mutant left the suite
+**green**, which is the only way that defect could have been found.
+A mutant that survives a test is a fact about the test.
+
+### 28.3 The second kind of file the worktree needs: GIT HISTORY
+
+Copying the repo's `docs/`, `scripts/` and `tests/` was not enough.
+`test_blind_rerunner.py` needs a **repository whose history contains
+a named commit**, so the census worktree is now a `git clone` of the
+repo rather than a plain copy of the component directory.  The clone's
+working tree is then overwritten with the tree as it is NOW, because
+the census measures the tree as it is, not as it was committed.
+
+The repo-root copies are kept EXPLICIT alongside the clone, so the
+requirement is visible in the script and survives the clone step being
+replaced.  `test_mutant_probe_pristine_failure.py` pins all three
+properties: the worktree is a clone, the repo-root files are copied,
+and the preparation precedes the probe run.
+
+This is what the coordinator's own `b173-mutant.sh` already did -- it
+uses `git worktree add`, which has the history.  The defect was in the
+REPO's `scripts/b173-census-all.sh`, which is a different harness.
+
+### 28.4 What this does NOT change
+
+* **No product code changed.**  `blind_rerunner.py` is byte-identical
+  to its pre-round state; the seven sites were validation branches, and
+  the fix is TESTS that exercise them.
+* No version, schema, or audit kind is added or changed.
+* No digest changes.
+* The census artifact in `docs/baseline/mutant-census/` is **not**
+  edited here.  It is a snapshot of a measurement on a NAMED tree, and
+  the rule for it is that re-measuring is the coordinator's decision.
+
+### 28.5 What this says about the artifact
+
+The coordinator's `census-v3.txt` records `blind_rerunner` at **13/13**
+with every site individually KILLED.  That row was measured through
+`b173-mutant.sh`, which uses a real worktree -- so it was measured on a
+different tree, with a different harness, and it is **not** the same
+measurement as this round's.
+
+The two figures are both true and they are not comparable:
+
+| harness | tree | figure |
+|---|---|---|
+| the coordinator's `b173-mutant.sh` (a real worktree) | a pinned historical commit | **13/13** |
+| the repo's `scripts/b173-census-all.sh` (a plain copy -- BROKEN) | the tree as it was | **13/13**, falsely |
+| the repo's `scripts/b173-census-all.sh` (fixed: a clone) | the tree as it is NOW | **6/13** before this slice's tests, **13/13** after |
+
+**The middle row is the point of this section**: the broken harness
+agreed with the good one, on a different tree, for the wrong reason.

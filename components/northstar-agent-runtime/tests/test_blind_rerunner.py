@@ -260,3 +260,170 @@ class TestCheckComparison:
         assert [item["id"] for item in persisted["unassessed_blind"]] == [item.id for item in checks]
         assert "delivery seal was not supplied" in persisted["findings"]
         assert persisted["blind_only"] == []
+
+
+class TestTheInputValidationIsExercised:
+    """The seven input-validation branches the census could not kill.
+
+    Measured 2026-11-25: the whole-file census over
+    ``blind_rerunner.py`` reported **killed 13/13** -- a perfect score.
+    It was FALSE.  The module's only referencing suite,
+    ``test_blind_runner.py``, reads the REPO ROOT (it runs ``git
+    rev-parse`` on a named commit), and the census worktree did not
+    carry the repository -- so the suite FAILED on the PRISTINE source,
+    and every non-zero exit was read as "mutant killed".  With the
+    worktree fixed, the same tree reads **killed 6/13**: seven
+    survivors, which are seven branches that reject malformed input and
+    were never exercised with malformed input.
+
+    Each test below drives the branch with the malformed input it
+    exists to reject.  The mutants are the ``or`` -> ``and`` flips that
+    let the malformed value THROUGH, so a test that pins the rejection
+    kills them.
+    """
+
+    def test_a_blind_check_rejects_an_empty_id(self):
+        """``or@47``: a check's id must be a non-empty single-line string."""
+        with pytest.raises(BlindRerunnerError, match="id must be a non-empty"):
+            BlindCheck("", "Assert the status is healthy.", "python check.py")
+
+    def test_a_blind_check_rejects_a_blank_description(self):
+        """``or@47``: the same rule, applied to the description."""
+        with pytest.raises(BlindRerunnerError, match="description must be a non-empty"):
+            BlindCheck("b1", "   ", "python check.py")
+
+    def test_a_blind_check_rejects_a_multiline_command(self):
+        """``or@47``: the same rule, applied to the command."""
+        with pytest.raises(BlindRerunnerError, match="command must be a non-empty"):
+            BlindCheck("b1", "Assert the status is healthy.", "python check.py\nrm -rf /")
+
+    def test_a_claim_must_be_a_single_trimmed_sentence(self, tmp_path):
+        """``or@183``: the claim's own validation.
+
+        Two of the disjuncts are untested: the TRIMMED rule
+        (``claim != claim.strip()``) and the SINGLE-SENTENCE rule.  A
+        claim with trailing whitespace, or with two sentences, must be
+        rejected.
+        """
+        # The start commit must be VALID, or the check ABOVE this one
+        # fires first and the claim's own check is never reached -- which
+        # is how the mutant survived the first version of this test.
+        root, commit, _ = _repo(tmp_path)
+        # The EMPTY claim is the input that distinguishes the two
+        # operands.  The mutation flips the FIRST ``or`` to ``and``, so
+        # the two forms differ only when ``not isinstance(claim, str)``
+        # and ``not claim.strip()`` DISAGREE -- and with an empty claim
+        # the third disjunct (``claim != claim.strip()``) is also False,
+        # so it cannot mask the difference.
+        #
+        # (A whitespace-only claim does NOT work: ``"   " != ""`` makes
+        # the third disjunct raise anyway, so both forms reject it and
+        # the mutant survives.  That was the first version of this
+        # test, and it passed for the wrong reason.)
+        with pytest.raises(BlindRerunnerError, match="claim must be a non-empty"):
+            build_blind_bundle(commit, "", repo_root=root)
+        with pytest.raises(BlindRerunnerError, match="exactly one sentence"):
+            build_blind_bundle(commit, CLAIM + " And another one.", repo_root=root)
+
+    def test_candidate_material_paths_must_be_strings(self, tmp_path):
+        """``or@200``: a non-string path or content is malformed input.
+
+        The existing tests pass a string path with an EXCLUDED name --
+        which the evidence-path check rejects first.  They never pass a
+        path that is not a string at all.
+        """
+        root, commit, _ = _repo(tmp_path)
+        with pytest.raises(BlindRerunnerError, match="paths and contents must be strings"):
+            build_blind_bundle(
+                commit, CLAIM, repo_root=root, candidate_material={123: "content"}
+            )
+
+    def test_candidate_material_in_an_evidence_DIRECTORY_is_rejected(self, tmp_path):
+        """``retT@163``: an evidence DIRECTORY is excluded, not just a name.
+
+        The module excludes two shapes of delivery artifact: a path whose
+        BASENAME is a known evidence name (``delivery-seal.json`` and
+        friends), and a path that lies inside an evidence DIRECTORY
+        (``delivery-evidence/...``).  Only the first shape was tested,
+        and the text check does NOT catch the second -- it looks for
+        markers, not directory names -- so the directory check was the
+        only thing standing between an evidence directory and a bundle.
+        """
+        root, commit, _ = _repo(tmp_path)
+        with pytest.raises(BlindRerunnerError, match="excluded delivery evidence path"):
+            build_blind_bundle(
+                commit,
+                CLAIM,
+                repo_root=root,
+                candidate_material={"delivery-evidence/notes.txt": "x"},
+            )
+        with pytest.raises(BlindRerunnerError, match="excluded delivery evidence path"):
+            build_blind_bundle(
+                commit,
+                CLAIM,
+                repo_root=root,
+                candidate_material={"evidence_bundle/report.md": "x"},
+            )
+
+    def test_a_seal_without_both_pins_is_unavailable(self):
+        """``or@232``: both pins must hold.
+
+        The existing test supplies an empty pin LIST, which the next
+        check rejects.  It never supplies a seal whose
+        ``check_inputs_unchanged`` is False -- so the second disjunct is
+        untested.
+        """
+        with pytest.raises(AuditorChecksUnavailable, match="unchanged pinned check inputs"):
+            extract_auditor_checks(
+                {
+                    "schema": "northstar.delivery-seal.v2",
+                    "start_commit": "a" * 40,
+                    "start_tree_hash": "c" * 40,
+                    "check_inputs_pinned": True,
+                    "check_inputs_unchanged": False,
+                    "check_input_pins": [
+                        {"path": "app.py", "baseline_blob_sha": "b" * 40, "unchanged": True}
+                    ],
+                }
+            )
+
+    def test_a_seal_with_an_unusable_start_commit_is_unavailable(self):
+        """``or@237``: the start commit must be a full Git object id.
+
+        The existing tests always supply ``"a" * 40``, which MATCHES the
+        pattern, so the rejection never fires.  A short or non-hex
+        commit must be rejected.
+        """
+        with pytest.raises(AuditorChecksUnavailable, match="no valid start commit"):
+            extract_auditor_checks(
+                {
+                    "schema": "northstar.delivery-seal.v2",
+                    "start_commit": "not-a-commit",
+                    "start_tree_hash": "c" * 40,
+                    "check_inputs_pinned": True,
+                    "check_inputs_unchanged": True,
+                    "check_input_pins": [
+                        {"path": "app.py", "baseline_blob_sha": "b" * 40, "unchanged": True}
+                    ],
+                }
+            )
+
+    def test_a_seal_with_an_unusable_tree_hash_is_unavailable(self):
+        """``or@239``: the tree hash must be a usable digest.
+
+        ``"c" * 40`` is hex and 40 long, so it MATCHES.  A short or
+        non-hex tree hash must be rejected.
+        """
+        with pytest.raises(AuditorChecksUnavailable, match="no usable pinned start-tree hash"):
+            extract_auditor_checks(
+                {
+                    "schema": "northstar.delivery-seal.v2",
+                    "start_commit": "a" * 40,
+                    "start_tree_hash": "zz",
+                    "check_inputs_pinned": True,
+                    "check_inputs_unchanged": True,
+                    "check_input_pins": [
+                        {"path": "app.py", "baseline_blob_sha": "b" * 40, "unchanged": True}
+                    ],
+                }
+            )

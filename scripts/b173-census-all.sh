@@ -84,24 +84,56 @@ if [ "$#" -eq 0 ]; then
 fi
 
 WT="/tmp/b173-census-${SLUG}"
-rm -rf "$WT"; mkdir -p "$WT/components"
-cp -a "$RUNTIME_DIR" "$WT/components/"
-# The suites in a scope may read files OUTSIDE the component directory --
-# `test_finding_gate.py`'s `DesignDocTests` reads
-# `docs/design/bughunter-finding-gate.md` from the REPO ROOT via
-# `Path(__file__).resolve().parents[3]`.  17 of the runtime's suites
-# resolve a path that way, and 16 of the runtime's 1620 modules have a
-# scope that includes one.
+rm -rf "$WT"; mkdir -p "$WT"
+# The worktree must be a GIT REPOSITORY, not a plain copy of the
+# component directory.
 #
-# Without the repo's `docs/`, `scripts/` and `tests/` in the worktree,
-# those suites ERROR AT SETUP on the PRISTINE source -- so the suite's
-# exit code is non-zero before any mutant is applied, and every mutant in
-# the scope is reported KILLED.  Measured 2026-11-25:
+# The suites in a scope may read things OUTSIDE the component directory,
+# and two kinds of thing are needed:
+#
+#   * FILES at the repo root.  `test_finding_gate.py`'s `DesignDocTests`
+#     reads `docs/design/bughunter-finding-gate.md` from the REPO ROOT
+#     via `Path(__file__).resolve().parents[3]`.  17 of the runtime's
+#     suites resolve a path that way, and 16 of the runtime's 1620
+#     modules have a scope that includes one.
+#
+#   * GIT HISTORY.  `test_blind_rerunner.py` runs `git rev-parse` on a
+#     NAMED COMMIT and builds a delivery bundle from the range, so it
+#     needs a repository whose history contains that commit.
+#
+# Without them, those suites FAIL on the PRISTINE source -- so the
+# suite's exit code is non-zero before any mutant is applied, and every
+# mutant in the scope is reported KILLED.  Measured 2026-11-25:
 # `refusal_hold_wiring.py` reported "killed 23/23" that way, while
 # planting the mutation by hand showed it SURVIVES (which §23.4 had
 # already proved arithmetically).
 #
-# So the worktree carries the repo-root directories those suites read.
+# A `git clone` gives the history and the tree in one step; the runtime
+# directory is then overwritten with the WORKING TREE, because the
+# census measures the tree as it is now, not as it was committed.
+git clone --quiet --shared --no-checkout "$REPO_ROOT" "$WT" 2>/dev/null \
+  || git clone --quiet "$REPO_ROOT" "$WT" 2>/dev/null \
+  || git init --quiet "$WT"
+if [ -d "$WT/.git" ]; then
+  # Make the working tree match the tree as it is NOW: the committed
+  # state plus whatever is uncommitted in the repo.  `git checkout` in
+  # the WORKTREE is safe -- it is a private copy, not the shared tree.
+  git -C "$WT" checkout --quiet --force HEAD -- . 2>/dev/null || true
+fi
+rm -rf "$WT/components/northstar-agent-runtime"
+cp -a "$RUNTIME_DIR" "$WT/components/northstar-agent-runtime"
+# The working tree's changes come along: copy them over the clone's
+# committed state, so the census measures the tree as it is.
+if [ -d "$REPO_ROOT/.git" ]; then
+  rsync -a --exclude='.git' "$REPO_ROOT/components/northstar-agent-runtime/" \
+    "$WT/components/northstar-agent-runtime/" 2>/dev/null || true
+fi
+# The clone already carries the repo root, but the copy is kept EXPLICIT
+# so the requirement is visible and survives the clone step being
+# replaced: a suite that resolves the repo root must find its files
+# there.  Measured 2026-11-25: without them, `test_finding_gate.py`'s
+# `DesignDocTests` errored at setup on the PRISTINE source, and every
+# mutant in that scope was reported killed.
 cp -a "$REPO_ROOT/docs" "$WT/docs" 2>/dev/null || true
 cp -a "$REPO_ROOT/scripts" "$WT/scripts" 2>/dev/null || true
 cp -a "$REPO_ROOT/tests" "$WT/tests" 2>/dev/null || true
