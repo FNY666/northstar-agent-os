@@ -415,3 +415,421 @@ def test_main_self_check():
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.startswith("graph-database OK")
+
+
+# ---------------------------------------------------------------------------
+# 15. a record that cannot be canonicalized is NOT intact -- it does not raise
+# ---------------------------------------------------------------------------
+#
+# `verify()` answers a QUESTION: "is this record intact?".  The answer
+# for a record whose fields cannot be canonicalized is `False` -- the
+# record cannot be shown to be intact, so it is not.
+#
+# The defect: `_pin()` delegates to `canonical_json`, which refuses a
+# lone surrogate with its OWN error type -- `JcsError`, a `ValueError`.
+# The `except GraphDatabaseError` clause around `_pin` does NOT catch
+# it, so `verify()` RAISED instead of answering.
+#
+# Measured 2026-11-25 on the tree as it stood:
+#
+#     >>> GraphRecord(graph_name="\ud800", digest="sha256:"+"0"*64, seq=5).verify()
+#     JcsError: lone surrogate U+D800 is not JCS-serializable
+#
+# Two consequences, both measured:
+#
+# * `verify()` RAISED instead of answering `False`, so a caller asking
+#   "is this record intact?" got an exception.
+# * `JcsError` is a `ValueError`, so a caller guarding with `except
+#   ValueError` treats a TAMPERED record as a PARSE error and moves on
+#   -- the record is neither verified nor rejected.
+#
+# The repo already has the fix pattern: `job_queue.py`'s `_canonical`
+# translates the sibling helper's error into its OWN taxonomy
+# (see `job_queue.py`, "Canonical encoding and digest pins").  The same
+# translation belongs here.
+#
+# The stdlib fallback path raises `GraphDatabaseError`, so the two
+# configurations must agree -- that is the control.
+
+
+def _unencodable_records():
+    """One record per kind, each carrying a lone surrogate."""
+    surrogate = "\ud800"
+    return [
+        GraphRecord(graph_name=surrogate, digest="sha256:" + "0" * 64, seq=1),
+        DropRecord(
+            graph_name=surrogate,
+            reason="r",
+            digest="sha256:" + "0" * 64,
+            seq=1,
+        ),
+        NodeRecord(
+            graph_name=surrogate,
+            node_id="n",
+            labels=("L",),
+            properties_digest="sha256:" + "0" * 64,
+            digest="sha256:" + "0" * 64,
+            seq=1,
+        ),
+        EdgeRecord(
+            graph_name=surrogate,
+            edge_id="e",
+            from_node="a",
+            to_node="b",
+            edge_type="t",
+            properties_digest="sha256:" + "0" * 64,
+            digest="sha256:" + "0" * 64,
+            seq=1,
+        ),
+    ]
+
+
+@pytest.mark.parametrize("record", _unencodable_records())
+def test_verify_answers_false_for_a_record_it_cannot_canonicalize(record):
+    """`verify()` answers a question; a question is not an exception."""
+    assert record.verify() is False
+
+
+def test_the_two_canonicalizer_configurations_agree():
+    """The control: the shipped path and the fallback must agree.
+
+    THE POINT: a config that CAN canonicalize the input must give the
+    same answer as the other config.  Both must answer `False` (the
+    digest does not match), and neither may raise.
+
+    A note on what this control does NOT claim: the two configs do NOT
+    produce the same DIGEST for the same logical payload -- the shipped
+    path emits JCS bytes, the fallback emits its own tagged form.  They
+    are different byte strings by construction.  So this test cannot
+    assert digest equality; it asserts AGREEMENT ON THE ANSWER, which
+    is the property a caller depends on.
+
+    (An earlier draft of this control asserted the fallback RAISES for
+    a lone surrogate.  Measured, it does not: the fallback's `_tag`
+    passes a lone surrogate straight through to `json.dumps`, which
+    escapes it as `\\ud800`.  The fallback therefore SILENTLY ACCEPTS a
+    lone surrogate and pins a non-JCS canonical form -- a third defect,
+    fixed separately below.  The control was passing for the wrong
+    reason: the digest mismatch, not an encode failure.)
+    """
+    surrogate = "\ud800"
+    record = GraphRecord(
+        graph_name=surrogate, digest="sha256:" + "0" * 64, seq=1
+    )
+
+    saved = graph_database._cj
+    try:
+        # The shipped path: `canonical_json` is present.
+        assert graph_database._cj is not None, (
+            "the shipped path is not installed, so this control measures "
+            "nothing"
+        )
+        assert record.verify() is False
+
+        # The fallback path: no sibling helper.
+        graph_database._cj = None
+        assert record.verify() is False
+    finally:
+        graph_database._cj = saved
+
+
+def test_a_tampered_record_is_not_mistaken_for_a_parse_error():
+    """A caller guarding on `ValueError` must not swallow a bad record.
+
+    `JcsError` is a `ValueError`.  A caller that catches `ValueError`
+    around a parse step would treat a record that cannot be
+    canonicalized as a parse error and MOVE ON -- the record would be
+    neither verified nor rejected.  So `verify()` must not let a
+    `ValueError` escape: it must answer.
+    """
+    record = GraphRecord(
+        graph_name="\ud800", digest="sha256:" + "0" * 64, seq=1
+    )
+    try:
+        answer = record.verify()
+    except ValueError as exc:
+        pytest.fail(
+            "verify() let a ValueError escape (%s): a caller guarding on "
+            "ValueError would treat a tampered record as a parse error" % exc
+        )
+    assert answer is False
+
+
+# ---------------------------------------------------------------------------
+# 16. the stdlib fallback must refuse what the shipped path refuses
+# ---------------------------------------------------------------------------
+#
+# Measured 2026-11-25 on the tree as it stood, the two canonicalizer
+# configurations disagreed about a lone surrogate:
+#
+#     shipped  -> GraphDatabaseError   (canonical_json refuses it)
+#     fallback -> OK, 49 bytes         (json.dumps escapes it as \ud800)
+#
+# The fallback therefore SILENTLY ACCEPTED a value the shipped path
+# refused, and pinned a canonical form that is NOT JCS -- a digest over
+# bytes no other JCS implementation would produce.  That is the
+# fail-OPEN direction: the record pins, and verifies, under a form that
+# does not round-trip through the shipped path.
+#
+# The two configurations must agree about what is LEGAL.  They need not
+# agree about the resulting DIGEST -- the fallback's tagged form is
+# deliberately its own byte string -- but a value one refuses must be
+# refused by both.
+#
+# The control: a value BOTH accept must be accepted by both, or this
+# test would be satisfied by a fallback that refuses everything.
+
+
+def _configs():
+    """Yield (label, canonicalizer) for both configurations."""
+    saved = graph_database._cj
+    try:
+        yield "shipped", saved
+        yield "fallback", None
+    finally:
+        graph_database._cj = saved
+
+
+def _canonical_under(label, payload):
+    """Canonicalize under one configuration; return bytes or the error."""
+    saved = graph_database._cj
+    try:
+        graph_database._cj = saved if label == "shipped" else None
+        return ("ok", graph_database._canonical(payload))
+    except GraphDatabaseError as exc:
+        return ("refused", type(exc).__name__)
+    finally:
+        graph_database._cj = saved
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"name": "\ud800"},
+        {"name": "\udfff"},
+        {"name": "a\ud800b"},
+    ],
+)
+def test_both_configurations_refuse_a_lone_surrogate(payload):
+    """A value the shipped path refuses, the fallback must refuse too."""
+    shipped = _canonical_under("shipped", payload)
+    fallback = _canonical_under("fallback", payload)
+
+    assert shipped[0] == "refused", (
+        "the shipped path accepted a lone surrogate: %r" % (shipped,)
+    )
+    assert fallback[0] == "refused", (
+        "the fallback accepted a lone surrogate that the shipped path "
+        "refuses: %r -- the two configurations disagree about legality, "
+        "so a digest pinned under one does not verify under the other"
+        % (fallback,)
+    )
+
+
+def test_both_configurations_accept_a_value_both_can_canonicalize():
+    """The control: the fallback must not refuse everything.
+
+    A fallback that refused every input would satisfy the test above
+    vacuously.  So this test pins down that the two configurations
+    still ACCEPT a legitimate payload -- the disagreement must be
+    narrow, about the values that are actually illegal.
+    """
+    payload = {"name": "ordinary", "n": 7, "tags": ["a", "b"]}
+    shipped = _canonical_under("shipped", payload)
+    fallback = _canonical_under("fallback", payload)
+
+    assert shipped[0] == "ok", shipped
+    assert fallback[0] == "ok", fallback
+
+
+def test_a_lone_surrogate_cannot_be_pinned_in_either_configuration():
+    """The end-to-end shape: no configuration may pin a surrogate."""
+    for label in ("shipped", "fallback"):
+        saved = graph_database._cj
+        try:
+            graph_database._cj = saved if label == "shipped" else None
+            db = GraphDatabase()
+            with pytest.raises(GraphDatabaseError):
+                db.graph("\ud800", 1)
+            assert db.graph_names() == ()
+        finally:
+            graph_database._cj = saved
+
+
+# ---------------------------------------------------------------------------
+# 17. a seq above the safe range must be refused -- it cannot be pinned
+# ---------------------------------------------------------------------------
+#
+# `canonical_json` serializes an integer outside the safe range as an
+# IEEE-754 double (RFC 8785 Appendix B note (2)), so 2**53 and 2**53+1
+# canonicalize to the SAME bytes:
+#
+#     _canonical(2**53)   == b'9007199254740992'
+#     _canonical(2**53+1) == b'9007199254740992'
+#
+# So above the safe range the digest stops pinning the seq, and a
+# TAMPERED seq still verifies.  Measured 2026-11-25:
+#
+#     d = _pin("graph", "g", 2**53)
+#     GraphRecord(graph_name="g", digest=d, seq=2**53+1).verify()
+#     -> True        # the seq was changed; the digest was not
+#
+# That is a fail-OPEN integrity defect: the digest is the module's
+# tamper pin, and it silently stops pinning.
+#
+# The repo already has this exact rule in `job_queue.py::_check_seq`
+# (and in `grant_pin_ledger.py`, `profiler.py`).  `graph_database.py`
+# declares `_MAX_INT = 2**53 - 1` and NEVER USES IT -- the bound was
+# missing from `_check_seq`, and `seq` was the one unbounded integer in
+# a digest here.
+#
+# The stdlib fallback refuses such an integer outright, so without the
+# bound the two configurations also disagreed about whether a large
+# seq is legal at all.
+
+
+def test_a_seq_above_the_safe_range_is_refused():
+    """A seq that cannot be pinned must not be accepted."""
+    db = GraphDatabase()
+    db.graph("g", 1)
+    for bad in (2**53, 2**53 + 1, 2**60):
+        with pytest.raises(SeqOrderError):
+            db.graph("g2", bad)
+
+
+def test_a_tampered_seq_above_the_safe_range_cannot_verify():
+    """The control for the defect: the digest must pin the seq.
+
+    This is the property the bound protects.  If the bound were
+    removed, a record whose seq was bumped by one would still verify.
+
+    The record is built from a LEGITIMATE pin (seq 1) and then
+    tampered, so the test does not itself depend on the bound: it
+    asserts the tampered record does NOT verify.
+    """
+    digest = graph_database._pin("graph", "g", 1)
+    tampered = GraphRecord(graph_name="g", digest=digest, seq=2**53 + 1)
+    assert tampered.verify() is False
+
+
+def test_the_safe_range_boundary_is_accepted():
+    """The control: the bound must not cut off a LEGAL seq.
+
+    `2**53 - 1` is the last pin-able integer.  A bound that refused it
+    would over-refuse; a bound that accepted `2**53` would under-
+    refuse.  Both boundaries are pinned here.
+    """
+    db = GraphDatabase()
+    db.graph("g", 2**53 - 1)
+    with pytest.raises(SeqOrderError):
+        db.graph("g2", 2**53)
+
+
+# ---------------------------------------------------------------------------
+# 18. a failed mutation books a `rejected` row -- including a failed PIN
+# ---------------------------------------------------------------------------
+#
+# The class docstring promises: "failed mutations consume their seq and
+# book a `rejected` audit row".
+#
+# But the `_pin(...)` calls sit OUTSIDE the try block that books the
+# row.  Measured 2026-11-25:
+#
+#     db.graph("\ud800", 1)   -> raises, and books NO row
+#     db.node("g", "n", 2, properties={"p": "\ud800"})
+#                          -> raises, and books NO row
+#
+# while a refusal caught INSIDE the try block does book one:
+#
+#     db.node("g", "n", 2, properties={"p": object()})
+#                          -> raises BadPropertyError, books a row
+#
+# So the trail cannot tell "the database refused this graph" from "the
+# database never saw it" -- the same defect shape the refusal-hold
+# wiring forbids for the queue.
+#
+# After the fixes above these inputs are refused by the VALIDATION
+# layer (which sits inside the try block), so the row is booked.  The
+# test below therefore pins the PROMISE, not the mechanism: whatever
+# the refusal path, a failed mutation books a row.
+
+
+def test_a_failed_mutation_books_a_rejected_row():
+    """A refused mutation must leave a trace."""
+    db = GraphDatabase()
+    db.graph("g", 1)
+    rows_before = len(db.audit_log())
+
+    with pytest.raises(GraphDatabaseError):
+        db.node("g", "n", 2, labels=("L",), properties={"p": "\ud800"})
+
+    rows = db.audit_log()
+    assert len(rows) == rows_before + 1, (
+        "a failed mutation booked no row: the trail cannot tell a refusal "
+        "from a never-seen request"
+    )
+    assert rows[-1]["kind"] == "graph-database.rejected"
+    assert rows[-1]["detail"]["reason"], "the rejection row names no reason"
+
+
+def test_a_failed_mutation_still_consumes_its_seq():
+    """A failed mutation consumes its seq -- the docstring's other half."""
+    db = GraphDatabase()
+    db.graph("g", 1)
+
+    with pytest.raises(GraphDatabaseError):
+        db.node("g", "n", 2, labels=("L",), properties={"p": "\ud800"})
+
+    # seq 2 was consumed, so seq 2 is refused as a rewind...
+    with pytest.raises(SeqOrderError):
+        db.graph("g2", 2)
+    # ...and seq 3 is the next usable one.
+    db.graph("g2", 3)
+    assert "g2" in db.graph_names()
+
+
+def test_a_pin_refuses_an_integer_outside_the_safe_range():
+    """No digest may ever be pinned over a lossy integer.
+
+    THIS is the property that closes the collision.  Without it,
+    ``_pin("graph", "g", 2**53)`` and ``_pin("graph", "g", 2**53+1)``
+    produce the SAME digest -- both canonicalize to the bytes
+    ``9007199254740992`` -- and a record carrying either digest
+    verifies against either seq.  So the fix is not "refuse a big seq
+    at the door" (that is ``_check_seq``'s job, and it does not cover
+    ``verify()``, which recomputes the pin from a record's own fields).
+
+    The pin must REFUSE the integer, so no such digest can be minted
+    in the first place.
+
+    The recursion matters: the payload is a NESTED list of pin parts,
+    so a top-level-only check would miss the integer entirely.
+    """
+    for part in (2**53, 2**53 + 1, 2**60, -(2**53)):
+        with pytest.raises(GraphDatabaseError):
+            graph_database._pin("graph", "g", part)
+
+
+def test_a_pin_still_accepts_the_last_safe_integer():
+    """The control: the refusal must not over-reach.
+
+    ``2**53 - 1`` is the last integer whose canonical form is exact.
+    A pin over it must succeed, or the module could not pin anything
+    near the bound.
+    """
+    pinned = graph_database._pin("graph", "g", 2**53 - 1)
+    assert pinned.startswith("sha256:")
+
+
+def test_a_record_carrying_an_unpinnable_seq_does_not_verify():
+    """`verify()` must ANSWER, not raise, for an unpinnable seq.
+
+    ``verify()`` recomputes the pin from the record's own fields and
+    does NOT go through ``_check_seq`` -- the seq it checks is the one
+    on the record, which may have been tampered with.  So the pin's own
+    refusal is what stands between a tampered seq and a `True`.
+    """
+    record = GraphRecord(
+        graph_name="g", digest="sha256:" + "0" * 64, seq=2**53 + 1
+    )
+    assert record.verify() is False

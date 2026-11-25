@@ -279,6 +279,35 @@ def _check_seq(seq: Any) -> int:
         raise SeqOrderError(f"seq must be int, got {type(seq).__name__}")
     if seq < 0:
         raise SeqOrderError("seq must be non-negative")
+    if seq > _MAX_INT:
+        # A seq above the safe range cannot be PINNED by a digest.
+        #
+        # ``canonical_json`` serializes an integer outside the safe
+        # range as an IEEE-754 double (RFC 8785 Appendix B note (2)),
+        # so 2**53 and 2**53+1 canonicalize to the SAME bytes:
+        #
+        #     _canonical(2**53)   == b'9007199254740992'
+        #     _canonical(2**53+1) == b'9007199254740992'
+        #
+        # So a record's digest would stop pinning its seq, and a
+        # *tampered* seq would still verify -- measured 2026-11-25:
+        # the seq was changed from 9007199254740992 to 9007199254740993,
+        # the digest was unchanged, and ``verify()`` said True.  That
+        # is a fail-OPEN integrity defect: the digest IS the tamper
+        # pin, and above the safe range it silently stops pinning.
+        #
+        # The stdlib fallback refuses such an integer outright, so
+        # without this bound the two configurations also disagreed
+        # about whether a large seq is legal at all.
+        #
+        # The bound matches the repo's house pattern: see
+        # ``job_queue.py`` (``_MAX_INT = 2**53 - 1``, same rule, same
+        # reasoning), ``grant_pin_ledger.py`` (``_MAX_COUNTER``) and
+        # ``profiler.py`` (``record_digest()`` refuses a huge integral
+        # fail-closed).  ``seq`` was the one integer in a digest here
+        # that was unbounded -- ``_MAX_INT`` was already declared in
+        # this module and never used.
+        raise SeqOrderError("seq exceeds the safe range")
     return seq
 
 
@@ -335,9 +364,80 @@ def _check_value(value: Any, depth: int = 0) -> Any:
 # ---------------------------------------------------------------------------
 
 
+def _refuse_unsafe_int(value: Any) -> None:
+    """Refuse an integer outside the safe range, anywhere in a payload.
+
+    Above ``2**53 - 1`` the canonical form is lossy -- RFC 8785
+    Appendix B note (2) serializes such an integer as an IEEE-754
+    double -- so two different integers canonicalize to the same
+    bytes.  A digest over lossy bytes stops pinning its input.
+
+    This walks containers rather than only the top-level value,
+    because the payload is a nested list of pin parts.
+    """
+    if isinstance(value, bool):
+        return
+    if isinstance(value, int):
+        if abs(value) > _MAX_INT:
+            raise GraphDatabaseError("integer outside safe range")
+        return
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            _refuse_unsafe_int(item)
+        return
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            _refuse_unsafe_int(key)
+            _refuse_unsafe_int(item)
+
+
 def _canonical(payload: Any) -> bytes:
     if _cj is not None:
-        return _cj.jcs_dumps(payload).encode("utf-8")  # type: ignore
+        # An integer outside the safe range cannot be canonicalized
+        # injectively: ``canonical_json`` serializes it as an IEEE-754
+        # double (RFC 8785 Appendix B note (2)), so 2**53 and 2**53+1
+        # produce the SAME bytes.  The stdlib fallback refuses such an
+        # integer outright, so the shipped path must refuse it too --
+        # otherwise the two configurations disagree about what is
+        # LEGAL, and a digest pinned under one does not verify under
+        # the other.
+        #
+        # This is the same rule the repo already applies in
+        # ``job_queue.py``'s ``_canonical`` and ``_check_seq``, in
+        # ``grant_pin_ledger.py`` and in ``profiler.py``.
+        _refuse_unsafe_int(payload)
+        try:
+            return _cj.jcs_dumps(payload).encode("utf-8")  # type: ignore
+        except ValueError as exc:
+            # The sibling helper refuses input it cannot canonicalize
+            # (a lone surrogate, a non-finite float, an unsupported
+            # type) with ITS OWN error type -- ``JcsError``, which is
+            # a ``ValueError``.  That type is not part of this
+            # module's taxonomy, and it must not escape: the records
+            # below guard ``_pin`` with ``except GraphDatabaseError``,
+            # and the stdlib fallback raises exactly that.
+            #
+            # Left untranslated, the two configurations disagreed about
+            # the SAME input -- the shipped path raised ``JcsError``,
+            # the fallback raised ``GraphDatabaseError`` -- and the
+            # shipped path's error escaped the clause written to catch
+            # it.  Measured 2026-11-25:
+            #
+            #   >>> GraphRecord(graph_name="\ud800", digest=..., seq=5).verify()
+            #   JcsError: lone surrogate U+D800 is not JCS-serializable
+            #
+            # ``verify()`` RAISED instead of answering ``False``, so a
+            # caller asking "is this record intact?" got an exception;
+            # and because ``JcsError`` is a ``ValueError``, a caller
+            # guarding with ``except ValueError`` treats a TAMPERED
+            # record as a PARSE error and moves on -- the record is
+            # neither verified nor rejected.
+            #
+            # The same translation is already in ``job_queue.py``'s
+            # ``_canonical``; this is the same shape, in the same repo.
+            raise GraphDatabaseError(
+                f"unencodable payload: {exc}"
+            ) from exc
 
     def _tag(v: Any) -> Any:
         if isinstance(v, bool):
@@ -351,6 +451,25 @@ def _canonical(payload: Any) -> bytes:
                 raise GraphDatabaseError("non-finite float refused")
             return {"t": "float", "v": repr(v)}
         if isinstance(v, str):
+            # A lone surrogate is not a Unicode scalar value: RFC 8785
+            # §3.2.2.3 requires a compliant implementation to TERMINATE
+            # with an error, because it "breaks signatures silently".
+            #
+            # The shipped path (``canonical_json``) refuses it.  The
+            # stdlib fallback would NOT: ``json.dumps`` escapes it as
+            # ``\ud800`` and emits bytes that are not JCS at all.  So
+            # the fallback must refuse it too -- otherwise the two
+            # configurations disagree about what is LEGAL, and a digest
+            # pinned under the fallback does not verify under the
+            # shipped path.  Measured 2026-11-25: the fallback accepted
+            # a lone surrogate and produced 49 bytes.
+            for char in v:
+                code = ord(char)
+                if 0xD800 <= code <= 0xDFFF:
+                    raise GraphDatabaseError(
+                        f"lone surrogate U+{code:04X} is not "
+                        "JCS-serializable"
+                    )
             return {"t": "str", "v": v}
         if isinstance(v, (list, tuple)):
             return {"t": "list", "v": [_tag(i) for i in v]}
@@ -651,12 +770,19 @@ class GraphDatabase:
                     raise DuplicateGraphError(
                         f"graph name retired: {graph_name}"
                     )
+                # The pin belongs INSIDE the guarded region: a value
+                # that cannot be canonicalized is a refusal, and a
+                # refusal books a row.  Measured 2026-11-25: with the
+                # pin outside, ``graph("\ud800", 1)`` raised and booked
+                # NO row, so the trail could not tell "the database
+                # refused this graph" from "the database never saw it".
+                digest = _pin("graph", graph_name, seq)
             except GraphDatabaseError as exc:
                 self._reject(seq, type(exc).__name__, graph_name)
                 raise
             record = GraphRecord(
                 graph_name=graph_name,
-                digest=_pin("graph", graph_name, seq),
+                digest=digest,
                 seq=seq,
             )
             self._graphs[graph_name] = {
@@ -683,6 +809,10 @@ class GraphDatabase:
                 if isinstance(reason, bool) or not isinstance(reason, str):
                     raise BadGraphError("reason must be str")
                 graph = self._active_graph(graph_name)
+                # The pin belongs INSIDE the guarded region -- see
+                # ``graph()``: a failed pin is a refusal, and a refusal
+                # books a row.
+                digest = _pin("drop", graph_name, reason, seq)
             except GraphDatabaseError as exc:
                 name = graph_name if isinstance(graph_name, str) else ""
                 self._reject(seq, type(exc).__name__, name)
@@ -690,7 +820,7 @@ class GraphDatabase:
             record = DropRecord(
                 graph_name=graph_name,
                 reason=reason,
-                digest=_pin("drop", graph_name, reason, seq),
+                digest=digest,
                 seq=seq,
             )
             nodes = len(graph["nodes"])
@@ -738,24 +868,30 @@ class GraphDatabase:
                     raise DuplicateNodeError(
                         f"node already pinned: {node_id}"
                     )
-            except GraphDatabaseError as exc:
-                name = graph_name if isinstance(graph_name, str) else ""
-                self._reject(seq, type(exc).__name__, name)
-                raise
-            properties_digest = _pin("properties", checked_props)
-            record = NodeRecord(
-                graph_name=graph_name,
-                node_id=node_id,
-                labels=checked_labels,
-                properties_digest=properties_digest,
-                digest=_pin(
+                # The pins belong INSIDE the guarded region -- see
+                # ``graph()``: a failed pin is a refusal, and a refusal
+                # books a row.  Measured 2026-11-25: with the pin
+                # outside, ``node(..., properties={"p": "\ud800"})``
+                # raised and booked NO row.
+                properties_digest = _pin("properties", checked_props)
+                digest = _pin(
                     "node",
                     graph_name,
                     node_id,
                     checked_labels,
                     properties_digest,
                     seq,
-                ),
+                )
+            except GraphDatabaseError as exc:
+                name = graph_name if isinstance(graph_name, str) else ""
+                self._reject(seq, type(exc).__name__, name)
+                raise
+            record = NodeRecord(
+                graph_name=graph_name,
+                node_id=node_id,
+                labels=checked_labels,
+                properties_digest=properties_digest,
+                digest=digest,
                 seq=seq,
             )
             graph["nodes"][node_id] = (
@@ -825,19 +961,11 @@ class GraphDatabase:
                             f"parallel edge {from_id}->{to_id}"
                             f" [{edge_type}] already pinned"
                         )
-            except GraphDatabaseError as exc:
-                name = graph_name if isinstance(graph_name, str) else ""
-                self._reject(seq, type(exc).__name__, name)
-                raise
-            properties_digest = _pin("properties", checked_props)
-            record = EdgeRecord(
-                graph_name=graph_name,
-                edge_id=edge_id,
-                from_node=from_id,
-                to_node=to_id,
-                edge_type=edge_type,
-                properties_digest=properties_digest,
-                digest=_pin(
+                # The pins belong INSIDE the guarded region -- see
+                # ``graph()``: a failed pin is a refusal, and a refusal
+                # books a row.
+                properties_digest = _pin("properties", checked_props)
+                digest = _pin(
                     "edge",
                     graph_name,
                     edge_id,
@@ -846,7 +974,19 @@ class GraphDatabase:
                     edge_type,
                     properties_digest,
                     seq,
-                ),
+                )
+            except GraphDatabaseError as exc:
+                name = graph_name if isinstance(graph_name, str) else ""
+                self._reject(seq, type(exc).__name__, name)
+                raise
+            record = EdgeRecord(
+                graph_name=graph_name,
+                edge_id=edge_id,
+                from_node=from_id,
+                to_node=to_id,
+                edge_type=edge_type,
+                properties_digest=properties_digest,
+                digest=digest,
                 seq=seq,
             )
             graph["edges"][edge_id] = (
