@@ -70,6 +70,7 @@ class RunOptions:
     allow_nested_delegation: bool = False
     compaction_threshold_tokens: int | None = 60_000  # None disables compaction
     max_output_tokens: int = 4096
+    temperature: float | None = None  # sent to the provider when set; None leaves the endpoint default alone
     redact_tool_output: bool = False  # omit tool output bodies from the transcript
     redact_session_content: bool = False  # omit conversation bodies; disables transcript resume
     stream: bool = False  # yield stream_delta events while assistant text is produced (transcript unchanged)
@@ -144,7 +145,11 @@ def _build_provider(options: RunOptions) -> Any:
                     "the 'anthropic' provider needs the optional dependency; "
                     "pip install northstar-agent-runtime[anthropic]"
                 ) from error
-            return AnthropicProvider(model=options.model, max_tokens=options.max_output_tokens)
+            return AnthropicProvider(
+                model=options.model,
+                max_tokens=options.max_output_tokens,
+                temperature=options.temperature,
+            )
         raise ValueError(f"unknown provider {options.provider!r} (use 'scripted', 'anthropic' or a Provider instance)")
     return options.provider
 

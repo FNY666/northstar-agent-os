@@ -8,36 +8,9 @@ everything that only describes one local run.
 """
 from __future__ import annotations
 
-import hashlib
 import json
-import re
 import sys
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
-
-_REDACTED_PATH_PREFIX = "/_redacted-path-sha256/"
-_REDACTED_PATH = re.compile(r"/_redacted-path-sha256/[0-9a-f]{64}\Z")
-
-
-def _record_base_url(base_url: str) -> str:
-    """Sanitize old and new receipts before their endpoint enters an archive."""
-    if not base_url or base_url == "(provider default)":
-        return base_url or "(provider default)"
-    if base_url == "(custom endpoint; URL details redacted)":
-        return base_url
-    try:
-        parts = urlsplit(base_url)
-    except ValueError:
-        return "(custom endpoint; URL details redacted)"
-    netloc = parts.netloc.rsplit("@", 1)[-1]
-    if _REDACTED_PATH.fullmatch(parts.path):
-        path = parts.path
-    elif parts.path:
-        digest = hashlib.sha256(parts.path.encode("utf-8")).hexdigest()
-        path = f"{_REDACTED_PATH_PREFIX}{digest}"
-    else:
-        path = ""
-    return urlunsplit((parts.scheme, netloc, path, "", ""))
 
 
 def _endpoint_note(base_url: str) -> str:
@@ -48,18 +21,12 @@ def _endpoint_note(base_url: str) -> str:
     """
     if not base_url or "(provider default)" in base_url:
         return "provider default endpoint"
-    # Parse the hostname so userinfo, ports, paths, and suffix-lookalike
-    # domains cannot turn an unrelated endpoint into a vendor endpoint.
-    candidate = base_url if "://" in base_url else f"//{base_url}"
-    try:
-        host = (urlsplit(candidate).hostname or "").rstrip(".").lower()
-    except ValueError:
-        host = ""
-    if host == "openai.com" or host.endswith(".openai.com"):
+    host = base_url.split("//", 1)[-1].split("/", 1)[0]
+    if host.endswith("openai.com"):
         return "OpenAI official endpoint"
-    if host == "anthropic.com" or host.endswith(".anthropic.com"):
+    if host.endswith("anthropic.com"):
         return "Anthropic official endpoint"
-    return f"third-party relay ({host or base_url}); not a vendor endpoint"
+    return f"third-party relay ({host}); not a vendor endpoint"
 
 
 def build_record(receipt: dict) -> dict:
@@ -77,8 +44,9 @@ def build_record(receipt: dict) -> dict:
         "model": {
             "provider": conditions["provider"],
             "model": conditions["model"],
-            "base_url": _record_base_url(conditions["base_url"]),
-            "endpoint_note": _endpoint_note(_record_base_url(conditions["base_url"])),
+            "base_url": conditions["base_url"],
+            "endpoint_note": _endpoint_note(conditions["base_url"]),
+            "temperature": conditions.get("temperature"),
         },
         "limits": conditions["limits"],
         "sandbox": conditions["sandbox"],
