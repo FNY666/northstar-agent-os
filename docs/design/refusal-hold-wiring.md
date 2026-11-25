@@ -3927,6 +3927,55 @@ $ python3 -m pytest -q tests/test_refusal_hold_queue_wiring.py \
 581 passed, 32 subtests passed
 ```
 
+### 26.6a The whole-file census, and a FALSE KILL caught in the act
+
+The whole-file census over `job_queue.py`, run over the union of every
+suite that references it (`test_refusal_hold_queue_wiring`,
+`test_job_queue`, `test_leased_task_claim`, `test_cancellation_tombstone`):
+
+| | before this slice | after |
+|---|---|---|
+| sites | 84 | **85** |
+| killed | **75/84** | **76/85** |
+| survivors | **9** | **9** |
+
+The survivor set is **unchanged** -- the same nine, shifted by this
+slice's line offsets:
+
+| before | after | what it is |
+|---|---|---|
+| `or@1353` | `or@1405` | the `or` in the dequeue skip loop |
+| `and@1808`, `and@1812`, `and@1813`, `and@1818`, `and@1823`, `and@1828`, `and@1845`, `and@1852` | `and@1860`, `and@1864`, `and@1865`, `and@1870`, `and@1875`, `and@1880`, `and@1897`, `and@1904` | the `and` in the module's own `main()` self-check's assertion chains |
+
+Those nine are §22.8's survivors, and §22.8 says why they are a
+separate category (each conjunct of an `assert a and b` is
+individually untested).  This slice does not claim them.
+
+**The false kill, and why it matters.**  The "before" number above was
+measured by putting the PREVIOUS `job_queue.py` back while this
+slice's NEW test file was still in the tree.  The new tests fail
+against the old source -- that is what RED means -- so **every**
+mutant died from the unrelated failure and the census reported a
+flattering `84/84`.
+
+That is the mirror image of the stale-bytecode false kill the probe
+already guards against: there, a stale `.pyc` made the suite "kill" a
+fault that survived; here, a failing test file made the suite "kill"
+faults it never measured.  **The pre-flight does not catch it**, because
+the pre-flight only asks whether the suite COLLECTED -- and this suite
+collects fine, it just fails.
+
+The honest baseline was measured by putting BOTH the previous source
+AND the previous test file back: `75/84`, nine survivors.  That is the
+number the comparison above uses, and it is the number the slice's own
+§24.5 already reports.
+
+**How to apply:** a census baseline must be measured with the WHOLE
+slice reverted -- source AND tests -- or the new tests will fail on
+the old source and manufacture kills.  A census that reports a
+suspiciously perfect score against a tree that has a new test file in
+it is reporting the test file, not the mutants.
+
 ### 26.7 What this does NOT change
 
 * **A per-job refusal is still a per-job refusal.**  `blocked_by_refusal`
