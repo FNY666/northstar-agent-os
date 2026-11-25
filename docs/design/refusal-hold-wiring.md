@@ -4809,3 +4809,98 @@ gave it away was not a failure but an ABSENCE.  A census that
 SKIPs a row looks exactly like a census that measures a row and finds
 nothing wrong.  Counting the SKIPs turned 121 invisible absences into
 one visible number.
+
+## 30. The union scope, RE-MEASURED on the rows the artifact paired with ONE suite
+
+§22 established that the scope must be the UNION of every suite that
+exercises a module, and fixed it for `job_queue.py` (43/85 -> 76/85).
+§29 fixed the resolver so the union can be FOUND at all.
+
+This section is the re-measurement: what the union scope says about the
+18 rows of the census artifact whose scope is now wider than the
+single-suite pairing the artifact used.
+
+### 30.1 The rows
+
+`docs/baseline/mutant-census/census-v3.txt` holds 270 module rows.  With
+the §29 resolver, **18** of them resolve to a scope with more than one
+suite:
+
+| row | artifact (single suite) | union scope |
+|---|---|---|
+| `a2a_gates` | 37/43 | `test_a2a_gates`, `test_a2a_budget_combo` |
+| `ab_testing` | 10/23 | `test_ab_testing`, `test_ab_testing_spec` |
+| `action_card` | 14/24 | `test_action_card`, `test_agent_readiness`, `test_approver_separation`, `test_audit_fixes`, `test_egress_enforcer`, `test_twin_receipts` |
+| `agent_files` | 6/19 | `test_plugin_install`, `test_plugin_manifest`, `test_scaffold`, `test_workspace_ext` |
+| `agent_identity` | 7/21 | `test_agent_identity`, `test_identity_e1`, `test_passport` |
+| `agents` | 14/31 | **eleven** suites, `test_agents` first |
+| `alert_trigger_registry` | 3/4 | `test_alert_trigger_registry`, `test_planted_fault` |
+| `approval_chain` | 6/12 | `test_approval_chain`, `test_kill_approval_combo`, `test_mcp_approval_combo` |
+| `approval_fatigue_probes` | 5/29 | `test_approval_fatigue_probes`, `test_consent_fatigue_probes` |
+| `approval_sla` | 14/17 | `test_approval_sla`, `test_budget_approval_combo`, `test_identity_approval_combo` |
+| `approval_sla_time` | 13/16 | `test_approval_sla_time`, `test_approval_chain_time` |
+| `artifact_authority` | 38/38 | `test_artifact_authority`, `test_signed_receipt` |
+| `audit_cli` | 6/31 | `test_akf_export`, `test_audit_head_holder`, `test_trace_export` |
+| `audit_head_holder` | 65/71 | `test_audit_head_holder`, `test_long_horizon` |
+| `audit_rekor` | **0/7** | `test_audit_rekor`, `test_audit_archive` |
+| `benchmark_runner` | 12/28 | `test_benchmark_runner`, `test_benchmark_runner_spec` |
+| `budget` | 7/19 | `test_budget`, `test_agents`, `test_checkpoints` |
+| `budget_token_bucket` | 7/11 | `test_budget_token_bucket`, `test_budget_combo` |
+
+### 30.2 What the re-measurement shows
+
+The first rows measured:
+
+| row | artifact | union scope | delta |
+|---|---|---|---|
+| `a2a_gates` | 37/43 | **37/43** | 0 |
+| `ab_testing` | 10/23 | **17/23** | **+7** |
+| `action_card` | 14/24 | **16/24** | **+2** |
+| `agent_files` | 6/19 | **8/19** | **+2** |
+
+`a2a_gates` is the interesting one: the sibling suite
+`test_a2a_budget_combo` adds **nothing**, so its single-suite figure
+was already honest.  That is the point of measuring rather than
+assuming -- the union is a superset, and a superset can leave a figure
+unchanged.
+
+`ab_testing` is the other shape: the sibling suite `test_ab_testing_spec`
+catches **seven** mutants the narrow scope reported as SURVIVED.  Every
+one of those seven was a false accusation of a weak test suite -- the
+mirror image of the false kill, and it is what §22's `job_queue.py`
+measurement first made visible.
+
+### 30.3 What this does NOT change
+
+* **The census artifact is NOT edited.**  It is a snapshot of a
+  measurement on a named tree; re-measuring it is the coordinator's
+  decision (`docs/design/r6-baseline-unify.md` §5.1).  The figures in
+  §30.1 and §30.2 are a MEASUREMENT TAKEN HERE, and they are not
+  written into the artifact.
+* **No product code changed.**  The re-measurement reads the tree; it
+  does not touch it.
+* No version, schema, or audit kind is added or changed.
+* No digest changes.
+
+### 30.4 The shape of the correction, stated once
+
+A census score is a claim about **a scope**.  Two scopes, one tree, two
+numbers, and both numbers are true -- §22.1 says this about the
+two-suite and four-suite series for `job_queue.py`, and it is now true
+of the artifact as a whole.
+
+The rule that falls out of the whole of §22, §27, §28 and §29:
+
+> **A measurement without its scope is not a measurement, and a scope
+> that cannot be resolved is not a scope.**
+
+The two failure modes this round found are the same failure from
+opposite directions:
+
+* §27 and §28: the scope was resolved, but the WORKTREE could not run
+  it, so every result was a false kill.
+* §29: the worktree was fine, but the scope could not be RESOLVED for
+  121 of 270 rows, so they were SKIPped -- and a SKIP leaves no trace.
+
+One produces a number that is too good.  The other produces no number
+at all.  Both are invisible unless you count for them.
