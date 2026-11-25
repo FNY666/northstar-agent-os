@@ -65,6 +65,33 @@ class ResponseBoundaryTests(unittest.TestCase):
             with self.assertRaisesRegex(RekorError, "1 MiB byte cap"):
                 audit_rekor._post_json("https://rekor.example", {}, timeout=1)
 
+    def test_a_response_of_exactly_the_cap_is_accepted(self):
+        # The byte cap is `len(raw) > MAX`, so a response of EXACTLY
+        # ``MAX`` bytes is inside the cap and must be accepted.
+        #
+        # The test above cannot tell `>` from `>=`: it feeds ``MAX + 1``
+        # bytes, which both spellings reject.  Only the boundary input
+        # distinguishes them, so it needs its own test -- otherwise the
+        # guard's off-by-one is invisible and the mutant ``gt@127``
+        # SURVIVES.
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self, _size):
+                return b"x" * audit_rekor.MAX_REKOR_RESPONSE_BYTES
+
+        with mock.patch("audit_rekor.urllib.request.urlopen", return_value=Response()):
+            # The body is not JSON, so it is rejected as a BAD RESPONSE --
+            # not as a byte-cap violation.  The distinction is the whole
+            # point: the byte cap did NOT fire.
+            with self.assertRaisesRegex(RekorError, "bad response") as caught:
+                audit_rekor._post_json("https://rekor.example", {}, timeout=1)
+        self.assertNotIn("byte cap", str(caught.exception))
+
     def test_rekor_response_rejects_duplicate_keys_and_nonstandard_constants(self):
         class Response:
             def __init__(self, body):
@@ -306,6 +333,225 @@ class RekorTests(unittest.TestCase):
         a = anchor_statement(feed_sha256="ab", head_chain_hash="cd", records=1, anchored_at="t")
         b = anchor_statement(records=1, anchored_at="t", head_chain_hash="cd", feed_sha256="ab")
         self.assertEqual(a, b)
+
+
+class MalformedResponseTests(unittest.TestCase):
+    """The client's REJECTION paths, fed the malformed responses they exist for.
+
+    WHY THIS CLASS EXISTS (measured 2026-11-25)
+    --------------------------------------------
+    The mutant census scores ``audit_rekor.py`` at **0/7**: every one of
+    its seven mutants SURVIVES.  That is not a broken instrument -- the
+    module's own suite passes (14 passed, 1 skipped) and a hand-planted
+    ``or@165`` survives too, so the score is real COVERAGE DEBT.
+
+    The seven survivors are all the same shape: a defensive guard that
+    rejects a malformed response, where the guard is an ``or`` (or a
+    chain of ``or``s).  The happy-path tests never produce a malformed
+    response, so the guard's rejection branch is never taken, and
+    mutating ``or`` to ``and`` changes nothing the suite can see.
+
+    The rule this class follows: **a guard needs a CRAFTED INPUT.**  A
+    guard that only ever reads a well-formed response is unverifiable,
+    and an unverifiable guard is a guard that can be deleted without
+    anyone noticing.
+
+    Each test below pins ONE rejection path, and each asserts the
+    MESSAGE as well as the type, so a test that passes for the wrong
+    reason (some other error being raised) cannot masquerade as a kill.
+    """
+
+    class _Response:
+        """A urlopen stand-in that returns a fixed JSON body."""
+
+        def __init__(self, body):
+            self.body = body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, _size):
+            return self.body
+
+    def _post(self, body):
+        """``_post_json`` against a stubbed response, returning the body."""
+        with mock.patch(
+            "audit_rekor.urllib.request.urlopen",
+            return_value=self._Response(json.dumps(body).encode("utf-8")),
+        ):
+            return audit_rekor._post_json("https://rekor.example", {}, timeout=1)
+
+    def test_submit_rejects_a_response_that_is_not_a_dict(self):
+        # `not isinstance(response, dict)` -- a list response must be
+        # rejected on the TYPE, before the length is ever looked at.
+        with self.assertRaisesRegex(RekorError, "unexpected submit response shape"):
+            with mock.patch(
+                "audit_rekor.urllib.request.urlopen",
+                return_value=self._Response(b'["not", "a", "dict"]'),
+            ):
+                submit_entry("https://rekor.example", {}, timeout=1)
+
+    def test_submit_rejects_a_dict_that_is_not_a_single_entry(self):
+        # `len(response) != 1` -- a dict with TWO entries is the shape the
+        # guard exists to reject, and the guard is an `or` with the type
+        # check.  With a dict, the type check is False, so the length
+        # check is the only thing standing between this and a wrong
+        # anchor.
+        with self.assertRaisesRegex(RekorError, "unexpected submit response shape"):
+            with mock.patch(
+                "audit_rekor.urllib.request.urlopen",
+                return_value=self._Response(b'{"a": {"logIndex": 1}, "b": {"logIndex": 2}}'),
+            ):
+                submit_entry("https://rekor.example", {}, timeout=1)
+
+    def test_retrieve_rejects_an_empty_entry_list(self):
+        # `not response` -- an EMPTY list is a list, so the type check
+        # passes and the emptiness check is the one that must fire.
+        with self.assertRaisesRegex(RekorError, "rekor returned no entries"):
+            with mock.patch(
+                "audit_rekor.urllib.request.urlopen",
+                return_value=self._Response(b"[]"),
+            ):
+                retrieve_by_index("https://rekor.example", 1, timeout=1)
+
+    def test_retrieve_rejects_a_first_entry_that_is_not_a_single_item(self):
+        # `len(first) != 1` -- same shape as the submit guard: the first
+        # element is a dict, so the length check must be the one that
+        # fires.
+        with self.assertRaisesRegex(RekorError, "unexpected retrieve response shape"):
+            with mock.patch(
+                "audit_rekor.urllib.request.urlopen",
+                return_value=self._Response(b'[{"a": {"body": "x"}, "b": {"body": "y"}}]'),
+            ):
+                retrieve_by_index("https://rekor.example", 1, timeout=1)
+
+    def test_retrieve_rejects_an_entry_without_a_body(self):
+        # `'body' not in entry` -- the entry IS a dict, so the type check
+        # passes and the missing-key check must be the one that fires.
+        with self.assertRaisesRegex(RekorError, "retrieved entry has no body"):
+            with mock.patch(
+                "audit_rekor.urllib.request.urlopen",
+                return_value=self._Response(b'[{"uuid": {"logIndex": 1}}]'),
+            ):
+                retrieve_by_index("https://rekor.example", 1, timeout=1)
+
+    def test_anchor_refuses_a_feed_with_no_chained_head(self):
+        # `not isinstance(head, str) or not head` -- a manifest whose
+        # head_chain_hash is None (an unchained feed) must be refused.
+        # The type check is False for a str and True for None; the guard
+        # is an `or`, so BOTH halves have to be exercised.
+        #
+        # The manifest is stubbed rather than produced by a real feed:
+        # the sample feed IS chained, so it yields a str head and would
+        # not reach this branch at all.
+        manifest = {
+            "anchor": "northstar-audit-anchor/1",
+            "chain": "northstar-audit-chain/1",
+            "feed_sha256": "ab" * 32,
+            "head_chain_hash": None,
+            "records": 3,
+        }
+        with mock.patch("audit_chain.anchor_manifest", return_value=manifest):
+            with self.assertRaisesRegex(ValueError, "no chained head to anchor"):
+                anchor_feed_head(self._feed_path(), _SEED, rekor_url="https://rekor.example")
+
+    def test_anchor_refuses_a_feed_whose_head_is_empty(self):
+        # The SECOND half of the same guard: a head that is a str but
+        # EMPTY.  The type check passes and the emptiness check must
+        # fire, so this test is the one that distinguishes the guard
+        # from `not isinstance(head, str)`.
+        manifest = {
+            "anchor": "northstar-audit-anchor/1",
+            "chain": "northstar-audit-chain/1",
+            "feed_sha256": "ab" * 32,
+            "head_chain_hash": "",
+            "records": 3,
+        }
+        with mock.patch("audit_chain.anchor_manifest", return_value=manifest):
+            with self.assertRaisesRegex(ValueError, "no chained head to anchor"):
+                anchor_feed_head(self._feed_path(), _SEED, rekor_url="https://rekor.example")
+
+    def _feed_path(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = Path(tmp.name) / "feed.ndjson"
+        _sample_feed(path)
+        return path
+
+    def test_verify_in_log_falls_back_to_the_default_url(self):
+        # `rekor_url or anchor.get("rekor_url") or REKOR_V1_DEFAULT` --
+        # the FIRST `or` is what selects the anchor's own recorded URL
+        # when the caller passes none, and the SECOND is what falls back
+        # to the default when the anchor records none either.
+        #
+        # With no caller URL and no recorded URL, the default is used.
+        # The assertion is on the URL the client actually POSTS to, so
+        # the test cannot pass by accident.
+        seen = []
+
+        class _Recorder:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self, _size):
+                return b"[]"
+
+        def _urlopen(request, timeout=None):
+            seen.append(request.full_url)
+            return _Recorder()
+
+        anchor = {"log_index": 7, "pubkey": "00" * 32}
+        with mock.patch("audit_rekor.urllib.request.urlopen", side_effect=_urlopen):
+            # The stub returns an empty list, so the retrieval refuses --
+            # which is the correct behaviour for a log that has no such
+            # entry.  The URL is what this test is about.
+            with self.assertRaisesRegex(RekorError, "rekor returned no entries"):
+                verify_anchor_in_log(anchor)
+        self.assertTrue(seen, "the client never opened a connection")
+        self.assertTrue(
+            seen[0].startswith(REKOR_V1_DEFAULT),
+            f"expected the default log url, got {seen[0]}",
+        )
+
+    def test_verify_in_log_prefers_the_anchors_recorded_url(self):
+        # The OTHER half of the chain: when the anchor records a URL and
+        # the caller passes none, the anchor's URL is the one used.
+        # Without this test, the `or` chain's FIRST link is unverified.
+        seen = []
+
+        class _Recorder:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self, _size):
+                return b"[]"
+
+        def _urlopen(request, timeout=None):
+            seen.append(request.full_url)
+            return _Recorder()
+
+        anchor = {
+            "log_index": 7,
+            "pubkey": "00" * 32,
+            "rekor_url": "https://log.example/",
+        }
+        with mock.patch("audit_rekor.urllib.request.urlopen", side_effect=_urlopen):
+            with self.assertRaisesRegex(RekorError, "rekor returned no entries"):
+                verify_anchor_in_log(anchor)
+        self.assertTrue(seen, "the client never opened a connection")
+        self.assertTrue(
+            seen[0].startswith("https://log.example"),
+            f"expected the anchor's own log url, got {seen[0]}",
+        )
 
 
 @unittest.skipUnless(
