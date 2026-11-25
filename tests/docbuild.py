@@ -225,6 +225,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "provenance_taint",
         "run_setup",
         "sdk",
+        "acp_server",
         "scaffold",
         "sessions",
         "session_lease",
