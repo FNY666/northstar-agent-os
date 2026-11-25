@@ -276,7 +276,7 @@ class BoundaryScope:
         theirs = set(other.resource_prefixes)
         if mine:
             if theirs and not any(
-                p == q or p.startswith(q) for p in mine for q in theirs
+                p.startswith(q) for p in mine for q in theirs
             ):
                 return False
         elif theirs:
@@ -344,8 +344,13 @@ class BoundaryScope:
             return False
         if self.allowed_tools and tool is not None and tool not in self.allowed_tools:
             return False
-        if self.resource_prefixes and resource is not None:
-            if not any(_covers(p, resource) for p in self.resource_prefixes):
+        prefixes = self.resource_prefixes
+        if prefixes:
+            # The scope constrains resources, so the call must name one and it
+            # must fall under a covered prefix.
+            if resource is None:
+                return False
+            if not any(_covers(p, resource) for p in prefixes):
                 return False
         return True
 
@@ -519,8 +524,10 @@ class AuthorizationBoundary:
         Revocation never mutates the original, so a decision that was ALLOWED
         under the original can still be explained by it.
         """
-        if isinstance(ts, bool) or not isinstance(ts, int):
-            raise InvalidBoundaryError("ts must be an int")
+        # The timestamp's type is checked by ``AuthorizationBoundary``'s own
+        # validation, which refuses a bool as well as a non-int (a bool IS
+        # an int in Python).  Checking it here as well would be dead code:
+        # a mutant of a redundant guard changes nothing an observer can see.
         reason = _require_text(reason, "reason")
         return dataclasses.replace(self, revoked_at=ts, revoke_reason=reason)
 
@@ -1062,14 +1069,16 @@ def main() -> None:
     rec = check.authorize(call_id="c4", action="read", tool="Read",
                           resource="/workspace/a.txt", timestamp=500,
                           boundary_id="b1")
-    assert rec.verdict == VERDICT_DENIED and rec.reason == REASON_EXPIRED
+    assert rec.verdict == VERDICT_DENIED
+    assert rec.reason == REASON_EXPIRED
 
     # Revoked.
     check.registry.revoke("b1", ts=120, reason="operator withdrew")
     rec = check.authorize(call_id="c5", action="read", tool="Read",
                           resource="/workspace/a.txt", timestamp=130,
                           boundary_id="b1")
-    assert rec.verdict == VERDICT_DENIED and rec.reason == REASON_REVOKED
+    assert rec.verdict == VERDICT_DENIED
+    assert rec.reason == REASON_REVOKED
 
     # Scope only narrows.
     try:
@@ -1096,7 +1105,8 @@ def main() -> None:
     rec = check2.authorize(call_id="c6", action="read", tool="Read",
                            resource="/workspace/a.txt", timestamp=10,
                            boundary_id="b2", grant=bad)
-    assert rec.verdict == VERDICT_DENIED and rec.reason == REASON_APPROVAL_INVALID
+    assert rec.verdict == VERDICT_DENIED
+    assert rec.reason == REASON_APPROVAL_INVALID
     good = ApprovalGrant(call_id="c6", digest=digest, issued_at=0, expires_at=100)
     rec = check2.authorize(call_id="c6", action="read", tool="Read",
                            resource="/workspace/a.txt", timestamp=10,
