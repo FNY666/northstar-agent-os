@@ -347,7 +347,7 @@ class WheelDataFileTests(unittest.TestCase):
         # surface shows up here and nowhere else until this number moves.
         # 1615 == 1614 (pre-finding_gate) + 1 (finding_gate).
         self.assertIn("finding_gate", top)
-        self.assertEqual(len(top), 1617, sorted(top)[:5])
+        self.assertEqual(len(top), 1618, sorted(top)[:5])
 
 
 class InstalledSurfaceTests(unittest.TestCase):
