@@ -27,6 +27,7 @@ from zero_knowledge import (
     UnknownCircuitError,
     UnknownProofError,
     ZeroKnowledge,
+    ZeroKnowledgeError,
     zero_knowledge_audit_event,
 )
 
@@ -369,3 +370,218 @@ def test_15_main_self_check():
     )
     assert r.returncode == 0, r.stderr
     assert "zero-knowledge OK: setup, prove, verify, retire, refusals" in r.stdout
+
+
+# ---------------------------------------------------------------------------
+# 16. The digest-pin defects (B173 slice, measured 2026-11-25)
+#
+# `zero_knowledge.py` carried four defects of the same family that
+# `graph_database.py` and `status_page.py` carried before their slices
+# (commits 66e6ccd4 and 9f01f1ef).  Measured on the tree as it stood:
+#
+# 1. `ZeroKnowledge.setup(circuit_id="\ud800", ...)` raised
+#    `canonical_json.JcsError` -- a ValueError, but NOT a
+#    `ZeroKnowledgeError` -- so the module's own guards did not catch
+#    it and the caller's taxonomy was bypassed.
+# 2. The stdlib fallback ACCEPTED a lone surrogate and emitted non-JCS
+#    bytes: b'{"t":"list","v":[{"t":"str","v":"\\ud800"}]}'.
+# 3. `canonical_json` serializes an integer outside the safe range as
+#    an IEEE-754 double (RFC 8785 Appendix B note (2)), so 2**53 and
+#    2**53+1 canonicalize to the SAME bytes.  The seq rides in the
+#    AUDIT-EVENT pin, so an audit event whose seq was bumped by one
+#    still verified.
+# 4. A failed pin booked NO `rejected` row: `setup()`'s `_digest_pin`
+#    calls sat outside the `try` that books the row.
+#
+# Note the per-method shape: `prove()` and `retire()` ALREADY
+# translate the canonicalizer's error into the module's own error and
+# DO book a `rejected` row.  The escape is `setup()`'s pin and the
+# record `verify()` methods.
+
+
+SURROGATE = "\ud800"
+
+
+def test_a_refusal_raises_the_modules_own_error_type():
+    """The module's own taxonomy, not the sibling helper's.
+
+    `JcsError` is a `ValueError`, so a caller guarding on
+    `except ValueError` would treat a refused mutation as a parse
+    error.  The module's error must be what escapes.
+    """
+    zk = ZeroKnowledge()
+    with pytest.raises(ZeroKnowledgeError):
+        zk.setup(SURROGATE, 1, ceremony="transparent",
+                 constraint_digest=CONSTRAINT)
+
+
+def test_a_failed_mutation_still_consumes_its_seq():
+    """A failed pin at a valid seq books a row and consumes the seq.
+
+    This is the second refusal convention (`docs/design/
+    refusal-hold-wiring.md` §21.3): a malformed ARGUMENT at a valid
+    seq consumes the seq and books a `rejected` row.  Without this,
+    the trail cannot tell "the ledger refused this circuit" from
+    "the ledger never saw it".
+    """
+    zk = ZeroKnowledge()
+    with pytest.raises(ZeroKnowledgeError):
+        zk.setup(SURROGATE, 1, ceremony="transparent",
+                 constraint_digest=CONSTRAINT)
+    kinds = [e["kind"] for e in zk.audit_log(2)]
+    assert "zero-knowledge.rejected" in kinds
+    # the seq was consumed: the next claim must be strictly greater
+    with pytest.raises(SeqOrderError):
+        zk.setup("c1", 1, ceremony="transparent",
+                 constraint_digest=CONSTRAINT)
+    zk.setup("c2", 2, ceremony="transparent", constraint_digest=CONSTRAINT)
+    assert zk.stats(3)["circuits"] == 1
+
+
+def test_both_configurations_refuse_a_lone_surrogate():
+    """The shipped path and the fallback must agree about LEGALITY.
+
+    They need not agree about the resulting digest bytes -- the
+    fallback's tagged form is deliberately its own string -- but a
+    value one refuses must be refused by both.
+    """
+    saved = zero_knowledge._jcs_dumps
+    try:
+        assert zero_knowledge._jcs_dumps is not None, \
+            "the shipped path is not installed"
+
+        zero_knowledge._jcs_dumps = saved
+        with pytest.raises(ZeroKnowledgeError):
+            zero_knowledge._canonical([SURROGATE])
+
+        zero_knowledge._jcs_dumps = None
+        with pytest.raises(ZeroKnowledgeError):
+            zero_knowledge._canonical([SURROGATE])
+    finally:
+        zero_knowledge._jcs_dumps = saved
+
+
+def test_both_configurations_accept_a_value_both_can_canonicalize():
+    """The control: the fallback must not refuse everything.
+
+    Without this, a fallback that refused every input would satisfy
+    the test above vacuously.
+    """
+    saved = zero_knowledge._jcs_dumps
+    try:
+        for cfg in (saved, None):
+            zero_knowledge._jcs_dumps = cfg
+            assert zero_knowledge._canonical(["ordinary", 7, ["a"]])
+    finally:
+        zero_knowledge._jcs_dumps = saved
+
+
+def test_a_seq_above_the_safe_range_is_refused():
+    """A seq that cannot be pinned must not be accepted.
+
+    Without this bound, 2**53 and 2**53+1 canonicalize to the same
+    bytes, so the digest stops pinning the seq.
+    """
+    zk = ZeroKnowledge()
+    with pytest.raises(ZeroKnowledgeError):
+        zk.setup("c1", 2 ** 53, ceremony="transparent",
+                 constraint_digest=CONSTRAINT)
+
+
+def test_an_oversized_seq_is_refused_as_a_malformed_seq():
+    """The refusal's SHAPE, not just its type.
+
+    A malformed SEQ consumes nothing and books nothing -- the call
+    never reached the ledger.  A failed PIN at a valid seq consumes
+    the seq and books a row.  Both raise `ZeroKnowledgeError`, so only
+    the shape distinguishes them.
+    """
+    zk = ZeroKnowledge()
+    with pytest.raises(ZeroKnowledgeError):
+        zk.setup("c1", 2 ** 53, ceremony="transparent",
+                 constraint_digest=CONSTRAINT)
+    # nothing booked
+    assert zk.audit_log(1) == ()
+    # nothing consumed: seq 1 is still claimable
+    zk.setup("c1", 1, ceremony="transparent", constraint_digest=CONSTRAINT)
+    assert zk.stats(2)["circuits"] == 1
+
+
+def test_the_audit_event_pin_pins_the_seq():
+    """The control: the digest must pin the seq.
+
+    This is the property the safe-range bound protects.  The seq rides
+    in the audit-event pin, so two DIFFERENT seqs must produce two
+    DIFFERENT digests.
+    """
+    kind = AUDIT_KINDS[0]
+    ev = zero_knowledge_audit_event(kind, 7, circuit_id="c1")
+    other = zero_knowledge_audit_event(kind, 8, circuit_id="c1")
+    assert ev["digest"] != other["digest"], \
+        "the audit-event pin does not pin the seq"
+
+
+def test_an_oversized_seq_cannot_be_pinned_at_all():
+    """A seq that cannot be pinned is refused before any pin is minted.
+
+    Above the safe range JCS serializes the integer as an IEEE-754
+    double, so 2**53 and 2**53+1 would canonicalize to the SAME bytes
+    -- the pin would stop pinning.  The bound refuses the seq at the
+    door, so no such audit event can be minted.
+    """
+    kind = AUDIT_KINDS[0]
+    with pytest.raises(ZeroKnowledgeError):
+        zero_knowledge_audit_event(kind, 2 ** 53, circuit_id="c1")
+    with pytest.raises(ZeroKnowledgeError):
+        zero_knowledge_audit_event(kind, 2 ** 53 + 1, circuit_id="c1")
+
+
+def test_the_safe_range_boundary_is_accepted():
+    """The control: the bound must not over-refuse.
+
+    2**53 - 1 is the last integer JCS pins exactly.
+    """
+    zk = ZeroKnowledge()
+    zk.setup("c1", 2 ** 53 - 1, ceremony="transparent",
+             constraint_digest=CONSTRAINT)
+    assert zk.stats(2 ** 53 - 1)["circuits"] == 1
+    ev = zero_knowledge_audit_event(AUDIT_KINDS[0], 2 ** 53 - 1,
+                                    circuit_id="c1")
+    assert ev["digest"]
+
+
+def test_a_pin_refuses_an_integer_outside_the_safe_range():
+    """A payload integer that cannot be pinned must be refused.
+
+    The shipped path loses the distinction between 2**53 and
+    2**53+1, so a pin over such a payload stops pinning it.
+    """
+    with pytest.raises(ZeroKnowledgeError):
+        zero_knowledge._canonical([2 ** 53])
+    with pytest.raises(ZeroKnowledgeError):
+        zero_knowledge._canonical([2 ** 53 + 1])
+
+
+def test_a_pin_still_accepts_the_last_safe_integer():
+    """The control: the pin refusal must not over-reach."""
+    assert zero_knowledge._canonical([2 ** 53 - 1])
+
+
+def test_verify_answers_false_for_a_record_it_cannot_canonicalize():
+    """`verify()` answers a question; a question is not an exception.
+
+    The record's digest cannot be recomputed over a lone surrogate, so
+    the answer is "not intact" -- `False`.  It must not raise.
+    """
+    rec = zero_knowledge.SetupRecord(
+        circuit_id=SURROGATE,
+        ceremony="transparent",
+        constraint_digest=CONSTRAINT,
+        participants=(),
+        toxic_waste="n/a",
+        proving_key_digest="sha256:" + "0" * 64,
+        verification_key_digest="sha256:" + "0" * 64,
+        digest="sha256:" + "0" * 64,
+        seq=1,
+    )
+    assert rec.verify() is False

@@ -61,7 +61,13 @@ SCHEMA = "northstar.zero-knowledge.v1"
 AUDIT_SCHEMA = "audit.ndjson/1"
 
 _DIGEST_PREFIX = "sha256:"
-_MAX_INT = 2 ** 53
+#: Largest integer JCS pins exactly (RFC 8785 Appendix B note (1)):
+#: (-(2**53)+1) .. ((2**53)-1).  The house bound -- `job_queue.py`,
+#: `graph_database.py`, `status_page.py`, `grant_pin_ledger.py` and
+#: `profiler.py` all use the same value.  Above it JCS serializes an
+#: IEEE-754 double (Appendix B note (2)), so 2**53 and 2**53+1
+#: canonicalize to the SAME bytes and the digest stops pinning.
+_MAX_INT = 2 ** 53 - 1
 _MAX_ID_LEN = 128
 
 # Pinned setup-ceremony vocabulary. "transparent" needs no trusted party
@@ -166,6 +172,13 @@ class AuditKindError(ZeroKnowledgeError):
 def _check_seq(seq: Any) -> int:
     if isinstance(seq, bool) or not isinstance(seq, int):
         raise SeqOrderError(f"seq must be an int, got {type(seq).__name__}")
+    if seq > _MAX_INT:
+        # A seq above the safe range cannot be pinned: JCS serializes it
+        # as an IEEE-754 double, so 2**53 and 2**53+1 canonicalize to
+        # the same bytes and the audit-event pin stops pinning the seq.
+        # Refuse it at the door -- a malformed SEQ consumes nothing and
+        # books nothing.
+        raise SeqOrderError(f"seq exceeds the safe range (max {_MAX_INT})")
     return seq
 
 
@@ -249,9 +262,42 @@ def _check_participants(value: Any) -> Tuple[str, ...]:
 # ---------------------------------------------------------------------------
 
 
+def _refuse_unsafe_int(value: Any) -> None:
+    """Refuse an integer outside the safe range, anywhere in a payload.
+
+    ``canonical_json`` serializes an integer outside the safe range as an
+    IEEE-754 double (RFC 8785 Appendix B note (2)), so 2**53 and
+    2**53+1 canonicalize to the SAME bytes -- above the range the digest
+    stops pinning what it claims to pin.  The stdlib fallback already
+    refused such an integer; this makes the shipped path agree with it,
+    and extends the refusal to integers nested in lists and mappings.
+    """
+    if isinstance(value, bool):
+        return
+    if isinstance(value, int):
+        if abs(value) > _MAX_INT:
+            raise ZeroKnowledgeError("integer outside safe range")
+        return
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            _refuse_unsafe_int(item)
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            _refuse_unsafe_int(key)
+            _refuse_unsafe_int(item)
+
+
 def _canonical(payload: Any) -> bytes:
     if _jcs_dumps is not None:
-        return _jcs_dumps(payload).encode("utf-8")  # type: ignore
+        _refuse_unsafe_int(payload)
+        try:
+            return _jcs_dumps(payload).encode("utf-8")  # type: ignore
+        except ValueError as exc:
+            # `canonical_json.JcsError` is a ValueError, but NOT a
+            # `ZeroKnowledgeError` -- so the module's own guards would be
+            # dead for it.  Translate it into this module's taxonomy.
+            raise ZeroKnowledgeError(f"unencodable payload: {exc}") from exc
 
     def _tag(v: Any) -> Any:
         if isinstance(v, bool):
@@ -265,6 +311,16 @@ def _canonical(payload: Any) -> bytes:
                 raise ZeroKnowledgeError("non-finite float refused")
             return {"t": "float", "v": repr(v)}
         if isinstance(v, str):
+            for char in v:
+                code = ord(char)
+                if 0xD800 <= code <= 0xDFFF:
+                    # RFC 8785 §3.2.2.3: a lone surrogate MUST cause a
+                    # compliant JCS implementation to terminate with an
+                    # appropriate error.  The shipped path refuses it;
+                    # the fallback must agree about LEGALITY.
+                    raise ZeroKnowledgeError(
+                        f"lone surrogate U+{code:04X} is not JCS-serializable"
+                    )
             return {"t": "str", "v": v}
         if isinstance(v, (list, tuple)):
             return {"t": "list", "v": [_tag(i) for i in v]}
@@ -285,6 +341,22 @@ def _digest_pin(payload: Any, tag: str) -> str:
     return _DIGEST_PREFIX + hashlib.sha256(
         tag.encode("utf-8") + b"\x1f" + _canonical(payload)
     ).hexdigest()
+
+
+def _verify_pin(digest: str, payload: Any, tag: str) -> bool:
+    """Does ``digest`` pin ``payload``?  Answer, never raise.
+
+    A record whose payload cannot be canonicalized (a lone surrogate, an
+    integer outside the safe range) is NOT intact -- the answer is
+    ``False``.  Recomputing the pin for such a record would raise the
+    canonicalizer's error out of a method whose whole job is to answer
+    a question about integrity.
+    """
+    try:
+        recomputed = _digest_pin(payload, tag)
+    except ZeroKnowledgeError:
+        return False
+    return digest == recomputed
 
 
 def _binding_digest(circuit_id: str, inputs_hex: str) -> str:
@@ -339,7 +411,8 @@ class SetupRecord:
         }
 
     def verify(self) -> bool:
-        expect = _digest_pin(
+        return _verify_pin(
+            self.digest,
             (
                 self.circuit_id,
                 self.ceremony,
@@ -349,7 +422,6 @@ class SetupRecord:
             ),
             "setup",
         )
-        return self.digest == expect
 
 
 @dataclass(frozen=True)
@@ -386,7 +458,8 @@ class ProofRecord:
         }
 
     def verify(self) -> bool:
-        expect = _digest_pin(
+        return _verify_pin(
+            self.digest,
             (
                 self.proof_id,
                 self.circuit_id,
@@ -397,7 +470,6 @@ class ProofRecord:
             ),
             "proof-record",
         )
-        return self.digest == expect
 
 
 @dataclass(frozen=True)
@@ -434,7 +506,8 @@ class VerifyReport:
         }
 
     def verify(self) -> bool:
-        expect = _digest_pin(
+        return _verify_pin(
+            self.digest,
             (
                 self.proof_id,
                 self.circuit_id,
@@ -445,7 +518,6 @@ class VerifyReport:
             ),
             "verification",
         )
-        return self.digest == expect
 
 
 @dataclass(frozen=True)
@@ -470,8 +542,7 @@ class RetireRecord:
         }
 
     def verify(self) -> bool:
-        expect = _digest_pin((self.circuit_id, self.reason), "retire")
-        return self.digest == expect
+        return _verify_pin(self.digest, (self.circuit_id, self.reason), "retire")
 
 
 # ---------------------------------------------------------------------------
@@ -589,23 +660,17 @@ class ZeroKnowledge:
                     raise DuplicateCircuitError(
                         f"circuit {circuit_id!r} already has a setup"
                     )
-            except ZeroKnowledgeError as exc:
-                self._fail(seq, exc, circuit_id=str(circuit_id))
-            proving_key_digest = _digest_pin(
-                (circuit_id, constraint_digest, ceremony), "proving-key"
-            )
-            verification_key_digest = _digest_pin(
-                (circuit_id, ceremony, "verification-key"), "verification-key"
-            )
-            record = SetupRecord(
-                circuit_id=circuit_id,
-                ceremony=ceremony,
-                constraint_digest=constraint_digest,
-                participants=participants,
-                toxic_waste=toxic_waste,
-                proving_key_digest=proving_key_digest,
-                verification_key_digest=verification_key_digest,
-                digest=_digest_pin(
+                # The pins live INSIDE the guarded region: a pin that
+                # cannot be computed is a refusal at a valid seq, so it
+                # consumes the seq and books a `rejected` row.  Outside
+                # the region it would escape with no trace.
+                proving_key_digest = _digest_pin(
+                    (circuit_id, constraint_digest, ceremony), "proving-key"
+                )
+                verification_key_digest = _digest_pin(
+                    (circuit_id, ceremony, "verification-key"), "verification-key"
+                )
+                digest = _digest_pin(
                     (
                         circuit_id,
                         ceremony,
@@ -614,7 +679,18 @@ class ZeroKnowledge:
                         toxic_waste,
                     ),
                     "setup",
-                ),
+                )
+            except ZeroKnowledgeError as exc:
+                self._fail(seq, exc, circuit_id=str(circuit_id))
+            record = SetupRecord(
+                circuit_id=circuit_id,
+                ceremony=ceremony,
+                constraint_digest=constraint_digest,
+                participants=participants,
+                toxic_waste=toxic_waste,
+                proving_key_digest=proving_key_digest,
+                verification_key_digest=verification_key_digest,
+                digest=digest,
                 seq=seq,
             )
             self._setups[circuit_id] = record
@@ -664,24 +740,16 @@ class ZeroKnowledge:
                     witness_bytes = _canonical(witness)
                 except Exception as exc:
                     raise BadWitnessError(f"witness unencodable: {exc}")
-            except ZeroKnowledgeError as exc:
-                self._fail(
-                    seq, exc, circuit_id=str(circuit_id), proof_id=str(proof_id)
+                # The pins live INSIDE the guarded region, so a pin that
+                # cannot be computed consumes the seq and books a
+                # `rejected` row rather than escaping with no trace.
+                inputs_hex = inputs_bytes.hex()
+                witness_pin = _digest_pin((witness_bytes.hex(),), "witness")
+                statement_digest = _binding_digest(circuit_id, inputs_hex)
+                proof_pin = _proof_pin(
+                    setup.proving_key_digest, statement_digest, witness_pin
                 )
-            inputs_hex = inputs_bytes.hex()
-            witness_pin = _digest_pin((witness_bytes.hex(),), "witness")
-            statement_digest = _binding_digest(circuit_id, inputs_hex)
-            proof_pin = _proof_pin(
-                setup.proving_key_digest, statement_digest, witness_pin
-            )
-            record = ProofRecord(
-                proof_id=proof_id,
-                circuit_id=circuit_id,
-                statement_digest=statement_digest,
-                inputs_digest=inputs_hex,
-                witness_pin=witness_pin,
-                proof_pin=proof_pin,
-                digest=_digest_pin(
+                digest = _digest_pin(
                     (
                         proof_id,
                         circuit_id,
@@ -691,7 +759,19 @@ class ZeroKnowledge:
                         proof_pin,
                     ),
                     "proof-record",
-                ),
+                )
+            except ZeroKnowledgeError as exc:
+                self._fail(
+                    seq, exc, circuit_id=str(circuit_id), proof_id=str(proof_id)
+                )
+            record = ProofRecord(
+                proof_id=proof_id,
+                circuit_id=circuit_id,
+                statement_digest=statement_digest,
+                inputs_digest=inputs_hex,
+                witness_pin=witness_pin,
+                proof_pin=proof_pin,
+                digest=digest,
                 seq=seq,
             )
             self._proofs[proof_id] = record
@@ -719,12 +799,16 @@ class ZeroKnowledge:
                     raise RetiredCircuitError(f"circuit {circuit_id!r} already retired")
                 if circuit_id not in self._setups:
                     raise UnknownCircuitError(f"circuit {circuit_id!r} has no setup")
+                # The pin lives INSIDE the guarded region, so a pin that
+                # cannot be computed consumes the seq and books a
+                # `rejected` row rather than escaping with no trace.
+                digest = _digest_pin((circuit_id, reason), "retire")
             except ZeroKnowledgeError as exc:
                 self._fail(seq, exc, circuit_id=str(circuit_id))
             record = RetireRecord(
                 circuit_id=circuit_id,
                 reason=reason,
-                digest=_digest_pin((circuit_id, reason), "retire"),
+                digest=digest,
                 seq=seq,
             )
             self._retired.add(circuit_id)
