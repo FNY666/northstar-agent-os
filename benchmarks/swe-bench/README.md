@@ -1,87 +1,66 @@
-# Frozen SWE-bench Verified sample
+# SWE-bench Verified 50
 
-`verified-50.json` is a frozen sample of 50 tasks from
-[princeton-nlp/SWE-bench_Verified](https://huggingface.co/datasets/princeton-nlp/SWE-bench_Verified).
-It exists so that the blueprint's SWE-bench gate -- "50 Verified tasks,
-at least five more resolved than the baseline, taking the lower of two
-runs" -- can be measured against a fixed set of tasks rather than a set
-that drifts with the dataset.
+A frozen slice of [SWE-bench Verified](https://www.swebench.com/), used to
+measure the model on the industry benchmark rather than only on the
+in-house task pack.
 
-## What "frozen" means here
+## What is frozen
 
-Each task records:
+`verified-50.json` holds 50 instances across 12 repositories.  Each entry
+records:
 
-* the upstream instance id and the base commit it starts from;
-* the fingerprints of the grading test lists (`FAIL_TO_PASS`,
-  `PASS_TO_PASS`) and of the problem statement, so a later run can prove
-  it graded the same tests without carrying thousands of test ids around;
-* the container image that provides the environment, and that image's
-  manifest digest.
-
-The digest is the load-bearing part.  The upstream images are published
-as `swebench/sweb.eval.x86_64.<org>_<build>_<instance>` and they are
-rebuilt over time; without a digest, two runs of the same task could
-grade different environments and the comparison would mean nothing.
-
-`verified-50.digests.json` pins the digests on their own.  Changing a
-digest is therefore a visible, deliberate act rather than something that
-can slip into a manifest unnoticed.
-
-## Selection
-
-Tasks are picked round-robin over repositories, ordered by instance id:
-the same dataset always yields the same sample, and no single
-repository can dominate the measurement.  The current sample covers
-twelve repositories, with at most five tasks from any one of them.
-
-## Regenerating
-
-    python3 scripts/freeze_swe_bench_sample.py \
-        --dataset <path to the Verified parquet file> \
-        --output benchmarks/swe-bench/verified-50.json \
-        --count 50
-
-Regenerating requires network access to the Docker Hub registry to
-resolve image digests.  Pass `--no-digest` to freeze the sample without
-resolving digests, which is useful offline but leaves the environment
-unpinned.
-
-## Running it
-
-The upstream environment images are `linux/amd64` only.  On an arm64
-host the images cannot be pulled, so a SWE-bench run needs an amd64
-machine; the digest recorded here is what makes that machine's
-environment the same one this sample was frozen against.
-
-## Running the evaluation
-
-`scripts/run_swe_bench_eval.py` evaluates patches against this sample. It
-uses the upstream `swebench.harness` unchanged, so a verdict here means
-what it means upstream.
-
-```
-pip install swebench==5.0.2
-python scripts/run_swe_bench_eval.py \
-    --patches patches.json \
-    --output receipt.json
-```
-
-`patches.json` maps an instance id to the patch text for that task.
-
-The environment images are `linux/amd64`. On an arm64 host they run under
-QEMU user-mode emulation: install `qemu-user` and `qemu-user-binfmt`,
-and pull with `--platform linux/amd64`. The upstream harness writes its
-logs into a `logs/` directory beside wherever it was started; the adapter
-moves that out of the repository.
-
-Three outcomes have been checked against this sample, and each one is
-distinguished in the receipt:
-
-| Patch | Verdict |
+| Field | Meaning |
 |---|---|
-| the upstream gold patch | `RESOLVED_FULL` |
-| a patch that applies cleanly but changes the wrong thing | `RESOLVED_NO` |
-| no patch at all | `no_patch_delivered` |
+| `instance_id` | the upstream instance name |
+| `repo` | the repository the instance belongs to |
+| `base_commit` | the commit the bug is present at |
+| `fail_to_pass` | the tests the patch has to make pass |
+| `pass_to_pass` | the tests the patch must not break |
+| `problem_statement_sha256` | fingerprint of the issue report |
+| `environment_image` | the container the evaluation runs in |
+| `environment_digest` | the digest of that container image |
 
-The middle row is the one that matters: a patch that applies is not a
-patch that fixes the issue.
+`verified-50.digests.json` holds the image digests on their own, so a
+changed digest is visible in a diff.
+
+The sample is regenerated with `scripts/freeze_swe_bench_sample.py`.
+
+## How a run works
+
+Solving and evaluating are two separate steps.
+
+1. `scripts/solve_swe_bench.py` lets a real model attempt an instance.  The
+   repository is exported from the instance's own environment image, so the
+   checkout the model edits is the checkout the evaluation will run
+   against.  The model works through the normal `northstar code` path, and
+   the patch it delivers is read from the run's evidence bundle.
+2. `scripts/run_swe_bench_eval.py` hands the patch to the upstream
+   `swebench.harness` and records its verdict.  The verdict is the
+   upstream one; this repository does not reimplement the grading.
+
+A receipt from the solver records the provider, the model, the endpoint,
+the sampling temperature, the sandbox profile, the budget and the sample
+fingerprint, so a later run can show it measured the same thing.
+
+## Reading a result
+
+The outcomes are the upstream states:
+
+| Outcome | Meaning |
+|---|---|
+| `RESOLVED_FULL` | every failing test passes and nothing else broke |
+| `RESOLVED_PARTIAL` | the failing tests pass, but some other test broke |
+| `RESOLVED_NO` | the patch did not fix the issue |
+| `evaluation_timeout` | the evaluation ran out of time; not a verdict |
+| `no_patch_delivered` | the model delivered no patch |
+| `ERROR` | the evaluation itself broke |
+
+`RESOLVED_PARTIAL` and `RESOLVED_NO` are both failures of the model, but
+they are different failures, and the receipt keeps them apart.
+
+## Cost and time
+
+The evaluation runs the upstream test suite inside the instance's
+container.  On an aarch64 host the amd64 images run under emulation, which
+makes a single instance take from half an hour to more than an hour.  A
+full 50-instance run is therefore a multi-hour job, not a quick check.
