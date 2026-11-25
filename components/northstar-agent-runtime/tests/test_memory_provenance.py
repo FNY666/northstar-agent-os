@@ -706,3 +706,74 @@ class FrontierRegistryTests(unittest.TestCase):
                    if e.source_url == "https://github.com/rajesamp/sentinel-mem")
         self.assertEqual("implemented", row.status)
         self.assertEqual("memory-provenance-axis", row.linked_slice)
+
+
+class PublicSurfaceTests(unittest.TestCase):
+    """Every public name of the module is named by at least one test here.
+
+    A public function with no test naming it is a public function nobody
+    pinned, and the mutant probe would report a survivor in it without
+    anyone knowing which contract broke.
+    """
+
+    def test_the_gate_decision_carries_the_accepted_flag_and_the_reason(self):
+        gate = mp.WriteGate(mp.ProvenanceLedger())
+        decision = gate.submit(_record(memory_id="m1"))
+        self.assertIsInstance(decision, mp.GateDecision)
+        self.assertTrue(decision.accepted)
+        self.assertEqual("stored", decision.reason)
+        self.assertEqual("m1", decision.memory_id)
+
+    def test_a_gate_decision_with_no_record_has_an_empty_memory_id(self):
+        decision = mp.GateDecision(False, mp.Disposition.QUARANTINED, "nope")
+        self.assertEqual("", decision.memory_id)
+        self.assertIsNone(decision.record)
+
+    def test_the_promotion_result_carries_the_reason_and_the_approver(self):
+        gate = mp.WriteGate(mp.ProvenanceLedger())
+        gate.submit(_record(memory_id="m1", origin=mp.Origin.TOOL_OUTPUT))
+        result = gate.promote("m1", approver="u-9", justification="checked")
+        self.assertIsInstance(result, mp.PromotionResult)
+        self.assertTrue(result.promoted)
+        self.assertEqual("promoted", result.reason)
+        self.assertEqual("m1", result.memory_id)
+        self.assertEqual("u-9", result.approver)
+
+    def test_the_revocation_helpers_return_the_same_tainted_set(self):
+        gate = mp.WriteGate(mp.ProvenanceLedger())
+        gate.submit(_record(memory_id="m1", session="s-bad"))
+        gate.submit(_record(memory_id="m2", session="s-good"))
+        self.assertEqual({"m1"}, mp.revoke_sessions_of(gate, "s-bad"))
+        self.assertEqual({"m1"}, mp.taint_closure(gate, {"s-bad"}))
+        # The pure helper changed nothing.
+        self.assertIs(mp.Disposition.PROMOTED, gate.disposition_of("m1"))
+
+    def test_the_ledger_row_serialises_its_own_fields(self):
+        ledger = mp.ProvenanceLedger()
+        row = ledger.append("MEMORY_WRITTEN", {"memory_id": "m1"})
+        self.assertIsInstance(row, mp.LedgerRow)
+        as_dict = row.to_dict()
+        self.assertEqual(0, as_dict["seq"])
+        self.assertEqual("MEMORY_WRITTEN", as_dict["event"])
+        self.assertEqual({"memory_id": "m1"}, as_dict["payload"])
+
+    def test_the_write_gate_exposes_its_ledger(self):
+        ledger = mp.ProvenanceLedger()
+        gate = mp.WriteGate(ledger)
+        self.assertIs(ledger, gate.ledger)
+
+    def test_the_merge_gate_exposes_its_write_gate(self):
+        gate = mp.WriteGate(mp.ProvenanceLedger())
+        merger = mp.MergeGate(gate)
+        self.assertIs(gate, merger.gate)
+
+    def test_the_merge_rescan_names_the_markers_it_found(self):
+        gate = mp.WriteGate(mp.ProvenanceLedger())
+        gate.submit(_record(memory_id="m1", origin=mp.Origin.USER_DIRECT))
+        gate.submit(_record(memory_id="m2", origin=mp.Origin.TOOL_OUTPUT))
+        merger = mp.MergeGate(gate)
+        inputs = [gate.get("m1"), gate.get("m2")]
+        found = merger.rescan_markers("tool_output said so", inputs)
+        self.assertIn("tool_output", found)
+        self.assertNotIn("user_direct", found)
+        self.assertEqual(set(), merger.rescan_markers("nothing here", inputs))
