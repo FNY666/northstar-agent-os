@@ -340,6 +340,23 @@ class OsSandboxProcessBackendTests(RuntimeTestCase):
         self.assertIn("backend=process", body)
         self.assertIn("isolation=process", body)
 
+    def test_landlock_report_does_not_claim_tcp_enforcement_before_abi4(self):
+        from tools.sandbox import landlock_abi_version, landlock_supported
+
+        if not sys.platform.startswith("linux") or not landlock_supported():
+            self.skipTest("requires a Linux host with Landlock")
+        result = run_sandboxed(
+            self._request([sys.executable, "-c", "pass"], seccomp="off"),
+            backend="process",
+        )
+        abi = landlock_abi_version()
+        self.assertIn(f"landlock path allowlist active (ABI {abi}", result.detail)
+        if abi < 4:
+            self.assertIn("Landlock TCP enforcement unavailable below ABI 4", result.detail)
+            self.assertNotIn("TCP denied)", result.detail)
+        else:
+            self.assertIn("TCP denied)", result.detail)
+
     def test_process_backend_does_not_resolve_security_loader_from_path(self):
         fake_bin = Path(tempfile.mkdtemp(prefix="nsar-hostile-path-"))
         marker = fake_bin / "python3-ran"

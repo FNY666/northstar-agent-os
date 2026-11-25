@@ -61,3 +61,18 @@ python3 tests/docbuild.py verify
 - 聚焦回归 `python3 -m unittest tests.test_code_task_measurement tests.test_runtime_module_inventory -v`：9 项通过。`make ts-test`：60 项通过。仓库测试：170 项通过。`python3 tests/docbuild.py verify`：8 个组件 API 页、1,877 个模块及 148 个 Markdown 文件校验通过。
 - `make test` 在 `northstar-agent-interop` 中止：3 个子进程测试因子组件导入路径缺失而失败（分别报缺少 `authorization`/`binding`）。另行运行 runtime unittest 收集 19,566 项，25 项跳过、629 项错误；测试环境未安装 `pytest`，导致多个基于 pytest 的测试模块无法导入。上述失败与本轮 endpoint 归因改动无关，当前不据此声称完整 Python 测试套件通过。
 - 修复后复验（2026-11-25）：interop 并发/锁测试子进程显式继承 interop、host、run-contract 源码路径；`test_route_ledger.py` 也独立引导 run-contract 路径。隔离 venv 使用仓库已锁定的 `pytest==8.3.4` 执行根目录 `make test`：sidecar 53、egress 33、run-contract 54、run-evidence 94、host 37、durable-run 499（11 skipped）、interop 260、runtime 18,937（24 skipped）、TypeScript 60、仓库文档 177，全部通过。系统 Python 未安装 pytest；依赖仅安装于 `/tmp/northstar-agent-os-test-venv`，未修改系统环境。`git diff --check` 通过。
+
+## 2026-11-25 生态扩展复核与模块盘点改进
+
+- 扩展核对 Goose/oi-kit、OpenHands Software Agent SDK、Hermes Agent、MCP Registry/reference servers、Pi 与 OpenCode 的官方仓库/README；核验公开社区入口。仅记录可公开验证的项目边界与自述，未加入或读取私人群聊，也不声称覆盖全部 AI 项目。
+- `scripts/classify-runtime-modules.py` 现在能发现常见 `importlib.import_module`、`builtins.__import__` 与 `importlib.util.spec_from_file_location` 别名形式；加入运行时 trace 后识别出生产路径动态加载 `bash_parser.py`，并将字面量模块名纳入静态图。新增回归覆盖，模块盘点器 3 项、运行时 trace 4 项通过。
+- 当前静态复算：1,579 模块、189 个静态可达、1,390 个待人工复核、29 个动态导入站点、0 个解析错误。静态可达不代表 Core 获批；动态计算模块名仍需人工复核。
+- 新增显式运行时 import trace 工具。离线 `python3 -m cli bench` 通过 169/169 项；实际观察 161 个 runtime 文件，0 个不在静态可达集，28 个静态可达文件未被这条单一命令导入（不能据此判断为未使用）。结果 JSON 留在 `/tmp`，未纳入 Git。
+- 完整报告：[`docs/ecosystem-survey-2026-11-25.zh-CN.md`](ecosystem-survey-2026-11-25.zh-CN.md)；盘点说明：[`docs/architecture/runtime-module-inventory.md`](architecture/runtime-module-inventory.md)。
+- 本轮根目录 `make test` 在临时 venv（`pytest==8.3.4`）中收集 18,944 项、24 项跳过；sidecar、egress、run-contract、run-evidence、host、durable-run、interop 均通过，runtime 发现 4 项失败：Landlock TCP 测试收到 `ConnectionRefusedError` 而非预期的拒绝；2 项 provider-temperature 测试本地 endpoint 未被调用；1 项 run-evidence 测试返回 `error_evidence_incomplete`。这 4 项未触及本轮修改的模块盘点器，故不声称本轮全仓测试通过。模块盘点 3 项、文档结构 3 项、TypeScript 60 项、docbuild verify 均通过。
+- 后续继续（同日）：新增 `scripts/trace-runtime-imports.py`，对显式命令做有限时的临时 import tracing 与静态差异报告；4 项 tracer + 3 项盘点器回归通过。离线 `python3 -m cli bench` trace 通过 169/169，观察 161 个 runtime 文件，静态图外 0 个、静态未观察到 28 个。运行时发现 `bash_parser.py` 的文件位置加载路径，并补上 `spec_from_file_location` 识别；盘点更新为 1,579 / 189 / 1,390 / 29。报告 JSON 保存在 `/tmp`，不是仓库产物。
+- 继续自查后修正两个边界：静态盘点器以前无法将 `import_module(".child", package=...)` 映射到包内依赖；现对字面量包名和 `__package__` 作有限解析，计算包名仍保持未解析。Tracer 现在拒绝 NaN/Infinity/过大的 timeout；静态根缺失或语法错误时不启动目标命令。新增覆盖后，当前聚焦回归为 tracer 6 项 + module inventory 4 项通过。
+- 再审发现旧 `inventory_sha256` 只覆盖导入图/分类，没有绑定源文件内容；相同 import 但功能代码变化会保留旧摘要。现将输出升为 schema v2，为每个 `.py` 文件加入 `source_sha256`，并测试“代码变化、依赖不变时总摘要也变化”。本地 v2 digest：`533ad0d4d3d633399fb64809936b9049ee11f9224205c03074cab4cde89b315f`。
+- 按承诺进一步对 scripted agent-read、resume、code dry-run 与 code 执行/验证路径做 trace；各路径观察 66–70 个 runtime 文件，观察到的模块均落在静态可达集。五个路径样本合计观察到 71 个不同 runtime 文件；差异主要符合各路径功能（code 路径触达 `code_task.py`、`tools/code.py`、`tools/resource_limits.py`）。单次未加载不等于未使用，trace JSON 留在 `/tmp`。
+- 回查上轮测试失败：运行环境 Landlock ABI 为 2，低于 TCP 网络规则所需 ABI 4；TCP deny 测试现在按能力跳过。`openai` 是 runtime 可选依赖，未安装时本地 HTTP provider 测试明确 skip，不再错误报“endpoint 未调用”。`run_evidence` 文件单独复验 8 项通过；完整套件尚未重跑。
+- 修正了同一 ABI 边界的状态报告：`tools/os_sandbox.py` 与 `doctor` 以前在 Landlock ABI 2 时仍声称 Landlock 拒绝 TCP；现在按 ABI 分支明确显示“Landlock TCP enforcement unavailable”，并保留 seccomp 独立状态。`test_os_sandbox.py` 63 项（3 skipped）、`test_cli.py` 113 项（4 skipped）、Landlock 21 项（1 skipped）、run-evidence 8 项通过；provider-temperature 2 项因可选 SDK 缺失跳过。
