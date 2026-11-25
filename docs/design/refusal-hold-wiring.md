@@ -4600,12 +4600,14 @@ test_run_evidence           test_sdk
 test_unittest_blind_slices
 ```
 
-`census-v3.txt` holds **270** module rows.  Each row's scope is the
+`census-v3.txt` holds **391** lines, of which **270** carry a
+measurement.  Each measured row's scope is the
 UNION of every suite that imports the module, so the rows at risk are
 the ones whose union includes one of the 17 above.  The import map was
 built in ONE pass over the runtime's test files with an AST read (the
 same decision `scripts/census-scope.py` makes, done once instead of
-270 times), and every one of the 270 rows was tested against it.
+270 times), and every one of the 270 measured rows was tested against
+it.
 
 **Exactly one row is affected: `blind_runner`, the row this section is
 about.**  The other 269 were measured on scopes that do not reach
@@ -4682,10 +4684,31 @@ MUTANT SKIP: no test file exercises annotation_pin
 
 ### 29.2 The scale: 121 of 270 rows
 
-`docs/baseline/mutant-census/census-v3.txt` holds **270** module rows.
-**121** of them name a module that no suite imports statically, so the
-scope resolver returned the empty scope for them and the census SKIPped
-them.
+`docs/baseline/mutant-census/census-v3.txt` holds **391** lines, of
+which **270** carry a measurement (`MUTANT RESULT: killed k/n`) and
+**121** carry none: 58 read `SKIP` and 63 read `ERROR`.  Every
+statement in this section about "the rows" means the **270 measured
+rows**, and the two sets of 121 are DISJOINT -- verified by parsing
+the artifact, not by eye:
+
+| set | count | what it is |
+|---|---|---|
+| measured rows | 270 | carry `MUTANT RESULT: killed k/n` |
+| unmeasured rows | 121 | 58 `SKIP` + 63 `ERROR`, carry no number |
+| measured rows whose module no suite imports statically | **121** | the rows §29 is about |
+| rows that resolve to the empty scope (before) | 121 | the same set |
+| rows that resolve to the empty scope (after) | **5** | `allowlist`, `ba_01`..`ba_04` |
+
+The coincidence between "121 unmeasured rows" and "121 measured rows
+that would be SKIPped" is a coincidence: the overlap is **zero**.
+One set is what the artifact failed to measure; the other is what the
+artifact measured at too narrow a scope.  Two different defects with
+the same count, and a reader who saw only one of the two would think
+the other was a typo.
+
+**121** of the 270 measured rows name a module that no suite imports
+statically, so the scope resolver returned the empty scope for them
+and the census SKIPped them.
 
 The census artifact's own row for `annotation_pin` reads
 `killed 33/33` -- and the census, run today through the fixed script,
@@ -4822,7 +4845,8 @@ single-suite pairing the artifact used.
 
 ### 30.1 The rows
 
-`docs/baseline/mutant-census/census-v3.txt` holds 270 module rows.  With
+`docs/baseline/mutant-census/census-v3.txt` holds 391 lines, of which
+270 carry a measurement.  With
 the §29 resolver, **18** of them resolve to a scope with more than one
 suite:
 
@@ -4904,3 +4928,137 @@ opposite directions:
 
 One produces a number that is too good.  The other produces no number
 at all.  Both are invisible unless you count for them.
+
+---
+
+## 31. The zero-score row: `audit_rekor` at 0/7, and why it was not an instrument fault
+
+§29 found rows that the census could not RESOLVE.  §30 re-measured the
+rows it could resolve.  One row in the artifact carries a score of
+**zero**, and a zero is the score that most looks like a defect in the
+MEASURING APPARATUS: 0/7 means not one of seven mutants was caught, and
+the natural reading is that the harness is broken.
+
+It is not.  It is real coverage debt, and the difference took three
+measurements to establish.
+
+### 31.1 The zero is real, not a broken scope
+
+`audit_rekor` scores `killed 0/7` in
+`docs/baseline/mutant-census/census-v3.txt`.
+
+Three things had to be checked before believing the score:
+
+| check | result | what it rules out |
+|---|---|---|
+| the module's own suite passes on the pristine source | **14 passed, 1 skipped** | a broken suite |
+| the scope is the union, not the single suite | `test_audit_rekor`, `test_audit_archive` | a too-narrow scope (§29's defect) |
+| the mutant is PLANTED BY HAND and still survives | `or@165` survives | a stale-bytecode false kill (§27's defect) |
+
+The third check is the one that settles it.  A hand-planted mutant that
+survives is a survivor; there is no instrument left to blame.
+
+### 31.2 What the seven survivors have in common
+
+```
+or@165  submit_entry:      not isinstance(response, dict) or len(response) != 1
+or@197  retrieve_by_index: not isinstance(response, list) or not response
+or@200  retrieve_by_index: not isinstance(first, dict) or len(first) != 1
+or@203  retrieve_by_index: not isinstance(entry, dict) or "body" not in entry
+or@255  anchor_feed_head:  not isinstance(head, str) or not head
+or@332  verify_anchor_in_log: rekor_url or anchor.get("rekor_url") or REKOR_V1_DEFAULT
+gt@127  _post_json:        len(raw) > MAX_REKOR_RESPONSE_BYTES
+```
+
+Six of the seven are a **defensive guard that REJECTS a malformed
+response**.  The client talks to a remote transparency log, so it must
+refuse a response that is not the shape it expects -- but the tests
+only ever drive it with WELL-FORMED responses, so the rejection branch
+is never taken, and rewriting `or` to `and` changes nothing any test
+can see.
+
+The seventh is the same defect wearing a different hat: `len(raw) >
+MAX` and `len(raw) >= MAX` are indistinguishable at every input the
+suite produces, because the suite's only oversized response is
+`MAX + 1` bytes and BOTH spellings reject that.  The distinguishing
+input is EXACTLY `MAX` bytes, which is INSIDE the cap.
+
+> **A guard needs a crafted input.**
+>
+> A guard that only ever reads a clean real file is unverifiable, and an
+> unverifiable guard is a guard that can be deleted without anyone
+> noticing.  The branch that does the protecting is exactly the branch
+> no test walks.
+
+This is the same lesson §26 reached from the other direction -- there,
+a guard's site-selection was the defect; here, a guard's INPUT
+selection is.  Both are the statement "the thing that was measured is
+not the thing that protects".
+
+### 31.3 The fix, and what it measured
+
+A new `MalformedResponseTests` class in
+`components/northstar-agent-runtime/tests/test_audit_rekor.py` feeds
+each guard the malformed response it exists to reject.  Each test
+asserts the **message** as well as the type, so a test that passes for
+the wrong reason -- some other error being raised on the way -- cannot
+masquerade as a kill.
+
+`gt@127` needed a different shape of input: a response of exactly
+`MAX` bytes, which is inside the cap, and so must be rejected as a BAD
+RESPONSE and **not** as a byte-cap violation.  The test asserts the
+negative too (`assertNotIn("byte cap", ...)`), which is what makes it
+a boundary test rather than a second oversized-response test.
+
+Each killer was verified by planting ONE mutant at a time and naming
+the test that goes red:
+
+| mutant | the test that kills it |
+|---|---|
+| `gt@127` | `test_a_response_of_exactly_the_cap_is_accepted` |
+| `or@165` | `test_submit_rejects_a_dict_that_is_not_a_single_entry` |
+| `or@197` | `test_retrieve_rejects_an_empty_entry_list` (+ the two URL tests) |
+| `or@200` | `test_retrieve_rejects_a_first_entry_that_is_not_a_single_item` |
+| `or@203` | `test_retrieve_rejects_an_entry_without_a_body` |
+| `or@255` | `test_anchor_refuses_a_feed_whose_head_is_empty` |
+| `or@332` | `test_verify_in_log_prefers_the_anchors_recorded_url` |
+
+Five of the seven are killed by exactly ONE test.  `or@197` has three
+witnesses, and they are the same branch seen three ways.
+
+The census now reads:
+
+```
+killed 0/7  ->  killed 7/7
+```
+
+**NO PRODUCT CODE CHANGED.**  `audit_rekor.py` is byte-identical to its
+pre-slice state; the whole slice is in the test file.
+
+### 31.4 Two of my own drafts were wrong
+
+Both were caught before they shipped, and both are the same shape of
+error -- the test asserted something about the MODULE rather than about
+the GUARD:
+
+* the unchained-head test asserted that the sample feed has no chained
+  head.  It DOES: `_sample_feed` chains its records, so the manifest
+  carries a str head and the branch was never reached.  The manifest is
+  now stubbed.
+* the default-URL test expected `verify_anchor_in_log` to RETURN a
+  verdict.  It RAISES, by design, when the log cannot be reached or has
+  no such entry -- the docstring says so.  The test now asserts the
+  raise.
+
+> **A test that passes for the wrong reason is worse than none**, and
+> so is a test that fails for a reason the author did not check.  Both
+> are the same failure: the test is not measuring the thing it names.
+
+### 31.5 What this does NOT change
+
+* The census artifact is NOT edited.  `audit_rekor`'s row still reads
+  `killed 0/7`, because that row is a snapshot of a measurement on a
+  named tree.  The re-measurement is here, in this section.
+* No product code changed.
+* No version, schema, or audit kind is added or changed.
+* No digest changes.
