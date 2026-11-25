@@ -3752,3 +3752,201 @@ and against the fixed tree: `42 passed`.
   queue-level rejection, and it is still booked.
 * **`dequeue()` is unchanged.**  It has its own refusal path (§15,
   §16), and it books one row per refused candidate.
+
+---
+
+## 26. AMENDED 2026-11-25 — a `blocked_*` prefix was not enough to make a refusal PER-JOB
+
+### 26.1 The finding
+
+§16.2's load-bearing rule is:
+
+> **A broken gate is NOT a refusal, and is not skipped.**  The skip is
+> only sound for a **per-job** refusal; a gate that cannot answer at all
+> is a property of the **gate**, and skipping it would turn a broken
+> gate into a silently degraded queue -- fail-**OPEN**.
+
+and §17.2 adds:
+
+> **A broken gate books no row.**  A broken gate fails the whole call
+> and refuses nothing in particular; booking a `job.rejected` row for
+> it would put a refusal in the trail that never happened.
+
+`_is_refusal` drew the line on the error's own vocabulary, and the
+vocabulary it used was a **prefix**:
+
+```python
+reason = getattr(exc, "reason", None)
+if isinstance(reason, str) and reason.startswith("blocked_"):
+    return True
+```
+
+But the hold's own taxonomy puts **two different things** under that
+prefix (`refusal_hold.py`'s reason constants):
+
+| reason | whose condition is it? |
+| --- | --- |
+| `blocked_by_refusal` | the (job, action) PAIR -- a refusal row covers it |
+| `blocked_key_invalid` | the (job, action) PAIR -- its identity is malformed |
+| `blocked_store_unreadable` | the **GATE** -- it could not read its own store |
+| `blocked_row_invalid` | the **GATE** -- the row is not a refusal row at all |
+| `blocked_row_tampered` | the **GATE** -- the row was forged |
+
+The first two are per-job: they name one (job, action) pair, and a
+different pair is unaffected.  The last three are the gate's own
+condition.
+
+**The real gate reports its brokenness as one of the last three.**  So
+the prefix test could not tell the two apart, and the broken gate was
+classified as a per-job refusal: skipped, and booked a row.
+
+### 26.2 The measurement
+
+Measured 2026-11-25, on the tree as §25 left it, with the REAL gate over
+a store that cannot be read (`RefusalHoldStore.break_reads()`):
+
+```
+--- the real gate, its store broken ---
+dequeue raised: RefusalRefusedError job 'j1' may not be re-dispatched
+  for action 'send_email': a recorded refusal covers it
+  (blocked_store_unreadable); the job stays where it is
+states after: ready ready
+--- queue audit trail ---
+  job.enqueued {...}
+  job.enqueued {...}
+  job.rejected {'reason': 'RefusalRefusedError',
+                'refusal_reason': 'blocked_store_unreadable',
+                'job_id': 'j1', 'action': 'send_email'}
+  job.rejected {'reason': 'RefusalRefusedError',
+                'refusal_reason': 'blocked_store_unreadable',
+                'job_id': 'j2', 'action': 'send_email'}
+```
+
+Two refusals booked for a gate that refused nothing in particular --
+exactly what §17.2 forbids.
+
+And with the gate breaking **MID-LIST** -- candidate 1 refused for
+real, candidate 2 hits the broken store:
+
+```
+dequeue raised: ... (blocked_store_unreadable)
+  job.rejected rows: j1 (blocked_by_refusal),
+                     j2 (blocked_store_unreadable),
+                     j3 (blocked_store_unreadable)
+```
+
+The broken answer was skipped like a refusal and the walk continued, so
+the queue could hand out a job behind a broken gate -- the fail-OPEN
+§16.2 names.
+
+### 26.3 Why the existing guard could not see it
+
+`test_a_broken_gate_books_no_rejected_row` used a gate that raises
+`RuntimeError`:
+
+```python
+class _Broken:
+    def require_queue_allowed(self, job_id, action, *, now=None):
+        raise RuntimeError("the gate cannot answer")
+```
+
+A `RuntimeError` is an **UNRECOGNISED** broken gate.  It was never
+classified as a refusal in the first place, so the guard was already
+green and the prefix was never exercised.  The real gate never raises
+`RuntimeError` -- it raises `RefusalRefusedError` carrying a
+`blocked_*` reason.  **The guard tested the shape the rule did not
+contain.**
+
+### 26.4 The fix
+
+`job_queue.py` now names the gate's own conditions explicitly:
+
+```python
+_GATE_CONDITION_REASONS = frozenset(
+    {
+        "blocked_store_unreadable",
+        "blocked_row_invalid",
+        "blocked_row_tampered",
+    }
+)
+```
+
+and `_is_refusal` returns `False` for them.  The prefix test is kept
+for the **per-job** reasons, so a host that raises a `blocked_*` slug
+the repo has not seen is still treated as a refusal (fail-safe toward
+skipping, which is the safe direction for a per-job answer).
+
+The set is a literal, not an import: the queue must not import the
+wiring (the wiring imports the hold, and the hold must not drag the
+queue in).
+
+### 26.5 The guards
+
+Three new guards in `BrokenGateIsNotAPerJobRefusalTests`
+(`tests/test_refusal_hold_queue_wiring.py`):
+
+| guard | what it pins |
+| --- | --- |
+| `test_a_gate_whose_store_is_unreadable_books_no_rejected_row` | the defect: the REAL gate over a broken store books no row |
+| `test_a_gate_that_breaks_mid_list_is_not_skipped` | the broken answer STOPS the walk -- the reason that reaches the caller is `blocked_store_unreadable`, and no job is handed out |
+| `test_the_per_job_refusal_is_still_a_refusal` | the control: narrowing the rule must not narrow it to nothing -- a real per-job refusal is still skipped and still books its row |
+
+### 26.6 The verification
+
+RED first, on the unfixed tree:
+
+```
+$ python3 -m pytest -q tests/test_refusal_hold_queue_wiring.py \
+      -k BrokenGateIsNotAPerJobRefusal
+FAILED ...::test_a_gate_that_breaks_mid_list_is_not_skipped
+FAILED ...::test_a_gate_whose_store_is_unreadable_books_no_rejected_row
+2 failed, 1 passed, 198 deselected
+```
+
+GREEN on the fixed tree: `3 passed`.
+
+The mutation run -- the fix reverted in place, the tests re-run:
+
+```
+$ # remove the _GATE_CONDITION_REASONS branch
+FAILED ...::test_a_gate_that_breaks_mid_list_is_not_skipped
+FAILED ...::test_a_gate_whose_store_is_unreadable_books_no_rejected_row
+2 failed, 1 passed, 198 deselected
+```
+
+**MUTANT KILLED.**  The fix is what makes the two tests pass; they do
+not pass for another reason.
+
+The adjacent suites, on the fixed tree:
+
+```
+$ python3 -m pytest -q tests/test_refusal_hold_queue_wiring.py \
+      tests/test_job_queue.py tests/test_refusal_hold.py \
+      tests/test_refusal_hold_wiring.py tests/test_cancellation_tombstone.py \
+      tests/test_leased_task_claim.py
+581 passed, 32 subtests passed
+```
+
+### 26.7 What this does NOT change
+
+* **A per-job refusal is still a per-job refusal.**  `blocked_by_refusal`
+  and `blocked_key_invalid` still classify as refusals, are still
+  skipped, and still book their row.  The control guard pins that.
+* **The raising form still raises** and the batch form still returns a
+  bare `None`.
+* **`_is_refusal` still draws the line on the error's own vocabulary.**
+  The vocabulary was the problem, not the duck-typing.
+* **An unrecognised `blocked_*` slug is still a refusal** -- the safe
+  direction for a per-job answer.
+
+### 26.8 The general lesson
+
+**A prefix is not a taxonomy.**  `blocked_` groups five reasons, and
+two of them name a (job, action) pair while three name the gate.  A
+rule that reads the prefix reads the group, not the category.
+
+The measure that found it was not reading the code.  It was asking
+**"what would the real gate do when it is broken?"**, building that
+gate, and running the queue against it.  The existing guard had
+already tested "a broken gate" -- but with a broken gate the queue had
+never been given.

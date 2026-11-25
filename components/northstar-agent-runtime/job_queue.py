@@ -365,6 +365,19 @@ def _check_seq(seq: Any) -> int:
     return seq
 
 
+#: The hold's ``blocked_*`` reasons that are a property of the GATE, not
+#: of the (job, action) pair being asked about.  A gate in one of these
+#: states could not answer at all, so it refuses nothing in particular:
+#: it is not skipped, and it books no row.  See :func:`_is_refusal`.
+_GATE_CONDITION_REASONS = frozenset(
+    {
+        "blocked_store_unreadable",
+        "blocked_row_invalid",
+        "blocked_row_tampered",
+    }
+)
+
+
 def _is_refusal(exc: BaseException) -> bool:
     """Is this exception a **per-job refusal**, rather than a broken gate?
 
@@ -383,8 +396,8 @@ def _is_refusal(exc: BaseException) -> bool:
     Two shapes count as a refusal:
 
     * the error carries a ``reason`` attribute whose value is one of the
-      hold's refusal reasons -- the wiring's ``RefusalRefusedError``
-      carries exactly that;
+      hold's **per-job** refusal reasons -- the wiring's
+      ``RefusalRefusedError`` carries exactly that;
     * the error's class name is ``RefusalRefusedError`` -- the shape a
       host that re-implements the gate's contract uses.
 
@@ -397,11 +410,50 @@ def _is_refusal(exc: BaseException) -> bool:
     itself, because the gate's boolean form refused without saying
     why.  It is a refusal (the gate said "not allowed"), and it is
     named here so the trail can book it -- with a real class name.
+
+    **A ``blocked_*`` prefix is NOT enough.**  The hold's own taxonomy
+    mixes two different things under that prefix:
+
+    * ``blocked_by_refusal`` -- a refusal ROW covers this (job, action)
+      pair.  PER-JOB: skip it and ask about the next one.
+    * ``blocked_key_invalid`` -- THIS (job, action) pair's identity is
+      malformed, so it is refused.  PER-JOB: the identity names exactly
+      one pair, and a different pair with a well-formed identity is
+      unaffected.
+    * ``blocked_store_unreadable`` -- the GATE could not read its own
+      store.  A property of the GATE.
+    * ``blocked_row_invalid`` -- the row on the key is not a refusal row
+      at all, so the gate cannot establish that a refusal covers this
+      action.  A property of the GATE.
+    * ``blocked_row_tampered`` -- the row was forged.  A property of the
+      GATE.
+
+    The last three are the GATE's condition, and the design doc states
+    twice what they mean: "A broken gate is NOT a refusal, and is not
+    skipped" and "A broken gate books no row."  Skipping them would turn
+    a broken gate into a silently degraded queue -- fail-OPEN -- and
+    booking them would put a refusal in the trail that never happened.
+
+    The real gate reports its own brokenness AS one of those reasons, so
+    the prefix test could not tell the two apart.  Measured 2026-11-25,
+    before this fix, with the real gate over a store that could not be
+    read:
+
+        dequeue raised: RefusalRefusedError (blocked_store_unreadable)
+        job.rejected rows: 2
+
+    -- two refusals booked for a gate that refused nothing in
+    particular.  And with the gate breaking MID-LIST (candidate 1
+    refused for real, candidate 2 hits the broken store), the broken
+    answer was skipped like a refusal and the walk continued, so the
+    queue could hand out a job behind a broken gate.
     """
     if isinstance(exc, UnnamedRefusalError):
         return True
     reason = getattr(exc, "reason", None)
     if isinstance(reason, str) and reason.startswith("blocked_"):
+        if reason in _GATE_CONDITION_REASONS:
+            return False
         return True
     return type(exc).__name__ == "RefusalRefusedError"
 

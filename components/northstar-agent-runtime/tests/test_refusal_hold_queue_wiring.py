@@ -2388,6 +2388,151 @@ class RefusedCandidatesAreAllAuditedTests(unittest.TestCase):
         self.assertEqual(queue.job("j1").state, "ready")
 
 
+class BrokenGateIsNotAPerJobRefusalTests(unittest.TestCase):
+    """A gate that CANNOT ANSWER is not a per-job refusal.
+
+    The skip in ``dequeue()`` is only sound for a **per-job** refusal --
+    one that names one (job, action) pair.  A gate that could not answer
+    at all is a property of the **gate**, and skipping it would turn a
+    broken gate into a silently degraded queue -- fail-OPEN.  The design
+    doc states this twice: "A broken gate is NOT a refusal, and is not
+    skipped" and "A broken gate books no row."
+
+    The defect: ``_is_refusal`` classified ANY error whose ``reason``
+    started with ``blocked_`` as a per-job refusal.  But the real gate
+    reports its own brokenness AS a ``blocked_*`` reason --
+    ``blocked_store_unreadable`` -- so the broken gate was classified as
+    a refusal, skipped, and booked a ``job.rejected`` row.
+
+    The existing guard (``test_a_broken_gate_books_no_rejected_row``)
+    used a ``RuntimeError`` -- an UNRECOGNISED broken gate, which was
+    never classified as a refusal in the first place.  It could not see
+    this defect: the real gate never raises ``RuntimeError``.
+
+    Measured 2026-11-25, on the tree as it stood:
+
+        --- the real gate, its store broken ---
+        dequeue raised: RefusalRefusedError ... (blocked_store_unreadable)
+        job.rejected rows: 2
+
+    -- a refusal was booked that never happened, for a gate that refused
+    nothing in particular.
+
+    And worse, when the gate breaks MID-LIST -- candidate 1 is refused
+    for real, candidate 2 hits the broken store -- the broken answer was
+    skipped like a refusal and the walk continued, so the queue could
+    hand out a job behind a broken gate.
+    """
+
+    def _rejected(self, queue):
+        return [row for row in queue.audit_log() if row["kind"] == "job.rejected"]
+
+    def test_a_gate_whose_store_is_unreadable_books_no_rejected_row(self):
+        """The real gate's brokenness is a ``blocked_*`` reason.
+
+        ``RefusalHoldQueueGate`` over a registry whose store cannot be
+        read answers ``blocked_store_unreadable`` -- and it raises
+        ``RefusalRefusedError`` carrying that reason.  The reason is
+        ``blocked_*``, so the prefix test classified it as a per-job
+        refusal.
+        """
+        registry = RefusalHoldRegistry()
+        gate = RefusalHoldQueueGate(registry)
+        registry.hold.store.break_reads()
+
+        queue = JobQueue(refusal_gate=gate)
+        for index, job_id in enumerate(["j1", "j2"]):
+            queue.enqueue(job_id, "q", "dispatch", DIGEST, index + 1)
+        with self.assertRaises(RefusalRefusedError):
+            queue.dequeue("worker-1", "q", 10)
+        for job_id in ("j1", "j2"):
+            self.assertEqual(
+                queue.job(job_id).state,
+                "ready",
+                "a job was handed out behind a gate that cannot answer",
+            )
+        self.assertEqual(
+            self._rejected(queue),
+            [],
+            "a gate that cannot answer was booked as a refusal; it refuses "
+            "nothing in particular",
+        )
+
+    def test_a_gate_that_breaks_mid_list_is_not_skipped(self):
+        """The broken answer must stop the walk, not skip the candidate.
+
+        Candidate 1 is refused for real.  Candidate 2 hits a gate that
+        cannot answer.  The broken answer must NOT be treated as another
+        per-job refusal: if it were, the walk would continue and the
+        queue could hand out a job behind a broken gate.
+        """
+        class _BreaksMidway:
+            def __init__(self):
+                self.calls = 0
+
+            def require_queue_allowed(self, job_id, action, *, now=None):
+                self.calls += 1
+                if self.calls == 1:
+                    raise RefusalRefusedError(
+                        "this action is refused", reason="blocked_by_refusal"
+                    )
+                raise RefusalRefusedError(
+                    "the store cannot answer", reason="blocked_store_unreadable"
+                )
+
+        queue = JobQueue(refusal_gate=_BreaksMidway())
+        for index, job_id in enumerate(["j1", "j2", "j3"]):
+            queue.enqueue(job_id, "q", "dispatch", DIGEST, index + 1)
+        with self.assertRaises(RefusalRefusedError) as caught:
+            queue.dequeue("worker-1", "q", 10)
+        self.assertEqual(
+            getattr(caught.exception, "reason", None),
+            "blocked_store_unreadable",
+            "the broken answer was not the one that reached the caller; "
+            "the walk carried on past a gate that cannot answer",
+        )
+        for job_id in ("j1", "j2", "j3"):
+            self.assertEqual(
+                queue.job(job_id).state,
+                "ready",
+                "a job was handed out behind a gate that cannot answer",
+            )
+        rejected = self._rejected(queue)
+        self.assertEqual(
+            [row["detail"].get("job_id") for row in rejected],
+            ["j1"],
+            "only the candidate refused FOR REAL may be booked; the "
+            "candidates the broken gate could not answer must not be",
+        )
+
+    def test_the_per_job_refusal_is_still_a_refusal(self):
+        """The control: narrowing the rule must not narrow it to nothing.
+
+        A real per-job refusal -- one that names one (job, action) pair
+        -- is still classified as a refusal, still skipped, and still
+        books its row.
+        """
+        registry = RefusalHoldRegistry()
+        gate = RefusalHoldQueueGate(registry)
+        gate.record_queue("j1", "dispatch", row=make_row())
+
+        queue = JobQueue(refusal_gate=gate)
+        for index, job_id in enumerate(["j1", "j2"]):
+            queue.enqueue(job_id, "q", "dispatch", DIGEST, index + 1)
+        got = queue.dequeue("worker-1", "q", 10)
+        self.assertEqual(got.job_id, "j2", "the healthy job was not handed out")
+        rejected = self._rejected(queue)
+        self.assertEqual(
+            [row["detail"].get("job_id") for row in rejected],
+            ["j1"],
+            "the refused candidate was not booked",
+        )
+        self.assertEqual(
+            rejected[0]["detail"].get("refusal_reason"),
+            "blocked_by_refusal",
+        )
+
+
 class RefusedRetryIsAuditedTests(unittest.TestCase):
     """A refused RE-DISPATCH must be named in the queue's own trail.
 
