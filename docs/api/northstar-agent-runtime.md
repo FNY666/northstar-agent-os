@@ -91478,7 +91478,7 @@ Measure qualifier survival across simulated compaction rounds.
 
 Shape an ``audit.ndjson/1`` record for a scope-qualifier check.
 
-#### `stdlib_only()`
+#### `stdlib_only(source: Optional[str]=None)`
 
 AST check: this module imports stdlib modules only.
 
