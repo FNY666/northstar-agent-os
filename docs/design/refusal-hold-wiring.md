@@ -4873,7 +4873,7 @@ suite:
 
 ### 30.2 What the re-measurement shows
 
-The first rows measured:
+All eighteen rows, re-measured at the union scope:
 
 | row | artifact | union scope | delta |
 |---|---|---|---|
@@ -4881,6 +4881,40 @@ The first rows measured:
 | `ab_testing` | 10/23 | **17/23** | **+7** |
 | `action_card` | 14/24 | **16/24** | **+2** |
 | `agent_files` | 6/19 | **8/19** | **+2** |
+| `agent_identity` | 7/21 | **9/21** | **+2** |
+| `agents` | 14/31 | **17/31** | **+3** |
+| `alert_trigger_registry` | 3/4 | **4/4** | **+1** |
+| `approval_chain` | 6/12 | **6/12** | 0 |
+| `approval_fatigue_probes` | 5/29 | **17/29** | **+12** |
+| `approval_sla` | 14/17 | **14/17** | 0 |
+| `approval_sla_time` | 13/16 | **13/16** | 0 |
+| `artifact_authority` | 38/38 | **38/38** | 0 |
+| `audit_cli` | 6/31 | **11/31** | **+5** |
+| `audit_head_holder` | 65/71 | **65/71** | 0 |
+| `audit_rekor` | 0/7 | **0/7** | 0 (see §31) |
+| `benchmark_runner` | 12/28 | **14/28** | **+2** |
+| `budget` | 7/19 | **7/19** | 0 |
+| `budget_token_bucket` | 7/11 | **7/11** | 0 |
+
+Eight rows are UNCHANGED, seven rise, and one (`audit_rekor`) is
+unchanged at ZERO and is the subject of §31.
+
+The eight unchanged rows are the point of measuring rather than
+assuming: the union is a SUPERSET, and a superset can leave a figure
+unchanged.  `a2a_gates` is the cleanest case -- its sibling suite
+`test_a2a_budget_combo` adds **nothing**, so its single-suite figure
+was already honest.  `artifact_authority` was already 38/38 and stays
+38/38, and `audit_head_holder` 65/71 stays 65/71.
+
+`approval_fatigue_probes` is the largest delta at **+12**, and it is
+where §32 finds twelve more survivors -- the boundary guards the
+union scope recovered but no test could see.
+
+`ab_testing` is the other shape: the sibling suite `test_ab_testing_spec`
+catches **seven** mutants the narrow scope reported as SURVIVED.  Every
+one of those seven was a false accusation of a weak test suite -- the
+mirror image of the false kill, and it is what §22's `job_queue.py`
+measurement first made visible.
 
 `a2a_gates` is the interesting one: the sibling suite
 `test_a2a_budget_combo` adds **nothing**, so its single-suite figure
@@ -5059,6 +5093,115 @@ the GUARD:
 * The census artifact is NOT edited.  `audit_rekor`'s row still reads
   `killed 0/7`, because that row is a snapshot of a measurement on a
   named tree.  The re-measurement is here, in this section.
+* No product code changed.
+* No version, schema, or audit kind is added or changed.
+* No digest changes.
+
+---
+
+## 32. The boundary guards: `approval_fatigue_probes` at 5/29, and the input that reaches the boundary
+
+§30's re-measurement raised `approval_fatigue_probes` from 5/29 to
+17/29 by widening the scope.  Twelve survivors remained, and they are
+one shape.
+
+### 32.1 The twelve, and what they have in common
+
+```
+lt@381  max_approvals_per_window < 1      vs <= 1    differs at ==1
+lt@383  uniform_approve_streak < 2         vs <= 2    differs at ==2
+lt@385  min_deliberation_seconds < 0       vs <= 0    differs at ==0
+gt@416  len(approvals) > max_approvals     vs >=      differs at ==max
+lt@430  delta < min_deliberation_seconds   vs <=      differs at ==min
+lt@661  max_approvals_per_window < 1       vs <= 1    differs at ==1
+lt@663  uniform_approve_streak < 2          vs <= 2    differs at ==2
+lt@665  min_deliberation_seconds < 0        vs <= 0    differs at ==0
+lt@700  interval < min_deliberation_seconds vs <=      differs at ==min
+gt@708  decided_at > mid                    vs >=      differs at ==mid
+or@870  not isinstance(given, str) or ...   vs and ... the type half
+```
+
+Every one is a comparison whose two spellings AGREE at every input the
+suite produces, because the suite only ever produces inputs from ONE
+SIDE of the boundary.  `max_approvals_per_window` is only ever built as
+0 (which must be refused) and never as 1 (which is legal); the velocity
+bound is only ever exceeded and never reached; the deliberation bound
+is only ever undershot and never met.
+
+Six of the twelve are the SAME THREE GUARDS TWICE: `FatigueMonitor`
+and `FatigueMeter` each carry their own copy of the three validation
+guards, at 381/383/385 and 661/663/665.  A guard that is duplicated in
+the same module is duplicated in its blind spot too.
+
+> **A guard needs a crafted input.**
+>
+> §31's rule, with a different crafted input.  There, the input was
+> MALFORMED -- the response the guard exists to reject.  Here, the
+> input is the EXACT BOUNDARY -- the value the guard's two spellings
+> disagree about.  Both are the same statement: a comparison whose two
+> sides never meet cannot be measured, and a measurement of the wrong
+> side is a measurement of nothing.
+
+### 32.2 What the new tests feed, and what it measured
+
+The new `BoundaryAndCraftedInputTests` class in
+`components/northstar-agent-runtime/tests/test_consent_fatigue_probes.py`
+feeds each guard the exact value at which its two spellings disagree.
+
+Measured, one mutant planted at a time, each test named:
+
+| mutant | the test that kills it |
+|---|---|
+| `lt@381` | `test_a_max_approvals_of_exactly_one_is_accepted` |
+| `lt@383` | `test_a_uniform_streak_of_exactly_two_is_accepted` |
+| `lt@385` | `test_a_min_deliberation_of_exactly_zero_is_accepted` |
+| `gt@416` | `test_exactly_the_velocity_bound_is_not_flooded` |
+| `lt@430` | `test_exactly_the_deliberation_bound_does_not_collapse` |
+| `lt@661` | `test_a_max_approvals_of_exactly_one_is_accepted` |
+| `lt@663` | `test_a_uniform_streak_of_exactly_two_is_accepted` |
+| `lt@665` | `test_a_min_deliberation_of_exactly_zero_is_accepted` |
+| `lt@700` | `test_exactly_the_deliberation_bound_is_not_a_collapse_ratio` |
+| `gt@708` | `test_an_event_exactly_at_the_window_midpoint_is_in_the_recent_half` |
+| `or@870` | `test_verify_decision_rejects_a_non_string_digest` |
+
+Each killer kills EXACTLY its own mutant -- one red test each, for all
+eleven.  The census reads:
+
+```
+artifact 5/29  ->  union scope 17/29  ->  with these tests 29/29
+```
+
+**NO PRODUCT CODE CHANGED.**  `approval_fatigue_probes.py` is
+byte-identical to its pre-slice state; the whole slice is in the test
+file.
+
+### 32.3 Two of my own drafts were wrong, and both are the same error
+
+* **The velocity test asserted a bound it never reached.**  It spaced
+  its twelve events 100s apart, but the window is `now - 900` to
+  `now`, so only **ten** of the twelve landed inside it and the bound
+  of twelve was never reached.  The test passed, and it would have
+  passed against the mutant too -- a test that cannot fail is a test
+  that measures nothing.  The spacing is now 80s, and the test asserts
+  the in-window count FIRST, so the mistake cannot recur silently.
+* **The midpoint test made both events DENY**, so the denial-decay axis
+  read 0.0 under either spelling and could not tell them apart.  The
+  midpoint event must **APPROVE**: then the original leaves the recent
+  half empty (no measurable decay), and the mutant puts it in the
+  recent half -- a full 1.0 decay read off a trajectory that never had
+  a recent decision at all.
+
+> **A test that passes for the wrong reason is worse than none**, and
+> a test that passes for the RIGHT reason but measures the wrong thing
+> is no better.  Both are the same failure: the test is not measuring
+> the thing it names.  The first version of the velocity test named a
+> bound and asserted a verdict; it reached neither.
+
+### 32.4 What this does NOT change
+
+* The census artifact is NOT edited.  `approval_fatigue_probes`'s row
+  still reads `killed 5/29`, because that row is a snapshot of a
+  measurement on a named tree.  The re-measurements are here.
 * No product code changed.
 * No version, schema, or audit kind is added or changed.
 * No digest changes.
