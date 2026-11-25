@@ -367,3 +367,205 @@ def test_seq_boundaries_and_default_args():
     assert r2.system_id == ok_id
     with pytest.raises(BadIdError):
         ap.perturb("y" * 257, 2, "corruption", "failed")
+
+
+# ---------------------------------------------------------------------------
+# 16. The digest-pin defects (B173 slice, measured 2026-11-25)
+#
+# `ai_perturbation.py` carried the same four defects of the family that
+# `graph_database.py`, `status_page.py`, `zero_knowledge.py`,
+# `ai_constitution.py` and `ai_interpretability.py` carried before their
+# slices.
+#
+# NOTE the per-module shape: the `_pin(...)` call sat INSIDE the record
+# constructor, which is inside the guarded `try` -- so the pin did not
+# escape the region.  But it raised `canonical_json.JcsError`, which the
+# `except AIPerturbationError` handler did not catch, so the seq was
+# burned and NO `rejected` row was booked.  The trail showed a burn
+# with no row.
+
+
+SURROGATE = "\ud800"
+
+
+def test_a_refusal_raises_the_modules_own_error_type():
+    """The module's own taxonomy, not the sibling helper's.
+
+    `JcsError` is a `ValueError`, so a caller guarding on
+    `except ValueError` would treat a refused mutation as a parse
+    error.  The module's error must be what escapes.
+    """
+    ap = AIPerturbation()
+    with pytest.raises(AIPerturbationError):
+        ap.perturb(SURROGATE, 1)
+
+
+def test_a_failed_mutation_still_consumes_its_seq():
+    """A failed pin at a valid seq burns the seq and books a row.
+
+    This is the second refusal convention (`docs/design/
+    refusal-hold-wiring.md` §21.3): a malformed ARGUMENT at a valid
+    seq consumes the seq and books a `rejected` row.
+    """
+    ap = AIPerturbation()
+    with pytest.raises(AIPerturbationError):
+        ap.perturb(SURROGATE, 1)
+    kinds = [e["kind"] for e in ap.audit_log()]
+    assert KIND_REJECTED in kinds
+    # the seq was consumed: the next claim must be strictly greater
+    with pytest.raises(SeqOrderError):
+        ap.perturb("sys-a", 1)
+    ap.perturb("sys-a", 2)
+    assert ap.stats()["perturbations"] == 1
+
+
+def test_the_shipped_path_and_the_fallback_agree_about_legality():
+    """Both configurations must refuse a lone surrogate.
+
+    They need not agree about the resulting digest bytes -- the
+    fallback's tagged form is deliberately its own string -- but a
+    value one refuses must be refused by both.  RFC 8785 §3.2.2.3
+    requires a compliant implementation to terminate with an error.
+    """
+    import ai_perturbation as apm
+    saved = apm._cj
+    try:
+        assert apm._cj is not None, "the shipped path is not installed"
+
+        apm._cj = saved
+        with pytest.raises(AIPerturbationError):
+            apm._canonical([SURROGATE])
+
+        apm._cj = None
+        with pytest.raises(AIPerturbationError):
+            apm._canonical([SURROGATE])
+    finally:
+        apm._cj = saved
+
+
+def test_both_configurations_accept_a_value_both_can_canonicalize():
+    """The control: the fallback must not refuse everything.
+
+    Without this, a fallback that refused every input would satisfy
+    the test above vacuously.
+    """
+    import ai_perturbation as apm
+    saved = apm._cj
+    try:
+        for cfg in (saved, None):
+            apm._cj = cfg
+            assert apm._canonical(["ordinary", 7, ["a"]])
+    finally:
+        apm._cj = saved
+
+
+def test_a_seq_above_the_safe_range_is_refused():
+    """A seq that cannot be pinned must not be accepted.
+
+    Without this bound, 2**53 and 2**53+1 canonicalize to the same
+    bytes, so the digest stops pinning the seq.
+    """
+    ap = AIPerturbation()
+    with pytest.raises(AIPerturbationError):
+        ap.perturb("sys-a", 2 ** 53)
+
+
+def test_an_oversized_seq_is_refused_as_a_malformed_seq():
+    """The refusal's SHAPE, not just its type.
+
+    A malformed SEQ consumes nothing and books nothing -- the call
+    never reached the ledger.  A failed PIN at a valid seq consumes the
+    seq and books a row.  Both raise `AIPerturbationError`, so only the
+    shape distinguishes them.
+    """
+    ap = AIPerturbation()
+    with pytest.raises(AIPerturbationError):
+        ap.perturb("sys-a", 2 ** 53)
+    # nothing booked
+    assert ap.audit_log() == ()
+    # nothing consumed: seq 1 is still claimable
+    ap.perturb("sys-a", 1)
+    assert ap.stats()["perturbations"] == 1
+
+
+def test_a_tampered_seq_above_the_safe_range_cannot_verify():
+    """The control: the digest must pin the seq.
+
+    This is the property the bound protects.  The seq rides in the
+    perturbation pin, so a record whose seq was bumped must not still
+    verify -- and the pin cannot even be MINTED over an out-of-range
+    seq.
+    """
+    import ai_perturbation as apm
+    digest = apm._pin(
+        "perturbation", "prt-1", "sys-a", "noise-injection", "robust",
+        "", 2 ** 53 - 1,
+    )
+    tampered = apm.PerturbationRecord(
+        perturbation_id="prt-1",
+        system_id="sys-a",
+        perturbation_kind="noise-injection",
+        outcome="robust",
+        perturbation_digest="",
+        seq=2 ** 53 + 1,
+        digest=digest,
+    )
+    assert tampered.verify(
+        "prt-1", "sys-a", "noise-injection", "robust", "",
+    ) is False
+    # and the pin cannot be minted over an out-of-range seq at all
+    with pytest.raises(AIPerturbationError):
+        apm._pin(
+            "perturbation", "prt-1", "sys-a", "noise-injection", "robust",
+            "", 2 ** 53,
+        )
+
+
+def test_the_safe_range_boundary_is_accepted():
+    """The control: the bound must not over-refuse.
+
+    2**53 - 1 is the last integer JCS pins exactly.
+    """
+    ap = AIPerturbation()
+    ap.perturb("sys-a", 2 ** 53 - 1)
+    assert ap.stats()["perturbations"] == 1
+
+
+def test_a_pin_refuses_an_integer_outside_the_safe_range():
+    """A payload integer that cannot be pinned must be refused.
+
+    The shipped path loses the distinction between 2**53 and
+    2**53+1, so a pin over such a payload stops pinning it.
+    """
+    import ai_perturbation as apm
+    with pytest.raises(AIPerturbationError):
+        apm._canonical([2 ** 53])
+    with pytest.raises(AIPerturbationError):
+        apm._canonical([2 ** 53 + 1])
+
+
+def test_a_pin_still_accepts_the_last_safe_integer():
+    """The control: the pin refusal must not over-reach."""
+    import ai_perturbation as apm
+    assert apm._canonical([2 ** 53 - 1])
+
+
+def test_verify_answers_false_for_a_record_it_cannot_canonicalize():
+    """`verify()` answers a question; a question is not an exception.
+
+    The record's digest cannot be recomputed over a lone surrogate, so
+    the answer is "not intact" -- `False`.  It must not raise.
+    """
+    import ai_perturbation as apm
+    rec = apm.PerturbationRecord(
+        perturbation_id="prt-1",
+        system_id=SURROGATE,
+        perturbation_kind="noise-injection",
+        outcome="robust",
+        perturbation_digest="",
+        seq=1,
+        digest="sha256:" + "0" * 64,
+    )
+    assert rec.verify(
+        "prt-1", SURROGATE, "noise-injection", "robust", "",
+    ) is False
