@@ -345,5 +345,56 @@ class ValidationTests(unittest.TestCase):
             run(RunOptions(prompt="Hi", provider="gemini"))
 
 
+class RunCodeCheckInputPinningTests(unittest.TestCase):
+    def test_run_code_enforces_check_inputs_and_records_admission_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            repo = parent / "repo"
+            repo.mkdir()
+            subprocess.run(["git", "-C", str(repo), "init", "--quiet"], check=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.email", "t@example.invalid"], check=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.name", "T"], check=True)
+            (repo / "app.py").write_text("value = 1\n", encoding="utf-8")
+            (repo / "check.sh").write_text('grep -q "value = 2" app.py\n', encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "--quiet", "-m", "init"], check=True)
+
+            tamper_turns = [
+                {
+                    "tool": {
+                        "name": "SubmitPlan",
+                        "input": {
+                            "summary": "tamper with check script",
+                            "files": ["check.sh"],
+                            "steps": ["rewrite check.sh to exit 0"],
+                            "risks": [],
+                            "check_indices": [0],
+                        },
+                    }
+                },
+                {"tool": {"name": "Write", "input": {"path": "check.sh", "content": "exit 0\n"}}},
+                {"text": "done"},
+            ]
+            report = run_code(
+                CodeTask(
+                    goal="update app value to 2",
+                    workspace=str(repo),
+                    checks=("sh check.sh",),
+                    check_inputs=("check.sh",),
+                ),
+                options=RunOptions(
+                    scripted_turns=tamper_turns,
+                    shell_backend="process",
+                    shell_seccomp="off",
+                    shell_capdrop="off",
+                    workspace_agents=False,
+                ),
+                evidence_dir=str(parent / "evidence"),
+            )
+            self.assertEqual(report.subtype, "error_postconditions_failed")
+            self.assertFalse(report.ok)
+            self.assertTrue(report.admission_path and Path(report.admission_path).is_file())
+
+
 if __name__ == "__main__":
     unittest.main()

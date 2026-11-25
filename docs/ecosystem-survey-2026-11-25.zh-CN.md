@@ -1,6 +1,8 @@
 # Northstar Agent OS 生态扫描：采用边界与下一步
 
 > 核验日期：2026-11-25。本文记录本轮公开资料扫描，服务于 Northstar Agent OS 的路线决策。框架功能、社区入口和版本会持续变化；以下不声称穷尽所有 AI 项目，也不把社区自述当作安全验证。
+>
+> 扩展生态雷达（覆盖 OpenCode / Hermes Agent / Goose / Cline / OpenHands / Qwen Code / DeerFlow、ACP 1.0、AAIF、AGNTCY、CaMeL、BenchJack 奖励黑客审计、2026 基准洗牌及本轮代码级加固）：[`docs/research/agent-ecosystem-radar-2026-11-25.zh-CN.md`](research/agent-ecosystem-radar-2026-11-25.zh-CN.md)。
 
 ## 先确认项目身份与现状
 
