@@ -296,6 +296,46 @@ class LedgerChainTests(unittest.TestCase):
         b = mp.compute_row_hash(0, "E", {"x": 1}, "sha256:" + "0" * 64)
         self.assertNotEqual(a, b)
 
+    def test_a_re_linked_row_breaks_the_chain_even_when_its_own_hash_is_right(self):
+        # The strongest tamper is one that is *internally consistent*: the
+        # row's own hash is recomputed over the forged prev_hash, so the
+        # payload check passes.  Only the link to the previous row can
+        # catch it.  Without the prev_hash check the chain would verify.
+        ledger = mp.ProvenanceLedger()
+        ledger.append("MEMORY_WRITTEN", {"memory_id": "m1"})
+        ledger.append("MEMORY_WRITTEN", {"memory_id": "m2"})
+        ledger.append("MEMORY_WRITTEN", {"memory_id": "m3"})
+        first = ledger._rows[0]
+        forged_prev = "sha256:" + "f" * 64
+        forged_hash = mp.compute_row_hash(first.seq, first.event, first.payload,
+                                          forged_prev)
+        ledger._rows[0] = mp.LedgerRow(
+            seq=first.seq, event=first.event, payload=dict(first.payload),
+            prev_hash=forged_prev, row_hash=forged_hash,
+        )
+        ok, first_bad = ledger.verify()
+        self.assertFalse(ok)
+        self.assertEqual(0, first_bad)
+
+    def test_a_re_seq_ed_row_breaks_the_chain(self):
+        # The same trick applied to the sequence number: renumber one row
+        # and recompute its hash.  The payload and the link are intact, so
+        # only the seq check can catch it.
+        ledger = mp.ProvenanceLedger()
+        ledger.append("MEMORY_WRITTEN", {"memory_id": "m1"})
+        ledger.append("MEMORY_WRITTEN", {"memory_id": "m2"})
+        second = ledger._rows[1]
+        forged_seq = second.seq + 7
+        forged_hash = mp.compute_row_hash(forged_seq, second.event, second.payload,
+                                          second.prev_hash)
+        ledger._rows[1] = mp.LedgerRow(
+            seq=forged_seq, event=second.event, payload=dict(second.payload),
+            prev_hash=second.prev_hash, row_hash=forged_hash,
+        )
+        ok, first_bad = ledger.verify()
+        self.assertFalse(ok)
+        self.assertEqual(1, first_bad)
+
     def test_the_head_is_the_genesis_pin_for_an_empty_chain(self):
         self.assertEqual(mp.GENESIS_HASH, mp.ProvenanceLedger().head)
 

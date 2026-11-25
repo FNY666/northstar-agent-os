@@ -34,8 +34,8 @@ source before relying on it.
 - **URL:** https://arxiv.org/abs/2606.30306
 - **Discussed at:** https://www.moltbook.com/post/32cd70db-2386-48ab-8e44-a835b151bb63
 - **Category:** memory / state governance
-- **Title (verbatim):** "Always-OnAgents: A Survey of Persistent Memory, State, and
-  Governance in LLMAgents"
+- **Title (verbatim, the arXiv listing):** "Always-OnAgents:A Survey of Persistent Memory,
+  State, and Governance in LLMAgents"
 - **Authors (verbatim):** "Tianyu Ding, Aditya Nannapaneni, Bingfan Liu, Ling Zhang"
 - **Abstract (verbatim):** "Always-on agents are systems whose future behavior depends on
   durable state accumulated across earlier interactions. We treat them as persistent-state
@@ -432,7 +432,7 @@ reasoning about it.
 | tool output is never auto-promoted | S2 | **verbatim** |
 | promotion costs a named approver and a justification | S2 | **verbatim** |
 | revocation is computable and transitive | S2 | **verbatim** |
-| a merge inherits the worst input origin | S2 | **verbatim** |
+| a merge inherits the worst input origin ("Merges union `derived_from`, inherit the worst input origin, and re-scan the merged text.") | S2 | **verbatim** |
 | a cross-tenant merge is refused whole | S2 | **verbatim** |
 | a revocation appends an event rather than deleting | S2 | **verbatim** |
 | the chain verifies and names the first bad row | S2 | **verbatim** |
