@@ -254,6 +254,10 @@ class TestLiveLoader(RuntimeTestCase):
             self.assertNotIn("host-only-secret", result.stdout)
             self.assertIn("Permission denied", result.stderr)
 
+    @unittest.skipUnless(
+        landlock_abi_version() >= 4,
+        "TCP network restrictions require Landlock ABI 4 or newer",
+    )
     def test_tcp_denied(self):
         with tempfile.TemporaryDirectory() as ws:
             result = self._run(

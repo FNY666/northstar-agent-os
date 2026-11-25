@@ -49,6 +49,7 @@ from tools.sandbox import (
     LANDLOCK_MODES,
     default_profile,
     landlock_loader_argv,
+    landlock_abi_version,
     landlock_supported,
 )
 from tools.seccomp import SECCOMP_MODES, SeccompError, build_default_filter, prctl_loader_argv
@@ -1308,7 +1309,14 @@ def run_sandboxed(
         spec = default_profile(str(workspace))
         spec["mode"] = landlock_mode
         exec_argv = landlock_loader_argv(exec_argv, spec, python=python)
-        detail += "; landlock path allowlist active (FS deny-by-default, TCP denied)"
+        landlock_abi = landlock_abi_version()
+        if landlock_abi >= 4:
+            detail += f"; landlock path allowlist active (ABI {landlock_abi}, FS deny-by-default, TCP denied)"
+        else:
+            detail += (
+                f"; landlock path allowlist active (ABI {landlock_abi}, FS deny-by-default; "
+                "Landlock TCP enforcement unavailable below ABI 4)"
+            )
     elif landlock_mode != "off":
         # Graceful degradation, stated out loud: the loader would also warn
         # on stderr, but the detail line is what the operator reads.

@@ -595,12 +595,17 @@ def _check_landlock(args: argparse.Namespace, findings: list[Finding], backend: 
                 )
             )
         return
+    network_detail = (
+        "TCP denied by Landlock"
+        if probe["abi"] >= 4
+        else f"Landlock TCP rights unavailable (requires ABI 4+, host ABI {probe['abi']})"
+    )
     findings.append(
         Finding(
             "landlock",
             "ok",
             f"mode={mode}, backend={backend}: path allowlist will be applied "
-            f"(Landlock ABI v{probe['abi']}, FS deny-by-default, TCP denied)",
+            f"(Landlock ABI v{probe['abi']}, FS deny-by-default; {network_detail})",
         )
     )
 

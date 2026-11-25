@@ -18,7 +18,7 @@ from collections import deque
 from pathlib import Path
 from typing import Iterable
 
-SCHEMA = "northstar.runtime-module-inventory.v1"
+SCHEMA = "northstar.runtime-module-inventory.v2"
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ROOTS = (
     "cli",
@@ -70,18 +70,107 @@ def _relative_base(module: str, level: int, *, is_package: bool) -> str:
     return ".".join(parts[:keep])
 
 
+def _dotted_name(node: ast.AST) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        prefix = _dotted_name(node.value)
+        return ".".join(part for part in (prefix, node.attr) if part)
+    return ""
+
+
+def _resolve_import_module_name(
+    name: str,
+    call: ast.Call,
+    module: str,
+    path: Path,
+) -> str | None:
+    """Resolve literal ``import_module('.x', package=...)`` names conservatively."""
+    if not name.startswith("."):
+        return name
+    package_node = call.args[1] if len(call.args) > 1 else next(
+        (keyword.value for keyword in call.keywords if keyword.arg == "package"),
+        None,
+    )
+    if isinstance(package_node, ast.Constant) and isinstance(package_node.value, str):
+        package = package_node.value
+    elif isinstance(package_node, ast.Name) and package_node.id == "__package__":
+        package = module if path.name == "__init__.py" else module.rpartition(".")[0]
+    else:
+        return None
+    package_parts = package.split(".") if package else []
+    level = len(name) - len(name.lstrip("."))
+    if level > len(package_parts):
+        return None
+    base = package_parts[: len(package_parts) - level + 1]
+    suffix = name[level:].split(".") if name[level:] else []
+    return ".".join(part for part in (*base, *suffix) if part)
+
+
 def imports_for(
     module: str,
     path: Path,
     modules: dict[str, Path],
-) -> tuple[set[str], list[dict[str, object]], str | None]:
+) -> tuple[set[str], list[dict[str, object]], str | None, str | None]:
     try:
-        source = path.read_text(encoding="utf-8")
+        source_bytes = path.read_bytes()
+    except OSError as error:
+        return set(), [], f"{type(error).__name__}: {error}", None
+    source_sha256 = hashlib.sha256(source_bytes).hexdigest()
+    try:
+        source = source_bytes.decode("utf-8")
         tree = ast.parse(source, filename=str(path))
-    except (OSError, UnicodeDecodeError, SyntaxError) as error:
-        return set(), [], f"{type(error).__name__}: {error}"
+    except (UnicodeDecodeError, SyntaxError) as error:
+        return set(), [], f"{type(error).__name__}: {error}", source_sha256
     edges: set[str] = set()
     dynamic: list[dict[str, object]] = []
+
+    # Resolve the common import aliases before walking calls. A call such as
+    # ``from importlib import import_module as load; load("plugin")`` is just
+    # as real an edge as ``importlib.import_module("plugin")``. Treating it as
+    # invisible undercounts the production closure and can misclassify a module
+    # as unused. This remains deliberately static: computed names are reported
+    # as dynamic sites but are not guessed into the import graph.
+    importlib_names = {"importlib"}
+    importlib_util_names = {"importlib.util"}
+    import_module_names = {"import_module"}
+    import_function_names = {"__import__"}
+    spec_loader_names = {"spec_from_file_location"}
+    builtins_names = {"builtins"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "importlib":
+                    importlib_names.add(alias.asname or "importlib")
+                elif alias.name == "importlib.util":
+                    importlib_util_names.add(alias.asname or "importlib.util")
+                elif alias.name == "builtins":
+                    builtins_names.add(alias.asname or "builtins")
+        elif isinstance(node, ast.ImportFrom):
+            if node.module == "importlib":
+                import_module_names.update(
+                    alias.asname or alias.name
+                    for alias in node.names
+                    if alias.name == "import_module"
+                )
+                importlib_util_names.update(
+                    alias.asname or alias.name
+                    for alias in node.names
+                    if alias.name == "util"
+                )
+            elif node.module == "importlib.util":
+                spec_loader_names.update(
+                    alias.asname or alias.name
+                    for alias in node.names
+                    if alias.name == "spec_from_file_location"
+                )
+            elif node.module == "builtins":
+                import_function_names.update(
+                    alias.asname or alias.name
+                    for alias in node.names
+                    if alias.name == "__import__"
+                )
+
     for node in ast.walk(tree):
         names: list[str] = []
         if isinstance(node, ast.Import):
@@ -102,40 +191,65 @@ def imports_for(
                     names.append(".".join(item for item in (base, alias.name) if item))
         elif isinstance(node, ast.Call):
             called = ""
-            if isinstance(node.func, ast.Name) and node.func.id == "__import__":
+            function_name = _dotted_name(node.func)
+            if function_name in import_function_names:
                 called = "__import__"
-            elif (
-                isinstance(node.func, ast.Attribute)
-                and isinstance(node.func.value, ast.Name)
-                and node.func.value.id == "importlib"
-                and node.func.attr == "import_module"
+            elif function_name in import_module_names:
+                called = "importlib.import_module"
+            elif function_name in spec_loader_names:
+                called = "importlib.util.spec_from_file_location"
+            elif any(
+                function_name == f"{prefix}.import_module"
+                for prefix in importlib_names
             ):
                 called = "importlib.import_module"
+            elif any(
+                function_name == f"{prefix}.spec_from_file_location"
+                for prefix in importlib_util_names
+            ):
+                called = "importlib.util.spec_from_file_location"
+            elif any(
+                function_name == f"{prefix}.__import__"
+                for prefix in builtins_names
+            ):
+                called = "__import__"
             if called:
+                literal_node = node.args[0] if node.args else next(
+                    (keyword.value for keyword in node.keywords if keyword.arg == "name"),
+                    None,
+                )
                 literal = (
-                    node.args[0].value
-                    if node.args and isinstance(node.args[0], ast.Constant)
-                    and isinstance(node.args[0].value, str)
+                    literal_node.value
+                    if isinstance(literal_node, ast.Constant)
+                    and isinstance(literal_node.value, str)
                     else None
                 )
                 dynamic.append({"line": node.lineno, "call": called, "literal": literal})
                 if literal:
-                    names.append(literal)
+                    import_name = (
+                        _resolve_import_module_name(literal, node, module, path)
+                        if called == "importlib.import_module"
+                        else literal
+                    )
+                    if import_name:
+                        names.append(import_name)
         for name in names:
             found = _candidate(name, modules)
             if found and found != module:
                 edges.add(found)
-    return edges, dynamic, None
+    return edges, dynamic, None, source_sha256
 
 
 def inventory(runtime: Path, roots: Iterable[str]) -> dict[str, object]:
     modules = discover(runtime)
     graph: dict[str, set[str]] = {}
     dynamic: dict[str, list[dict[str, object]]] = {}
+    source_hashes: dict[str, str | None] = {}
     parse_errors: dict[str, str] = {}
     for name, path in modules.items():
-        edges, calls, error = imports_for(name, path, modules)
+        edges, calls, error, source_sha256 = imports_for(name, path, modules)
         graph[name] = edges
+        source_hashes[name] = source_sha256
         if calls:
             dynamic[name] = calls
         if error:
@@ -169,6 +283,7 @@ def inventory(runtime: Path, roots: Iterable[str]) -> dict[str, object]:
     module_rows = {
         name: {
             "path": modules[name].relative_to(runtime).as_posix(),
+            "source_sha256": source_hashes[name],
             "imports": sorted(graph[name]),
             "classification": "core_reachable" if name in reachable else "review_required",
             **(

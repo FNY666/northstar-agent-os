@@ -220,7 +220,7 @@ Labs 包含攻击语料、模拟探针、外部基准适配器、研究性防御
 
 迁移依据是从 CLI/SDK 出发的静态与运行时调用图。任何模块在移动前都必须分类为 Core、Labs、兼容层或待审查；待审查不等于可删除。
 
-首轮可复现静态清单见 [`architecture/runtime-module-inventory.md`](architecture/runtime-module-inventory.md)。它识别出 1,569 个模块，其中 178 个被当前生产入口静态触达，1,391 个留待人工复核，另有 24 处动态导入。入口可达集合中已经混入行业、基准和研究模块，因此“可达”只表示当前存在耦合，不代表已经批准进入 Core。下一步必须结合离线任务运行时导入轨迹，为可达模块逐个给出 Core、Labs、兼容层或待审查裁决。
+首轮可复现静态清单见 [`architecture/runtime-module-inventory.md`](architecture/runtime-module-inventory.md)。首轮快照识别出 1,569 个模块，其中 178 个被当前生产入口静态触达，1,391 个留待人工复核，另有 24 处动态导入。入口可达集合中已经混入行业、基准和研究模块，因此“可达”只表示当前存在耦合，不代表已经批准进入 Core。2026-11-25 的复算为 1,579 个模块、189 个静态可达、1,390 个待人工复核和 29 个动态加载站点；盘点器覆盖常见 importlib / builtins 别名及文件位置加载，并新增显式运行时 import trace 工具。一次离线 `northstar bench` trace 发现 `bash_parser.py` 经 `spec_from_file_location` 加载，静态图已纳入；仍需对多个产品路径采集 trace，再逐个给出 Core、Labs、兼容层或待审查裁决。
 
 ---
 
@@ -385,7 +385,7 @@ M0/M1 先交付独立的编程安全脚本入口：攻击载荷仅作用于临�
 2. 用当前 `northstar code` 在已经冻结的 24 题上测出真实模型基线；**已落地** —— 真实模型在 24 题上实测 20/24，门槛 20/24，记录见 `benchmarks/code-tasks/v1/measurements/`。
 3. 冻结 50 题 SWE-bench 样本和运行环境；**已落地** —— `benchmarks/swe-bench/verified-50.json` 锁定 50 个实例、基准提交、评测测试与容器镜像 manifest digest；`scripts/run_swe_bench_eval.py` 直接复用上游 `swebench.harness` 判定，不自研评测逻辑。官方环境镜像只有 `linux/amd64`，在 arm64 主机经 QEMU 用户态模拟运行，已核对三条判定路径：gold patch→`RESOLVED_FULL`、语义错误补丁→`RESOLVED_NO`（补丁能应用但测试仍失败）、无补丁→`no_patch_delivered`。
 4. 补齐阶段恢复与未知副作用 reconcile；**已落地** —— 见 `components/northstar-agent-runtime/code_resume.py`。
-5. 达到 24 题离线门槛后再扩展长任务和 Labs；**离线门槛已达成，且基线已固定** —— 先把采样温度纳入评测条件（CLI/SDK/provider 支持 `--temperature`，默认不传即不改变端点行为），再按「两次取低」重复运行：固定温度前两次得 20/24 与 22/24、5 题结果不同；固定 `temperature=0` 后两次均为 23/24、逐题结果完全一致，发布基线取较低值 23/24（门槛 20/24）。记录见 `benchmarks/code-tasks/v1/measurements/`。
+5. **SWE-bench Verified 50 已接入真实模型**：新增 `scripts/solve_swe_bench.py`（求解侧）与既有 `scripts/run_swe_bench_eval.py`（评测侧），仓库从实例自带的环境镜像导出，保证模型改的代码与评测跑的代码是同一份；判定完全交给上游 `swebench.harness`，不重写评分。实测 12 题覆盖全部 12 个仓库，6 题验证批中 5 题 `RESOLVED_FULL`、1 题 `RESOLVED_PARTIAL`。**代价**：amd64 镜像在 aarch64 上靠 QEMU 模拟，单题评测需 30–90 分钟，全量 50 题属多小时作业。（以下为内部 24 题 pack 的门槛）达到 24 题离线门槛后再扩展长任务和 Labs；**离线门槛已达成，且基线已固定** —— 先把采样温度纳入评测条件（CLI/SDK/provider 支持 `--temperature`，默认不传即不改变端点行为），再按「两次取低」重复运行：固定温度前两次得 20/24 与 22/24、5 题结果不同；固定 `temperature=0` 后两次均为 23/24、逐题结果完全一致，发布基线取较低值 23/24（门槛 20/24）。记录见 `benchmarks/code-tasks/v1/measurements/`。
 
 这五步同步保留编程攻防双轨：每个有害样本配一个有效的良性对照，验证证据由宿主检查，不以模型自述或平均安全分替代硬门。来源雷达与本轮候选裁决见 [2026-10-17 生态研究](../research/2026-10-17/00-ecosystem-synthesis.md)。
 
