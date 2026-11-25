@@ -24,6 +24,12 @@ _baseline_module = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_baseline_module)
 RELEASE_GATE_TASKS = _baseline_module.RELEASE_GATE_TASKS
 
+_record_spec = importlib.util.spec_from_file_location(
+    "northstar_record_measurement", ROOT / "scripts" / "record_measurement.py"
+)
+_record_module = importlib.util.module_from_spec(_record_spec)
+_record_spec.loader.exec_module(_record_module)
+
 
 def _records() -> list[dict]:
     if not MEASUREMENTS.is_dir():
@@ -35,6 +41,57 @@ def _records() -> list[dict]:
 
 
 class RecordedMeasurementTests(unittest.TestCase):
+    def test_endpoint_attribution_requires_a_vendor_domain_boundary(self):
+        expected = {
+            "https://api.openai.com/v1": "OpenAI official endpoint",
+            "https://OPENAI.COM./v1": "OpenAI official endpoint",
+            "https://api.anthropic.com/v1": "Anthropic official endpoint",
+            "https://attackeropenai.com/v1": "third-party relay",
+            "https://openai.com.attacker.example/v1": "third-party relay",
+            "https://notanthropic.com/v1": "third-party relay",
+            "https://anthropic.com.attacker.example/v1": "third-party relay",
+            "https://openai.com@attacker.example/v1": "third-party relay",
+        }
+        for base_url, expected_note in expected.items():
+            with self.subTest(base_url=base_url):
+                note = _record_module._endpoint_note(base_url)
+                self.assertTrue(note.startswith(expected_note), note)
+
+    def test_archiving_redacts_path_credentials_from_legacy_receipts(self):
+        secret = "dummy-archive-path-secret"
+        base_url = (
+            f"https://user:dummy-archive-user-secret@gateway.example.invalid/"
+            f"v1/tenant/{secret}/chat/completions?api_key=dummy-archive-query-secret"
+        )
+        receipt = {
+            "conditions": {
+                "provider": "openai",
+                "model": "test-model",
+                "base_url": base_url,
+                "pack": {"pack_id": "test-pack", "manifest_sha256": "test-sha"},
+                "limits": {},
+                "sandbox": {},
+                "toolchain": {},
+            },
+            "summary": {},
+            "measurement": "real_model_baseline",
+            "real_model_evaluated": True,
+            "release_eligible": False,
+            "release_gate": {},
+            "tasks": [],
+        }
+        record = _record_module.build_record(receipt)
+        serialized = json.dumps(record, sort_keys=True)
+        archived_url = record["model"]["base_url"]
+
+        self.assertTrue(archived_url.startswith("https://gateway.example.invalid/_redacted-path-sha256/"))
+        self.assertEqual(archived_url, _record_module._record_base_url(base_url))
+        self.assertEqual(archived_url, _baseline_module._receipt_base_url(base_url))
+        self.assertNotIn(secret, serialized)
+        self.assertNotIn("dummy-archive-user-secret", serialized)
+        self.assertNotIn("dummy-archive-query-secret", serialized)
+        self.assertIn("third-party relay (gateway.example.invalid)", record["model"]["endpoint_note"])
+
     def test_every_record_describes_a_real_evaluation(self):
         records = _records()
         self.assertTrue(records, "no recorded measurement is present")

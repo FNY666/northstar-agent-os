@@ -93,6 +93,29 @@ class ProviderError(RuntimeError):
         self.retry_after_ms = retry_after_ms if isinstance(retry_after_ms, int) and not isinstance(retry_after_ms, bool) else None
 
 
+def _safe_provider_error_reason(
+    error: BaseException | str,
+    secrets: Iterable[str] = (),
+    *,
+    limit: int = 300,
+) -> str:
+    """Summarise an SDK error without copying known credentials into logs.
+
+    SDK exceptions can include request details supplied by a gateway. Remove
+    the exact credential values known to the provider before applying the
+    display limit; truncating first can leave an echoed secret intact.
+    """
+    text = error if isinstance(error, str) else (str(error) or type(error).__name__)
+    candidates = sorted(
+        {value for value in secrets if isinstance(value, str) and value},
+        key=len,
+        reverse=True,
+    )
+    for value in candidates:
+        text = text.replace(value, "[REDACTED]")
+    return text if len(text) <= limit else text[: limit - 3] + "..."
+
+
 def _checked_usage_count(value: Any, field_name: str) -> int:
     """Validate a present count supplied by a live provider before billing."""
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:

@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -11,6 +12,16 @@ CONTRACT_ROOT = COMPONENT_ROOT.parent / "northstar-run-contract"
 sys.path.insert(0, str(COMPONENT_ROOT))
 sys.path.insert(0, str(HOST_ROOT))
 sys.path.insert(0, str(CONTRACT_ROOT))
+
+
+def _interop_subprocess_env():
+    env = os.environ.copy()
+    source_paths = [str(COMPONENT_ROOT), str(HOST_ROOT), str(CONTRACT_ROOT)]
+    if env.get("PYTHONPATH"):
+        source_paths.append(env["PYTHONPATH"])
+    env["PYTHONPATH"] = os.pathsep.join(source_paths)
+    return env
+
 
 from route_causality import CausalEdge  # noqa: E402
 from causal_store import CausalEvidenceRecord, CausalEvidenceStore, EvidenceCursor  # noqa: E402
@@ -215,6 +226,7 @@ class CausalEvidenceStoreTests(unittest.TestCase):
                 [sys.executable, str(script), str(self.path), str(COMPONENT_ROOT), str(result_path)],
                 stdout=subprocess.DEVNULL,
                 stderr=error_stream,
+                env=_interop_subprocess_env(),
             )
             processes.append((process, result_path, error_path))
         try:

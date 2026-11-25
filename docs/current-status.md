@@ -53,3 +53,11 @@ python3 tests/docbuild.py verify
 - 入口文档、组件 README 和本文一起对照实现更新；出现冲突时先核对代码与实际验证结果。
 - `CHANGELOG.md`、`docs/superpowers/plans/` 和带日期的 benchmark/DX 报告是历史记录；修改实现后，应在本文和入口文档更新状态，并在历史文档顶部补充快照说明，而不是悄悄改写历史叙述。
 - `docs/api/*.md` 由 `tests/docbuild.py` 生成，使用 `python3 tests/docbuild.py build` 更新，禁止手工维护。
+
+
+## 2026-11-25 本地开发与验证补记
+
+- `scripts/record_measurement.py` 的供应商 endpoint 归因现按解析后的 hostname 和 DNS 标签边界判断；`attackeropenai.com`、`openai.com.attacker.example` 及 userinfo 混淆不再被标为官方端点。
+- 聚焦回归 `python3 -m unittest tests.test_code_task_measurement tests.test_runtime_module_inventory -v`：9 项通过。`make ts-test`：60 项通过。仓库测试：170 项通过。`python3 tests/docbuild.py verify`：8 个组件 API 页、1,877 个模块及 148 个 Markdown 文件校验通过。
+- `make test` 在 `northstar-agent-interop` 中止：3 个子进程测试因子组件导入路径缺失而失败（分别报缺少 `authorization`/`binding`）。另行运行 runtime unittest 收集 19,566 项，25 项跳过、629 项错误；测试环境未安装 `pytest`，导致多个基于 pytest 的测试模块无法导入。上述失败与本轮 endpoint 归因改动无关，当前不据此声称完整 Python 测试套件通过。
+- 修复后复验（2026-11-25）：interop 并发/锁测试子进程显式继承 interop、host、run-contract 源码路径；`test_route_ledger.py` 也独立引导 run-contract 路径。隔离 venv 使用仓库已锁定的 `pytest==8.3.4` 执行根目录 `make test`：sidecar 53、egress 33、run-contract 54、run-evidence 94、host 37、durable-run 499（11 skipped）、interop 260、runtime 18,937（24 skipped）、TypeScript 60、仓库文档 177，全部通过。系统 Python 未安装 pytest；依赖仅安装于 `/tmp/northstar-agent-os-test-venv`，未修改系统环境。`git diff --check` 通过。

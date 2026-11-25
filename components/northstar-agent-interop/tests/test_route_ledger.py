@@ -1,5 +1,6 @@
 import json
 import multiprocessing
+import os
 import stat
 import subprocess
 import sys
@@ -10,8 +11,20 @@ from pathlib import Path
 
 COMPONENT_ROOT = Path(__file__).resolve().parents[1]
 HOST_ROOT = COMPONENT_ROOT.parent / "northstar-host"
+CONTRACT_ROOT = COMPONENT_ROOT.parent / "northstar-run-contract"
 sys.path.insert(0, str(COMPONENT_ROOT))
 sys.path.insert(0, str(HOST_ROOT))
+sys.path.insert(0, str(CONTRACT_ROOT))
+
+
+def _interop_subprocess_env():
+    env = os.environ.copy()
+    source_paths = [str(COMPONENT_ROOT), str(HOST_ROOT), str(CONTRACT_ROOT)]
+    if env.get("PYTHONPATH"):
+        source_paths.append(env["PYTHONPATH"])
+    env["PYTHONPATH"] = os.pathsep.join(source_paths)
+    return env
+
 
 from backend_router import RouteDecision  # noqa: E402
 from route_ledger import (  # noqa: E402
@@ -550,6 +563,7 @@ class RouteLedgerPersistenceTests(RouteLedgerTestCase):
                     ],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
+                    env=_interop_subprocess_env(),
                     start_new_session=True,
                 )
                 deadline = time.monotonic() + 10
@@ -624,6 +638,7 @@ class RouteLedgerPersistenceTests(RouteLedgerTestCase):
                 [sys.executable, str(script), str(self.path), str(payload_path), str(COMPONENT_ROOT), str(result_path)],
                 stdout=subprocess.DEVNULL,
                 stderr=error_stream,
+                env=_interop_subprocess_env(),
                 start_new_session=True,
             )
             processes.append((process, result_path, error_path))

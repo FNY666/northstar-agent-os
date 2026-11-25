@@ -332,6 +332,90 @@ class ClientConstructionTests(unittest.TestCase):
             provider = OpenAICompatProvider(base_url="http://127.0.0.1:11434/v1", api_key="fixture-explicit-key")
         self.assertEqual(provider._client_kwargs["api_key"], "fixture-explicit-key")
 
+    def test_sdk_failure_redacts_environment_key_and_endpoint(self):
+        secret = "opaque_custom_credential_6Dq9vX3N1p"
+        base_url = "https://user:dummy-url-secret@gateway.example.invalid/v1?tenant=dummy-query-secret"
+
+        class FailingClient:
+            def __init__(self):
+                self.chat = type("Chat", (), {"completions": self})()
+
+            def create(self, **kwargs):
+                raise RuntimeError(f"gateway echoed {secret}; request URL {base_url}")
+
+        with patch.dict("os.environ", {"OPENAI_API_KEY": secret}):
+            provider = OpenAICompatProvider(client=FailingClient(), base_url=base_url)
+            with self.assertRaises(ProviderError) as caught:
+                provider.generate(request())
+
+        message = str(caught.exception)
+        self.assertIn("[REDACTED]", message)
+        self.assertNotIn(secret, message)
+        self.assertNotIn(base_url, message)
+        self.assertNotIn("dummy-url-secret", message)
+        self.assertNotIn("dummy-query-secret", message)
+        self.assertIsNone(caught.exception.__cause__)
+        self.assertTrue(caught.exception.__suppress_context__)
+
+    def test_sdk_failure_redacts_split_endpoint_components(self):
+        base_url = (
+            "https://dummy%2Dendpoint%2Duser:dummy%2Dendpoint%2Dpass@gateway.example.invalid/"
+            "tenant/dummy%2Dpath%2Dsecret/v1?api_key=dummy%2Dquery%2Dsecret&token=dummy%2Dtoken%2Dsecret"
+        )
+        echoed_fields = (
+            "transport failed: user=dummy-endpoint-user pass=dummy-endpoint-pass "
+            "path=/tenant/dummy-path-secret/v1 segment=dummy-path-secret "
+            "query=api_key=dummy-query-secret&token=dummy-token-secret query-value=dummy-token-secret"
+        )
+
+        class FailingClient:
+            def __init__(self):
+                self.chat = type("Chat", (), {"completions": self})()
+
+            def create(self, **kwargs):
+                raise RuntimeError(echoed_fields)
+
+        provider = OpenAICompatProvider(client=FailingClient(), base_url=base_url)
+        with self.assertRaises(ProviderError) as caught:
+            provider.generate(request())
+
+        message = str(caught.exception)
+        self.assertIn("[REDACTED]", message)
+        for secret in (
+            "dummy-endpoint-user",
+            "dummy-endpoint-pass",
+            "dummy-path-secret",
+            "dummy-query-secret",
+            "dummy-token-secret",
+        ):
+            self.assertNotIn(secret, message)
+        self.assertIsNone(caught.exception.__cause__)
+
+    def test_sdk_failure_redacts_custom_default_header_values(self):
+        headers = {
+            "Authorization": "Bearer fixture-openai-auth-secret",
+            "X-API-Key": "fixture-openai-x-api-secret",
+            "X-Org-Session": "fixture-openai-custom-header-secret",
+        }
+
+        class FailingClient:
+            def __init__(self):
+                self.chat = type("Chat", (), {"completions": self})()
+
+            def create(self, **kwargs):
+                raise RuntimeError("gateway echoed " + "; ".join(
+                    f"{name}: {value}" for name, value in headers.items()
+                ))
+
+        provider = OpenAICompatProvider(client=FailingClient(), extra_headers=headers)
+        with self.assertRaises(ProviderError) as caught:
+            provider.generate(request())
+
+        message = str(caught.exception)
+        self.assertIn("[REDACTED]", message)
+        for value in headers.values():
+            self.assertNotIn(value, message)
+
     @unittest.skipIf(importlib.util.find_spec("openai") is not None, "the openai package is installed here")
     def test_a_missing_sdk_is_reported_as_a_provider_error(self):
         with self.assertRaises(ProviderError) as caught:

@@ -14,6 +14,8 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "run-code-task-baseline.py"
@@ -71,6 +73,94 @@ class BaselineReceiptTests(unittest.TestCase):
         self.assertIn("toolchain", conditions)
         self.assertIn("python", conditions["toolchain"])
         self.assertEqual(conditions["pack"]["manifest_sha256"], MODULE._pack_identity()["manifest_sha256"])
+
+    def test_receipt_redacts_credentials_and_fingerprints_custom_endpoint_path(self):
+        base_url = (
+            "https://user:dummy-user-secret@example.invalid/"
+            "v1/tenant/dummy-path-secret/chat/completions"
+            "?api_key=dummy-query-secret#dummy-fragment"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "receipt.json"
+            with patch.dict(os.environ, {"OPENAI_API_KEY": ""}):
+                receipt = MODULE.run_baseline(
+                    provider="openai",
+                    model="some-model",
+                    base_url=base_url,
+                    output=output,
+                    only=["py-feat-001-batch-normalize"],
+                )
+            serialized = output.read_text(encoding="utf-8")
+        safe_url = receipt["conditions"]["base_url"]
+        self.assertTrue(safe_url.startswith("https://example.invalid/_redacted-path-sha256/"))
+        fingerprint = safe_url.rsplit("/", 1)[-1]
+        self.assertEqual(len(fingerprint), 64)
+        int(fingerprint, 16)
+        self.assertNotEqual(
+            safe_url,
+            MODULE._receipt_base_url(base_url.replace("dummy-path-secret", "another-path-secret")),
+        )
+        self.assertNotIn("dummy-user-secret", serialized)
+        self.assertNotIn("dummy-path-secret", serialized)
+        self.assertNotIn("dummy-query-secret", serialized)
+        self.assertNotIn("dummy-fragment", serialized)
+
+    def test_custom_endpoint_credentials_are_not_exposed_in_runtime_argv(self):
+        base_url = (
+            "https://user:dummy-user-secret@gateway.example.invalid/v1/tenant/secret-path"
+            "?api_key=dummy-query-secret"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.object(
+                MODULE.subprocess,
+                "run",
+                return_value=SimpleNamespace(returncode=0, stdout=b"", stderr=b""),
+            ) as run:
+                MODULE._run_model(
+                    "py-feat-001-batch-normalize",
+                    root / "fixture",
+                    [],
+                    root / "evidence",
+                    provider="openai",
+                    model="test-model",
+                    base_url=base_url,
+                    provider_environment={},
+                    limits={
+                        "max_turns": 1,
+                        "max_tool_calls": 1,
+                        "max_output_tokens": 16,
+                        "wall_time_seconds": 1,
+                    },
+                )
+        command = run.call_args.args[0]
+        child_environment = run.call_args.kwargs["env"]
+        self.assertNotIn("--base-url", command)
+        self.assertNotIn(base_url, command)
+        self.assertNotIn("dummy-user-secret", " ".join(command))
+        self.assertNotIn("dummy-query-secret", " ".join(command))
+        self.assertEqual(child_environment["OPENAI_BASE_URL"], base_url)
+        self.assertIsInstance(command, list)
+        self.assertFalse(run.call_args.kwargs.get("shell", False))
+
+    def test_only_the_selected_provider_credential_is_forwarded(self):
+        with patch.dict(
+            os.environ,
+            {
+                "OPENAI_API_KEY": "dummy-openai-key",
+                "ANTHROPIC_API_KEY": "dummy-anthropic-key",
+                "UNRELATED_SECRET": "dummy-unrelated-secret",
+            },
+        ):
+            self.assertEqual(
+                MODULE._provider_environment("openai"),
+                {"OPENAI_API_KEY": "dummy-openai-key"},
+            )
+            self.assertEqual(
+                MODULE._provider_environment("anthropic"),
+                {"ANTHROPIC_API_KEY": "dummy-anthropic-key"},
+            )
+            self.assertEqual(MODULE._provider_environment("scripted"), {})
 
     def test_the_release_gate_needs_twenty_of_twenty_four(self):
         self.assertEqual(MODULE.RELEASE_GATE_TASKS, 20)

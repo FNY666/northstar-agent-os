@@ -24,6 +24,7 @@ import tempfile
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 PACK_SCRIPT = ROOT / "scripts" / "run-code-task-pack.py"
@@ -74,6 +75,30 @@ def _read_json(path: Path) -> dict[str, Any]:
     except (OSError, ValueError):
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+_REDACTED_PATH_PREFIX = "/_redacted-path-sha256/"
+
+
+def _receipt_base_url(base_url: str) -> str:
+    """Keep comparable endpoint identity without persisting URL credentials.
+
+    The original value still goes to the provider. Receipt metadata removes
+    userinfo, query strings, fragments and raw path text; a stable path digest
+    distinguishes endpoints that share a host without persisting the raw path.
+    """
+    if not base_url:
+        return "(provider default)"
+    try:
+        parts = urlsplit(base_url)
+    except ValueError:
+        return "(custom endpoint; URL details redacted)"
+    netloc = parts.netloc.rsplit("@", 1)[-1]
+    path = (
+        f"{_REDACTED_PATH_PREFIX}{_sha256(parts.path.encode('utf-8'))}"
+        if parts.path else ""
+    )
+    return urlunsplit((parts.scheme, netloc, path, "", ""))
 
 
 def _toolchain() -> dict[str, str]:
@@ -168,8 +193,6 @@ def _run_model(
         "--evidence-dir", str(evidence_root),
         "--json",
     ]
-    if base_url:
-        command.extend(("--base-url", base_url))
     if script:
         command.extend(("--script", script))
     for check in checks:
@@ -177,6 +200,11 @@ def _run_model(
 
     started = time.monotonic()
     timed_out = False
+    child_environment = {**PACK._environment(fixture), **provider_environment}
+    if provider == "openai" and base_url:
+        # Endpoint URLs can themselves contain userinfo or query credentials.
+        # The CLI supports OPENAI_BASE_URL, so do not expose them in argv/ps.
+        child_environment["OPENAI_BASE_URL"] = base_url
     try:
         process = subprocess.run(
             command,
@@ -186,7 +214,7 @@ def _run_model(
             stderr=subprocess.PIPE,
             # The runtime needs the provider credential; the evaluated code
             # does not, because host checks run in their own clean environment.
-            env={**PACK._environment(fixture), **provider_environment},
+            env=child_environment,
             timeout=float(limits["wall_time_seconds"]),
             check=False,
         )
@@ -281,7 +309,7 @@ def run_baseline(
         "conditions": {
             "provider": provider,
             "model": model,
-            "base_url": base_url or "(provider default)",
+            "base_url": _receipt_base_url(base_url),
             "script": Path(script).name if script else "",
             "sandbox": SANDBOX_PROFILE,
             "limits": limits,

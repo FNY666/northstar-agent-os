@@ -10,6 +10,7 @@ import sys
 import types
 import unittest
 from dataclasses import dataclass
+from unittest.mock import patch
 
 import support  # noqa: F401
 from support import RuntimeTestCase, text_turn, tool_turn
@@ -344,7 +345,39 @@ class AnthropicNormaliseTests(unittest.TestCase):
         self.assertIn("anthropic request failed", message)
         self.assertLessEqual(len(message), 400, "a provider error must not carry a whole request body")
         self.assertNotIn("x" * 500, message)
-        self.assertIsInstance(caught.exception.__cause__, RuntimeError)
+        self.assertIsNone(caught.exception.__cause__)
+        self.assertTrue(caught.exception.__suppress_context__)
+
+    def test_sdk_failure_redacts_an_opaque_environment_key(self):
+        secret = "opaque_custom_credential_6Dq9vX3N1p"
+        client = FakeClient([RuntimeError(f"gateway echoed credential {secret}")])
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": secret}):
+            with self.assertRaises(ProviderError) as caught:
+                AnthropicProvider(client=client).generate(
+                    GenerationRequest(system="", messages=(), tools=(), model="", max_tokens=10)
+                )
+        self.assertIn("[REDACTED]", str(caught.exception))
+        self.assertNotIn(secret, str(caught.exception))
+        self.assertIsNone(caught.exception.__cause__)
+
+    def test_sdk_failure_redacts_custom_default_header_values(self):
+        headers = {
+            "Authorization": "Bearer fixture-anthropic-auth-secret",
+            "X-API-Key": "fixture-anthropic-x-api-secret",
+            "X-Org-Session": "fixture-anthropic-custom-header-secret",
+        }
+        client = FakeClient([RuntimeError("gateway echoed " + "; ".join(
+            f"{name}: {value}" for name, value in headers.items()
+        ))])
+        provider = AnthropicProvider(client=client, extra_headers=headers)
+
+        with self.assertRaises(ProviderError) as caught:
+            provider.generate(GenerationRequest(system="", messages=(), tools=(), model="", max_tokens=10))
+
+        message = str(caught.exception)
+        self.assertIn("[REDACTED]", message)
+        for value in headers.values():
+            self.assertNotIn(value, message)
 
     def test_provider_errors_are_not_double_wrapped(self):
         client = FakeClient([ProviderError("already normalised")])

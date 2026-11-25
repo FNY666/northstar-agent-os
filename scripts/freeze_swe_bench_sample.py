@@ -14,18 +14,26 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote, urlencode
 
 HF_DATASET = "https://huggingface.co/datasets/princeton-nlp/SWE-bench_Verified/resolve/main/data/test-00000-of-00001.parquet"
 IMAGE_PREFIX = "swebench/sweb.eval.x86_64"
 # The upstream images are published under a fixed build number; it is not
 # derived from the instance and every image in a release carries the same.
 IMAGE_BUILD = "1776"
+SAFE_IMAGE_COMPONENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
+IMAGE_NAME = re.compile(
+    rf"^{re.escape(IMAGE_PREFIX)}\."
+    rf"[A-Za-z0-9][A-Za-z0-9_.-]*_{IMAGE_BUILD}_"
+    r"[A-Za-z0-9][A-Za-z0-9_.-]*:latest$"
+)
 
 
 def _read_parquet(path: Path) -> list[dict[str, Any]]:
@@ -73,9 +81,17 @@ def image_name(repo: str, version: Any, instance_id: str) -> str:
     """
     # Upstream names the image after the instance id's organisation
     # segment: "pytest-dev__pytest-10051" becomes "pytest-dev", and the
-    # instance itself keeps only its "<repo>-<number>" half.
-    org = instance_id.split("__", 1)[0]
-    short_id = instance_id.split("__")[-1]
+    # instance itself keeps only its "<repo>-<number>" half. Restrict both
+    # parts to one safe path/tag alphabet before they reach registry URLs.
+    if not isinstance(instance_id, str):
+        raise ValueError("instance_id must be a safe '<org>__<repo-instance>' identifier")
+    org, separator, short_id = instance_id.partition("__")
+    if (
+        not separator
+        or not SAFE_IMAGE_COMPONENT.fullmatch(org)
+        or not SAFE_IMAGE_COMPONENT.fullmatch(short_id)
+    ):
+        raise ValueError("instance_id must be a safe '<org>__<repo-instance>' identifier")
     return f"{IMAGE_PREFIX}.{org}_{IMAGE_BUILD}_{short_id}:latest"
 
 
@@ -85,19 +101,16 @@ def image_digest(name: str) -> str | None:
     The registry is asked directly: the docker CLI serialises on its
     credential store, and fifty sequential lookups take minutes.
     """
+    if not isinstance(name, str) or not IMAGE_NAME.fullmatch(name):
+        return None
     repository, _, tag = name.partition(":")
     tag = tag or "latest"
     registry = "registry-1.docker.io"
-    if "/" not in repository:
-        return None
-    namespace, _, short = repository.partition("/")
-    if namespace != "swebench":
-        return None
-    token = _registry_token(registry, repository)
+    token = _registry_token(repository)
     if token is None:
         return None
     request = urllib.request.Request(
-        f"https://{registry}/v2/{repository}/manifests/{tag}",
+        f"https://{registry}/v2/{quote(repository, safe='/')}/manifests/{quote(tag, safe='')}",
         headers={
             "Authorization": f"Bearer {token}",
             "Accept": ", ".join(
@@ -130,12 +143,16 @@ def image_digest(name: str) -> str | None:
     return None
 
 
-def _registry_token(registry: str, repository: str) -> str | None:
+def _registry_token(repository: str) -> str | None:
     """Get an anonymous pull token for a public repository."""
-    url = (
-        "https://auth.docker.io/token?service=registry.docker.io"
-        f"&scope=repository:{repository}:pull"
+    query = urlencode(
+        {
+            "service": "registry.docker.io",
+            "scope": f"repository:{repository}:pull",
+        },
+        safe="/:",
     )
+    url = f"https://auth.docker.io/token?{query}"
     for attempt in range(3):
         try:
             with urllib.request.urlopen(url, timeout=60) as response:

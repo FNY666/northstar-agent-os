@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 import copy
+import os
 from typing import Any, Sequence
 
 from providers.base import (
@@ -26,6 +27,7 @@ from providers.base import (
     ToolUseBlock,
     Usage,
     _provider_usage_count,
+    _safe_provider_error_reason,
 )
 
 # Model families the adapter knows how to talk to. Unknown models are still
@@ -137,6 +139,17 @@ class AnthropicProvider(Provider):
         return payload
 
     # -- response normalisation -------------------------------------------
+    def _error_reason(self, error: Exception) -> str:
+        return _safe_provider_error_reason(
+            error,
+            (
+                self._client_kwargs.get("api_key", ""),
+                os.environ.get("ANTHROPIC_API_KEY", ""),
+                *self._client_kwargs.get("default_headers", {}).values(),
+            ),
+            limit=300,
+        )
+
     def generate(self, request: GenerationRequest) -> Generation:
         payload = self.build_payload(request)
         try:
@@ -144,7 +157,7 @@ class AnthropicProvider(Provider):
         except ProviderError:
             raise
         except Exception as error:  # noqa: BLE001 - must surface as an event
-            raise ProviderError(f"anthropic request failed: {_reason(error)}", **_classify(error)) from error
+            raise ProviderError(f"anthropic request failed: {self._error_reason(error)}", **_classify(error)) from None
         return self.normalise(response)
 
     def stream(self, request: GenerationRequest):  # type: ignore[override]
@@ -170,7 +183,7 @@ class AnthropicProvider(Provider):
         except ProviderError:
             raise
         except Exception as error:  # noqa: BLE001 - must surface as an event
-            raise ProviderError(f"anthropic stream failed: {_reason(error)}", **_classify(error)) from error
+            raise ProviderError(f"anthropic stream failed: {self._error_reason(error)}", **_classify(error)) from None
         yield self.normalise(response)
 
     @staticmethod
@@ -313,15 +326,6 @@ def _usage_mapping(response: Any) -> dict[str, int]:
         if count is not None:
             mapping[key] = count
     return mapping
-
-
-def _reason(error: Exception) -> str:
-    """Short, secret-free reason string.
-
-    Provider exceptions can embed request bodies; never propagate them verbatim.
-    """
-    text = str(error) or type(error).__name__
-    return text if len(text) <= 300 else text[:297] + "..."
 
 
 def _classify(error: Exception) -> dict[str, Any]:

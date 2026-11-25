@@ -23,8 +23,9 @@ Product spine and roadmap: [docs/next-gen-agent-os.zh-CN.md](docs/next-gen-agent
 Capability benchmark vs top agents: [docs/benchmark-top-agents-2026-09.zh-CN.md](docs/benchmark-top-agents-2026-09.zh-CN.md).  
 Absorb / refuse rules: [docs/next-gen-agent-blueprint.zh-CN.md](docs/next-gen-agent-blueprint.zh-CN.md).
 
-## What ships today
+2026-11 ecosystem scan: [docs/ecosystem-survey-2026-11-25.zh-CN.md](docs/ecosystem-survey-2026-11-25.zh-CN.md).
 
+## What ships today
 | Layer | What | Role |
 | --- | --- | --- |
 | **Product entry** | `northstar` / `bin/northstar` | Agent OS CLI (`code`, `agent`, `resume`, plus kernel commands) |

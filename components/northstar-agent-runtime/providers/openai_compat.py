@@ -45,6 +45,7 @@ import json
 import os
 from collections.abc import Mapping
 from typing import Any, Sequence
+from urllib.parse import parse_qsl, unquote, urlsplit
 
 from providers.base import (
     Generation,
@@ -57,6 +58,7 @@ from providers.base import (
     ToolUseBlock,
     Usage,
     _provider_usage_count,
+    _safe_provider_error_reason,
 )
 
 #: Model families that reject ``max_tokens`` and want the reasoning-era name.
@@ -314,6 +316,20 @@ class OpenAICompatProvider(Provider):
         return payload
 
     # -- response normalisation -------------------------------------------
+    def _error_reason(self, error: Exception) -> str:
+        base_url = self._client_kwargs.get("base_url", "")
+        env_base_url = os.environ.get("OPENAI_BASE_URL", "")
+        return _reason(
+            error,
+            (
+                self._client_kwargs.get("api_key", ""),
+                os.environ.get("OPENAI_API_KEY", ""),
+                *_endpoint_secrets(base_url),
+                *_endpoint_secrets(env_base_url),
+                *self._client_kwargs.get("default_headers", {}).values(),
+            ),
+        )
+
     def generate(self, request: GenerationRequest) -> Generation:
         payload = self.build_payload(request)
         try:
@@ -321,7 +337,7 @@ class OpenAICompatProvider(Provider):
         except ProviderError:
             raise
         except Exception as error:  # noqa: BLE001 - must surface as an event
-            raise ProviderError(f"chat completions request failed: {_reason(error)}", **_classify(error)) from error
+            raise ProviderError(f"chat completions request failed: {self._error_reason(error)}", **_classify(error)) from None
         return self.normalise(response)
 
     def stream(self, request: GenerationRequest):  # type: ignore[override]
@@ -415,7 +431,7 @@ class OpenAICompatProvider(Provider):
         except ProviderError:
             raise
         except Exception as error:  # noqa: BLE001 - must surface as an event
-            raise ProviderError(f"chat completions stream failed: {_reason(error)}", **_classify(error)) from error
+            raise ProviderError(f"chat completions stream failed: {self._error_reason(error)}", **_classify(error)) from None
         message: dict[str, Any] = {"role": "assistant", "content": "".join(pieces)}
         if calls:
             message["tool_calls"] = [calls[index] for index in sorted(calls)]
@@ -593,12 +609,50 @@ def _usage(response: Any) -> Usage:
     )
 
 
-def _reason(error: Exception) -> str:
+def _endpoint_secrets(endpoint: str) -> tuple[str, ...]:
+    """Return endpoint components that must not escape through an SDK error.
+
+    Some transports echo only a parsed URL field rather than the configured URL
+    verbatim, so exact-URL redaction alone does not protect userinfo, path tokens,
+    or query values. Keep the hostname available for useful diagnostics.
+    """
+    if not isinstance(endpoint, str) or not endpoint:
+        return ()
+    try:
+        parts = urlsplit(endpoint)
+    except ValueError:
+        return (endpoint,)
+
+    candidates = [endpoint]
+    for credential in (parts.username, parts.password):
+        if credential:
+            candidates.extend((credential, unquote(credential)))
+    if "@" in parts.netloc:
+        userinfo = parts.netloc.rsplit("@", 1)[0]
+        candidates.extend((userinfo, unquote(userinfo)))
+    for component in (parts.path, parts.query, parts.fragment):
+        candidates.extend((component, unquote(component)))
+    for segment in parts.path.split("/"):
+        candidates.extend((segment, unquote(segment)))
+    try:
+        query_pairs = parse_qsl(parts.query, keep_blank_values=True)
+    except ValueError:
+        query_pairs = []
+    for key, value in query_pairs:
+        candidates.extend((key, unquote(key), value, unquote(value)))
+    return tuple(candidate for candidate in candidates if candidate)
+
+
+def _reason(error: Exception, secrets: Sequence[str] = ()) -> str:
+    text = str(error) or type(error).__name__
     for attribute in ("status_code", "code"):
         value = getattr(error, attribute, None)
         if value not in (None, ""):
-            return f"{type(error).__name__}({attribute}={value}): {str(error)[:200]}"
-    return f"{type(error).__name__}: {str(error)[:200]}"
+            text = f"{type(error).__name__}({attribute}={value}): {text}"
+            break
+    else:
+        text = f"{type(error).__name__}: {text}"
+    return _safe_provider_error_reason(error=text, secrets=secrets, limit=200)
 
 
 __all__ = ["DEFAULT_MODEL", "OpenAICompatProvider"]
