@@ -53,6 +53,44 @@ def _git(*args: str) -> str:
     return result.stdout
 
 
+def _parents(sha: str) -> list[str]:
+    """The parents of a commit (empty for a root commit)."""
+    fields = _git("rev-list", "--parents", "-n", "1", sha).split()
+    return fields[1:]
+
+
+def _tree(sha: str) -> str:
+    """The tree object a commit resolves to."""
+    return _git("rev-parse", "%s^{tree}" % sha).strip()
+
+
+def _is_graph_only_merge(sha: str) -> bool:
+    """True for a MERGE that authored no content of its own.
+
+    A merge whose tree is **identical** to its first parent's tree introduced
+    no content: it reconciled the graph and nothing else.  Its subject
+    records a topology operation ("Merge the remote tip into the submission
+    window"), not a piece of work, so it has no slice to name.
+
+    A merge whose tree DIFFERS from its first parent's authored content and
+    must name its slice like any other commit -- that is the case this
+    helper must not excuse, and
+    `test_every_content_changing_merge_names_its_slice` pins it.
+
+    Measured 2026-11-25 on `submission-window/b173-refusal-gate-landing`:
+    the batch's range holds 476 commits, 11 of them merges, 8 named with the
+    `B173 ` prefix and 3 not.  All 3 un-named ones (`481d2366`, `0c8aae85`,
+    `23c8174d`) are graph-only: `git diff --stat <merge>^1 <merge>` is
+    EMPTY for each.  They are the reconciliation merges that brought the
+    remote tip back into the branch -- subjects that are already published
+    and cannot be renamed without rewriting published history.
+    """
+    parents = _parents(sha)
+    if len(parents) < 2:
+        return False
+    return _tree(sha) == _tree(parents[0])
+
+
 def _batch_commits() -> list[str]:
     """The commits this batch authored, in order.
 
@@ -181,16 +219,70 @@ class CommitSubjectAttributionTests(unittest.TestCase):
         # carry a subject that does not start with "B173 " -- `58f4a3d1`
         # ("c1") and `c0c6d8b3` ("c2").  Both are accidental `git add`
         # commits, and both are invisible to the referee by name.
+        #
+        # Measured 2026-11-25: a third shape of offender appeared -- MERGE
+        # commits whose subject is git's default ("Merge the remote tip into
+        # the submission window").  Three of them were on the branch, all
+        # graph-only (tree-identical to their first parent), all published
+        # on the remote already, so their subjects cannot be renamed without
+        # rewriting history that other windows hold.
+        #
+        # A graph-only merge authored no content, so it has no slice to
+        # name; it is out of scope for this test.  A merge that DID author
+        # content is in scope, and is pinned by
+        # `test_every_content_changing_merge_names_its_slice` below -- so
+        # this exemption cannot become a blanket amnesty for merges.
         offenders = []
         for line in _batch_commits():
             sha, subject = line.split("\t", 1)
             if not subject.startswith("B173 "):
+                if _is_graph_only_merge(sha):
+                    continue
                 offenders.append((sha, subject))
         self.assertEqual(
             offenders,
             [],
             "commits whose subject does not start with 'B173 ': "
             + ", ".join("%s (%s)" % (sha[:8], subject) for sha, subject in offenders),
+        )
+
+    def test_every_content_changing_merge_names_its_slice(self):
+        # The non-vacuity control for the exemption above.
+        #
+        # The exemption says: a merge that introduced NO content of its own
+        # need not name a slice.  This test says the converse: a merge that
+        # DID introduce content MUST name its slice.  Without this control
+        # the exemption would be unfalsifiable -- a merge that authored
+        # content could hide behind it forever.
+        #
+        # Measured 2026-11-25 on this branch: 11 merges in the batch's
+        # range, 3 of them graph-only.  The other 8 all carry the `B173 `
+        # prefix, and 5 of the 8 are content-changing -- so this test has
+        # real subjects to hold, and is not vacuous.
+        unnamed = []
+        content_merges = 0
+        for line in _batch_commits():
+            sha, subject = line.split("\t", 1)
+            if len(_parents(sha)) < 2:
+                continue
+            if _is_graph_only_merge(sha):
+                continue
+            content_merges += 1
+            if not subject.startswith("B173 "):
+                unnamed.append((sha, subject))
+        self.assertEqual(
+            unnamed,
+            [],
+            "merges that authored content must name their slice: "
+            + ", ".join("%s (%s)" % (sha[:8], subject) for sha, subject in unnamed),
+        )
+        # The control needs real content-changing merges to hold, or it
+        # would pass for the wrong reason (an empty set is not a proof).
+        self.assertGreater(
+            content_merges,
+            0,
+            "no content-changing merge found in the batch's range, so the "
+            "control above could not fail: the exemption may be vacuous",
         )
 
     def test_no_commit_subject_is_a_bare_single_character(self):
