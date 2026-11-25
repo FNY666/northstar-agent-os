@@ -578,12 +578,16 @@ SEED_ENTRIES: Tuple[FrontierEntry, ...] = (
         source_url="https://www.moltbook.com/",
         category="authorization / community",
         verdict="absorb-now",
-        status="proposed",
+        status="implemented",
         linked_slice="agent-authorization-boundary",
         notes=(
             "Record S20. Reports twelve experiments against four agent "
             "frameworks where failures clustered at the seams, and argues the "
-            "re-check must fire at delegation time, not at call time."
+            "re-check must fire at delegation time, not at call time. "
+            "Implemented by agent_boundary.py: BoundaryCheck.delegate() "
+            "re-checks the parent's boundary at delegation time, so a "
+            "sub-agent inherits its parent's staleness rather than a "
+            "snapshot of its authority."
         ),
     ),
 )
