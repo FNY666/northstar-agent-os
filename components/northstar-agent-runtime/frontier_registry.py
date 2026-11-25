@@ -346,12 +346,16 @@ SEED_ENTRIES: Tuple[FrontierEntry, ...] = (
         source_url="https://github.com/agent-rails/agent-guard",
         category="authorization / governance",
         verdict="absorb-now",
-        status="proposed",
+        status="implemented",
         linked_slice="agent-authorization-boundary",
         notes=(
             "Record S3. Says policy is evaluated before the tool runs, denied "
             "calls never reach the tool, approval-required calls fail closed "
             "without an approver, and the decision is written to an audit sink."
+            " Implemented by agent_boundary.py: authorize() decides and "
+            "execute() acts, so a denied call never reaches the tool; a "
+            "call needing approval with no matching grant fails closed; and "
+            "every decision leaves an audit line with a reason code."
         ),
     ),
     FrontierEntry(
@@ -359,11 +363,15 @@ SEED_ENTRIES: Tuple[FrontierEntry, ...] = (
         source_url="https://github.com/Mohil-Ahuja/Steward",
         category="authorization / red-team",
         verdict="absorb-now",
-        status="proposed",
+        status="implemented",
         linked_slice="agent-authorization-boundary",
         notes=(
             "Record S4. Wraps tool results in an untrusted-tool-output envelope; "
             "names scope_abuse as an open problem in its own scoreboard."
+            " Implemented by agent_boundary.py: the scope carries an expiry, "
+            "can only be narrowed, and is re-checked at delegation time -- "
+            "the scope-abuse limit the scoreboard names is narrowed, not "
+            "claimed solved."
         ),
     ),
     FrontierEntry(

@@ -190,6 +190,7 @@ REGISTRY = (
     _registration("adversarial_detector", "runtime", "2026-10-07", "Adversarial example detector: statistical tripwires for perturbed inputs."),
     _registration("adversarial_robustness", "runtime", "2026-10-08", "Adversarial robustness (attack-test / harden / certify) interface, simulated."),
     _registration("agb_smoke_corpus", "bench", "2026-10-05", "AGB smoke corpus: AgentGuardBench-derived offline adversarial probes."),
+    _registration("agent_boundary", "agent-authorization-boundary", "2026-11-25", "Authorization boundary: a scope that only narrows, an expiry, and a delegation-time re-check."),
     _registration("agent_files", "repository-defined agents and read-only agent skills for the gov", "2026-09-07", "Repository-defined subagents: ``.northstar/agents/*.md``."),
     _registration("agent_handoff", "agent-handoff", "2026-11-14", "Agent handoff: ``transfer_to_<name>`` tool with a fixed destination."),
     _registration("agent_identity", "eighty-fifth", "2026-10-04", "DID-based agent identity, delegation chains with depth limits, and permission-combination prohibition."),

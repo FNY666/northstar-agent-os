@@ -1859,6 +1859,109 @@ AGB smoke corpus: AgentGuardBench-derived offline adversarial probes.
 
 Machine-readable manifest for the smoke corpus.
 
+### `agent_boundary`
+
+Source: `components/northstar-agent-runtime/agent_boundary.py`
+
+Authorization is a BOUNDARY, not a prompt: a scope that only narrows, an expiry, and a delegation-time re-check.
+
+#### `BoundaryError`
+
+Base class for every refusal this module raises.
+
+#### `ScopeWideningError`
+
+Raised when a narrowing request would WIDEN the scope.
+
+#### `InvalidBoundaryError`
+
+Raised on structurally invalid input (empty scope, non-string id).
+
+#### `ApprovalRequiredError`
+
+Raised when a call needs human approval and the grant is absent.
+
+#### `BoundaryScope`
+
+An immutable description of WHAT a boundary authorizes.
+
+- `narrowed_to(resource_prefixes: Optional[Iterable[str]]=None, actions: Optional[Iterable[str]]=None, allowed_tools: Optional[Iterable[str]]=None, denied_tools: Optional[Iterable[str]]=None)`
+  - Return a NEW scope that is no broader than ``self``.
+- `is_satisfied_by(action: str, tool: Optional[str]=None, resource: Optional[str]=None)`
+  - True when ``action``/``tool``/``resource`` fall inside this scope.
+- `as_dict()`
+#### `ApprovalGrant`
+
+A human approval, bound to exactly one call.
+
+- `is_valid_at(ts: int)`
+  - True when this grant is unexpired at ``ts``.
+- `matches(call_id: str, digest: str)`
+  - True when this grant binds exactly this call.
+- `as_dict()`
+#### `AuthorizationBoundary`
+
+One authorization: WHO may do WHAT, until WHEN, on WHICH evidence.
+
+- `state` (property)
+  - The CURRENT state, derived from the caller's timestamp.
+- `is_valid_at(ts: int)`
+  - True when this boundary authorizes something at ``ts``.
+- `is_expired_at(ts: int)`
+  - True when this boundary's expiry has passed at ``ts``.
+- `narrow_to(boundary_id: str, scope: BoundaryScope, issued_at: int, expires_at: Optional[int]=None, grantee: Optional[str]=None)`
+  - Return a NEW boundary with a no-broader scope.
+- `revoke(ts: int, reason: str)`
+  - Return a NEW boundary that is revoked at ``ts``.
+- `as_dict()`
+#### `DecisionRecord`
+
+The auditable line left by every authorization decision.
+
+- `allowed` (property)
+- `denied` (property)
+- `as_line()`
+  - Return the one-line audit rendering of this decision.
+- `as_dict()`
+#### `BoundaryRegistry`
+
+A store of boundaries, keyed by ``boundary_id``.
+
+- `issue(boundary_id: str, scope: BoundaryScope, subject: str, grantee: str, issued_at: int, expires_at: int, evidence_digest: Optional[str]=None, parent_boundary_id: Optional[str]=None)`
+  - Create and store a new boundary.
+- `get(boundary_id: str)`
+  - Return the boundary with this id, or ``None``.
+- `narrow(parent_boundary_id: str, boundary_id: str, scope: BoundaryScope, issued_at: int, expires_at: Optional[int]=None, grantee: Optional[str]=None)`
+  - Narrow a stored boundary and store the RESULT as a new boundary.
+- `revoke(boundary_id: str, ts: int, reason: str)`
+  - Revoke a stored boundary; the revoked copy REPLACES the entry.
+- `expire_stale(now: int)`
+  - Return the ids of the boundaries that are expired at ``now``.
+- `all()`
+  - Return every stored boundary, sorted by id.
+#### `BoundaryCheck`
+
+The pre-execution decision point.
+
+- `registry` (property)
+- `decisions` (property)
+  - Every decision this check has produced, in order.
+- `audit_lines()`
+  - Every decision as an audit line, in order.
+- `call_digest(call_id: str, action: str, tool: Optional[str], resource: Optional[str])`
+  - The digest an approval grant must bind to.
+- `authorize(call_id: str, action: str, tool: Optional[str]=None, resource: Optional[str]=None, timestamp: int=0, boundary_id: Optional[str]=None, grant: Optional[ApprovalGrant]=None, requires_human: bool=False)`
+  - Decide whether a call is authorized, and record the decision.
+- `authorize_or_raise(call_id: str, action: str, tool: Optional[str]=None, resource: Optional[str]=None, timestamp: int=0, boundary_id: Optional[str]=None, grant: Optional[ApprovalGrant]=None, requires_human: bool=False)`
+  - Authorize, and raise :class:`ApprovalRequiredError` when a human approval is needed and absent.
+- `execute(fn: Callable, call_id: str, action: str, tool: Optional[str]=None, resource: Optional[str]=None, timestamp: int=0, boundary_id: Optional[str]=None, grant: Optional[ApprovalGrant]=None, requires_human: bool=False, *args: Any, **kwargs: Any)`
+  - Authorize, then call ``fn`` ONLY if the verdict is ``allowed``.
+- `delegate(parent_boundary_id: str, child_boundary_id: str, grantee: str, scope: Optional[BoundaryScope]=None, issued_at: int=0, expires_at: Optional[int]=None)`
+  - Re-check the parent boundary AT DELEGATION TIME and delegate.
+#### `main()`
+
+Self-check: denied calls never reach the tool, scope only narrows, expiry and revocation bind, a grant binds one call, delegation re-checks at delegation time, and every decision leaves a line.
+
 ### `agent_files`
 
 Source: `components/northstar-agent-runtime/agent_files.py`
