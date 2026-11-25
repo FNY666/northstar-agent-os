@@ -1442,3 +1442,159 @@ class ScopeRelationEquivalenceHarnessControlTests(unittest.TestCase):
                 compared += 1
         self.assertEqual(compared, len(sets) * (len(sets) - 1))
         self.assertGreater(compared, 100)
+
+
+class ScopeQualifierStdlibGuardTests(unittest.TestCase):
+    """The stdlib guard's OWN branches must be reachable.
+
+    ``stdlib_only()`` used to read only its own module's source, which is
+    clean by construction: every import in it is in the allowed set, so
+    the guard's two ``return False`` branches were UNREACHABLE from any
+    test.  A guard whose branches cannot be reached cannot be told apart
+    from a guard that always says "yes", so a planted fault in it
+    (``return False`` -> ``return True``) survived every test.
+
+    The guard now takes the source to check, defaulting to its own --
+    the same shape ``deny_hotpath.stdlib_only`` already uses.  Crafted
+    sources make each branch reachable.
+    """
+
+    def test_a_foreign_import_is_refused(self):
+        """retF@1775: the ``ast.Import`` branch.
+
+        A plain ``import numpy`` names a package that is not stdlib, so
+        the guard must refuse it.
+        """
+        self.assertFalse(stdlib_only("import numpy\n"))
+
+    def test_a_dotted_foreign_package_is_refused(self):
+        """retF@1775: the dotted spelling of the same branch.
+
+        ``import numpy.linalg`` names ``numpy`` as its root, and the root
+        is what decides.
+        """
+        self.assertFalse(stdlib_only("import numpy.linalg\n"))
+
+    def test_an_allowed_import_is_accepted(self):
+        """retF@1775: the CONTROL -- the branch is not always taken.
+
+        Without this, the guard could be "always refuse" and the test
+        above would still pass.
+        """
+        self.assertTrue(stdlib_only("import json\n"))
+
+    def test_a_foreign_from_import_is_refused(self):
+        """retF@1778: the ``ast.ImportFrom`` branch.
+
+        ``from numpy import array`` names a non-stdlib module.
+        """
+        self.assertFalse(stdlib_only("from numpy import array\n"))
+
+    def test_an_allowed_from_import_is_accepted(self):
+        """retF@1778: the CONTROL for the from-import branch."""
+        self.assertTrue(stdlib_only("from typing import Optional\n"))
+
+    def test_a_relative_import_is_refused(self):
+        """retF@1778: the relative-import shape.
+
+        ``from . import sibling`` parses with ``module=None``, so the
+        guard's "not in allowed" test never runs on it and the import
+        would pass.  A relative import reaches outside the stdlib exactly
+        as a foreign one does, so the guard must refuse it.
+        """
+        self.assertFalse(stdlib_only("from . import sibling\n"))
+
+    def test_the_module_itself_is_stdlib_only(self):
+        """The default argument still checks THIS module."""
+        self.assertTrue(stdlib_only())
+
+    def test_a_source_with_no_imports_at_all_is_accepted(self):
+        """A module with no imports imports nothing, so nothing is foreign."""
+        self.assertTrue(stdlib_only("x = 1\n"))
+
+
+class ScopeQualifierSelfCheckTests(unittest.TestCase):
+    """The module's own ``main()`` self-check is part of the contract.
+
+    The census found four survivors inside ``main()``: no test ran it, so
+    a weakened assertion inside it survived.  Running ``main()`` is not
+    enough either -- it only proves the self-check does not raise, and a
+    weakened assertion (``and`` -> ``or``) does not raise.  So the
+    self-check is executed here, AND its claims are re-derived from
+    outside it.
+    """
+
+    def _gate(self):
+        store = SourceStore(
+            [
+                SourceLine(
+                    source_ref="src-1",
+                    grant_id="grant-1",
+                    qualifiers=(ScopeQualifier("only", "folder X"),),
+                )
+            ]
+        )
+        rows = DenialRowStore(
+            [DenialRow(scope="grant-1/write", kind=ROW_CLEAR, signature="sig-1")]
+        )
+        return ScopeQualifierGate(store, denial_rows=rows)
+
+    def test_the_module_self_check_runs(self):
+        import scope_qualifier
+
+        scope_qualifier.main()
+
+    def test_the_module_self_check_prints_its_verdict(self):
+        import contextlib
+        import io
+
+        import scope_qualifier
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            scope_qualifier.main()
+        self.assertIn("scope-qualifier OK", buffer.getvalue())
+
+    def test_the_self_check_entry_point_is_the_main_guard(self):
+        """eq@1819: the ``__name__ == "__main__"`` guard.
+
+        The entry point is the module's own self-check, and it is
+        reachable: running the module as a script runs the self-check.
+        The guard is asserted by RUNNING the module as a script, which is
+        the only thing that can distinguish ``==`` from ``!=``.
+        """
+        import subprocess
+        import sys
+
+        result = subprocess.run(
+            [sys.executable, "-m", "scope_qualifier"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("scope-qualifier OK", result.stdout)
+
+    def test_the_self_check_claims_a_matching_grant_passes(self):
+        """eq@1805: the MATCH claim, re-derived from outside.
+
+        The self-check asserts ``check.outcome == OUTCOME_MATCH`` and
+        ``not check.blocked``.  A mutation of that assertion
+        (``==`` -> ``!=``) would make the self-check assert the
+        opposite and still not raise, so the claim is re-derived here.
+        """
+        gate = self._gate()
+        check = gate.check(grant(qualifiers=(FOLDER_X,)), now=100)
+        self.assertEqual(check.outcome, OUTCOME_MATCH)
+        self.assertFalse(check.blocked)
+
+    def test_the_self_check_claims_a_dropped_fence_blocks(self):
+        """eq@1810: the DROPPED-FENCE claim, re-derived from outside."""
+        gate = self._gate()
+        check = gate.check(grant(qualifiers=()), now=100)
+        self.assertTrue(check.blocked)
+        self.assertEqual(check.outcome, OUTCOME_MISMATCH)
+
+    def test_the_self_check_claims_the_module_is_stdlib_only(self):
+        """The self-check's own stdlib claim, re-derived."""
+        self.assertTrue(stdlib_only())

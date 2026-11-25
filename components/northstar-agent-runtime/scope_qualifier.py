@@ -1755,9 +1755,25 @@ def scope_audit_event(
     }
 
 
-def stdlib_only() -> bool:
-    """AST check: this module imports stdlib modules only."""
-    tree = ast.parse(Path(__file__).read_text(encoding="utf-8"), filename=__file__)
+def stdlib_only(source: Optional[str] = None) -> bool:
+    """AST check: this module imports stdlib modules only.
+
+    ``source`` is the text to check; the default is this module's own
+    source.  The parameter exists so the check can be **exercised**: a
+    guard that reads only its own clean file cannot be told apart from a
+    guard that always says "yes", and a planted fault in it would survive
+    every test.  Feeding it a crafted source is what makes the guard's own
+    branches reachable.
+
+    The repo already has this pattern -- ``deny_hotpath.stdlib_only`` and
+    ``config_management``'s path-taking check do the same.
+    """
+    tree = ast.parse(
+        Path(__file__).read_text(encoding="utf-8")
+        if source is None
+        else source,
+        filename=__file__,
+    )
     allowed = {
         "__future__",
         "ast",
@@ -1774,6 +1790,11 @@ def stdlib_only() -> bool:
                 if alias.name.split(".")[0] not in allowed:
                     return False
         elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                # A RELATIVE import (``from . import sibling``) has no
+                # module name to check -- and it reaches outside the
+                # stdlib all the same way, so it is a non-stdlib import.
+                return False
             if node.module and node.module.split(".")[0] not in allowed:
                 return False
     return True
@@ -1802,7 +1823,8 @@ def main() -> None:
         source_ref="src-1",
     )
     check = gate.check(ok, now=100)
-    assert check.outcome == OUTCOME_MATCH and not check.blocked
+    assert check.outcome == OUTCOME_MATCH
+    assert not check.blocked
 
     dropped = GrantRecord(grant_id="grant-1", verb="write", source_ref="src-1")
     check = gate.check(dropped, now=100)
