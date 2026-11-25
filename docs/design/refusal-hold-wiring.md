@@ -4569,3 +4569,68 @@ The two figures are both true and they are not comparable:
 
 **The middle row is the point of this section**: the broken harness
 agreed with the good one, on a different tree, for the wrong reason.
+
+### 28.6 The blast radius, MEASURED: one row of 270
+
+The defect was in a HARNESS, and a harness is used for many things, so
+the honest question is how many other measurements it produced.  The
+answer was measured, not estimated.
+
+The 17 suites of the runtime that resolve a path OUTSIDE the component
+directory:
+
+```
+test_audit_chain            test_r6_check_accuracy
+test_audit_export           test_r6_manifest_integrity
+test_blind_rerunner         test_r6_manifest_subject
+test_finding_gate           test_r6_worktree_rename
+test_hlc                    test_r8_acceptance_conformance
+test_judge_hygiene          test_r8_commit_attribution
+test_equivalence_table_coverage  test_r8_promised_test_methods
+test_run_evidence           test_sdk
+test_unittest_blind_slices
+```
+
+`census-v3.txt` holds **270** module rows.  Each row's scope is the
+UNION of every suite that imports the module, so the rows at risk are
+the ones whose union includes one of the 17 above.  The import map was
+built in ONE pass over the runtime's test files with an AST read (the
+same decision `scripts/census-scope.py` makes, done once instead of
+270 times), and every one of the 270 rows was tested against it.
+
+**Exactly one row is affected: `blind_runner`, the row this section is
+about.**  The other 269 were measured on scopes that do not reach
+outside the component directory, so the broken worktree did not affect
+them.
+
+That is a smaller blast radius than §28.1's "16 of 1620 modules"
+figure suggests, and the two are not in conflict: the 16 is the number
+of modules whose scope includes a repo-root-reading suite, and this is
+the number of those 16 that appear in the artifact with a row that the
+broken harness produced.  The other 15 are simply not in `census-v3.txt`
+-- they were never measured by it, so there is no row to be wrong.
+
+The honest summary is therefore: **the false kill was ONE row, and it
+is now corrected.**  The fix to the harness is worth much more than
+that one row, because the harness is what every FUTURE measurement
+runs through.
+
+### 28.7 The general lesson for a harness defect
+
+The defect had a property that made it nearly invisible:
+
+* it produced a PERFECT score, which is what a reader scans for;
+* it agreed with a second, independently-produced measurement of the
+  same module, so there was no visible disagreement to investigate;
+* and it was a defect in the INSTRUMENT, so the natural response --
+  "the tests pass, the score is perfect, move on" -- is exactly what
+  the defect wants.
+
+The only thing that broke it was a SECOND claim about the same module
+that could not both be true: §23.4's arithmetic proof of `gt@753`'s
+equivalence, against a census that said the mutant was killed.  That
+is the general shape worth remembering: **when two measurements of the
+same thing disagree, the disagreement is the finding** -- and one of the
+two is usually the instrument, because the instrument is the thing that
+has never been checked against a case where it could fail.
+
