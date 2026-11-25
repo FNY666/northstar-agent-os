@@ -285,23 +285,41 @@ Every fix was proved by planting the fault and re-running the suite.
   resolvers and federations; the digests are pins over declared
   content, not a proof of provenance.
 
-## 7. The general lesson, and the scope it closes
+## 7. The general lesson, and the scope it leaves open
 
 **A house pattern without a house guard is a defect in every house.**
-The runtime has **672** modules that canonicalize through
-`canonical_json` (measured 2026-11-25: `grep -rl jcs_dumps --include=*.py`,
-excluding `build/` and the helper itself), and **189** of them import
-the sibling helper behind a `try/except` fallback — the configuration
-this defect lives in. An AST sweep over those found **165 candidate
-sites** across **54 modules**: a `try` whose body calls a canonicalizer
-and whose handler catches the module's own error type without catching
-`ValueError`.
+The runtime has **1619** top-level modules (the helper `canonical_json.py`
+excluded). **687** of them call one of its three canonicalizers
+(`jcs_dumps`, `jcs_canonical_json`, `jcs_sha256_hex`), and **629** of
+those import the sibling helper behind a `try/except` fallback — the
+configuration this defect lives in. **643** modules import it that way
+whether or not they call it directly.
 
-**165 was a worklist, not a finding.** A dynamic probe — instantiate
+*(Measured 2026-11-25 on the pre-fix tree, `66e6ccd4~1`, with an AST
+walk over the runtime's top-level modules. These numbers REPLACE an
+earlier claim of "672 modules, 189 with a fallback, 165 candidate sites
+across 54 modules", which does not reproduce under any of ~40
+definitions tried — the `grep` in the earlier claim also ran with
+ugrep, which skips git-ignored directories, so its result depended on
+the directory it started in. A count in a doc is a claim too.)*
+
+An AST sweep over the fallback importers found **611 candidate sites**
+across **200 modules** on the **pre-fix** tree, and **628 sites across
+201 modules** on the fixed tree: a `try` whose body reaches a
+canonicalizer and whose first handler catches the module's own error
+class without catching `ValueError`. The difference is the seven fixed
+modules themselves — each fix moved its pin *inside* the guarded
+region, which is exactly what the defect was, so a sweep that reads
+shape alone now sees them as dead-guard sites.
+
+The counts are produced by `scripts/digest-pin-census.py` and pinned by
+`tests/test_digest_pin_census.py`.
+
+**611 is a worklist, not a finding.** A dynamic probe — instantiate
 each candidate module's ledger class, enumerate its public methods,
 build a call with every string parameter set to a lone surrogate and
 every int parameter set to 1, and check whether `JcsError` escapes —
-was run over 50 candidate modules. It found **7 live**:
+found **7 live**:
 
 | module | method | `JcsError` escapes | a `rejected` row booked? |
 |---|---|---|---|
@@ -313,13 +331,42 @@ was run over 50 candidate modules. It found **7 live**:
 | `graphql_gateway.py` | `plan` | yes | n/a (a pure read view) |
 | `zero_knowledge.py` | `setup` | yes | **no** |
 
-**All seven are now fixed.** The other 43 probed modules were not live
-— their public mutators validate their strings before reaching the
-pin.
+**All seven are fixed**, and re-running the probe on the fixed tree
+finds **0 live sites**: each of the seven now raises its **own** error
+type and books its `rejected` row (`plan` books none, correctly — it is
+a pure read view).
+
+Two measurements about the probe itself, both worth recording:
+
+* **A generic probe is not enough.** The probe has to supply
+  **crafted** inputs per module: `zero_knowledge.setup()` validates
+  `ceremony` and `constraint_digest` against a pinned vocabulary
+  before it reaches the pin, so a lone surrogate in `circuit_id` is
+  refused as a `BadDigestError` and the probe never sees the escape.
+  With a valid `constraint_digest`, the same call escapes. A guard
+  that reads only clean real files is unverifiable.
+* **A sweep that misses a live module is not a sweep.** On the
+  **pre-fix** tree the strict sweep (611 sites / 200 modules) finds
+  **six** of the seven, not seven: `status_page.py`'s pin sits
+  **outside** its guarded `try`, so it is not a "dead guard" site at
+  all. That seventh was found by exercising the modules, not by
+  reading them. On the **fixed** tree the sweep finds **all seven**
+  (628 sites / 201 modules) — because the fix moved `status_page`'s
+  pin *inside* the guarded region, which is what the defect was.
+  This is the same lesson `graphql_gateway.py` teaches in §2.4: the
+  finding is per METHOD and per SHAPE, not per module. A sweep's
+  output is a function of the tree it ran on, so a sweep's count
+  must name the tree.
+
+This slice closed the class: all seven are now fixed.
+
+The counts are produced by `scripts/digest-pin-census.py`, and
+`tests/test_digest_pin_census.py` pins them, so the numbers in this
+section are a measurement rather than a claim.
 
 The lesson: *reachability decides, not the shape of the code.* A guard
 that looks dead may be behind a validation that never lets the bad
-value through. So the sweep's 165 sites must never be reported as 165
+value through. So the sweep's 611 sites must never be reported as 611
 defects — and the probe's 7 must never be reported without having
 actually exercised each one.
 
