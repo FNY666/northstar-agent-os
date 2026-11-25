@@ -324,8 +324,8 @@ class EveryComponentPackagingTests(unittest.TestCase):
         installed = docbuild.installed_modules(RUNTIME)
         # 1636 = 1613 flat + 23 package members.  RE-MEASURED 2026-11-16 by
         # the `runtime-data-files` slice (was 1635 = 1613 + 22).
-        self.assertEqual(len(installed), 1641)
-        self.assertEqual(len(docbuild.flat_modules_on_disk(RUNTIME)), 1618)
+        self.assertEqual(len(installed), 1642)
+        self.assertEqual(len(docbuild.flat_modules_on_disk(RUNTIME)), 1619)
 
     def test_the_interop_component_is_covered_by_the_sweep(self):
         # The sweep must actually reach the component the defect was in.

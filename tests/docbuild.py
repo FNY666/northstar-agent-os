@@ -313,7 +313,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "sparse_merkle", "specification_gaming", "speech_to_text", "split_learning",
         "sports_agents", "spotlighting", "sse_interface", "sse_manager",
         "sso_integration", "standards", "stark_hash", "state_backend",
-        "state_machine", "static_verify", "steganography", "step_compliance",
+        "state_machine", "state_transfer_audit", "static_verify", "steganography", "step_compliance",
         "stomp_broker", "stream_guard", "stream_join", "stream_processing",
         "streaming_sql", "structured_log", "subscription_manager", "superalignment",
         "supplychain_agents", "support_agents", "swim_protocol", "sycophancy",

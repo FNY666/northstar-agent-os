@@ -77584,6 +77584,84 @@ Deterministic single-host finite state machine ledger.
   - Booked audit rows, oldest first. Pure read.
 #### `main()`
 
+### `state_transfer_audit`
+
+Source: `components/northstar-agent-runtime/state_transfer_audit.py`
+
+State-transfer auditing: the failures happen *between* the boxes.
+
+#### `StateTransferAuditError`
+
+Raised when an event, a verdict or a rule is not well formed.
+
+#### `UnverifiedTransferError`
+
+Raised by :func:`assert_verified` when an event is not verified.
+
+#### `TransferKind`
+
+The four enumerable state-transfer kinds.
+
+#### `TransferPolicy`
+
+The per-kind rule row: what this kind must declare to be verified.
+
+#### `TransferEvent`
+
+One state transfer, recorded. Immutable by construction.
+
+- `verified` (property)
+  - Whether this event satisfies the invariant. Derived, not stored.
+- `reason` (property)
+  - The reason code for this event's verdict. Derived, not stored.
+- `to_dict()`
+  - Return the event as a plain dict (for the chain and for audit).
+#### `Verdict`
+
+The outcome of evaluating one event.
+
+#### `evaluate(event: TransferEvent)`
+
+Apply the rule table to one event and return its :class:`Verdict`.
+
+#### `classify(event: TransferEvent)`
+
+The transfer kind's name for one event, as a string.
+
+#### `assert_verified(event: TransferEvent)`
+
+Return the event if it is verified; raise otherwise.
+
+#### `compute_row_hash(seq: int, event: TransferEvent, prev_hash: str)`
+
+The chain hash of one row: sha256 over its canonical body.
+
+#### `TransferRow`
+
+One row of the state-transfer chain. Immutable.
+
+- `to_dict()`
+  - Return the row as a plain dict (for export and for audit).
+#### `TransferAuditor`
+
+An append-only, hash-chained ledger of state transfers.
+
+- `head` (property)
+  - The chain hash of the last row, or the genesis pin.
+- `record(event: TransferEvent)`
+  - Append one transfer event to the chain and return its row.
+- `events()`
+  - Every recorded event, in order.
+- `rows()`
+  - Every row, in order.
+- `verify()`
+  - Return ``(ok, first_bad_index)``.
+- `unverified()`
+  - Every recorded event that did not satisfy the invariant.
+#### `stdlib_only()`
+
+Whether this module imports nothing outside the standard library.
+
 ### `static_verify`
 
 Source: `components/northstar-agent-runtime/static_verify.py`
