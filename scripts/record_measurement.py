@@ -64,17 +64,94 @@ def build_record(receipt: dict) -> dict:
     }
 
 
+def build_repeated_record(receipts: list[dict]) -> dict:
+    """Fold several runs of the same measurement into one record.
+
+    The blueprint asks for the lower of two runs, because a model that
+    passes once and fails once has not been shown to pass.  The lower
+    number is the one that counts, and the individual runs stay in the
+    record so the fold can be checked.
+    """
+    runs = []
+    for index, receipt in enumerate(receipts, start=1):
+        record = build_record(receipt)
+        runs.append(
+            {
+                "run": index,
+                "passed": receipt["summary"]["passed"],
+                "checked": receipt["summary"]["checked"],
+                "failure_kinds": receipt["summary"].get("failure_kinds", {}),
+                "median_elapsed_seconds": receipt["summary"].get("median_elapsed_seconds"),
+                "tasks": record["tasks"],
+            }
+        )
+    counts = [run["passed"] for run in runs]
+    lowest = min(counts)
+    first = receipts[0]
+    conditions = first["conditions"]
+    task_ids = {run["task_id"] for run in runs[0]["tasks"]}
+    unstable = []
+    if len(runs) > 1:
+        by_task = [{t["task_id"]: t for t in run["tasks"]} for run in runs]
+        for task_id in sorted(task_ids):
+            outcomes = {run.get(task_id, {}).get("outcome") for run in by_task}
+            if len(outcomes) > 1:
+                unstable.append(
+                    {
+                        "task_id": task_id,
+                        "outcomes": [
+                            by_task[i].get(task_id, {}).get("outcome")
+                            for i in range(len(by_task))
+                        ],
+                    }
+                )
+    record = build_record(first)
+    record["schema"] = "northstar.code-task-measurement-repeated.v1"
+    record["runs"] = runs
+    record["summary"] = {
+        "checked": first["summary"]["checked"],
+        "passed": lowest,
+        "failed": first["summary"]["checked"] - lowest,
+        "runs": len(runs),
+        "run_passed": counts,
+        "lower_of_runs": lowest,
+        "unstable_tasks": len(unstable),
+    }
+    record["release_gate"] = {
+        "measured": True,
+        "passed": lowest,
+        "required_tasks": first["release_gate"]["required_tasks"],
+        "eligible": lowest >= first["release_gate"]["required_tasks"],
+    }
+    record["release_eligible"] = record["release_gate"]["eligible"]
+    record["unstable_tasks"] = unstable
+    record["conditions_identical_across_runs"] = all(
+        json.dumps(receipt["conditions"], sort_keys=True)
+        == json.dumps(receipts[0]["conditions"], sort_keys=True)
+        for receipt in receipts
+    )
+    return record
+
+
 def main(argv: list[str]) -> int:
-    if len(argv) != 3:
-        print("usage: record_measurement.py <receipt.json> <record.json>", file=sys.stderr)
+    if len(argv) < 3:
+        print(
+            "usage: record_measurement.py <receipt.json> [<receipt2.json> ...] <record.json>",
+            file=sys.stderr,
+        )
         return 2
-    receipt = json.loads(Path(argv[1]).read_text(encoding="utf-8"))
-    record = build_record(receipt)
-    Path(argv[2]).write_text(
+    receipts = [
+        json.loads(Path(path).read_text(encoding="utf-8")) for path in argv[1:-1]
+    ]
+    if len(receipts) == 1:
+        record = build_record(receipts[0])
+    else:
+        record = build_repeated_record(receipts)
+    Path(argv[-1]).write_text(
         json.dumps(record, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
-    print(f"wrote {argv[2]}")
+    print(f"wrote {argv[-1]}")
     return 0
 
 

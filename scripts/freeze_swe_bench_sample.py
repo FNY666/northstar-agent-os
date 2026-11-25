@@ -31,14 +31,16 @@ IMAGE_BUILD = "1776"
 def _read_parquet(path: Path) -> list[dict[str, Any]]:
     """Read the frozen dataset into plain dicts.
 
-    pandas is only needed here, at freeze time; the runtime never reads
+    pyarrow is only needed here, at freeze time; the runtime never reads
     parquet.
     """
-    import pandas as pd
+    import pyarrow.parquet as pq
 
-    frame = pd.read_parquet(path)
+    table = pq.read_table(path).to_pydict()
+    columns = list(table)
     rows: list[dict[str, Any]] = []
-    for record in frame.to_dict(orient="records"):
+    for index in range(len(table[columns[0]])):
+        record = {name: table[name][index] for name in columns}
         rows.append(
             {
                 "repo": record["repo"],
@@ -53,6 +55,13 @@ def _read_parquet(path: Path) -> list[dict[str, Any]]:
                 "fail_to_pass": list(record["FAIL_TO_PASS"] or []),
                 "pass_to_pass": list(record["PASS_TO_PASS"] or []),
                 "problem_statement_sha256": _sha256_text(record["problem_statement"] or ""),
+                # The upstream harness needs these to build a test spec and
+                # to grade the run; the sample carries them so that the
+                # evaluation needs nothing but the frozen file.
+                "image": record.get("image"),
+                "eval_type": record.get("eval_type"),
+                "log_parser": record.get("log_parser"),
+                "eval_script": record.get("eval_script"),
             }
         )
     return rows
@@ -213,13 +222,17 @@ def main(argv: list[str]) -> int:
                 "version": row["version"],
                 "base_commit": row["base_commit"],
                 "difficulty": row["difficulty"],
-                "fail_to_pass_count": len(row["fail_to_pass"]),
+                "fail_to_pass": row["fail_to_pass"],
+                "pass_to_pass": row["pass_to_pass"],
                 "fail_to_pass_sha256": _sha256_text("\n".join(row["fail_to_pass"])),
-                "pass_to_pass_count": len(row["pass_to_pass"]),
                 "pass_to_pass_sha256": _sha256_text("\n".join(row["pass_to_pass"])),
                 "problem_statement_sha256": row["problem_statement_sha256"],
                 "environment_image": name,
                 "environment_digest": digest,
+                "image": row.get("image") or name,
+                "eval_type": row.get("eval_type"),
+                "log_parser": row.get("log_parser"),
+                "eval_script": row.get("eval_script"),
             }
         )
 

@@ -52,3 +52,36 @@ The upstream environment images are `linux/amd64` only.  On an arm64
 host the images cannot be pulled, so a SWE-bench run needs an amd64
 machine; the digest recorded here is what makes that machine's
 environment the same one this sample was frozen against.
+
+## Running the evaluation
+
+`scripts/run_swe_bench_eval.py` evaluates patches against this sample. It
+uses the upstream `swebench.harness` unchanged, so a verdict here means
+what it means upstream.
+
+```
+pip install swebench==5.0.2
+python scripts/run_swe_bench_eval.py \
+    --patches patches.json \
+    --output receipt.json
+```
+
+`patches.json` maps an instance id to the patch text for that task.
+
+The environment images are `linux/amd64`. On an arm64 host they run under
+QEMU user-mode emulation: install `qemu-user` and `qemu-user-binfmt`,
+and pull with `--platform linux/amd64`. The upstream harness writes its
+logs into a `logs/` directory beside wherever it was started; the adapter
+moves that out of the repository.
+
+Three outcomes have been checked against this sample, and each one is
+distinguished in the receipt:
+
+| Patch | Verdict |
+|---|---|
+| the upstream gold patch | `RESOLVED_FULL` |
+| a patch that applies cleanly but changes the wrong thing | `RESOLVED_NO` |
+| no patch at all | `no_patch_delivered` |
+
+The middle row is the one that matters: a patch that applies is not a
+patch that fixes the issue.

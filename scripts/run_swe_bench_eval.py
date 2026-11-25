@@ -1,0 +1,227 @@
+#!/usr/bin/env python3
+"""Evaluate patches against the frozen SWE-bench Verified sample.
+
+The upstream ``swebench.harness`` is used as-is for the evaluation and
+for the verdict, so a result here means what it means upstream.  This
+script only adds what the harness does not provide: a frozen task list,
+a receipt that records the conditions, and a verdict per task that can
+be compared with another run.
+
+The environment images are ``linux/amd64``.  On an arm64 host they run
+under QEMU user-mode emulation, which is slow but faithful.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+SAMPLE = REPO_ROOT / "benchmarks" / "swe-bench" / "verified-50.json"
+DIGESTS = REPO_ROOT / "benchmarks" / "swe-bench" / "verified-50.digests.json"
+
+# The upstream verdicts, verbatim. A task counts as solved only when the
+# upstream harness says it is fully resolved.
+RESOLVED_FULL = "RESOLVED_FULL"
+RESOLVED_PARTIAL = "RESOLVED_PARTIAL"
+RESOLVED_NO = "RESOLVED_NO"
+FAIL_TO_PASS = "FAIL_TO_PASS"
+PASS_TO_PASS = "PASS_TO_PASS"
+ERROR = "ERROR"
+
+
+def load_sample(path: Path) -> dict[str, Any]:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _upstream_available() -> bool:
+    try:
+        import swebench  # noqa: F401
+    except Exception:
+        return False
+    return True
+
+
+def _docker_platform() -> str:
+    try:
+        out = subprocess.run(
+            ["docker", "info", "--format", "{{.Architecture}}"],
+            capture_output=True, text=True, timeout=60,
+        ).stdout.strip()
+    except Exception:
+        return ""
+    return {"x86_64": "linux/amd64", "aarch64": "linux/arm64"}.get(out, out)
+
+
+def evaluate(
+    sample: dict[str, Any],
+    patches: dict[str, str],
+    *,
+    run_id: str,
+    timeout: int,
+    only: list[str] | None = None,
+) -> dict[str, Any]:
+    """Evaluate every task that has a patch and return a receipt."""
+    from swebench.harness.grading import get_resolution_status
+    from swebench.harness.constants import FAIL_TO_PASS, PASS_TO_PASS
+    from swebench.harness.run_evaluation import run_instance
+    from swebench.harness.utils import make_test_spec
+
+    import docker
+
+    client = docker.from_env()
+    tasks = sample["tasks"]
+    if only:
+        wanted = set(only)
+        tasks = [t for t in tasks if t["instance_id"] in wanted]
+
+    rows: list[dict[str, Any]] = []
+    dataset = {t["instance_id"]: _upstream_instance(t) for t in tasks}
+    for task in tasks:
+        instance_id = task["instance_id"]
+        patch = patches.get(instance_id, "")
+        row: dict[str, Any] = {
+            "instance_id": instance_id,
+            "repo": task["repo"],
+            "patch_bytes": len(patch.encode("utf-8")),
+            "patch_sha256": _sha256(patch),
+            "outcome": ERROR,
+            "resolved": False,
+        }
+        if not patch:
+            row["outcome"] = "no_patch_delivered"
+            rows.append(row)
+            continue
+        spec = make_test_spec(dataset[instance_id])
+        pred = {
+            "model_name_or_path": "northstar",
+            "model_patch": patch,
+            "instance_id": instance_id,
+        }
+        try:
+            # The upstream runner owns the container, the patch application
+            # and the evaluation script; its verdict is the upstream verdict.
+            _, report = run_instance(
+                spec, pred, client, run_id, timeout=timeout,
+            )
+            # The upstream runner returns a report keyed by instance id;
+            # the grading detail sits under "tests_status".
+            entry = report.get(instance_id, report)
+            status = get_resolution_status(entry.get("tests_status", entry))
+            row["outcome"] = status
+            row["resolved"] = status == RESOLVED_FULL
+            detail = entry.get("tests_status", {})
+            row["fail_to_pass"] = list(detail.get(FAIL_TO_PASS, {}).get("success", []))
+            row["pass_to_pass"] = list(detail.get(PASS_TO_PASS, {}).get("success", []))
+            if not row["resolved"]:
+                row["patch_successfully_applied"] = bool(entry.get("patch_successfully_applied"))
+                row["infra_failure"] = bool(entry.get("infra_failure"))
+        except Exception as exc:  # noqa: BLE001 - a broken instance must not stop the run
+            import traceback
+            row["outcome"] = ERROR
+            row["detail"] = traceback.format_exc()[-1200:]
+        rows.append(row)
+    passed = sum(1 for r in rows if r["resolved"])
+    return {
+        "schema": "northstar.swe-bench-eval.v1",
+        "run_id": run_id,
+        "summary": {
+            "checked": len(rows),
+            "passed": passed,
+            "failed": len(rows) - passed,
+            "failure_kinds": _kinds(rows),
+        },
+        "tasks": rows,
+    }
+
+
+def _upstream_instance(task: dict[str, Any]) -> dict[str, Any]:
+    """Shape a frozen task the way the upstream harness expects it."""
+    return {
+        "instance_id": task["instance_id"],
+        "repo": task["repo"],
+        "base_commit": task["base_commit"],
+        "version": task["version"],
+        "FAIL_TO_PASS": task["fail_to_pass"],
+        "PASS_TO_PASS": task["pass_to_pass"],
+        "image": task.get("image") or task["environment_image"],
+        "eval_type": task.get("eval_type"),
+        "log_parser": task.get("log_parser"),
+        "eval_script": _as_object(task.get("eval_script")),
+    }
+
+
+def _as_object(value: Any) -> Any:
+    """The upstream dataset carries the eval script as a JSON string."""
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return value
+    return value
+
+
+def _logger():
+    from swebench.logger import setup_logger
+    return setup_logger("swe-eval", Path("/tmp/swe-eval.log"))
+
+
+def _sha256(text: str) -> str:
+    import hashlib
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _kinds(rows: list[dict[str, Any]]) -> dict[str, int]:
+    kinds: dict[str, int] = {}
+    for row in rows:
+        if row["resolved"]:
+            continue
+        kinds[row["outcome"]] = kinds.get(row["outcome"], 0) + 1
+    return kinds
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--patches", required=True, help="JSON file: instance_id -> patch text")
+    parser.add_argument("--sample", default=str(SAMPLE))
+    parser.add_argument("--output", required=True)
+    parser.add_argument("--run-id", default="northstar")
+    parser.add_argument("--timeout", type=int, default=1800)
+    parser.add_argument("--task", action="append", help="limit to one instance; repeatable")
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+
+    if not _upstream_available():
+        print(
+            "the upstream swebench harness is required; install it with "
+            "`pip install swebench==5.0.2`",
+            file=sys.stderr,
+        )
+        return 2
+    sample = load_sample(Path(args.sample))
+    patches = json.loads(Path(args.patches).read_text(encoding="utf-8"))
+    receipt = evaluate(
+        sample, patches,
+        run_id=args.run_id, timeout=args.timeout, only=args.task,
+    )
+    receipt["conditions"] = {
+        "sample": Path(args.sample).name,
+        "sample_tasks": len(sample["tasks"]),
+        "docker_platform": _docker_platform(),
+        "harness": "upstream swebench 5.0.2",
+    }
+    Path(args.output).write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+    if args.json:
+        print(json.dumps(receipt["summary"], indent=2))
+    else:
+        print(json.dumps(receipt["summary"], indent=2))
+        print(f"wrote {args.output}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
