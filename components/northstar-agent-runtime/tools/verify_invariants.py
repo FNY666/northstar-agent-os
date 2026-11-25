@@ -161,6 +161,12 @@ def prepare(root: Path) -> Path:
     # root, outside `components/`; include it so the copied baseline represents
     # the same checkout shape as CI instead of failing before a guard mutation.
     shutil.copytree(REPO / "examples", root / "examples", ignore=shutil.ignore_patterns("__pycache__"))
+    # The offline ACP smoke drives the repository's own entry point, which
+    # lives at the repository root and resolves the runtime relative to
+    # itself.  Without it the copy reaches for a binary that was never
+    # copied, and the baseline goes red for a reason that has nothing to do
+    # with the component under test.
+    shutil.copytree(REPO / "bin", root / "bin", ignore=shutil.ignore_patterns("__pycache__"))
     return root / "components/northstar-agent-runtime"
 
 
