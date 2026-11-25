@@ -172,6 +172,17 @@ class CensusScopeScaleTests(unittest.TestCase):
     Measured 2026-11-25 over the runtime's 1620 top-level modules:
     **123** are referenced by more than one test suite, so the old
     single-suite pairing understated the scope for 7.6% of the runtime.
+
+    **AMENDED 2026-11-25 (the dynamic-load fix).**  The first count was
+    123, and it was computed by a resolver that read only STATIC
+    imports.  519 of the runtime's suites load their module by FILE
+    PATH, so the count understated the scope for a second reason -- and
+    for **121 of the 270 rows** in the census artifact it understated it
+    all the way to EMPTY, which made the census SKIP the row.
+
+    With the dynamic loads read as well, the count is **133**.  The
+    number is a measurement, so it moved; what did not move is the
+    guard, which is what says so.
     """
 
     def test_the_multi_suite_modules_are_counted(self) -> None:
@@ -183,7 +194,7 @@ class CensusScopeScaleTests(unittest.TestCase):
             if len(MODULE.referencing_suites(runtime, stem)) > 1
         ]
         self.assertEqual(
-            len(multi), 123,
+            len(multi), 133,
             "the number of modules whose scope the single-suite pairing "
             "understated",
         )
@@ -196,3 +207,313 @@ class CensusScopeScaleTests(unittest.TestCase):
         suites = MODULE.referencing_suites(RUNTIME, "agents")
         self.assertEqual(len(suites), 11)
         self.assertEqual(suites[0], "test_agents")
+
+
+class TheScopeMustSeeDynamicLoadsTests(unittest.TestCase):
+    """A STATIC import index is not the scope.
+
+    THE DEFECT (measured 2026-11-25)
+    --------------------------------
+    ``scripts/census-scope.py`` decided "this suite exercises this
+    module" by reading the suite's IMPORT statements from the AST.  That
+    is right as far as it goes, and it is wrong about a third of the
+    runtime.
+
+    **519** of the runtime's suites do not import their module at all.
+    They load it BY FILE PATH, because the module is not importable in
+    isolation (it reaches for siblings that are not on the path) and the
+    suite needs it standalone.  The house loader is::
+
+        def _load(name):
+            spec = importlib.util.spec_from_file_location(name, RUNTIME / f"{name}.py")
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[name] = module
+            spec.loader.exec_module(module)
+            return module
+
+        ap = _load("annotation_pin")
+
+    For those suites the import index had no entry, so the scope
+    resolver returned the EMPTY scope, and the census script printed::
+
+        MUTANT SKIP: no test file exercises annotation_pin
+
+    **121 of the 270 rows** in ``docs/baseline/mutant-census/census-v3.txt``
+    name such a module.  So 121 of 270 measurements were SKIPped -- and
+    a SKIP reads as a deliberate scope decision, so nothing looked
+    wrong.
+
+    The harm is not the SKIP itself.  It is that a SKIP is INVISIBLE: the
+    artifact still holds a number for the row, the number was measured
+    at the SINGLE-suite scope, and the row looked like a measurement.
+
+    THE FIX
+    -------
+    The scope resolver now reads the dynamic loads too, so the union
+    scope is the union of the suites that reach the module BY ANY MEANS.
+
+    THE NON-VACUITY CONTROL
+    -----------------------
+    A resolver that read nothing at all would satisfy "the scope is not
+    empty".  So every shape below is tested in BOTH directions: the
+    shape must be FOUND, and a suite that does NOT contain it must not
+    be counted.
+    """
+
+    def _resolve(self, sources: dict[str, str], base: str):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "tests").mkdir()
+            for name, body in sources.items():
+                (root / "tests" / name).write_text(body, encoding="utf-8")
+            return MODULE.referencing_suites(root, base)
+
+    def test_the_house_loader_is_seen(self) -> None:
+        """The runtime's own loader shape, with double quotes."""
+        suites = self._resolve(
+            {
+                "test_thing.py": (
+                    "import importlib.util\n"
+                    "import sys\n"
+                    "from pathlib import Path\n"
+                    "RUNTIME = Path(__file__).resolve().parent.parent\n"
+                    "def _load(name):\n"
+                    "    spec = importlib.util.spec_from_file_location("
+                    "name, RUNTIME / f\"{name}.py\")\n"
+                    "    module = importlib.util.module_from_spec(spec)\n"
+                    "    sys.modules[name] = module\n"
+                    "    spec.loader.exec_module(module)\n"
+                    "    return module\n"
+                    "t = _load(\"thing\")\n"
+                )
+            },
+            "thing",
+        )
+        self.assertEqual(
+            suites,
+            ["test_thing"],
+            "the house loader is how the runtime's suites reach their "
+            "module; a resolver that cannot see it reports an EMPTY scope "
+            "and the census SKIPs the row",
+        )
+
+    def test_the_house_loader_with_single_quotes_is_seen(self) -> None:
+        """The same loader, single-quoted.
+
+        Measured: half the runtime's suites write `f'{name}.py'` and half
+        write `f"{name}.py"`.  A resolver that reads only one of them
+        misses half the runtime -- and the miss is silent, because the
+        other half still resolves.
+        """
+        suites = self._resolve(
+            {
+                "test_thing.py": (
+                    "import importlib.util\n"
+                    "import sys\n"
+                    "from pathlib import Path\n"
+                    "RUNTIME = Path(__file__).resolve().parent.parent\n"
+                    "def _load(name):\n"
+                    "    spec = importlib.util.spec_from_file_location("
+                    "name, RUNTIME / f'{name}.py')\n"
+                    "    module = importlib.util.module_from_spec(spec)\n"
+                    "    sys.modules[name] = module\n"
+                    "    spec.loader.exec_module(module)\n"
+                    "    return module\n"
+                    "t = _load(\"thing\")\n"
+                )
+            },
+            "thing",
+        )
+        self.assertEqual(suites, ["test_thing"])
+
+    def test_a_literal_spec_from_file_location_is_seen(self) -> None:
+        suites = self._resolve(
+            {
+                "test_thing.py": (
+                    "import importlib.util\n"
+                    "import sys\n"
+                    "from pathlib import Path\n"
+                    "_MOD_PATH = Path(__file__).resolve().parent.parent / \"thing.py\"\n"
+                    "_spec = importlib.util.spec_from_file_location(\"thing\", _MOD_PATH)\n"
+                    "m = importlib.util.module_from_spec(_spec)\n"
+                    "sys.modules[\"thing\"] = m\n"
+                    "_spec.loader.exec_module(m)\n"
+                )
+            },
+            "thing",
+        )
+        self.assertEqual(suites, ["test_thing"])
+
+    def test_the_module_type_and_exec_pattern_is_seen(self) -> None:
+        """The other house shape: `types.ModuleType` plus `exec`."""
+        suites = self._resolve(
+            {
+                "test_thing.py": (
+                    "import sys\n"
+                    "import types\n"
+                    "from pathlib import Path\n"
+                    "_MODULE_PATH = Path(__file__).parent.parent / \"thing.py\"\n"
+                    "def _load_module():\n"
+                    "    src = _MODULE_PATH.read_text()\n"
+                    "    mod = types.ModuleType(\"thing\")\n"
+                    "    mod.__file__ = str(_MODULE_PATH)\n"
+                    "    sys.modules[\"thing\"] = mod\n"
+                    "    exec(compile(src, str(_MODULE_PATH), \"exec\"), mod.__dict__)\n"
+                    "    return mod\n"
+                    "t = _load_module()\n"
+                )
+            },
+            "thing",
+        )
+        self.assertEqual(suites, ["test_thing"])
+
+    def test_a_docstring_naming_the_module_is_not_a_reference(self) -> None:
+        """A docstring is documentation, not a load.
+
+        Without this, a suite whose DOCSTRING names a module would be
+        counted as exercising it -- and the census would measure a suite
+        that never touches the module.
+        """
+        suites = self._resolve(
+            {
+                "test_thing.py": (
+                    '"""thing.py does the thing."""\n'
+                    "import os\n"
+                )
+            },
+            "thing",
+        )
+        self.assertEqual(suites, [])
+
+    def test_a_prose_mention_is_still_not_a_reference(self) -> None:
+        """The original rule still holds for prose."""
+        suites = self._resolve(
+            {
+                "test_thing.py": (
+                    "# see thing.py's `_check`\n"
+                    "import os\n"
+                )
+            },
+            "thing",
+        )
+        self.assertEqual(suites, [])
+
+    def test_the_resolver_is_not_vacuous(self) -> None:
+        """THE NON-VACUITY CONTROL.
+
+        A resolver that found nothing would satisfy every "is not a
+        reference" case above.  So the same tree must ALSO produce a
+        real reference -- and the two must not be confused.
+        """
+        suites = self._resolve(
+            {
+                "test_thing.py": (
+                    "import importlib.util\n"
+                    "import sys\n"
+                    "from pathlib import Path\n"
+                    "RUNTIME = Path(__file__).resolve().parent.parent\n"
+                    "def _load(name):\n"
+                    "    spec = importlib.util.spec_from_file_location("
+                    "name, RUNTIME / f\"{name}.py\")\n"
+                    "    module = importlib.util.module_from_spec(spec)\n"
+                    "    sys.modules[name] = module\n"
+                    "    spec.loader.exec_module(module)\n"
+                    "    return module\n"
+                    "t = _load(\"thing\")\n"
+                ),
+                "test_other.py": (
+                    '"""thing.py is mentioned here."""\n'
+                    "import os\n"
+                ),
+            },
+            "thing",
+        )
+        self.assertEqual(suites, ["test_thing"])
+
+
+class TheCensusArtifactIsMeasuredTests(unittest.TestCase):
+    """The census artifact's rows must resolve to a scope.
+
+    THE DEFECT (measured 2026-11-25)
+    --------------------------------
+    121 of the 270 rows in ``docs/baseline/mutant-census/census-v3.txt``
+    name a module that no suite imports STATICALLY, so the scope
+    resolver returned the EMPTY scope and the census SKIPped the row.
+
+    The SKIP was invisible: the artifact still carries a number for
+    every row, measured at the SINGLE-suite scope, and a row that was
+    never measured at the union scope looks exactly like a row that was
+    measured and found wanting.
+
+    So the guard is on the ARTIFACT: how many of its rows resolve to a
+    scope today.  The number is a measurement and it is pinned, so a
+    future resolver that loses the dynamic loads again fails HERE rather
+    than silently in a census that nobody reads.
+    """
+
+    #: The rows that resolve to the EMPTY scope, and why that is right.
+    #:
+    #: ``allowlist`` and ``ba_01``..``ba_04`` have no suite of their own
+    #: and are mentioned only in PROSE elsewhere:
+    #:
+    #:   tests/test_action_card.py:52   # Auto-approve allowlisted and ...
+    #:   tests/test_py_modules_list.py:21   "ba_01", "ba_02", ...
+    #:
+    #: So the census SKIPs them, and that is the correct answer: no
+    #: suite exercises them.  Every OTHER row must resolve.
+    EXPECTED_EMPTY = {"allowlist", "ba_01", "ba_02", "ba_03", "ba_04"}
+
+    def _rows(self):
+        import re
+
+        artifact = (
+            ROOT / "docs" / "baseline" / "mutant-census" / "census-v3.txt"
+        )
+        if not artifact.exists():
+            self.skipTest(f"the census artifact is absent: {artifact}")
+        text = artifact.read_text(encoding="utf-8")
+        rows = []
+        for line in text.splitlines():
+            match = re.match(
+                r"^(\S+) .*MUTANT RESULT: killed (\d+)/(\d+);", line)
+            if match:
+                rows.append(match.group(1))
+        return rows
+
+    def test_the_artifact_has_the_rows_it_is_expected_to_have(self) -> None:
+        rows = self._rows()
+        self.assertEqual(
+            len(rows), 270,
+            "the census artifact's row count changed; the guards below "
+            "are stated against it",
+        )
+
+    def test_every_row_but_the_five_resolves_to_a_scope(self) -> None:
+        empty = []
+        for module in self._rows():
+            base = module[:-3] if module.endswith(".py") else module
+            if not (RUNTIME / f"{base}.py").exists():
+                continue
+            if not MODULE.referencing_suites(RUNTIME, base):
+                empty.append(module)
+        self.assertEqual(
+            sorted(empty),
+            sorted(self.EXPECTED_EMPTY),
+            "a census row that resolves to NO scope is a row the census "
+            "SKIPS, and a SKIP is invisible: the artifact still carries a "
+            "number for it.  Either the resolver cannot see the suite "
+            "that exercises the module (the dynamic-load shapes), or the "
+            "row genuinely has no suite",
+        )
+
+    def test_the_five_unresolved_rows_have_no_suite_of_their_own(self) -> None:
+        """The five exceptions must stay exceptions, for the stated reason."""
+        for module in sorted(self.EXPECTED_EMPTY):
+            own = RUNTIME / "tests" / f"test_{module}.py"
+            self.assertFalse(
+                own.exists(),
+                f"{module} now has a suite of its own, so it must no "
+                "longer be in the exception set",
+            )

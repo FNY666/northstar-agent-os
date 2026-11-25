@@ -3344,6 +3344,15 @@ alone is exercised by **eleven** suites (`test_agents`,
 `test_agents` alone reports survivors that eleven suites would have
 caught.
 
+**AMENDED 2026-11-25 (§29):** the **123** is measured with a resolver
+that read only STATIC imports, and it understated the scope for a
+second reason as well.  The corrected figure is **133**, and the reason
+is §29: **519** of the runtime's suites reach their module by loading
+it BY FILE PATH rather than by importing it, and for **121 of the 270
+rows** in the census artifact the static-only resolver returned the
+EMPTY scope -- so the census **SKIPped** those rows, and a SKIP is
+invisible.
+
 `tests/test_census_scope.py` pins the resolver's definition -- both
 import shapes, prose-mention-is-not-a-reference, own-suite-first,
 determinism, and the empty scope (which must SKIP rather than fall back
@@ -4634,3 +4643,169 @@ same thing disagree, the disagreement is the finding** -- and one of the
 two is usually the instrument, because the instrument is the thing that
 has never been checked against a case where it could fail.
 
+
+## 29. The scope resolver read only STATIC imports, and 121 of 270 rows were SKIPped
+
+§28 fixed the census's WORKTREE.  This section is about the census's
+SCOPE -- and it is a bigger number.
+
+### 29.1 The defect
+
+`scripts/census-scope.py` decides "this suite exercises this module"
+by reading the suite's IMPORT statements from the AST.  That is right
+as far as it goes.
+
+It does not go far enough.
+
+**519** of the runtime's suites do not import their module at all.
+They load it BY FILE PATH, because the module is not importable in
+isolation -- it reaches for siblings that are not on the path -- and
+the suite needs it standalone.  The house loader is:
+
+```python
+def _load(name):
+    spec = importlib.util.spec_from_file_location(name, RUNTIME / f"{name}.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+ap = _load("annotation_pin")
+```
+
+For those suites the import index had no entry.  So the scope
+resolver returned the **EMPTY** scope, and the census script printed:
+
+```
+MUTANT SKIP: no test file exercises annotation_pin
+```
+
+### 29.2 The scale: 121 of 270 rows
+
+`docs/baseline/mutant-census/census-v3.txt` holds **270** module rows.
+**121** of them name a module that no suite imports statically, so the
+scope resolver returned the empty scope for them and the census SKIPped
+them.
+
+The census artifact's own row for `annotation_pin` reads
+`killed 33/33` -- and the census, run today through the fixed script,
+still reads `33/33` for it.  So the number was RIGHT.  The problem is
+that it was measured at the SINGLE-suite scope, by a different run,
+and the artifact cannot tell you that.
+
+**A SKIP is invisible.**  The artifact still carries a number for every
+row; a row that was never measured at the union scope looks exactly
+like a row that was measured and found wanting.  Nothing in the
+artifact says "this row was skipped", because the skip happened in a
+different run, in a different harness, and was written to a different
+stream.
+
+### 29.3 The fix
+
+`scripts/census-scope.py` now reads the dynamic loads as well, so the
+scope is the union of the suites that reach the module BY ANY MEANS.
+The shapes it recognises, all measured against the runtime's own
+suites:
+
+| # | shape | example |
+|---|---|---|
+| 1 | `spec_from_file_location(<literal name>, ...)` | `spec_from_file_location("ai_constitution", _MOD_PATH)` |
+| 2 | the house loader: a helper whose body holds `f"{name}.py"`, called with a literal | `_load("annotation_pin")` |
+| 3 | `types.ModuleType("<literal name>")` + `exec` | `types.ModuleType("ai_accountability_certification")` |
+| 4 | `sys.modules["<literal name>"] = ...` | `sys.modules["ai_constitution"] = acm` |
+| 5 | a path constant of the shape `... / "<name>.py"` | `_MODULE_PATH = ... / "ai_constitution.py"` |
+
+Every literal must be a plain module base name, and **docstrings are
+excluded** -- a docstring that names a module is documentation, not a
+load, and counting it would put a suite into a scope it does not
+exercise.
+
+Two details that each cost a round:
+
+* the f-string is usually wrapped in a path join (`RUNTIME / f"..."`),
+  so the `BinOp` has to be unwrapped before the template can be read;
+* half the runtime's suites write `f"{name}.py"` and half write
+  `f'{name}.py}'`, and the two parse to DIFFERENT arities -- one
+  `JoinedStr` with a leading empty literal, one without.  A resolver
+  that reads only one of them misses half the runtime, and the miss is
+  silent, because the other half still resolves.
+
+### 29.4 What it changes, measured
+
+| | before | after |
+|---|---|---|
+| census rows that resolve to a scope | 149 of 270 | **265 of 270** |
+| rows that resolve to the EMPTY scope | 121 | **5** |
+| modules whose scope is multi-suite | 123 | **133** |
+
+The five that remain are correct: `allowlist` and `ba_01`..`ba_04` have
+no suite of their own and are mentioned only in PROSE elsewhere --
+
+```
+tests/test_action_card.py:52      # Auto-approve allowlisted and all checks pass
+tests/test_py_modules_list.py:21   "ba_01", "ba_02", "ba_03", "ba_04",
+```
+
+-- so the census SKIPs them, and that is the right answer: no suite
+exercises them.
+
+`annotation_pin` now measures at **33/33**, matching the artifact's
+row.  `active_learning` measures at **17/22**.
+
+### 29.5 The guards
+
+`tests/test_census_scope.py` gains two classes:
+
+* **`TheScopeMustSeeDynamicLoadsTests`** -- one test per shape above,
+  each testing the shape in BOTH directions.  The "is not a reference"
+  direction is the one that keeps the resolver honest: a docstring and
+  a prose mention must both stay OUT, so the resolver cannot be
+  satisfied by reading everything.  And a **non-vacuity control** puts
+  a house-loader suite and a docstring-only suite in the SAME tree and
+  asserts that only the first is counted -- a resolver that read
+  nothing would satisfy every "is not a reference" case on its own.
+
+* **`TheCensusArtifactIsMeasuredTests`** -- the guard is on the
+  ARTIFACT, not on the resolver.  It asserts that exactly five of the
+  270 rows resolve to the empty scope, and it names those five, so a
+  future resolver that loses the dynamic loads again fails HERE rather
+  than silently in a census that nobody reads.  It also asserts the
+  five exceptions have no suite of their own, so the exception set
+  cannot rot.
+
+The pinned count of multi-suite modules moved from **123** to
+**133**.  A count that moves is a count that was measured, and the
+guard is what says so -- the number is a measurement, not a target.
+
+### 29.6 What this does NOT change
+
+* **No product code changed.**  `scripts/census-scope.py` is a
+  measuring tool, and `tests/test_census_scope.py` is a guard.  The
+  runtime's modules are byte-identical.
+* The census artifact under `docs/baseline/mutant-census/` is **not**
+  edited.  Its 121 skipped rows were measured at a real scope by a
+  different harness, and re-measuring the artifact is the
+  coordinator's decision.
+* No version, schema, or audit kind is added or changed.
+* No digest changes.
+
+### 29.7 The general lesson
+
+The scope resolver had a guard, and the guard was green, and the
+resolver was still wrong for **45% of the artifact**.
+
+The guard tested the resolver's DEFINITION ("references means a real
+import, read from the AST") and the definition was exactly right.  What
+it did not test was the resolver's COVERAGE: the definition was applied
+to the runtime's suites, and **519 of them did not use the mechanism the
+definition described.**
+
+A definition is not a coverage claim.  "This tool finds X" and "this
+tool finds all the X there are" are different claims, and only the
+second one can be wrong quietly.
+
+The way this one was found is also worth recording: the number that
+gave it away was not a failure but an ABSENCE.  A census that
+SKIPs a row looks exactly like a census that measures a row and finds
+nothing wrong.  Counting the SKIPs turned 121 invisible absences into
+one visible number.
