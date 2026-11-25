@@ -67,8 +67,8 @@
 # suites.
 #
 # So the scope is resolved by scripts/census-scope.py, which finds every
-# suite that genuinely IMPORTS the module (an AST decision, not a grep:
-# two suites mention `job_queue.py` in prose and import it in neither).
+# suite that genuinely LOADS the module (an AST decision, not a grep:
+# two suites mention `job_queue.py` in prose and load it in neither).
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -183,10 +183,17 @@ for m in "$@"; do
   #   first-mention  test_a2a_budget_combo.py   killed 10/43
   #   its own file   test_a2a_gates.py          killed 37/43
   #
-  # So "references" is decided by a REAL IMPORT read from the AST, not by
+  # So "references" is decided by a REAL LOAD read from the AST, not by
   # a grep: `test_graph_database.py` and `test_status_page.py` both MENTION
   # `job_queue.py` in prose, but neither imports it, and neither exercises
   # it.  See scripts/census-scope.py.
+  #
+  # "A REAL LOAD" covers the DYNAMIC loads too, which is not a detail.
+  # Measured 2026-11-25: 519 of the runtime's suites load their module by
+  # FILE PATH rather than by importing it, and a static-only resolver
+  # returned the EMPTY scope for 121 of the 270 rows in the census
+  # artifact -- so those rows were SKIPped, and a SKIP is invisible: the
+  # artifact still carries a number for every row.
   MODBASE=$(basename "$m" .py)
   TMOD=$(python3 "$SCOPE_RESOLVER" --root "$WT/components/northstar-agent-runtime" \
     "$MODBASE" 2>/dev/null | sed 's/^[^:]*: *//')
