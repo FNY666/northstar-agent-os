@@ -210,6 +210,23 @@ class AuditKindError(JobQueueError):
     """Unknown audit kind for job_queue_audit_event."""
 
 
+class UnnamedRefusalError(JobQueueError):
+    """The refusal gate refused without saying WHY.
+
+    The gate's **boolean** form answers "not allowed" for two different
+    things: a recorded refusal, and a gate that cannot answer at all
+    (the hold fails closed, so both are ``False``).  The boolean form
+    therefore carries no reason, and the batch form had nothing to put
+    in the trail's ``reason`` slot -- it put the class name of the
+    *missing* exception there, and the row read ``"NoneType"``.
+
+    This error is what the queue raises **internally** for that case,
+    so the row always names a real class.  It is not the host's error
+    and it never escapes this module: the batch form turns it into
+    ``None``, like every other refusal.
+    """
+
+
 # ---------------------------------------------------------------------------
 # Validation helpers
 # ---------------------------------------------------------------------------
@@ -374,7 +391,15 @@ def _is_refusal(exc: BaseException) -> bool:
     Everything else -- including a ``RuntimeError`` from a broken gate,
     and the ``TypeError`` this module raises for an unusable gate -- is
     NOT a refusal, and is not skipped.
+
+    The one exception is this module's OWN
+    :class:`UnnamedRefusalError`: that is a refusal the queue raised
+    itself, because the gate's boolean form refused without saying
+    why.  It is a refusal (the gate said "not allowed"), and it is
+    named here so the trail can book it -- with a real class name.
     """
+    if isinstance(exc, UnnamedRefusalError):
+        return True
     reason = getattr(exc, "reason", None)
     if isinstance(reason, str) and reason.startswith("blocked_"):
         return True
@@ -895,24 +920,79 @@ class JobQueue:
         as well.  The second element of the tuple is the exception
         that caused the refusal, or ``None`` when the job is allowed.
 
+        **The RAISING form is the one that is asked.**  This used to
+        prefer the gate's *boolean* form (``queue_allowed``) and fall
+        back to the raising one.  That was wrong twice over.
+
+        1. **The two forms can disagree.**  A host gate that offers
+           both is expected to answer both the same way -- they are
+           the same question -- but nothing enforced it, so the batch
+           form could be MORE PERMISSIVE than the raising form.  And
+           the repo's own gate offers only ``require_queue_allowed``
+           (the queue side has no boolean method at all), so the
+           boolean branch was **dead code against the real contract**:
+           the one path in it was a path no host takes.
+
+           Measured 2026-11-24, on the tree as §17 left it:
+
+               --- the RAISING form ---
+               retry raised: RuntimeError refused
+               state j1: reserved
+
+               --- the BATCH form, the SAME gate, the SAME job ---
+               retry_allowed -> RetryRecord(..., state='ready')
+               state j1: ready
+
+           The gate refused the re-dispatch and the batch form
+           re-dispatched it anyway: the refused action went back to
+           ``ready``, so it was offered again.
+
+        2. **The boolean form cannot say WHY.**  It answers ``False``
+           for a recorded refusal *and* for a gate that cannot answer
+           at all -- the hold fails closed, so both are ``False``.  So
+           the batch form could not tell a refusal from a broken gate,
+           and it booked a ``job.rejected`` row for a gate that
+           "refused nothing in particular" -- the exact row §17's rule
+           forbids.  And when the boolean form answered ``False``
+           without raising, the row's ``reason`` was the class name of
+           the *missing* exception: ``"NoneType"``.
+
+        Asking the **raising** form fixes all three: it names the
+        reason, it tells a refusal from a broken gate (``_is_refusal``
+        draws that line), and it is the form the raising form of
+        ``retry()`` already asks -- so the two forms of ``retry()``
+        are now the SAME question asked the same way.
+
         A caller that ignores the second element gets the old
         behaviour exactly; nothing about the boolean changed.
         """
         gate = self._refusal_gate
         if gate is None:
             return True, None
-        allows = getattr(gate, "queue_allowed", None)
-        if callable(allows):
-            try:
-                return bool(allows(job_id, action, now=now)), None
-            except Exception as exc:
-                return False, exc
         require = getattr(gate, "require_queue_allowed", None)
         if not callable(require):
-            raise TypeError(
-                "the refusal gate must offer queue_allowed(job_id, action, "
-                f"now=...) or require_queue_allowed(job_id, action, now=...), "
-                f"got {type(gate).__name__}"
+            allows = getattr(gate, "queue_allowed", None)
+            if not callable(allows):
+                raise TypeError(
+                    "the refusal gate must offer require_queue_allowed("
+                    "job_id, action, now=...) or queue_allowed(job_id, "
+                    f"action, now=...), got {type(gate).__name__}"
+                )
+            # A gate with ONLY the boolean form is a host that implements
+            # the contract partially.  It is still asked, because asking
+            # it is better than not asking -- but its answer cannot
+            # name a reason, so the row would carry a reason that names
+            # nothing.  ``UnnamedRefusalError`` is that reason, and it
+            # is a REAL class: the row never says "NoneType".
+            try:
+                allowed = bool(allows(job_id, action, now=now))
+            except Exception as exc:
+                return False, exc
+            if allowed:
+                return True, None
+            return False, UnnamedRefusalError(
+                "the refusal gate refused without saying why: it offers "
+                "only the boolean form, which does not carry a reason"
             )
         try:
             require(job_id, action, now=now)
@@ -1564,7 +1644,17 @@ class JobQueue:
                         # refusal was invisible here: the trail showed
                         # "dequeued, then nothing", which is
                         # indistinguishable from a worker that died.
-                        self._reject_refusal(seq, job_id, retry_action, exc)
+                        #
+                        # A BROKEN gate books no row, exactly as the
+                        # raising form does below: a broken gate
+                        # refuses nothing in particular, so a
+                        # ``job.rejected`` row would put a refusal in
+                        # the trail that never happened.  ``_is_refusal``
+                        # draws that line, and both forms use it.
+                        if exc is not None and _is_refusal(exc):
+                            self._reject_refusal(
+                                seq, job_id, retry_action, exc
+                            )
                         return None
                 else:
                     # The raising form: the gate raises, so the caller
