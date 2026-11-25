@@ -1137,3 +1137,78 @@ class SelfCheckStrengthTests(unittest.TestCase):
             timeout=120)
         self.assertEqual(completed.returncode, 0, completed.stdout)
         self.assertIn("self-check OK", completed.stdout)
+
+
+class PublicNameCoverageTests(unittest.TestCase):
+    """Every public name of the module is exercised by a test NAMING it.
+
+    The acceptance rule is that each public function has a test that names
+    it, so a reader (and a mutation probe) can tie a name to its evidence
+    without guessing.  These four methods close the last four gaps:
+    ``AuthorizationBoundary.state``, ``AuthorizationBoundary.narrow_to``,
+    ``ApprovalGrant.matches`` and ``DecisionRecord.as_line``.
+    """
+
+    def test_the_boundary_state_property_reports_valid_then_revoked(self):
+        check = make_check()
+        boundary = check.registry.get("b1")
+        self.assertEqual(boundary.state, "valid")
+        revoked = check.registry.revoke("b1", ts=120, reason="operator withdrew")
+        self.assertEqual(revoked.state, "revoked")
+        # The registry entry IS replaced by the revoked copy.
+        self.assertEqual(check.registry.get("b1").state, "revoked")
+        # The object the caller held before the revocation is untouched:
+        # revocation produces a NEW object rather than mutating the old.
+        self.assertEqual(boundary.state, "valid")
+        self.assertIsNone(boundary.revoked_at)
+
+    def test_narrow_to_returns_a_new_boundary_and_leaves_the_parent(self):
+        check = make_check()
+        parent = check.registry.get("b1")
+        child = parent.narrow_to(
+            "b-child",
+            scope=SCOPE.narrowed_to(actions=("read",)),
+            issued_at=110,
+        )
+        self.assertEqual(child.boundary_id, "b-child")
+        self.assertEqual(child.parent_boundary_id, "b1")
+        self.assertEqual(child.subject, parent.subject)
+        self.assertEqual(child.evidence_digest, parent.evidence_digest)
+        self.assertEqual(child.expires_at, parent.expires_at)
+        # The parent is unchanged.
+        self.assertIsNone(parent.parent_boundary_id)
+        self.assertEqual(parent.scope.actions, ("read",))
+        self.assertEqual(check.registry.get("b1").boundary_id, "b1")
+
+    def test_narrow_to_refuses_a_scope_that_would_widen(self):
+        check = make_check()
+        parent = check.registry.get("b1")
+        with self.assertRaises(ScopeWideningError):
+            parent.narrow_to(
+                "b-child",
+                scope=SCOPE.narrowed_to(actions=("read", "write")),
+                issued_at=110,
+            )
+
+    def test_the_grant_matches_only_its_own_call_id_and_digest(self):
+        grant = ApprovalGrant(call_id="c1", digest="sha256:abc",
+                              issued_at=100, expires_at=200)
+        self.assertTrue(grant.matches("c1", "sha256:abc"))
+        self.assertFalse(grant.matches("c2", "sha256:abc"))
+        self.assertFalse(grant.matches("c1", "sha256:other"))
+
+    def test_the_decision_line_is_json_with_the_verdict_and_the_reason(self):
+        import json
+        check = make_check()
+        record = check.authorize(call_id="c1", action="read", tool="Read",
+                                 resource="/workspace/a.txt", timestamp=150,
+                                 boundary_id="b1")
+        line = record.as_line()
+        self.assertNotIn("\n", line)
+        parsed = json.loads(line)
+        self.assertEqual(parsed["verdict"], VERDICT_ALLOWED)
+        self.assertEqual(parsed["reason"], "authorized")
+        self.assertEqual(parsed["call_id"], "c1")
+        self.assertEqual(parsed["boundary_id"], "b1")
+        self.assertEqual(parsed["grantee"], "agent-1")
+        self.assertEqual(parsed["timestamp"], 150)

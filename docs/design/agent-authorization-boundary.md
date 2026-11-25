@@ -191,7 +191,24 @@ Frozen. Fields: `boundary_id`, `scope`, `subject`, `grantee`, `issued_at`,
 
 The state (`valid` / `expired` / `revoked` / `narrowed`) is **derived**, not
 stored. A stored state would need a clock to advance it, and this module
-never reads a clock. `is_valid_at(ts)` is the query.
+never reads a clock. Each of the four is observed differently, and the
+module is explicit about which query answers which:
+
+* `valid` — the `state` property, on a boundary that has not been revoked;
+* `revoked` — the `state` property, on a boundary with `revoked_at` set;
+* `expired` — `is_expired_at(ts)`, which asks about the caller's timestamp
+  rather than asserting a fact about the object;
+* `narrowed` — not a property at all: it is the relation between a child
+  and its parent, visible as the child's `parent_boundary_id`.
+
+`state` therefore answers only "revoked or not". It is deliberately not a
+four-way switch, because "expired" and "narrowed" are not properties of the
+object: expiry is a question about a timestamp the caller supplies, and
+narrowing is a question about a pair of objects.
+
+`is_valid_at(ts)` is the query that decides whether the boundary
+authorizes anything at a given moment, and it is false for a revoked
+boundary at *every* timestamp.
 
 `narrow_to()` returns a **new** boundary; it never mutates the old one. The
 child inherits `subject` and `evidence_digest` from the parent, records
