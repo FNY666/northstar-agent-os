@@ -368,6 +368,36 @@ class SweBenchEvalTests(unittest.TestCase):
         self.assertEqual(code, 2)
 
 
+
+    def _write_log(self, root, instance_id, text):
+        base = root / "logs" / "run_evaluation" / "sb-x" / "northstar" / instance_id
+        base.mkdir(parents=True, exist_ok=True)
+        (base / "test_output.txt").write_text(text, encoding="utf-8")
+
+    def test_the_exit_status_says_the_run_died(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_log(root, "inst-1", "+ SWEBENCH_TEST_EXIT_CODE=139\n")
+            self.assertEqual(self.module._infra_failure(root, "sb-x", "inst-1"),
+                             "Segmentation fault")
+
+    def test_a_clean_exit_is_not_a_failure(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_log(root, "inst-1", "+ SWEBENCH_TEST_EXIT_CODE=0\n")
+            self.assertEqual(self.module._infra_failure(root, "sb-x", "inst-1"), "")
+
+    def test_a_test_that_only_mentions_the_words_is_not_a_failure(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_log(root, "inst-1",
+                            "test_x.py::test_y KILLED out of memory\n"
+                            "+ SWEBENCH_TEST_EXIT_CODE=1\n")
+            self.assertEqual(self.module._infra_failure(root, "sb-x", "inst-1"), "")
+
 class FrozenSampleShapeTests(unittest.TestCase):
     def setUp(self) -> None:
         self.sample = json.loads(
@@ -394,6 +424,7 @@ class FrozenSampleShapeTests(unittest.TestCase):
         for task in self.sample["tasks"]:
             counts[task["repo"]] = counts.get(task["repo"], 0) + 1
         self.assertLessEqual(max(counts.values()), 12)
+
 
 
 if __name__ == "__main__":
