@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import os
 import subprocess
 import sys
@@ -115,26 +116,48 @@ APPLY_PATCH_FAIL = ">>>>> Patch Apply Failed"
 # Signs that the run broke the machine rather than the code under test.
 # A segmentation fault in the test process is not something the model can
 # be blamed for, and the receipt has to say so.
+# A run that died is an infrastructure failure, not a model result.  The
+# runner records the exit status of the test command, so use that: it is
+# exact, where a text match on "Killed" or "out of memory" would also fire
+# on a test that merely printed those words.
+INFRA_EXIT_CODES = {
+    139: "Segmentation fault",
+    134: "Aborted",
+    137: "Killed",
+    135: "Bus error",
+}
+
 INFRA_MARKERS = (
     "Segmentation fault",
     "Bus error",
-    "Killed",
-    "out of memory",
     "Cannot allocate memory",
 )
 
 
 def _infra_failure(log_root: Path, run_id: str, instance_id: str) -> str:
-    """A sign that the run itself broke, or an empty string."""
+    """A sign that the run itself broke, or an empty string.
+
+    The exit status the runner records is the exact signal: 139 means the
+    process died of a segmentation fault, which under emulation says
+    nothing about the patch.  The text markers are only a fallback for a
+    run that never got as far as writing an exit status.
+    """
     base = log_root / "logs" / "run_evaluation" / run_id / "northstar" / instance_id
+    text = ""
     for name in ("run_instance.log", "test_output.txt"):
         try:
-            text = base.joinpath(name).read_text(encoding="utf-8", errors="replace")
+            text += base.joinpath(name).read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        for marker in INFRA_MARKERS:
-            if marker in text:
-                return marker
+    if not text:
+        return ""
+    for raw in re.findall(r"SWEBENCH_TEST_EXIT_CODE=(\d+)", text):
+        reason = INFRA_EXIT_CODES.get(int(raw))
+        if reason:
+            return reason
+    for marker in INFRA_MARKERS:
+        if marker in text:
+            return marker
     return ""
 
 
