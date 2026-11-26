@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -55,6 +56,36 @@ def _merge_patches(path: Path, extra: dict[str, str]) -> int:
 def _run(command: list[str], log: Path) -> int:
     with log.open("w", encoding="utf-8") as handle:
         return subprocess.run(command, stdout=handle, stderr=subprocess.STDOUT, check=False).returncode
+
+
+def _image_for(instance_id: str) -> str:
+    """The environment image one frozen instance is evaluated in."""
+    from importlib.util import module_from_spec, spec_from_file_location
+    spec = spec_from_file_location("swe_solver", SOLVE)
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.image_for_instance(instance_id)
+
+
+def _ensure_image(image: str, log_path: Path) -> bool:
+    """Make sure the environment image is present, for its own platform.
+
+    The images are published for one architecture only, and the solver
+    exports the repository out of them, so the pull has to name that
+    architecture rather than the host's.
+    """
+    inspect = subprocess.run(
+        ["docker", "image", "inspect", image],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+    )
+    if inspect.returncode == 0:
+        return True
+    with log_path.open("w", encoding="utf-8") as handle:
+        code = subprocess.run(
+            ["docker", "pull", "--platform", "linux/amd64", image],
+            stdout=handle, stderr=subprocess.STDOUT, check=False,
+        ).returncode
+    return code == 0
 
 
 def _docker_rmi(image: str) -> None:
@@ -98,6 +129,16 @@ def run_batch(
             log(f"SKIP_DONE {instance_id}")
             continue
 
+        image = ""
+        try:
+            image = _image_for(instance_id)
+        except Exception as exc:  # noqa: BLE001 - report it, do not crash the batch
+            log(f"IMAGE_UNKNOWN {instance_id}: {exc}")
+        if image and not _ensure_image(image, out / f"pull-{instance_id}.log"):
+            log(f"PULL_FAILED {instance_id}")
+            failed.append({"instance_id": instance_id, "stage": "pull", "code": "pull_failed"})
+            continue
+
         solve_receipt = out / f"solve-{instance_id}.json"
         if not solve_receipt.exists():
             command = [
@@ -122,6 +163,20 @@ def run_batch(
         if produced.exists():
             count = _merge_patches(patch_file, _load(produced))
             log(f"patches: {count}")
+        elif solve_receipt.exists():
+            # The solver ran but produced no patch.  That is not the same as
+            # an instance the model failed to solve: the run may have had no
+            # credentials at all, and the receipt says so.  Evaluating it
+            # would put "no patch delivered" into the results, which reads
+            # as a verdict on the model.
+            try:
+                receipt = _load(solve_receipt)
+            except (OSError, ValueError):
+                receipt = {}
+            if not receipt.get("real_model_evaluated", False):
+                log(f"NO_CREDENTIALS {instance_id}")
+                failed.append({"instance_id": instance_id, "stage": "solve", "code": "no_credentials"})
+                continue
 
         code = _run(
             [
@@ -148,17 +203,8 @@ def run_batch(
         else:
             done.append(instance_id)
 
-        if not keep_images:
-            try:
-                from importlib.util import module_from_spec, spec_from_file_location
-                spec = spec_from_file_location("swe_solver", SOLVE)
-                module = module_from_spec(spec)
-                spec.loader.exec_module(module)
-                image = module.image_for_instance(instance_id)
-            except Exception:  # noqa: BLE001 - cleanup is best effort
-                image = ""
-            if image:
-                _docker_rmi(image)
+        if not keep_images and image:
+            _docker_rmi(image)
 
     return {"solved": done, "skipped": skipped, "failed": failed}
 
@@ -176,7 +222,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--eval-python", default=sys.executable)
     parser.add_argument("--max-turns", type=int, default=None)
     parser.add_argument("--keep-images", action="store_true")
+    parser.add_argument(
+        "--api-key-env", default="",
+        help="environment variable holding the provider key; the batch refuses to "
+             "run without it rather than producing instances with no patch",
+    )
     args = parser.parse_args(argv)
+
+    if args.api_key_env and not os.environ.get(args.api_key_env, "").strip():
+        print(json.dumps({
+            "error": "missing_credentials",
+            "variable": args.api_key_env,
+            "detail": "the batch needs the provider key in the environment; "
+                      "without it every instance would come back with no patch",
+        }, indent=1))
+        return 2
 
     sample = _load(Path(args.sample))
     result = run_batch(

@@ -98,5 +98,202 @@ class BatchResumeTests(unittest.TestCase):
             self.assertEqual(len(second["solved"]), 0)
 
 
+class BatchImageTests(unittest.TestCase):
+    """The solver exports the repository out of the image, so it must exist."""
+
+    def setUp(self):
+        self.module = _module()
+
+    def test_a_missing_image_is_pulled_for_its_own_platform(self):
+        import tempfile
+        calls = []
+
+        class _Result:
+            returncode = 1
+
+        def fake_run(command, **kwargs):
+            calls.append(command)
+            if "inspect" in command[1]:
+                return _Result()
+            return _Result()
+
+        self.module.subprocess = type("S", (), {"run": staticmethod(fake_run)})
+        with tempfile.TemporaryDirectory() as tmp:
+            ok = self.module._ensure_image("some/image:tag", Path(tmp) / "pull.log")
+        self.assertFalse(ok)
+        pulled = [c for c in calls if "pull" in c]
+        self.assertTrue(pulled)
+        self.assertIn("--platform", pulled[0])
+        self.assertIn("linux/amd64", pulled[0])
+
+    def test_an_image_that_is_already_present_is_not_pulled(self):
+        import tempfile
+        calls = []
+
+        class _Result:
+            returncode = 0
+
+        def fake_run(command, **kwargs):
+            calls.append(command)
+            return _Result()
+
+        self.module.subprocess = type("S", (), {"run": staticmethod(fake_run)})
+        with tempfile.TemporaryDirectory() as tmp:
+            ok = self.module._ensure_image("some/image:tag", Path(tmp) / "pull.log")
+        self.assertTrue(ok)
+        self.assertFalse([c for c in calls if "pull" in c])
+
+
+def _fake_subprocess(run):
+    """A stand-in for the subprocess module that keeps everything but run."""
+    import subprocess as real
+
+    class _Fake:
+        DEVNULL = real.DEVNULL
+        PIPE = real.PIPE
+        STDOUT = real.STDOUT
+
+        @staticmethod
+        def run(command, **kwargs):
+            return run(command, **kwargs)
+
+    return _Fake
+
+
+class BatchImageTests(unittest.TestCase):
+    """The solver exports the repository out of the image, so it must exist."""
+
+    def setUp(self):
+        self.module = _module()
+
+    def test_a_missing_image_is_pulled_for_its_own_platform(self):
+        import tempfile
+        calls = []
+
+        class _Result:
+            returncode = 1
+
+        def fake_run(command, **kwargs):
+            calls.append(command)
+            if "inspect" in command[1]:
+                return _Result()
+            return _Result()
+
+        self.module.subprocess = _fake_subprocess(fake_run)
+        with tempfile.TemporaryDirectory() as tmp:
+            ok = self.module._ensure_image("some/image:tag", Path(tmp) / "pull.log")
+        self.assertFalse(ok)
+        pulled = [c for c in calls if "pull" in c]
+        self.assertTrue(pulled)
+        self.assertIn("--platform", pulled[0])
+        self.assertIn("linux/amd64", pulled[0])
+
+    def test_an_image_that_is_already_present_is_not_pulled(self):
+        import tempfile
+        calls = []
+
+        class _Result:
+            returncode = 0
+
+        def fake_run(command, **kwargs):
+            calls.append(command)
+            return _Result()
+
+        self.module.subprocess = _fake_subprocess(fake_run)
+        with tempfile.TemporaryDirectory() as tmp:
+            ok = self.module._ensure_image("some/image:tag", Path(tmp) / "pull.log")
+        self.assertTrue(ok)
+        self.assertFalse([c for c in calls if "pull" in c])
+
+
+class BatchCredentialTests(unittest.TestCase):
+    """A batch without credentials must not look like a model that failed."""
+
+    def setUp(self):
+        self.module = _module()
+
+    def test_a_missing_credential_variable_stops_the_batch(self):
+        import os
+        import tempfile
+        os.environ.pop("NS_BATCH_TEST_KEY", None)
+        with tempfile.TemporaryDirectory() as tmp:
+            code = self.module.main([
+                "--output", tmp,
+                "--api-key-env", "NS_BATCH_TEST_KEY",
+            ])
+        self.assertEqual(code, 2)
+
+    def test_an_instance_without_credentials_is_never_evaluated(self):
+        import json
+        import tempfile
+        out = Path(tempfile.mkdtemp())
+        instance = "acme__acme-1"
+        (out / f"solve-{instance}.json").write_text(
+            json.dumps({"tasks": [], "real_model_evaluated": False}),
+            encoding="utf-8",
+        )
+        sample = {"tasks": [{"instance_id": instance}]}
+
+        commands = []
+        self.module._run = lambda command, log: commands.append(command) or 0
+        self.module._ensure_image = lambda *a, **k: True
+        self.module._image_for = lambda *a: ""
+        self.module._docker_rmi = lambda *a: None
+
+        result = self.module.run_batch(
+            sample=sample,
+            out=out,
+            provider="openai",
+            model="m",
+            base_url="",
+            temperature=None,
+            timeout=1,
+            python="python",
+            eval_python="python",
+            log=lambda *a: None,
+        )
+        self.assertFalse(commands, "no program should run for an instance with no credentials")
+        self.assertFalse((out / f"eval-{instance}.json").exists())
+        self.assertEqual(
+            [f["code"] for f in result["failed"]],
+            ["no_credentials"],
+        )
+
+    def test_an_instance_with_a_patch_is_evaluated(self):
+        import json
+        import tempfile
+        out = Path(tempfile.mkdtemp())
+        instance = "acme__acme-2"
+        (out / f"solve-{instance}.json").write_text(
+            json.dumps({"tasks": [], "real_model_evaluated": True}),
+            encoding="utf-8",
+        )
+        (out / f"solve-{instance}-patches.json").write_text(
+            json.dumps({instance: "diff --git a/x b/x\n"}),
+            encoding="utf-8",
+        )
+        sample = {"tasks": [{"instance_id": instance}]}
+
+        commands = []
+        self.module._run = lambda command, log: commands.append(command) or 0
+        self.module._ensure_image = lambda *a, **k: True
+        self.module._image_for = lambda *a: ""
+        self.module._docker_rmi = lambda *a: None
+
+        self.module.run_batch(
+            sample=sample,
+            out=out,
+            provider="openai",
+            model="m",
+            base_url="",
+            temperature=None,
+            timeout=1,
+            python="python",
+            eval_python="python",
+            log=lambda *a: None,
+        )
+        self.assertTrue(any("run_swe_bench_eval.py" in " ".join(c) for c in commands))
+
+
 if __name__ == "__main__":
     unittest.main()
