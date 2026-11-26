@@ -5267,6 +5267,32 @@ artifact was taken -- a worktree that could not run the scope, a
 half-written tree, a collision with a concurrent run -- it affected all
 63 `ai_*` rows and none of the others.
 
+**AMENDED 2026-11-26.**  The qualitative claim above ("they measure fine
+today") was true but unquantified, and §33's own closing line warned that
+a count in a doc is a claim too.  The 63 rows have now been measured
+individually, on the current tree, with the fixed script:
+
+```
+ERROR rows in the artifact:            63
+ERROR rows now MEASURED:               63
+ERROR rows still unmeasured:            0
+aggregate over the 63 ERROR rows:  killed 1267/1640
+rows now at 100%:                        0
+```
+
+**Not one of the 63 is at 100%.**  The lowest is `ai_liability` at
+**25/40**, then `ai_recourse` 18/28, `ai_governance` 20/31, `ai_policy`
+20/31, `ai_oversight_auditing` 18/27.  So the 63 ERROR rows were not a
+cosmetic problem in the artifact -- they were 63 modules whose mutation
+score was never recorded, and the score is **77.3%**, well short of the
+rest of the artifact.  The sentence "the ERROR rows measure FINE today"
+was true in the sense that matters (they DO measure, and they measure
+without error) and misleading in the sense that matters more (they
+measure at 77%, not at 100%, and a reader of the artifact had no number
+at all for any of them).
+
+This is §33's point, made with a number.
+
 > **A SKIP is invisible; an ERROR is louder but equally unmeasured.**
 >
 > §29 says a SKIP leaves no trace in the artifact: the row carries a
@@ -5585,3 +5611,744 @@ The re-run against a stable tree is the one that counts.
   `tests/test_census_scope.py`'s pinned count of multi-suite modules,
   from **133** to **134**, and it changed because a second suite
   started loading `audit_archive`.
+
+## 35. One pattern, TWENTY copies: the `attack_extra_*` family, and the BRANCH level below the template
+
+§34 was a slice about a single module with a single suite.  This one
+is a slice about a **template**: twenty modules, twenty suites, and
+twenty times the same gap.  The artifact measured the family at
+**53/163 (32.5%)**:
+
+```
+attack_extra_01  2/6     attack_extra_07  3/7     attack_extra_13  3/9
+attack_extra_02  2/6     attack_extra_08  3/12    attack_extra_14  2/7
+attack_extra_03  2/6     attack_extra_09  2/7     attack_extra_15  2/6
+attack_extra_04  4/13    attack_extra_10  3/9     attack_extra_16  2/6
+attack_extra_05  3/9     attack_extra_11  4/9     attack_extra_17  3/12
+attack_extra_06  3/10    attack_extra_12  2/7     attack_extra_18  3/9
+                                 attack_extra_19  3/10    attack_extra_20  3/12
+```
+
+The uneven denominators (6, 7, 9, 10, 12, 13) are the trap.  A reader
+sorting by ratio sees six clusters of scores and infers six
+independent gaps.  In fact there is **ONE** gap, replicated twenty
+times, and the denominators differ only because the modules have
+different numbers of branches to mutate.
+
+### 35.1 What all twenty share, and what none of them shares
+
+`attack_extra_01.py` .. `attack_extra_20.py` are one template with
+different data.  Every one of them has exactly the same five
+functions, in the same order, with the same bodies:
+
+```
+detect(attack, observed)   -> bool
+run_probe(probe, check_fn) -> (blocked, reason)
+run_all(check_fn)          -> {"probes", "blocked", "total", "block_rate"}
+stdlib_only()              -> bool
+main()                     -> the self-check
+```
+
+and the same allowed-import set
+`{"__future__", "ast", "dataclasses", "pathlib", "typing"}`.  What
+differs is the attack catalogue and -- this is the part that matters
+-- **the body of `detect()`**.
+
+That is why this is **one slice, not twenty**: the same tests, written
+once, close all twenty rows.
+
+### 35.2 Level 1: the three template branches
+
+Parsed from the AST of all twenty, the three shared branches are:
+
+| | the branch | what the twenty suites do |
+|---|---|---|
+| **A** | `detect()`: `if attack not in known: return False` | `UNKNOWN-ATTACK-calls=0` in all 20 |
+| **B** | `stdlib_only()`: `return False` on a disallowed `import` / `import from` | `asserts-False=0` in all 20 |
+| **C** | `run_probe()`: the gate's decision is `False` | `False` never passed in all 20 |
+
+**A -- the unknown attack.**  Every suite calls `detect()` with an
+attack name taken from the module's own catalogue, so the
+`if attack not in known` line is never taken.
+
+**B -- the stdlib rejection.**  Every suite calls `stdlib_only()` and
+asserts it is `True`.  **A guard whose whole job is to REJECT, tested
+only on the accepting side, is not tested.**  The `return False` lines
+are unreachable from the suites as written.
+
+**C -- the gate says "not blocked".**  Every suite drives `run_probe`
+with a check that returns `True` (or raises, to exercise the
+fail-closed path).  None drives a check that returns `False`, so the
+`bool(blocked)` pass-through -- the whole point of the wrapper -- is
+never observed with a negative.
+
+### 35.3 Level 2: the DETECTION branches, and why level 1 was not enough
+
+Level 1 closes the three template branches.  But the census did NOT
+stop there: the first run left **23 survivors across 6 of the 20
+modules**, and they were all of a DIFFERENT shape:
+
+```
+attack_extra_05  or@61 and@63 retT@64 gt@68 retT@69
+attack_extra_06  or@61 and@63
+attack_extra_07  and@63 retT@64 and@65
+attack_extra_08  and@63 retT@64 and@65
+attack_extra_11  or@61 and@63 retT@64 and@65 or@65
+attack_extra_12  or@68 retT@69
+attack_extra_14  or@61
+attack_extra_17  and@61 or@63
+```
+
+These are the branches INSIDE `detect()`'s detection logic -- and
+**each module's own suite drives only ONE of them**.  For example
+`attack_extra_08.detect()` has three detection branches:
+
+```python
+if "collision" in text:            return True
+if "cache" in text and "inject" in text:   return True
+return "stale" in text and "schema" in text
+```
+
+and `test_attack_extra_08.py` asserts exactly one positive:
+
+```python
+assert ae.detect('poisoned_result', 'cache hit: poisoned result with injected instruction (key collision)') is True
+```
+
+That text contains markers for the FIRST and the SECOND branch
+simultaneously.  So the second branch is never observed on its own,
+and a mutant that breaks it survives.
+
+**This is a distinct failure from level 1, and it needs a distinct
+answer.**  Level 1 says "the guard was never driven with the input it
+rejects".  Level 2 says "the guard WAS driven, but with an input that
+satisfied two branches at once, so neither was pinned".  A guard
+tested only with inputs that satisfy EVERY branch is tested as
+shallowly as one never driven at all.
+
+### 35.4 The fix: one marker per branch, and the one-marker-only control
+
+The rule that closes level 2 is narrow and it is mechanical:
+
+> **Each branch needs an input that contains that branch's marker and
+> NO OTHER branch's marker.**
+
+For the `and` branches that means the positive case must still carry
+BOTH markers (it is an `and`), and the CONTROL must carry only ONE:
+
+| branch | positive | the control that pins it |
+|---|---|---|
+| `05`: `parent: read` AND `scope: write` | both | `parent: read` alone -> False |
+| `05`: `depth=N` > 3 | `depth=8` | `depth=3` -> False (the boundary) |
+| `07`: `approved` AND `withdrawn` | both | `approved` alone -> False |
+| `07`: `while pending` AND `mutat` | both | `while pending` alone -> False |
+| `08`: `cache` AND `inject` | both | `cache` alone -> False |
+| `08`: `stale` AND `schema` | both | `stale` alone -> False |
+| `11`: `kid` AND (`../` OR `..\`) | both | `kid normal-key` -> False |
+| `17`: `@` AND `{` | both | `user@example.com` -> False |
+| `18`: `pprof` AND `symbol` | both | `pprof` alone -> False |
+| `20`: `token=` AND (`ws://` OR `wss://`) | both | `token=abc` alone -> False |
+| `20`: `cross-site` AND `upgrade` | both | `cross-site` alone -> False |
+
+Every one of those controls is a case where the mutant `and -> or`
+must produce `True` and the code produces `False`.  That is the kill.
+
+**The boundary case is a separate lesson.**  `attack_extra_05`'s
+depth check is `int(...) > 3`.  The suite's positive is `depth=8`,
+which is `> 3` under both `>` and `>=`.  The mutant `gt@68` (`>` ->
+`>=`) therefore survived until a case at exactly `depth=3` was added.
+`depth=3` is not over 3, so the code returns `False` and the mutant
+returns `True`.  This is §32's exact-boundary rule, and it is the same
+rule at a different altitude: a guard's *near* side needs a case too,
+not just its far side.
+
+### 35.5 The `or` branches need the opposite construction
+
+An `or` branch is pinned by giving it a case where the OTHER side of
+the `or` is ALSO satisfied but the branch's own side is NOT -- so that
+the answer can only come from the intended side.  Two of those needed
+a construction that was not obvious:
+
+**`attack_extra_11`, the `alg` marker.**  The branch is
+
+```python
+if '"alg":"none"' in low or '"alg": "none"' in low:
+```
+
+so it fires on EITHER spelling.  A mutant that turns the `or` into an
+`and` is killed only by a text that contains the COMPACT spelling but
+not the SPACED one.  A text with both, or with neither, kills nothing.
+
+**`attack_extra_12`, the `grant_scopes` check.**  The branch is
+
+```python
+if "*" in grant_scopes or "admin" in grant_scopes:
+    return True
+return not grant_scopes.issubset(req_scopes)
+```
+
+The obvious positive -- `requested: read | granted: *` -- is ALSO
+detected by the `issubset` fallback (a `*` grant is not a subset of a
+`read` request), so the mutant `or -> and` reaches the same answer by
+the other road and SURVIVES.  The case that pins it is a grant that
+contains `*` or `admin` AND is a SUBSET of the request:
+
+```
+requested: * read  | granted: *       -> True
+requested: admin read | granted: admin -> True
+```
+
+Here the fallback returns `False`, so the only road to `True` is the
+`or` branch.
+
+**This is the general form of the trap: a mutation can be invisible
+because a SECOND path reaches the same answer.**  The fix is not "add
+a case for this branch" -- it is "add a case for this branch AND make
+every other path to the answer unreachable."  A test that adds a case
+without checking the alternatives still measures nothing, and it will
+look like it measured something.
+
+### 35.6 Non-vacuity: every case has a control
+
+A test that asserts a detection proves nothing unless the SAME guard
+also rejects the negative case.  Each case is stated as
+`(label, attack, observed, expected)`, and the negatives are part of
+the table, not an afterthought.  The `attack` argument is the attack
+name from the module's OWN catalogue -- that matters, because a case
+whose attack name is outside the catalogue would be rejected by the
+`if attack not in known` line (level 1) and would pass for the wrong
+reason on EVERY level-2 branch.
+
+That mistake was made while writing this section: the first draft of
+the probe table used attack names like `cross_agent` and `nxdomain`
+-- which are MARKERS, not attack names -- and every one of those
+cases returned `False` for the wrong reason.  §9.1's rule is that a
+proof which cannot fail proves nothing; the same is true of a case
+which cannot succeed for the intended reason.
+
+### 35.7 The `__main__` guard: an import-time observable
+
+The first census run on the family left one survivor per module:
+`eq@133`, the `if __name__ == "__main__":` line.  It survived because
+every suite IMPORTS the module, and on import the guard is correctly
+false.  The mutant flips it to `!=`, which makes the module run its
+own self-check **at import time** -- printing `attack_extra_01 OK` into
+whatever is on stdout.
+
+That is observable, and the first attempt to observe it failed for the
+wrong reason: `@dataclass` resolves `cls.__module__` through
+`sys.modules`, so a fresh module loaded without being REGISTERED raises
+`AttributeError` instead of running.  A test that asserted "import
+prints nothing" would have been satisfied by an exception -- a PASS
+produced by a crash, which is §9.1's "a test that passes for the
+wrong reason is worse than none".  The fix is to register the probe
+module in `sys.modules` before executing it, so the import really
+runs, and the assertion really sees the printed line.
+
+The mutant was planted (`__main__` -> `!= __main__`), the named test
+was confirmed to fail with `AssertionError: 'attack_extra_01 OK\n' != ''`,
+and the file was restored byte-identically (`cmp` against a pristine
+copy).
+
+### 35.8 The scope resolver reads LOADS, and it needs a LITERAL
+
+The new family suite initially loaded its twenty modules like this:
+
+```python
+FAMILY = tuple(f"attack_extra_{n:02d}" for n in range(1, 21))
+```
+
+and the census reported the family at the OLD scope -- one suite per
+module -- so the family suite contributed NOTHING to every row.  The
+resolver (`scripts/census-scope.py`) finds a module's scope by finding
+the suites that LOAD it, and **the loader shape it recognises is a call
+with a LITERAL module name**.  A list built by a loop is invisible to
+it: the loop is not a load, and the family suite's `MODULES` mapping
+never mentioned any module by a literal the resolver could match.
+
+The fix is twenty literal calls:
+
+```python
+MODULES = {
+    "attack_extra_01": _load("attack_extra_01"),
+    ...
+    "attack_extra_20": _load("attack_extra_20"),
+}
+```
+
+after which the resolver reports
+`attack_extra_01: test_attack_extra_01,test_attack_extra_family` and
+the family suite is in the scope for all twenty rows.
+
+**This is the same class of error as §9's "a comment is not a proof"
+and §30's "the scope is a union":** the suite EXISTED, it RAN, and it
+asserted things -- and the measurement instrument did not see it.
+A test file that is not in the resolver's scope contributes exactly
+zero to every number in the artifact, however good it is.
+
+### 35.9 A pinned count moves when a second suite loads a module
+
+`tests/test_census_scope.py` pins the number of modules whose scope the
+single-suite pairing understates.  The `audit_cli` slice moved it
+133 -> 134.  The family slice moves it **134 -> 154**, and the delta is
+**EXACTLY twenty** -- the twenty family modules, each of which now has
+two referencing suites.
+
+That the delta is exactly twenty is the check that matters.  A family
+suite that loaded the twenty modules in a LOOP would have added ZERO
+to the count, because the scope resolver only sees a load whose module
+name is a LITERAL -- the same fact that made the family suite invisible
+to the census in the first place.  A count that moves is a count that
+was measured, but only if the reader can see WHICH rows moved, so the
+guard now also pins the twenty by name:
+
+```python
+def test_the_twenty_family_modules_are_multi_suite(self) -> None:
+    for n in range(1, 21):
+        stem = f"attack_extra_{n:02d}"
+        suites = MODULE.referencing_suites(RUNTIME, stem)
+        self.assertEqual(
+            suites, ["test_attack_extra_NN", "test_attack_extra_family"],
+            f"{stem} is not multi-suite",
+        )
+```
+
+### 35.10 What this does NOT change
+
+* The census artifact is NOT edited.  The twenty rows still read
+  2/6, 3/9 and so on, because that row is a snapshot of a measurement on
+  a named tree at a named time.
+* No product code changed.  All twenty modules are byte-identical to
+  their pre-slice state; the slice is a new test file and this section.
+* The `attack_extra_*` modules are **simulated** red-team probes, not
+  live exploits, and their `main()` self-check is their own contract.
+  Closing this slice does NOT claim the family is well-designed; it
+  claims the family's branches are MEASURED.
+* The family is not the lowest row in the artifact.  `ai_liability`
+  (25/40) and the other 62 `ERROR` rows are lower still (§33.2), and
+  §30's "a wider scope is not a better score" still applies to
+  whatever comes next.
+
+### 35.11 The measurement
+
+_(The numbers below are MEASURED.  An earlier draft of this section
+asserted "120/163, every row at 100%" before the census had finished;
+that was a projection written as a fact, and §11's rule is that a count
+in a doc is a claim -- an unmeasured count is a fabricated one.)_
+
+The census, run on the current tree with the family suite in scope, and
+compared against the artifact's own row for the same module:
+
+| module | artifact | now | module | artifact | now |
+|---|---|---|---|---|---|
+| `attack_extra_01` | 2/6 | **6/6** | `attack_extra_11` | 4/9 | **12/12** |
+| `attack_extra_02` | 2/6 | **6/6** | `attack_extra_12` | 2/7 | **9/9** |
+| `attack_extra_03` | 2/6 | **6/6** | `attack_extra_13` | 3/9 | **7/7** |
+| `attack_extra_04` | 4/13 | **13/13** | `attack_extra_14` | 2/7 | **7/7** |
+| `attack_extra_05` | 3/9 | **13/13** | `attack_extra_15` | 2/6 | **6/6** |
+| `attack_extra_06` | 3/10 | **10/10** | `attack_extra_16` | 2/6 | **6/6** |
+| `attack_extra_07` | 3/7 | **10/10** | `attack_extra_17` | 3/12 | **9/9** |
+| `attack_extra_08` | 3/12 | **10/10** | `attack_extra_18` | 3/9 | **9/9** |
+| `attack_extra_09` | 2/7 | **6/6** | `attack_extra_19` | 3/10 | **7/7** |
+| `attack_extra_10` | 3/9 | **7/7** | `attack_extra_20` | 3/12 | **12/12** |
+
+```
+family, artifact:   killed  53/163   (32.5%)
+family, now:        killed 163/163  (100.0%)
+survivors:               0
+```
+
+**All twenty rows at 100%, and not one survivor.**  The denominators
+grew (6 -> 6, 7 -> 9, 9 -> 12, 10 -> 10, 12 -> 9, 13 -> 13) because the
+scope now includes the family suite, and the probe finds MORE mutation
+sites in the union -- the extra sites are the ones the single-suite
+pairing never reached.
+
+The slice's whole claim is one sentence: **the twenty suites
+collectively asserted only the HAPPY path of three guards and of one
+detection branch, twenty times over -- and the same tests close all
+twenty rows.**
+
+The slice's whole claim is one sentence: **the twenty suites
+collectively asserted only the HAPPY path of three guards and of one
+detection branch, twenty times over -- and the same tests close all
+twenty rows.**
+
+## 36. `alignment_check` at 2/9, and a proof of equivalence that was ITSELF a false kill
+
+§35 closed the twenty-module family.  This slice is the same shape on
+one module -- and it ended with a lesson the family did not teach.
+
+### 36.1 The row
+
+```
+alignment_check  MUTANT or@70 SURVIVED (or -> and)
+                      gt@75 SURVIVED (> -> >=)
+                      gt@82 SURVIVED (> -> >=)
+                 MUTANT retF@145 SURVIVED (return False -> return True)
+                      retF@148 SURVIVED (return False -> return True)
+                      gt@159 SURVIVED (> -> >=)
+                      eq@191 SURVIVED (== -> !=)
+                 MUTANT RESULT: killed 2/9
+```
+
+`alignment_check.py` is the goal-trace-action observer: it builds a
+judgment input, hands it to a HOST-PROVIDED judge, and fails CLOSED
+when the judge raises.  Its own suite covers the happy path and the
+fail-closed path.  Every one of the seven survivors is a branch the
+suite exercised on only ONE side.
+
+### 36.2 The four kinds of gap
+
+| site | the branch | the gap |
+|---|---|---|
+| `or@70` | `if not goal or not goal.strip():` | the suite passes `""`; a BLANK goal is untested |
+| `gt@82` | `"trace_truncated": len(trace) > max_trace` | the suite only ever sees the `True` side |
+| `retF@145` / `retF@148` | `stdlib_only()`'s two rejection branches | the suite asserts it is `True`; the rejections are unreachable |
+| `gt@159` | `goal_words = [... if len(w) > 3]` | inside `main()`'s rule-judge, which the suite never calls |
+| `eq@191` | `if __name__ == "__main__":` | the mutant runs the self-check at IMPORT time |
+
+**`or@70` is the interesting one.**  The suite's negative is `""`, and
+`""` is rejected under BOTH spellings of the guard -- `not goal` is
+True, and `not goal.strip()` is also True.  So the suite's negative
+case cannot tell `or` from `and`.  The crafted input is a goal that is
+non-empty but BLANK (`"   "`): `not goal` is False and
+`not goal.strip()` is True, so the mutant's `and` accepts it and the
+original rejects it.
+
+**The action guard is NOT symmetric, and that is the module's
+contract.**  The goal guard strips; the action guard is
+`if not action:`.  So a whitespace-only ACTION is ACCEPTED.  The first
+draft of this test expected a rejection and failed -- which is the
+right way to find out: the module's contract is what it is, and the
+test was wrong.  The test now asserts the asymmetry explicitly, and
+the asymmetry is the control: a test that wrongly expected `"   "` to
+be rejected would fail on it.
+
+### 36.3 `gt@75` is an EQUIVALENT mutant, and the proof had to be executable
+
+The remaining site is the trace-truncation bound:
+
+```python
+truncated = trace[-max_trace:] if len(trace) > max_trace else trace
+```
+
+The mutant changes `>` to `>=`.  The two forms differ ONLY when
+`len(trace) == max_trace`, and there they are the SAME LIST:
+
+* the original takes the `else` arm, which is `trace` itself;
+* the mutant takes the `then` arm, which is `trace[-max_trace:]` --
+  and at `len(trace) == max_trace` that slice is `trace[0:]`, i.e.
+  every element, in order.
+
+Both feed the SAME comprehension into the SAME dict, so the observable
+is content-identical, and the identity of the intermediate list is not
+observable in the output.  So `gt@75` **cannot be killed**, and the
+honest thing is to report it as an equivalence, not as a gap.
+
+**The proof is EXECUTABLE, not prose.**  `test_equivalence_table_coverage.py`
+requires every site §9.1's table names to be proved by CODE in a test
+file -- a comment naming a site is a note about the site, not a test
+of it.  So `TheTraceBoundIsEquivalentTests` in
+`components/northstar-agent-runtime/tests/test_alignment_check_surface.py`:
+
+* checks every `(len(trace), max_trace)` pair in a **31 x 9 grid** --
+  every length from 0 to 30 at nine bounds -- not a sample;
+* has a **non-vacuity control** pointed at a slice that IS observable
+  (the head instead of the tail of a trace longer than the bound), so
+  the harness must notice a difference;
+* reads the module's **real output** over the same grid and compares
+  it against the proof's prediction, so the proof cannot drift away
+  from the code it claims to be about.
+
+§9.1's table carries the row.
+
+### 36.4 THE FALSE KILL: my own proof defeated my own proof
+
+The first version of `test_gt_at_75_the_module_agrees_with_the_proof`
+read the module's source and asserted the **SPELLING**:
+
+```python
+self.assertIn("len(trace) > max_trace", expression)
+self.assertNotIn(">=", expression)
+```
+
+That is a spelling assertion, and it made the census report
+`gt@75 KILLED` -- a **false kill**.  The census planted the very
+mutant the proof says is equivalent; the spelling test failed; and the
+probe read a non-zero exit as a kill.  The proof had been defeated by
+a test that asserted the source TEXT rather than the behaviour.
+
+**The evidence that it was false is that the mutant PASSES the whole
+suite when planted.**  With `>` changed to `>=` in the module,
+`test_alignment_check_surface.py` and `test_alignment_check.py` both
+pass -- 22 tests, 565 subtests, zero failures.  A real defect would
+fail something.  Nothing failed, so the "kill" was the spelling.
+
+This is the same failure as the `job_queue` `or@1405` episode, where
+a proof that asserted a spelling was a false kill, and it is the
+SECOND time in this batch that a spelling assertion has stood in for a
+behavioural one.  The fix is the same: the proof asserts what the
+module DOES, over the whole input domain, and the spelling is left to
+the source.
+
+**A kill that no test can reproduce is not a kill.**  The tell is
+available for free -- plant the mutant and re-run the suite.  If
+everything passes, the "kill" was the assertion's own wording.
+
+### 36.5 The measurement
+
+```
+alignment_check, artifact:  killed  2/9
+alignment_check, now:       killed  8/9
+the survivor:               gt@75 -- EQUIVALENT, proved (executable)
+```
+
+The seven real gaps are closed.  The eighth is not a gap: it is a
+mutation that no test can distinguish, and it is registered in §9.1's
+table with a proof that runs.
+
+### 36.6 What this does NOT change
+
+* The census artifact is NOT edited.  The row still reads 2/9.
+* No product code changed.  `alignment_check.py` is byte-identical to
+  its pre-slice state.
+* `gt@75` is NOT claimed as closed by a test.  It is claimed as
+  equivalent, and the proof says exactly what is equivalent and over
+  which domain.
+
+## 37. `backpressure` at 1/14, and a self-check that is its own test suite
+
+### 37.1 The row
+
+```
+backpressure  MUTANT eq@194 SURVIVED (== -> !=)
+                   and@194 SURVIVED (and -> or)
+                   eq@196 .. eq@211 SURVIVED (== -> !=)
+                   and@214 SURVIVED (and -> or)
+                   eq@232 SURVIVED (== -> !=)
+              MUTANT RESULT: killed 1/14
+```
+
+`backpressure.py` implements the Reactive Streams demand-accounting
+contract.  Its own suite covers the class thoroughly -- demand
+addition, the non-positive and non-int rejections, the saturation, the
+overflow, the cancel semantics, the frozen record, the audit event.
+**And every one of the thirteen survivors was inside `main()`**, the
+module's own self-check, which the suite never calls.
+
+That is a different shape from §35 and §36.  Those modules had
+*branches* the suite exercised on one side.  `backpressure` has a
+whole FUNCTION the suite never entered.
+
+### 37.2 Three classes of mutant, three different observables
+
+| class | sites | the observable |
+|---|---|---|
+| `eq@N` -- an assert's comparison flipped | 194, 196-200, 208, 210, 211, 214 | `main()` raises |
+| `and@N` -- a conjunct weakened | 194, 214 | NOT `main()` -- see §37.4 |
+| `eq@232` -- the `__main__` guard | 232 | stdout at import time |
+
+**`eq@N` -- the self-check's own asserts.**  The mutant makes the
+module's self-check fail, so the observable is that `main()` raises.
+But "main() does not raise" is a WEAK observation: it says nothing
+about WHICH contract holds.  So the same file also asserts each
+contract DIRECTLY, on the class, against the module's documented
+behaviour: the demand flow step by step, the overflow counter, the
+saturation at the cap, the demand cleared by `cancel()`.  That way a
+mutant that breaks any single step names itself.
+
+**`eq@232` -- the `__main__` guard.**  The mutant runs the self-check
+at IMPORT time, printing `backpressure OK: ...`.  Observable on
+stdout -- but ONLY if the fresh module is REGISTERED in `sys.modules`
+first: `@dataclass` resolves `cls.__module__` there, so an unregistered
+load RAISES instead of running, and "import prints nothing" would be
+satisfied by a crash.
+
+### 37.3 The `and` mutants are EQUIVALENT, and the proof says why
+
+`and@194` and `and@214` weaken `A and B` to `A or B`, which makes the
+assert strictly weaker -- so a test that drives the assert into its
+failing state should see it.  And there IS no failing state:
+
+* at line 194 the controller is FRESH: `demand == 0` and
+  `not cancelled` are BOTH True, so `A and B` and `A or B` are both
+  True and the assert can never fire;
+* at line 214 the controller has just been CANCELLED, and `cancel()`
+  cleared the demand, so again both conjuncts hold and the assert can
+  never fire.
+
+The assert's VALUE is discarded, so the only observable is its
+FAILURE, and it cannot fail.  The two mutations are therefore
+indistinguishable: **both are EQUIVALENT mutants**, and no test can
+kill them.
+
+The proof is executable, in
+`TheVacuousAssertsAreEquivalentTests` in
+`components/northstar-agent-runtime/tests/test_backpressure_surface.py`:
+
+* it asserts both forms hold at the states `main()` actually reaches;
+* its **non-vacuity control** points the same comparison at the two
+  states where EXACTLY ONE conjunct holds -- which the harness must
+  detect -- and requires that the module's own `cancel()` clears the
+  demand, so the differing state is unreachable from `main()`.
+
+§9.1's table carries the two rows.
+
+### 37.4 A self-check the suite never runs is a self-check nobody verified
+
+The generalisation this slice produced, and it is the reason the row
+was at 1/14:
+
+> **A module's `main()` is a TEST SUITE that ships inside the
+> product.**  Its asserts encode the module's contract, and a suite
+> that exercises the module WITHOUT running `main()` leaves that
+> contract unverified.
+
+That is measurable across the component: **1331 of the component's
+modules have a `main()` and a `__main__` guard.**  (This is NOT a
+claim that 1331 rows are broken -- §35's measurement of the artifact
+shows only 161 of its 1732 survivors are inside a `main()`, so the
+rest are elsewhere.  It is a statement about where the unverified
+contracts are, and it is a worklist, not a finding.)
+
+### 37.5 The measurement
+
+```
+backpressure, artifact:  killed  1/14
+backpressure, now:       killed 12/14
+the survivors:           and@194, and@214 -- EQUIVALENT, proved (executable)
+```
+
+Twelve of the thirteen real gaps closed; the thirteenth is a mutation
+that no test can distinguish, and it is registered with a proof.
+
+### 37.6 What this does NOT change
+
+* The census artifact is NOT edited.  The row still reads 1/14.
+* No product code changed.  `backpressure.py` is byte-identical to its
+  pre-slice state.
+* The two equivalences are NOT claimed as closed by a test.  They are
+  claimed as equivalent, and the proof says exactly what is equivalent
+  and over which states.
+
+## 38. The row that was honest: `allowlist` at 0/5, a module with NO suite at all
+
+### 38.1 The finding, and how it was found
+
+The artifact's row:
+
+```
+allowlist  MUTANT retF@17 SURVIVED (return False -> return True)
+               retF@19 SURVIVED (return False -> return True)
+               and@19 SURVIVED (and -> or)
+               retT@20 SURVIVED (return True -> return False)
+               eq@27 SURVIVED (== -> !=)
+           MUTANT RESULT: killed 0/5
+           (allowlist.py / tests/test_ai_alignment.py)
+```
+
+The PAIRED suite, `tests/test_ai_alignment.py`, does not load
+`allowlist.py`.  The only occurrence of the word in that file is a
+COMMENT:
+
+```python
+# Test-side independent walk with the house allowlist.
+```
+
+So the 0/5 is **honest**: nothing tests this module.  It is not a
+scope error in the row -- it is a MISSING SUITE.
+
+### 38.2 The check that found it, and what it says about the rest
+
+The check is a diff between the artifact's pairing and the resolver's
+scope -- and it is a diff between two sets at the SAME scope, which is
+the only kind that means anything (§30).  Run over all 270 rows:
+
+```
+rows whose PAIRED suite is NOT in the resolver's scope: 5 of 270
+rows that are multi-suite: 41
+```
+
+The five are:
+
+| row | paired suite | the resolver's scope | why |
+|---|---|---|---|
+| `allowlist` | `test_ai_alignment` | **EMPTY** | a COMMENT, not a load |
+| `ba_01` | `test_py_modules_list` | **EMPTY** | the `ba_*` scratch family |
+| `ba_02` | `test_py_modules_list` | **EMPTY** | the same |
+| `ba_03` | `test_py_modules_list` | **EMPTY** | the same |
+| `ba_04` | `test_py_modules_list` | **EMPTY** | the same |
+
+**Four of the five are the `ba_*` family**, which §33.1 already
+classified as correctly unmeasured -- scratch utilities with no suite.
+`allowlist` is the odd one out: it is a REAL module with a REAL
+contract and NO suite whatsoever.
+
+**The 41 multi-suite rows are the other half of the story.**  §30
+re-measured `a2a_gates` at the union scope and found the score
+unchanged; §34's `audit_cli` slice found that adding a second suite
+can move the score from 6/31 to 31/31.  So a row's pairing is a
+choice, and 41 of the artifact's rows were paired with ONE suite when
+the scope is a UNION of several.
+
+### 38.3 What the module is, and what was unverified
+
+`allowlist.py` is the smallest module in the component:
+
+```python
+class Allowlist:
+    def __init__(self, allowed: list):
+        self.allowed = set(allowed)
+    def check(self, value: str) -> bool:
+        return value in self.allowed
+```
+
+plus a `stdlib_only()` AST guard and a `main()` self-check.  The five
+sites are the guard's two rejection branches, its accepting branch,
+and the `__main__` guard.
+
+**The rejection branches are the same shape as §35's and §36's:** a
+guard whose whole job is to REJECT, exercised only on the accepting
+side, is not tested -- and here it was not tested AT ALL.  The
+crafted input is a source file whose imports are not stdlib, with the
+module's `__file__` patched to point at it, so the real file is never
+modified.
+
+### 38.4 The measurement
+
+```
+allowlist, artifact:  killed  0/5   (paired with a suite that never loads it)
+allowlist, now:       killed  5/5   (scope: test_allowlist_surface)
+```
+
+Every one of the five was verified by planting it and confirming the
+named test fails:
+
+```
+retF@17: KILLED -> test_a_non_stdlib_import_is_rejected
+retF@19: KILLED -> test_a_non_stdlib_import_from_is_rejected
+and@19:  KILLED -> test_the_module_itself_passes_its_own_guard
+retT@20: KILLED -> test_the_module_itself_passes_its_own_guard
+eq@27:   KILLED -> test_importing_the_module_runs_no_self_check
+```
+
+Note `and@19`: it is killed by the test that asserts the guard accepts
+the REAL module, because the mutant makes `stdlib_only()` reject the
+module that ships it.  That is a good kill -- the assertion is about
+BEHAVIOUR, not about a spelling.
+
+### 38.5 What this does NOT change
+
+* The census artifact is NOT edited.  The row still reads 0/5.
+* No product code changed.  `allowlist.py` is byte-identical.
+* The multi-suite pin does NOT move: `allowlist` now has exactly ONE
+  suite, so it is not multi-suite, and the count stays at **156**.
+  That is worth stating, because the pin moved for every other suite
+  added in this batch, and a reader would expect it to move here too.
+* The other four rows are NOT closed by this slice.  `ba_01`..`ba_04`
+  are the `ba_*` scratch family, correctly unmeasured (§33.1).
+* The 41 multi-suite rows are a WORKLIST, not 41 findings.  §30 and
+  §34 both measured that re-pairing a row can move its score a long
+  way -- and §30 also measured that it can move it NOT AT ALL.  Each
+  row has to be measured on its own.

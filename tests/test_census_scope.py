@@ -195,6 +195,13 @@ class CensusScopeScaleTests(unittest.TestCase):
     and this is a second suite loading it.  A count that moves is a
     count that was measured.
 
+    **AMENDED 2026-11-26 (the `alignment_check` and `backpressure`
+    slices).**  Two more suites, each loading its own module:
+    `tests/test_alignment_check_surface.py` loads `alignment_check`,
+    and `tests/test_backpressure_surface.py` loads `backpressure`.
+    Both modules now have TWO referencing suites, so the count is
+    **156**.
+
     **AMENDED 2026-11-26 (the `attack_extra_*` family slice).**  The
     new `components/northstar-agent-runtime/tests/test_attack_extra_family.py`
     loads ALL TWENTY `attack_extra_NN` modules, so every one of them now
@@ -222,7 +229,7 @@ class CensusScopeScaleTests(unittest.TestCase):
             if len(MODULE.referencing_suites(runtime, stem)) > 1
         ]
         self.assertEqual(
-            len(multi), 154,
+            len(multi), 156,
             "the number of modules whose scope the single-suite pairing "
             "understated",
         )
@@ -242,6 +249,17 @@ class CensusScopeScaleTests(unittest.TestCase):
                              "test_attack_extra_family"],
                     f"{stem} is not multi-suite",
                 )
+
+    def test_the_two_single_module_slices_are_multi_suite(self) -> None:
+        # The same discipline as the twenty family modules: pin the
+        # new multi-suite rows by NAME, so a suite that silently stops
+        # loading its module cannot be absorbed into the count.
+        for stem in ("alignment_check", "backpressure"):
+            with self.subTest(module=stem):
+                suites = MODULE.referencing_suites(RUNTIME, stem)
+                self.assertEqual(len(suites), 2, f"{stem} is not multi-suite")
+                self.assertIn(f"test_{stem}", suites)
+                self.assertIn(f"test_{stem}_surface", suites)
 
     def test_agents_is_exercised_by_eleven_suites(self) -> None:
         # The clearest case: `agents.py` has ONE own suite and TEN
