@@ -124,10 +124,17 @@ def _apply_marker(log_root: Path, run_id: str, instance_id: str) -> str:
 
     Returns "pass", "fail" or "unknown".
     """
-    candidate = log_root / "logs" / "run_evaluation" / run_id / "northstar" / instance_id / "test_output.txt"
-    try:
-        text = candidate.read_text(encoding="utf-8", errors="replace")
-    except OSError:
+    base = log_root / "logs" / "run_evaluation" / run_id / "northstar" / instance_id
+    # The runner writes the marker into its instance log, and the test
+    # output is a separate file; read both so the marker is found wherever
+    # the runner put it.
+    text = ""
+    for name in ("run_instance.log", "test_output.txt"):
+        try:
+            text += base.joinpath(name).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+    if not text:
         return "unknown"
     if APPLY_PATCH_FAIL in text:
         return "fail"
