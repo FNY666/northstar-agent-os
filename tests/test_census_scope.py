@@ -194,6 +194,23 @@ class CensusScopeScaleTests(unittest.TestCase):
     loose: a module becomes multi-suite when a SECOND suite loads it,
     and this is a second suite loading it.  A count that moves is a
     count that was measured.
+
+    **AMENDED 2026-11-26 (the `attack_extra_*` family slice).**  The
+    new `components/northstar-agent-runtime/tests/test_attack_extra_family.py`
+    loads ALL TWENTY `attack_extra_NN` modules, so every one of them now
+    has TWO referencing suites -- its own, plus the family suite.  The
+    count is **154**, exactly twenty more than 134, and the twenty new
+    rows are exactly the twenty family modules.
+
+    That the delta is EXACTLY twenty is the check that matters.  A
+    family suite that loaded the twenty modules in a LOOP would have
+    added ZERO to this count, because the scope resolver only sees a
+    load whose module name is a LITERAL -- the same fact that made the
+    family suite invisible to the census in the first place.  A guard
+    that counts "modules with more than one suite" cannot tell the
+    difference between "a second suite loads this" and "a second suite
+    loads this", but a reader of this docstring can: the twenty rows
+    listed below are the twenty that moved.
     """
 
     def test_the_multi_suite_modules_are_counted(self) -> None:
@@ -205,10 +222,26 @@ class CensusScopeScaleTests(unittest.TestCase):
             if len(MODULE.referencing_suites(runtime, stem)) > 1
         ]
         self.assertEqual(
-            len(multi), 134,
+            len(multi), 154,
             "the number of modules whose scope the single-suite pairing "
             "understated",
         )
+
+    def test_the_twenty_family_modules_are_multi_suite(self) -> None:
+        # The delta above was EXACTLY twenty.  Pin the twenty by name,
+        # so a family suite that silently stops loading some of them
+        # cannot be absorbed into the count.  A count that moves is a
+        # count that was measured -- but only if the reader can see
+        # WHICH rows moved.
+        for n in range(1, 21):
+            stem = f"attack_extra_{n:02d}"
+            suites = MODULE.referencing_suites(RUNTIME, stem)
+            with self.subTest(module=stem):
+                self.assertEqual(
+                    suites, ["test_attack_extra_01".replace("01", f"{n:02d}"),
+                             "test_attack_extra_family"],
+                    f"{stem} is not multi-suite",
+                )
 
     def test_agents_is_exercised_by_eleven_suites(self) -> None:
         # The clearest case: `agents.py` has ONE own suite and TEN
