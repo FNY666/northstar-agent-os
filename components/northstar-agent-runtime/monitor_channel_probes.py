@@ -136,7 +136,7 @@ class MonitorRecord:
     digest: str
 
     def __post_init__(self) -> None:
-        if not isinstance(self.seq, int) or self.seq < 0:
+        if isinstance(self.seq, bool) or not isinstance(self.seq, int) or self.seq < 0:
             raise ValueError("seq must be a non-negative int")
         if self.direction not in DIRECTIONS:
             raise ValueError(f"direction must be one of {DIRECTIONS}")

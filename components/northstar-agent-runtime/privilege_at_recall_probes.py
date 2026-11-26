@@ -164,11 +164,11 @@ class MemoryRecord:
             raise ValueError("owner_agent must be a non-empty string")
         if self.trust not in TRUST_ORIGINS:
             raise ValueError(f"trust must be one of {TRUST_ORIGINS}")
-        if not isinstance(self.max_privilege, int) or self.max_privilege < 0:
+        if isinstance(self.max_privilege, bool) or not isinstance(self.max_privilege, int) or self.max_privilege < 0:
             raise ValueError("max_privilege must be a non-negative int")
-        if not isinstance(self.authority_version, int) or self.authority_version < 0:
+        if isinstance(self.authority_version, bool) or not isinstance(self.authority_version, int) or self.authority_version < 0:
             raise ValueError("authority_version must be a non-negative int")
-        if not isinstance(self.seq, int) or self.seq < 0:
+        if isinstance(self.seq, bool) or not isinstance(self.seq, int) or self.seq < 0:
             raise ValueError("seq must be a non-negative int")
         if not _good_digest(self.prev_digest):
             raise ValueError("prev_digest must be sha256:-prefixed")
@@ -304,11 +304,11 @@ class RecallRequest:
             raise ValueError("caller_agent must be a non-empty string")
         if not isinstance(self.caller_tenant, str) or not self.caller_tenant:
             raise ValueError("caller_tenant must be a non-empty string")
-        if not isinstance(self.caller_privilege, int) or self.caller_privilege < 0:
+        if isinstance(self.caller_privilege, bool) or not isinstance(self.caller_privilege, int) or self.caller_privilege < 0:
             raise ValueError("caller_privilege must be a non-negative int")
         if not isinstance(self.purpose, str) or not self.purpose:
             raise ValueError("purpose must be a non-empty string")
-        if not isinstance(self.accepted_authority, int) or self.accepted_authority < 0:
+        if isinstance(self.accepted_authority, bool) or not isinstance(self.accepted_authority, int) or self.accepted_authority < 0:
             raise ValueError("accepted_authority must be a non-negative int")
         if not _good_digest(self.digest):
             raise ValueError("digest must be sha256:-prefixed")

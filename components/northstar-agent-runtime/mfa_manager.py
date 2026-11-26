@@ -281,7 +281,7 @@ class MFAManager:
     # internals
     # ------------------------------------------------------------------
     def _check_seq(self, seq: int) -> None:
-        if not isinstance(seq, int):
+        if isinstance(seq, bool) or not isinstance(seq, int):
             raise TypeError("seq must be int")
         if seq <= self._last_seq:
             raise SeqOrderError(
@@ -423,7 +423,7 @@ class MFAManager:
         the caller exactly once."""
         if not isinstance(principal, str) or not principal:
             raise TypeError("principal must be a non-empty str")
-        if not isinstance(count, int) or count < 1 or count > 64:
+        if isinstance(count, bool) or not isinstance(count, int) or count < 1 or count > 64:
             raise ValueError("count must be an int in [1, 64]")
         with self._lock:
             self._check_seq(seq)
@@ -538,7 +538,7 @@ class MFAManager:
         if (not isinstance(cred_id, str) or cred_id != rec.cred_id
                 or not isinstance(challenge, bytes) or not challenge
                 or not isinstance(response, bytes)
-                or not isinstance(sign_count, int)
+                or isinstance(sign_count, bool) or not isinstance(sign_count, int)
                 or not isinstance(rp_id, str) or rp_id != rec.rp_id):
             self._audit("verify", principal, "webauthn", seq, False, "malformed")
             return VerifyResult(principal, "webauthn", False, "malformed")

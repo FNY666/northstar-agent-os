@@ -162,6 +162,176 @@ if __name__ == "__main__":
     unittest.main()
 
 
+#: The `ai_*` audit-event seq-guard family, pinned BY NAME.
+#:
+#: MEASURED 2026-11-26: the 162 `ai_*` modules whose audit-event
+#: function guards a `seq` parameter with a bool/int discriminator.
+#: `tests/test_ai_audit_seq_guard_family.py` loads all of them.
+SEQ_GUARD_FAMILY = (
+    "ai_accident",
+    "ai_accountability",
+    "ai_accountability_incident",
+    "ai_accountability_mitigation",
+    "ai_accountability_monitoring",
+    "ai_accountability_remediation",
+    "ai_accountability_risk",
+    "ai_accountability_testing",
+    "ai_accountability_threat",
+    "ai_accountability_validation",
+    "ai_accountability_verification",
+    "ai_accountability_vulnerability",
+    "ai_act",
+    "ai_adversarial",
+    "ai_alignment",
+    "ai_attack",
+    "ai_audit",
+    "ai_benchmarking",
+    "ai_bias",
+    "ai_calibration",
+    "ai_charter",
+    "ai_compliance",
+    "ai_compliance_incident",
+    "ai_compliance_mitigation",
+    "ai_compliance_monitoring",
+    "ai_compliance_remediation",
+    "ai_compliance_risk",
+    "ai_compliance_testing",
+    "ai_compliance_threat",
+    "ai_compliance_validation",
+    "ai_compliance_verification",
+    "ai_compliance_vulnerability",
+    "ai_concept",
+    "ai_containment",
+    "ai_contestability_incident",
+    "ai_contestability_mitigation",
+    "ai_contestability_monitoring",
+    "ai_contestability_remediation",
+    "ai_contestability_risk",
+    "ai_contestability_testing",
+    "ai_contestability_threat",
+    "ai_contestability_validation",
+    "ai_contestability_verification",
+    "ai_contestability_vulnerability",
+    "ai_counterfactual",
+    "ai_defense",
+    "ai_detection",
+    "ai_distillation",
+    "ai_distribution_shift",
+    "ai_ensemble",
+    "ai_ethics_incident",
+    "ai_ethics_mitigation",
+    "ai_ethics_monitoring",
+    "ai_ethics_remediation",
+    "ai_ethics_risk",
+    "ai_ethics_testing",
+    "ai_ethics_threat",
+    "ai_ethics_validation",
+    "ai_ethics_verification",
+    "ai_ethics_vulnerability",
+    "ai_evaluation",
+    "ai_explainability",
+    "ai_exploit",
+    "ai_failure",
+    "ai_fairness_incident",
+    "ai_fairness_mitigation",
+    "ai_fairness_monitoring",
+    "ai_fairness_remediation",
+    "ai_fairness_risk",
+    "ai_fairness_testing",
+    "ai_fairness_threat",
+    "ai_fairness_validation",
+    "ai_fairness_verification",
+    "ai_fairness_vulnerability",
+    "ai_feature",
+    "ai_fuzzing",
+    "ai_gating",
+    "ai_harm",
+    "ai_incident",
+    "ai_isolation",
+    "ai_mechanistic",
+    "ai_mitigation",
+    "ai_monitoring",
+    "ai_ood_detection",
+    "ai_oversight_incident",
+    "ai_oversight_mitigation",
+    "ai_oversight_monitoring",
+    "ai_oversight_remediation",
+    "ai_oversight_risk",
+    "ai_oversight_testing",
+    "ai_oversight_threat",
+    "ai_oversight_validation",
+    "ai_oversight_verification",
+    "ai_oversight_vulnerability",
+    "ai_pentesting",
+    "ai_prevention",
+    "ai_privacy",
+    "ai_probing",
+    "ai_pruning",
+    "ai_quarantine",
+    "ai_recovery",
+    "ai_redress",
+    "ai_redteaming",
+    "ai_remediation",
+    "ai_resilience",
+    "ai_risk",
+    "ai_robustness",
+    "ai_robustness_incident",
+    "ai_robustness_mitigation",
+    "ai_robustness_monitoring",
+    "ai_robustness_remediation",
+    "ai_robustness_risk",
+    "ai_robustness_testing",
+    "ai_robustness_threat",
+    "ai_robustness_validation",
+    "ai_robustness_verification",
+    "ai_robustness_vulnerability",
+    "ai_safety",
+    "ai_safety_incident",
+    "ai_safety_mitigation",
+    "ai_safety_monitoring",
+    "ai_safety_remediation",
+    "ai_safety_risk",
+    "ai_safety_testing",
+    "ai_safety_threat",
+    "ai_safety_validation",
+    "ai_safety_verification",
+    "ai_safety_vulnerability",
+    "ai_saliency",
+    "ai_sandbox",
+    "ai_security",
+    "ai_stress_testing",
+    "ai_surveillance",
+    "ai_testing",
+    "ai_threat",
+    "ai_throttling",
+    "ai_traceability_incident",
+    "ai_traceability_mitigation",
+    "ai_traceability_monitoring",
+    "ai_traceability_remediation",
+    "ai_traceability_risk",
+    "ai_traceability_testing",
+    "ai_traceability_threat",
+    "ai_traceability_validation",
+    "ai_traceability_verification",
+    "ai_traceability_vulnerability",
+    "ai_transparency",
+    "ai_transparency_incident",
+    "ai_transparency_mitigation",
+    "ai_transparency_monitoring",
+    "ai_transparency_remediation",
+    "ai_transparency_risk",
+    "ai_transparency_testing",
+    "ai_transparency_threat",
+    "ai_transparency_validation",
+    "ai_transparency_verification",
+    "ai_transparency_vulnerability",
+    "ai_uncertainty",
+    "ai_validation",
+    "ai_verification",
+    "ai_visualization",
+    "ai_vulnerability",
+)
+
 class CensusScopeScaleTests(unittest.TestCase):
     """How many modules does the single-suite pairing get WRONG?
 
@@ -237,6 +407,23 @@ class CensusScopeScaleTests(unittest.TestCase):
     suite's own premise test asserts that every one of the 170 still
     carries the template, so a module that leaves the family is caught
     rather than silently carried by the cases.
+
+    **AMENDED 2026-11-26 (the `ai_*` audit-event seq-guard family and
+    the six bool-seq defect sites).**  Two more suites landed:
+
+    * `components/northstar-agent-runtime/tests/
+      test_ai_audit_seq_guard_family.py` loads ONE HUNDRED AND
+      SIXTY-TWO `ai_*` modules -- the ones whose audit-event function
+      guards a `seq` parameter with a bool/int discriminator.  The
+      count moved 326 -> 335, and the delta is EXACTLY NINE, not 162:
+      153 of the 162 are ALSO members of the import-guard family, so
+      they were already counted.
+    * `components/northstar-agent-runtime/tests/
+      test_seq_bool_rejection.py` loads the SIX modules whose seq
+      guard accepted a bool (`monitor_channel_probes`,
+      `privilege_at_recall_probes`, `evidence_compaction_probes`,
+      `fraud_detector`, `tax_calculator`, `mfa_manager`).  The count
+      moved 335 -> 341.
     """
 
     def test_the_multi_suite_modules_are_counted(self) -> None:
@@ -248,7 +435,7 @@ class CensusScopeScaleTests(unittest.TestCase):
             if len(MODULE.referencing_suites(runtime, stem)) > 1
         ]
         self.assertEqual(
-            len(multi), 326,
+            len(multi), 341,
             "the number of modules whose scope the single-suite pairing "
             "understated",
         )
@@ -560,10 +747,73 @@ class CensusScopeScaleTests(unittest.TestCase):
                 expected = 3 if stem in auditing else 2
                 if stem == "ai_transparency_auditing":
                     expected = 4
+                # A module that is ALSO in the audit-event seq-guard
+                # family carries the seq-guard family suite as well.
+                # MEASURED 2026-11-26: 153 of the 170 are, and the
+                # seventeen that are not are the `ai_*_auditing` eight
+                # (already at 3 or 4) plus the nine that the seq-guard
+                # family does not carry.
+                if stem in SEQ_GUARD_FAMILY:
+                    expected += 1
                 self.assertEqual(
                     len(suites), expected,
                     f"{stem} is not multi-suite",
                 )
+
+    def test_the_ai_audit_seq_guard_family_modules_are_multi_suite(self):
+        """The 162 `ai_*` audit-event seq-guard modules, pinned BY NAME.
+
+        MEASURED 2026-11-26: `tests/test_ai_audit_seq_guard_family.py`
+        loads all 162 of them, so NINE of them became multi-suite --
+        the count moved 326 -> 335.  The delta is NINE and not 162
+        because 153 of the 162 are ALSO members of the import-guard
+        family, so they already carried a second suite.
+
+        Pinned by name because the count alone cannot say WHICH rows
+        moved, and a family suite that silently stops loading one of
+        them would be absorbed into the count.
+
+        The list is the family's OWN membership: the modules whose
+        audit-event function's second parameter is named `seq` and
+        whose body carries a bool/int discriminating guard on it.  A
+        module that joins the family is expected to be picked up; one
+        that leaves it is expected to fail the family's own premise
+        test rather than this one.
+        """
+        family = SEQ_GUARD_FAMILY
+        self.assertEqual(len(family), 162)
+        for stem in family:
+            with self.subTest(module=stem):
+                suites = MODULE.referencing_suites(RUNTIME, stem)
+                self.assertIn(f"test_{stem}", suites)
+                self.assertIn("test_ai_audit_seq_guard_family", suites)
+
+    def test_the_six_bool_seq_defect_modules_are_multi_suite(self):
+        """The six modules whose seq guard accepted a bool.
+
+        MEASURED 2026-11-26: `tests/test_seq_bool_rejection.py` loads
+        all six, so each became multi-suite -- the count moved
+        335 -> 341.
+
+        The six are the exception to the repo's own convention: 1266
+        of the runtime's seq-ish int guards spell the bool half out
+        (`isinstance(seq, bool) or not isinstance(seq, int)`), and
+        these six did not, so each of them accepted ``True`` where the
+        other 1266 refused it.
+        """
+        six = (
+            "evidence_compaction_probes",
+            "fraud_detector",
+            "mfa_manager",
+            "monitor_channel_probes",
+            "privilege_at_recall_probes",
+            "tax_calculator",
+        )
+        for stem in six:
+            with self.subTest(module=stem):
+                suites = MODULE.referencing_suites(RUNTIME, stem)
+                self.assertIn(f"test_{stem}", suites)
+                self.assertIn("test_seq_bool_rejection", suites)
 
     def test_agents_is_exercised_by_eleven_suites(self) -> None:
         # The clearest case: `agents.py` has ONE own suite and TEN

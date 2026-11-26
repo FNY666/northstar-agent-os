@@ -6763,3 +6763,325 @@ original defect re-planted -> test_stdlib_only_does_not_depend_on_an_optional_de
   (plus a comment).  The change is the family's own convention, so
   the module now agrees with the other 162.
 * No version, schema, or audit kind is added or changed.
+
+---
+
+## 41. The audit-event seq guard: ONE blind spot, 162 copies -- and SIX real defects
+
+### 41.1 The premise
+
+The `ai_*` import-guard family (§40) had ONE guard whose whole job is
+to reject, and 170 copies of it, all tested only on the accepting
+side.  The next family is the same shape one level over: a guard on a
+SEQUENCE NUMBER.
+
+162 of the runtime's `ai_*` modules expose a function whose second
+positional parameter is `seq`:
+
+```python
+def <module>_audit_event(kind, seq, ...):
+    if kind not in <KINDS>:
+        raise AuditKindError(...)
+    if isinstance(seq, bool) or not isinstance(seq, int):
+        raise SeqOrderError("seq must be an int")
+    ...
+```
+
+The family is discovered STRUCTURALLY: the function's name ends in
+`_audit_event`, its second parameter is named `seq`, and its body
+carries a bool/int discriminating guard on that parameter.
+
+Four condition spellings, measured:
+
+```
+ 93 | not isinstance(seq, int) or isinstance(seq, bool)
+ 55 | isinstance(seq, bool) or not isinstance(seq, int)
+ 13 | isinstance(seq, bool) or not isinstance(seq, int) or seq < 0
+  1 | isinstance(seq, bool) or not isinstance(seq, int) or seq <= 0
+```
+
+The error class is `SeqOrderError` in 161 modules and `BadSeqError`
+in one (`ai_pentesting`), so it is read from each module's own source
+rather than assumed.
+
+### 41.2 The blind spot
+
+Every one of the 162 modules has its OWN suite.  Those suites call the
+audit-event builder with a GOOD seq and assert the row comes back.
+When they test the seq guard at all, they test it with a NEGATIVE int.
+
+MEASURED: of the 162 modules' own suites, **149 never pass a bool**,
+and 13 do.  A negative int is tested in only 3.
+
+### 41.3 The discriminator is a bool, and the mutant is invisible to a negative
+
+`bool` is a subclass of `int`, so `isinstance(True, int)` is `True`.
+The guard needs BOTH halves to refuse a bool.  The census's `or ->
+and` mutant turns
+
+```python
+isinstance(seq, bool) or not isinstance(seq, int)
+```
+
+into
+
+```python
+isinstance(seq, bool) and not isinstance(seq, int)
+```
+
+which is `False` for a bool (`not isinstance(True, int)` is `False`),
+so the mutant **ACCEPTS** `True`.
+
+A negative int still trips the mutant -- `isinstance(-1, bool)` is
+`False`, so the whole `and` is `False` -- so **a test that only
+passes a negative int cannot see this mutant at all.**  The crafted
+input has to be a bool.
+
+### 41.4 What the artifact says, and the two instruments agreeing
+
+The census artifact (`docs/baseline/mutant-census/census-v3.txt`) has
+one row per module and lists only the SURVIVORS.  Reading the
+`or@<guard line>` entry out of each of the 162 rows:
+
+```
+recorded SURVIVED at the audit-event guard:  78
+recorded KILLED (no SURVIVED entry):          84
+```
+
+A second instrument -- a probe that copies the runtime to a temporary
+directory, plants the `or -> and` mutant in ONE module at a time, and
+runs that module's own suite -- reported 112 survivors.  The two
+disagreeed on 34 modules, and **every one of the 34 is a row the
+census reads `ERROR`**: a STALE measurement, not a kill.  Treating
+`ERROR` as *unmeasured* rather than as *killed* reconciles them
+exactly:
+
+```
+78 recorded survivors + 34 unmeasured (ERROR) = 112
+```
+
+The lesson is the one from the import-guard slice: **an `ERROR` row is
+not a missing row, and it is not a kill.**  A stale measurement and an
+absent measurement look the same in the artifact and mean opposite
+things.
+
+### 41.5 The two instruments, and what each is good for
+
+The copy-probe reported 50 KILLS that the artifact does not record.
+Those are NOT trustworthy: the copy has no git history, and a suite
+that reads the repo root or git state can fail on a plain copy for a
+reason that has nothing to do with the mutant -- a false kill, the
+mirror image of the stale-bytecode false kill.
+
+The census runs in a git worktree and is the instrument of record.
+The copy-probe's value was different: it showed that the survivor set
+was a strict SUPERSET of the census's, and the difference was exactly
+the `ERROR` rows.  **Two instruments that disagree are a scope
+question first and a finding second.**
+
+### 41.6 The suite
+
+`components/northstar-agent-runtime/tests/test_ai_audit_seq_guard_family.py`
+
+Four tests, 648 subtests, over all 162 modules:
+
+| test | what it pins |
+|---|---|
+| `test_the_family_members_really_carry_the_seq_guard` | the PREMISE: every member really has the shape |
+| `test_a_bool_seq_is_refused_with_the_modules_own_error` | the crafted input: `True` is refused with the module's own error class |
+| `test_a_good_seq_is_accepted` | THE CONTROL: a plain int still produces a row |
+| `test_a_negative_seq_is_refused_where_the_guard_says_so` | the `seq < 0` clause, on the 14 modules that carry it |
+
+Two things are DERIVED FROM EACH MODULE'S OWN SOURCE rather than
+hardcoded, because a hardcoded copy could drift from the module and
+the test would then assert against a rule the module does not enforce:
+
+* the valid KIND, read from the module's kind constant (`AUDIT_KINDS`
+  in 93 modules, `EMIT_KINDS` in 67, `_AUDIT_KINDS` in 2) -- the call
+  has to survive the kind check to reach the seq guard at all;
+* the ERROR CLASS, read from the raise in the seq branch -- because the
+  family is not uniform (`BadSeqError` in one module).
+
+Two members (`ai_ethics_monitoring`, `ai_pentesting`) declare a
+REQUIRED third parameter, `details`; the parameter is read from the
+signature and an empty dict is passed, so the list is not
+hand-maintained.
+
+### 41.7 The six REAL defects this family exposed
+
+The family is 162 modules that DO spell the bool half out.  The
+interesting finding is what happened where the spelling is ABSENT.
+
+`bool` is a subclass of `int`, so a guard written
+
+```python
+if not isinstance(seq, int) or seq < 0:
+```
+
+**accepts `True` and `False`.**  The repo does not use that shape:
+**1266** of the runtime's seq-ish int guards spell the bool half out
+explicitly.  SIX modules were the exception, and each of them accepted
+a bool seq:
+
+```
+monitor_channel_probes      MonitorRecord(seq=True)
+privilege_at_recall_probes  build_record(seq=True)
+evidence_compaction_probes  build_item(..., seq=True)
+fraud_detector              fraud_detector_audit_event(seq=True)
+tax_calculator              add_rate / calculate / exempt(seq=True)
+mfa_manager                 enroll(..., seq=True)
+```
+
+The aliasing is not cosmetic.  `True == 1` and `False == 0`, so a
+bool seq is indistinguishable from the int seq it aliases:
+
+```python
+rate = calculator.add_rate("US", "vat", 100, True)
+rate.added_seq == 1        # True
+```
+
+so the ledger's "this rate was applied at seq N" claim becomes
+ambiguous between `N` and `N-1`.
+
+Each fix is ONE line, and the raise is the site's OWN error class:
+
+```python
+-        if not isinstance(self.seq, int) or self.seq < 0:
++        if isinstance(self.seq, bool) or not isinstance(self.seq, int) or self.seq < 0:
+             raise ValueError("seq must be a non-negative int")
+```
+
+### 41.7b A guard on one path leaves the others open
+
+The six sites were found by sweeping for a `seq` PARAMETER.  The same
+six modules guard OTHER int fields the same way, and those guards
+accepted a bool too:
+
+```
+privilege_at_recall_probes  max_privilege, authority_version,
+                             caller_privilege, accepted_authority
+tax_calculator              rate_bps, net_cents
+mfa_manager                 count (the backup-code count), sign_count
+                             (the webauthn verification counter)
+```
+
+All nine are fixed the same way, and all nine are covered by the
+regression suite.
+
+`tax_calculator` shows why this is not cosmetic.  A rate registered at
+`rate_bps=True` is a rate of ONE BASIS POINT, and a quote computed at
+`net_cents=True` is a quote of ONE CENT:
+
+```python
+rate = calculator.add_rate("US", "vat", True, 1)
+rate.rate_bps == 1          # True -- it aliases the int 1
+quote = calculator.calculate(True, "US", 1)
+quote.gross_cents == 1      # True -- one cent, as a gross amount
+```
+
+> **A guard on one path leaves the others open.**  Enumerate every
+> site that writes the guarded state; the cheap sibling paths are the
+> bypass.  The `seq` sweep found six; the sibling sweep found nine
+> more in the same six files.
+
+### 41.8 The regression suite, and its non-vacuity control
+
+`components/northstar-agent-runtime/tests/test_seq_bool_rejection.py`
+
+Three classes:
+
+* `SeqBoolRejectionTests` -- a bool seq is refused at each of the six
+  sites, with the site's own error class (the exception TYPE is
+  asserted, so a fix that raised the wrong class would be caught).
+* `SeqBoolAcceptanceTests` -- THE CONTROL: a plain int seq is still
+  accepted everywhere.
+* `SeqBoolNonVacuityTests` -- THE NON-VACUITY CONTROL: the original
+  defect is RE-PLANTED in a COPY of the runtime and the suite is
+  re-run; the run must FAIL.  If it ever passes, the suite has
+  stopped measuring the defect.
+
+> **A test that cannot fail proves nothing.**  The re-plant is what
+> makes the rejection tests mean something; without it, a guard that
+> refused everything would pass all of them.
+
+### 41.8a The control earned its keep, twice
+
+The non-vacuity control was not a formality.  It caught TWO real
+problems that every other check had passed:
+
+**1. A fix with no test.**  Nine sibling guards were fixed in the same
+six modules.  Eight of them had a test.  The ninth --
+`mfa_manager`'s webauthn `sign_count` -- did not, so re-planting the
+defect there left the suite GREEN, and the control said so:
+
+```
+AssertionError: 0 == 0 : mfa_manager.py: the re-planted defect PASSED
+the suite -- the suite is no longer measuring the defect
+```
+
+**2. The OBSERVABLE is not always an exception.**  `mfa_manager.verify`
+returns a `VerifyResult` for malformed input; it does not raise.  So
+the observable for the signature-counter guard is the RESULT's
+`reason` field:
+
+```
+sign_count=True  ->  reason='malformed'
+sign_count=1     ->  reason='bad-signature'
+```
+
+A test that asserted "an exception was raised" would fail against the
+FIXED module, and a test that asserted only "valid is False" would
+pass under the mutant too -- for the WRONG reason.  The test asserts
+the reason string, and a paired control asserts the int case is NOT
+`malformed`.
+
+**3. The stale-bytecode trap, again.**  The re-plant replaces
+`" or "` with `" and "` -- the same length -- and the sites are
+planted within the same wall-clock second, so Python's `.pyc`
+validation (source mtime in whole seconds + source size) would reuse
+the previous run's bytecode and the MUTANT WOULD NEVER BE LOADED.
+The control reported "the defect passed" when the mutant was never
+executed at all.  The control now drops the cached `.pyc` before each
+plant.
+
+> **A re-plant that does not drop the bytecode measures the cache, not
+> the mutant.**  This is the third time this has bitten in B173; see
+> [[stale-bytecode-fakes-a-mutant-kill]].
+
+### 41.9 The census scope moved
+
+The scope resolver pairs a module with every suite that IMPORTS it.
+Two new suites, so two new multi-suite groups:
+
+```
+326 -> 335   the seq-guard family suite loads 162 modules
+335 -> 341   the bool-rejection suite loads the six defect modules
+```
+
+The deltas are NOT the family sizes, and the reason is the overlap:
+**153 of the 162** seq-guard modules are ALSO members of the
+import-guard family, so they already carried a second suite.  Only
+**nine** were new.
+
+```
+170 import-guard members
+- 17 that are not seq-guard members (the 8 `ai_*_auditing` plus 9)
+= 153 already multi-suite
+162 - 153 = 9 new
+```
+
+This is the third time a count in this repo has moved by a delta that
+is smaller than the family that moved it, and for the same reason each
+time: a family overlaps another family.  A count that moves is a count
+that was measured, but only if the reader can see WHICH rows moved --
+so both families are pinned BY NAME in `tests/test_census_scope.py`.
+
+### 41.10 What this does NOT change
+
+* Six product files changed, by ONE line each -- SIXTEEN lines in
+  total: six seq guards and nine sibling int guards.
+* The census artifact is NOT edited.  Every row still reads what it
+  read.
+* `ai_ethics_monitoring.py` (the §40 fix) is untouched.
+* No version, schema, or audit kind is added or changed.
+* The `ai_*` import-guard family suite is untouched.

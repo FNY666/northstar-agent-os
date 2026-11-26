@@ -402,7 +402,7 @@ def build_item(
         raise ValueError("item content must be a non-empty string")
     if source_digest and not _is_digest(source_digest):
         raise ValueError("source_digest must be a sha256: digest or empty")
-    if not isinstance(seq, int) or seq < 0:
+    if isinstance(seq, bool) or not isinstance(seq, int) or seq < 0:
         raise ValueError("seq must be a non-negative int")
     digest = _digest(
         {"kind": kind, "content": content, "source_digest": source_digest}

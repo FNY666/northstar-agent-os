@@ -253,9 +253,9 @@ class TaxCalculator:
         jurisdiction = _check_jurisdiction(jurisdiction)
         if tax_kind not in TAX_KINDS:
             raise TaxConfigError(f"unknown tax_kind: {tax_kind!r}")
-        if not isinstance(rate_bps, int) or rate_bps < 0 or rate_bps > 10000:
+        if isinstance(rate_bps, bool) or not isinstance(rate_bps, int) or rate_bps < 0 or rate_bps > 10000:
             raise TaxConfigError("rate_bps must be an int in [0, 10000]")
-        if not isinstance(seq, int) or seq < 0:
+        if isinstance(seq, bool) or not isinstance(seq, int) or seq < 0:
             raise TaxConfigError("seq must be a non-negative int")
         category = category.strip() or STANDARD_CATEGORY
 
@@ -312,7 +312,7 @@ class TaxCalculator:
         if not isinstance(entity_id, str) or not entity_id.strip():
             raise TaxConfigError("entity_id must be a non-empty string")
         jurisdiction = _check_jurisdiction(jurisdiction)
-        if not isinstance(seq, int) or seq < 0:
+        if isinstance(seq, bool) or not isinstance(seq, int) or seq < 0:
             raise TaxConfigError("seq must be a non-negative int")
 
         with self._lock:
@@ -376,9 +376,9 @@ class TaxCalculator:
         is a VAT bookkeeping flag: the tax is quoted at 0 for the seller
         and the buyer's rate record is still bound to the quote.
         """
-        if not isinstance(net_cents, int) or net_cents < 0:
+        if isinstance(net_cents, bool) or not isinstance(net_cents, int) or net_cents < 0:
             raise TaxConfigError("net_cents must be a non-negative int")
-        if not isinstance(seq, int) or seq < 0:
+        if isinstance(seq, bool) or not isinstance(seq, int) or seq < 0:
             raise TaxConfigError("seq must be a non-negative int")
         jurisdiction = _check_jurisdiction(jurisdiction)
 

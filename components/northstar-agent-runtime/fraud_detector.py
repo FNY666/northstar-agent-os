@@ -237,7 +237,7 @@ def fraud_detector_audit_event(
 
     ``seq`` is caller-supplied (the detector never mints its own).
     """
-    if not isinstance(seq, int) or seq < 0:
+    if isinstance(seq, bool) or not isinstance(seq, int) or seq < 0:
         raise FraudError("seq must be a non-negative int")
     event: Dict[str, Any] = {
         "schema": AUDIT_SCHEMA,
