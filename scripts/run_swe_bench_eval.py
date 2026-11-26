@@ -109,6 +109,33 @@ def _pull_image(client: Any, image: str) -> None:
         pass
 
 
+APPLY_PATCH_PASS = ">>>>> Applied Patch"
+APPLY_PATCH_FAIL = ">>>>> Patch Apply Failed"
+
+
+def _apply_marker(log_root: Path, run_id: str, instance_id: str) -> str:
+    """What the upstream runner recorded about applying the patch.
+
+    The upstream report field ``patch_successfully_applied`` is not about the
+    patch at all: the grader sets it only after it has parsed the test
+    output, so a patch that applied cleanly but made the tests error out
+    comes back with the field false.  The runner writes the truth into the
+    log instead, and that is what this reads.
+
+    Returns "pass", "fail" or "unknown".
+    """
+    candidate = log_root / "logs" / "run_evaluation" / run_id / "northstar" / instance_id / "test_output.txt"
+    try:
+        text = candidate.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return "unknown"
+    if APPLY_PATCH_FAIL in text:
+        return "fail"
+    if APPLY_PATCH_PASS in text:
+        return "pass"
+    return "unknown"
+
+
 def evaluate(
     sample: dict[str, Any],
     patches: dict[str, str],
@@ -180,14 +207,28 @@ def evaluate(
             # the grading detail sits under "tests_status".
             entry = report.get(instance_id, report)
             detail = entry.get("tests_status")
+            marker = _apply_marker(Path.cwd(), run_id, instance_id)
+            row["patch_apply_marker"] = marker
             row["patch_successfully_applied"] = bool(entry.get("patch_successfully_applied"))
             row["infra_failure"] = bool(entry.get("infra_failure"))
-            if not row["patch_successfully_applied"]:
-                # The upstream runner reports no test results when the patch
-                # never applied, so it never got as far as running the tests.
-                # That is not a verdict about the model, and it may not be
-                # reported as one.
+            if marker == "fail":
                 row["outcome"] = "patch_not_applied"
+                row["resolved"] = False
+                rows.append(row)
+                continue
+            if marker == "unknown" and not row["patch_successfully_applied"]:
+                # The log did not say, and the grader did not get as far as
+                # reading test results.  The patch application is unknown,
+                # which is not a verdict about the model either way.
+                row["outcome"] = "patch_not_applied"
+                row["resolved"] = False
+                rows.append(row)
+                continue
+            if marker == "pass" and not row["patch_successfully_applied"]:
+                # The patch applied, but the grader could not read the test
+                # results, so it has no verdict.  That is not the same as the
+                # patch failing to apply, and it is not a pass either.
+                row["outcome"] = "evaluation_inconclusive"
                 row["resolved"] = False
                 rows.append(row)
                 continue

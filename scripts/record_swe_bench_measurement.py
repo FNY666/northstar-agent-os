@@ -20,6 +20,17 @@ SCHEMA = "northstar.swe-bench-measurement.v1"
 RESOLVED_FULL = "RESOLVED_FULL"
 RESOLVED_PARTIAL = "RESOLVED_PARTIAL"
 
+# Outcomes that say something about the run, not about the model.  They are
+# reported separately: counting them as failures would blame the model for
+# an environment or harness problem.
+NOT_A_VERDICT = (
+    "patch_not_applied",
+    "no_patch_delivered",
+    "evaluation_inconclusive",
+    "evaluation_timeout",
+    "ERROR",
+)
+
 
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
@@ -61,6 +72,8 @@ def build_record(
 
     resolved = sum(1 for row in rows if row["outcome"] == RESOLVED_FULL)
     partial = sum(1 for row in rows if row["outcome"] == RESOLVED_PARTIAL)
+    not_a_verdict = sum(1 for row in rows if row["outcome"] in NOT_A_VERDICT)
+    failed = len(rows) - resolved - partial - not_a_verdict
     conditions = dict(solve_receipt.get("conditions", {}))
     conditions["harness"] = eval_receipt.get("conditions", {}).get("harness", "")
     conditions["sample_sha256"] = _sha256(sample_path.read_bytes())
@@ -75,8 +88,16 @@ def build_record(
             "checked": len(rows),
             "resolved_full": resolved,
             "resolved_partial": partial,
-            "failed": len(rows) - resolved - partial,
+            "failed": failed,
+            "not_a_verdict": not_a_verdict,
             "resolved_rate": round(resolved / len(rows), 4) if rows else 0.0,
+            # The rate over the instances that actually got a verdict.  The
+            # rate over every instance counts an environment problem as a
+            # model failure, which is the opposite of what it looks like.
+            "resolved_rate_over_verdicts": (
+                round(resolved / (len(rows) - not_a_verdict), 4)
+                if len(rows) - not_a_verdict else 0.0
+            ),
         },
     }
 
