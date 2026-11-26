@@ -27,6 +27,7 @@ NOT_A_VERDICT = (
     "patch_not_applied",
     "no_patch_delivered",
     "evaluation_inconclusive",
+    "evaluation_infrastructure_failure",
     "evaluation_timeout",
     "ERROR",
 )
