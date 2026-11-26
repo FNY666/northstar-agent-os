@@ -6,7 +6,11 @@ PART ONE (``test_int_guard_bool_family.py``) and PART TWO
 (``test_int_guard_bool_family_part2.py``) between them prove a crafted
 input for 42 of the 86 guarded targets.  The remaining 44 -- spread over
 14 modules -- had the bool half in the SOURCE and no call that showed
-the guard REFUSES a bool.
+the guard REFUSES a bool.  Together the three suites prove all 86.
+
+The eighty-seventh site, ``tools/sandbox.py:342``, lives in a
+SUBPACKAGE and is outside the runtime's 1,620-module census universe,
+so it is proved in ``tests/test_landlock.py`` instead.
 
 That is the shape of a coverage gap that looks like coverage: the
 shape check reads the module's SOURCE, so it passes whether or not the

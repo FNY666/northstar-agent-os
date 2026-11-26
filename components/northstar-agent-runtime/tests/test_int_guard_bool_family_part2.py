@@ -1,11 +1,12 @@
-"""The int-guard family, PART TWO: the 49 targets the first suite missed.
+"""The int-guard family, PART TWO: 29 targets the first suite missed.
 
 WHY A SECOND FILE
 -----------------
-`tests/test_int_guard_bool_family.py` proved 24 of the 86 guarded
-targets with a crafted input.  The other 49 -- in 18 modules -- had the
+`tests/test_int_guard_bool_family.py` proved 13 of the 86 guarded
+targets with a crafted input.  The other 73 -- in 18 modules -- had the
 SHAPE check (the bool half is in the source) but no crafted input, so
-nothing proved the guard actually REFUSES a bool.
+nothing proved the guard actually REFUSES a bool.  This file proves 29
+of them; PART THREE proves the remaining 44.
 
 That is the shape of a coverage gap that looks like coverage: the
 suite's `test_every_site_carries_the_bool_half` reads the module's

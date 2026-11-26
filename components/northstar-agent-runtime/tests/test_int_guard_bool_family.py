@@ -1,9 +1,16 @@
 """The int-guard family OUTSIDE the `ai_*` seq-guard family: PART ONE of
-two suites, 24 of the 86 guarded targets in 22 modules.
+four suites, 13 of the 86 guarded targets in 22 modules.
 
-PART TWO -- `test_int_guard_bool_family_part2.py` -- proves the other
-62 targets, in the other 18 modules.  This file covers the first 24;
-together they cover every one of the 86.
+PART TWO -- `test_int_guard_bool_family_part2.py` -- proves 29 more,
+in 18 further modules.  PART THREE -- `test_int_guard_bool_family_
+part3.py` -- proves the LAST 44, in 14 further modules.  Together the
+three prove all 86 guarded targets in the runtime's 36 top-level
+modules; the eighty-seventh site, `tools/sandbox.py:342`, lives in a
+SUBPACKAGE and is proved in `tests/test_landlock.py`.
+
+This file's 13 members are the CRAFTED-INPUT calls.  Its `BOOL_GUARDED`
+table names 27 sites, of which these 13 have a call: the other 14 are
+proved by parts two and three.
 
 WHY THIS FILE EXISTS (measured 2026-11-26)
 ------------------------------------------
@@ -35,7 +42,7 @@ bool walks straight through:
     True < 0                    ->  False
     -> the guard does not fire
 
-THE REPO ALREADY HAS A CONVENTION, HELD 1,984 TIMES
+THE REPO ALREADY HAS A CONVENTION, HELD 1,983 TIMES
 ----------------------------------------------------
     if isinstance(x, bool) or not isinstance(x, int):
 or, with a range clause,
@@ -452,7 +459,7 @@ class IntGuardFamilyShapeTest(unittest.TestCase):
     def test_every_site_carries_the_bool_half(self) -> None:
         """The guard must spell the bool half out.
 
-        The repo holds this convention 1,984 times.  These sites were
+        The repo holds this convention 1,983 times.  These sites were
         the exceptions, and each one is now the same shape as the rest.
         """
         for label, _fn, module, function, argument, _error in CALLS:
