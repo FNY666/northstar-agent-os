@@ -104,6 +104,21 @@ class SolverCredentialTests(unittest.TestCase):
             os.environ = original
 
 
+
+class SolverEmptyPatchTests(unittest.TestCase):
+    def test_a_patch_with_no_content_is_not_a_patch(self):
+        patches = {"inst-1": "   \n", "inst-2": "diff --git a/x b/x\n"}
+        kept = SOLVER_MODULE._drop_empty_patches(patches)
+        self.assertEqual(sorted(kept), ["inst-2"])
+
+    def test_a_patch_that_is_only_whitespace_is_dropped(self):
+        self.assertEqual(SOLVER_MODULE._drop_empty_patches({"i": "\t\n "}), {})
+
+    def test_a_real_patch_is_left_alone(self):
+        text = "diff --git a/x b/x\n--- a/x\n+++ b/x\n"
+        self.assertEqual(SOLVER_MODULE._drop_empty_patches({"i": text}), {"i": text})
+
+
 class SolverReceiptTests(unittest.TestCase):
     def test_a_run_without_credentials_says_so_and_invents_nothing(self):
         with tempfile.TemporaryDirectory() as temporary:

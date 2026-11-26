@@ -275,6 +275,17 @@ def solve_one(
     }
 
 
+
+def _drop_empty_patches(patches: dict[str, str]) -> dict[str, str]:
+    """The patches that actually say something.
+
+    A patch with no content is no patch.  Keeping it would make the count
+    of patched instances claim a patch that was never produced, and it would
+    send an empty diff to the evaluator.
+    """
+    return {iid: text for iid, text in patches.items() if text.strip()}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--provider", default="anthropic", choices=("anthropic", "openai", "scripted"))
@@ -396,6 +407,7 @@ def main(argv: list[str] | None = None) -> int:
         if not arguments.keep_workdir:
             shutil.rmtree(parent, ignore_errors=True)
 
+    patches = _drop_empty_patches(patches)
     receipt["real_model_evaluated"] = True
     receipt["summary"] = {
         "checked": len(receipt["tasks"]),
