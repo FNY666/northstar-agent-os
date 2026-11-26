@@ -1040,9 +1040,9 @@ def automation_bias_clock(
     they *require* the audit too, because absence of data is not
     evidence of diligence. EU AI Act Art. 14 names automation bias;
     this makes the bias measurable."""
-    if not isinstance(window.overridden, int) or window.overridden < 0:
+    if isinstance(window.overridden, bool) or not isinstance(window.overridden, int) or window.overridden < 0:
         raise PermitError("overridden must be a non-negative integer")
-    if not isinstance(window.total, int) or window.total < 0:
+    if isinstance(window.total, bool) or not isinstance(window.total, int) or window.total < 0:
         raise PermitError("total must be a non-negative integer")
     if window.overridden > window.total:
         raise PermitError("overridden cannot exceed total")

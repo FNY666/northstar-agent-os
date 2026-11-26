@@ -494,7 +494,7 @@ class MFAManager:
         if entry["disabled"]:
             self._audit("verify", principal, "totp", seq, False, "disabled")
             return VerifyResult(principal, "totp", False, "disabled")
-        if not isinstance(code, str) or not isinstance(step, int):
+        if not isinstance(code, str) or isinstance(step, bool) or not isinstance(step, int):
             self._audit("verify", principal, "totp", seq, False, "malformed")
             return VerifyResult(principal, "totp", False, "malformed")
         secret = entry["secret"]

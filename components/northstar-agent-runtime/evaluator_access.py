@@ -231,7 +231,7 @@ class EvaluationRegistry:
         if scope not in EVALUATION_SCOPES:
             raise EvaluatorAccessError(f"unknown evaluation scope {scope!r}")
         for name, value in (("evaluated_at", evaluated_at), ("expires_at", expires_at)):
-            if not isinstance(value, int) or value < 0:
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise EvaluatorAccessError(f"{name} must be a non-negative int epoch")
         if expires_at <= evaluated_at:
             raise EvaluatorAccessError("expires_at must be after evaluated_at")
@@ -317,7 +317,7 @@ class EvaluationRegistry:
         unexpired -> not revoked. Anything else classifies
         ``unverifiable-evaluation``: do not evaluate A and ship B.
         """
-        if not isinstance(now, int) or now < 0:
+        if isinstance(now, bool) or not isinstance(now, int) or now < 0:
             raise EvaluatorAccessError("now must be a non-negative int epoch")
         receipt = self._live_receipt(
             model_digest=model_digest, checkpoint=checkpoint, now=now

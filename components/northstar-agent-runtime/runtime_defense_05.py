@@ -52,7 +52,7 @@ class CgroupLimits:
             len(parts) == 2 and all(p.isdigit() for p in parts)
         ):
             raise CgroupError(f"bad cpu.max {self.cpu_max!r}")
-        if not isinstance(self.pids_max, int) or self.pids_max <= 0:
+        if isinstance(self.pids_max, bool) or not isinstance(self.pids_max, int) or self.pids_max <= 0:
             raise CgroupError("pids_max must be positive int")
 
     def render(self) -> Dict[str, str]:

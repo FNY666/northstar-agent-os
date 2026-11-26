@@ -80,7 +80,7 @@ class ConfidenceGate:
 
         tool_risk: "low" or "high".  High-risk tools need higher confidence.
         """
-        if not isinstance(confidence, int) or not 0 <= confidence <= 100:
+        if isinstance(confidence, bool) or not isinstance(confidence, int) or not 0 <= confidence <= 100:
             raise ConfidenceGateError("confidence must be int in [0,100]")
         # Determine tier.
         if confidence >= self._high:

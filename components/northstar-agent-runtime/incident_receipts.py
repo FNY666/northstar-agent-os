@@ -314,7 +314,7 @@ class IncidentRegistry:
                 "systemic_tier is only allowed with systemic_risk severity"
             )
         for name, value in (("detected_at", detected_at), ("reported_at", reported_at), ("now", now)):
-            if not isinstance(value, int) or value < 0:
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise IncidentReceiptError(f"{name} must be a non-negative int epoch")
         if detected_at > now:
             raise IncidentReceiptError(
@@ -496,7 +496,7 @@ class IncidentRegistry:
         """
         if not system_id or system_id.strip() != system_id:
             raise IncidentReceiptError("system_id must be a non-blank, unpadded string")
-        if not isinstance(retention_days, int) or retention_days < 0:
+        if isinstance(retention_days, bool) or not isinstance(retention_days, int) or retention_days < 0:
             raise IncidentReceiptError("retention_days must be a non-negative int")
         if retention_days < INCIDENT_RETENTION_FLOOR_DAYS:
             return RetentionVerdict(

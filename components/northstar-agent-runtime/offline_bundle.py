@@ -233,13 +233,13 @@ def compile_bundle(
     """
     if not isinstance(issuer_secret, (bytes, bytearray)) or len(issuer_secret) != 32:
         raise BundleError("issuer_secret must be a 32-byte Ed25519 seed")
-    if not isinstance(bundle_version, int) or bundle_version < 1:
+    if isinstance(bundle_version, bool) or not isinstance(bundle_version, int) or bundle_version < 1:
         raise BundleError("bundle_version must be a positive integer")
-    if not isinstance(expiry_epoch, int) or not isinstance(issued_at, int):
+    if isinstance(expiry_epoch, bool) or not isinstance(expiry_epoch, int) or isinstance(issued_at, bool) or not isinstance(issued_at, int):
         raise BundleError("expiry_epoch and issued_at must be integer epochs")
     if expiry_epoch <= issued_at:
         raise BundleError("expiry_epoch must be after issued_at")
-    if not isinstance(staleness_ceiling_s, int) or staleness_ceiling_s < 0:
+    if isinstance(staleness_ceiling_s, bool) or not isinstance(staleness_ceiling_s, int) or staleness_ceiling_s < 0:
         raise BundleError("staleness_ceiling_s must be a non-negative integer")
 
     perr = _validate_policy(policy)
@@ -314,7 +314,7 @@ def verify_bundle(
 
     if not isinstance(issuer_pubkey, (bytes, bytearray)) or len(issuer_pubkey) != 32:
         return deny("verifier misconfigured: issuer_pubkey must be 32 bytes")
-    if not isinstance(now_epoch, int) or not isinstance(min_version, int):
+    if isinstance(now_epoch, bool) or not isinstance(now_epoch, int) or isinstance(min_version, bool) or not isinstance(min_version, int):
         return deny("verifier misconfigured: now_epoch/min_version must be ints")
 
     env = BundleEnvelope.from_dict(bundle) if isinstance(bundle, Mapping) else None
@@ -356,7 +356,7 @@ def verify_bundle(
         return deny("bundle policy too stale: staleness ceiling exceeded")
 
     version = payload.get("bundle_version")
-    if not isinstance(version, int) or version < 1:
+    if isinstance(version, bool) or not isinstance(version, int) or version < 1:
         return deny("malformed bundle: bundle_version must be a positive int")
     if version < min_version:
         return deny(

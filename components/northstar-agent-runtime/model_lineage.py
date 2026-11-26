@@ -197,7 +197,7 @@ class LineageReceipt:
             )
         if not isinstance(self.tainted, bool):
             raise LineageReceiptError("tainted must be a bool")
-        if not isinstance(self.timestamp, int) or self.timestamp < 0:
+        if isinstance(self.timestamp, bool) or not isinstance(self.timestamp, int) or self.timestamp < 0:
             raise LineageReceiptError("timestamp must be a non-negative int")
         if self.prev_digest != _GENESIS:
             _check_hex64(self.prev_digest, "prev_digest")

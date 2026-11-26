@@ -186,7 +186,7 @@ def build_vendor_receipt(
     _require_hex64(vendor_attestation_digest, "vendor_attestation_digest")
     if prev_hash and not _is_hex64(prev_hash):
         raise VendorChainError("prev_hash must be empty or a 64-char hex digest")
-    if not isinstance(created_unix, int) or created_unix < 0:
+    if isinstance(created_unix, bool) or not isinstance(created_unix, int) or created_unix < 0:
         raise VendorChainError("created_unix must be a non-negative int")
     return VendorReceipt(
         receipt_id=receipt_id,
@@ -332,9 +332,9 @@ class ActionEnvelope:
     allowed_skus: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
-        if not isinstance(self.max_value_cents, int) or self.max_value_cents < 0:
+        if isinstance(self.max_value_cents, bool) or not isinstance(self.max_value_cents, int) or self.max_value_cents < 0:
             raise VendorChainError("max_value_cents must be a non-negative int")
-        if not isinstance(self.max_quantity, int) or self.max_quantity < 0:
+        if isinstance(self.max_quantity, bool) or not isinstance(self.max_quantity, int) or self.max_quantity < 0:
             raise VendorChainError("max_quantity must be a non-negative int")
         for sku in self.allowed_skus:
             _require_nonempty(sku, "allowed sku")
@@ -342,9 +342,9 @@ class ActionEnvelope:
     def contains(self, sku: str, quantity: int, value_cents: int) -> bool:
         if sku not in self.allowed_skus:
             return False
-        if not isinstance(quantity, int) or quantity <= 0 or quantity > self.max_quantity:
+        if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity <= 0 or quantity > self.max_quantity:
             return False
-        if not isinstance(value_cents, int) or value_cents < 0 or value_cents > self.max_value_cents:
+        if isinstance(value_cents, bool) or not isinstance(value_cents, int) or value_cents < 0 or value_cents > self.max_value_cents:
             return False
         return True
 
@@ -382,9 +382,9 @@ def build_autonomous_action(
     _require_nonempty(action_id, "action_id")
     _require_nonempty(sku, "sku")
     _require_nonempty(agent_id, "agent_id")
-    if not isinstance(quantity, int) or quantity <= 0:
+    if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity <= 0:
         raise VendorChainError("quantity must be a positive int")
-    if not isinstance(value_cents, int) or value_cents < 0:
+    if isinstance(value_cents, bool) or not isinstance(value_cents, int) or value_cents < 0:
         raise VendorChainError("value_cents must be a non-negative int")
     return AutonomousAction(
         action_id=action_id,

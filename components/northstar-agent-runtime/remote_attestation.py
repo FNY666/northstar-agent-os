@@ -391,7 +391,7 @@ def verify(
     if not isinstance(expected_pcrs, Mapping):
         raise RemoteAttestationError("expected_pcrs must be a mapping")
     for k, v in expected_pcrs.items():
-        if not isinstance(k, int) or not isinstance(v, bytes):
+        if isinstance(k, bool) or not isinstance(k, int) or not isinstance(v, bytes):
             raise RemoteAttestationError("expected_pcrs must map int -> bytes")
 
     if quote.label != expected_label:

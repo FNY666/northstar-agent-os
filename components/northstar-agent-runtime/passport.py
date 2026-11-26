@@ -482,11 +482,11 @@ class PassportIssuer:
             raise PassportError("passport subject must be non-empty")
         _hex_key(public_key_hex, 32, where="mint")
         caps = _check_capabilities(capabilities, where="mint")
-        if not isinstance(trust_level, int) or trust_level not in TRUST_LEVELS.values():
+        if isinstance(trust_level, bool) or not isinstance(trust_level, int) or trust_level not in TRUST_LEVELS.values():
             raise PassportError(f"mint: trust_level {trust_level!r} is not a known level")
         if not time_iso:
             raise PassportError("mint: time_iso is required (no clock reads)")
-        if not isinstance(ttl_seconds, int) or ttl_seconds < 1:
+        if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int) or ttl_seconds < 1:
             raise PassportError("mint: ttl_seconds must be a positive integer")
         iat = str(time_iso)
         exp = _iso_plus(iat, ttl_seconds)  # raises PassportError on malformed time_iso
@@ -541,13 +541,13 @@ def delegate_passport(
     # Mandatory intersection — escalation attempts raise here, before any
     # token exists.
     narrowed = intersect_capabilities(parent.capabilities, requested)
-    if not isinstance(trust_level, int) or trust_level not in TRUST_LEVELS.values():
+    if isinstance(trust_level, bool) or not isinstance(trust_level, int) or trust_level not in TRUST_LEVELS.values():
         raise PassportError(
             f"delegate_passport: trust_level {trust_level!r} is not a known level"
         )
     if not time_iso:
         raise PassportError("delegate_passport: time_iso is required (no clock reads)")
-    if not isinstance(ttl_seconds, int) or ttl_seconds < 1:
+    if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int) or ttl_seconds < 1:
         raise PassportError("delegate_passport: ttl_seconds must be a positive integer")
     # A child passport must not outlive its parent: clamp the TTL.
     iat = str(time_iso)

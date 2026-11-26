@@ -70,7 +70,7 @@ class CommandRegistry:
 
     def grant_preauth(self, n: int) -> None:
         """Grant bounded pre-authorization for next N sensitive actions."""
-        if not isinstance(n, int) or n < 0:
+        if isinstance(n, bool) or not isinstance(n, int) or n < 0:
             raise RegistryError("n must be non-negative int")
         self._pre_auth = n
 

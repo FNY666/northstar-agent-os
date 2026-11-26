@@ -422,7 +422,7 @@ class PriceDisclosureRegistry:
         _check_nonempty_str(receipt_id, "receipt_id")
         _check_nonempty_str(merchant_id, "merchant_id")
         _check_nonempty_str(item_id, "item_id")
-        if not isinstance(personalized_price_minor, int) or personalized_price_minor < 0:
+        if isinstance(personalized_price_minor, bool) or not isinstance(personalized_price_minor, int) or personalized_price_minor < 0:
             raise RetailError("personalized_price_minor must be a non-negative int")
         _check_nonempty_str(disclosure_text, "disclosure_text")
         _check_ts(shown_at, "shown_at")
@@ -635,7 +635,7 @@ class ESLChangeLog:
         _check_nonempty_str(item_id, "item_id")
         for name, v in (("old_price_minor", old_price_minor),
                         ("new_price_minor", new_price_minor)):
-            if not isinstance(v, int) or v < 0:
+            if isinstance(v, bool) or not isinstance(v, int) or v < 0:
                 raise RetailError(f"{name} must be a non-negative int")
         _check_ts(changed_at, "changed_at")
         _check_nonempty_str(trigger_rule, "trigger_rule")
@@ -845,7 +845,7 @@ class UpsellRegistry:
         _check_nonempty_str(item_id, "item_id")
         for name, v in (("list_price_minor", list_price_minor),
                         ("offered_price_minor", offered_price_minor)):
-            if not isinstance(v, int) or v < 0:
+            if isinstance(v, bool) or not isinstance(v, int) or v < 0:
                 raise RetailError(f"{name} must be a non-negative int")
         _check_nonempty_str(reason_text, "reason_text")
         _check_ts(recommended_at, "recommended_at")
@@ -1272,7 +1272,7 @@ class ShashaRegistry:
         _check_nonempty_str(cohort_b, "cohort_b")
         for name, v in (("price_a_minor", price_a_minor),
                         ("price_b_minor", price_b_minor)):
-            if not isinstance(v, int) or v < 0:
+            if isinstance(v, bool) or not isinstance(v, int) or v < 0:
                 raise RetailError(f"{name} must be a non-negative int")
         _check_nonempty_str(justification, "justification")
         _check_ts(published_at, "published_at")
@@ -1667,7 +1667,7 @@ class WearableCollectionRegistry:
             raise RetailError("device_kind must be a known delivery-device kind")
         if not purposes:
             raise RetailError("purposes must be non-empty")
-        if not isinstance(retention_days, int) or retention_days <= 0:
+        if isinstance(retention_days, bool) or not isinstance(retention_days, int) or retention_days <= 0:
             raise RetailError("retention_days must be a positive int")
         _check_ts(collected_at, "collected_at")
         pubkey = _authority_pubkey(self.authorities, authority_id)

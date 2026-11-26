@@ -1253,9 +1253,9 @@ def annex_iii_clock(plan: AnnexIIIPlan, now: int) -> TaxVerdict:
             f"{plan.jurisdiction!r} declared no recognizable Annex III posture",
         )
     _check_ts(plan.target_at, "plan.target_at")
-    if not isinstance(plan.milestones_completed, int) or plan.milestones_completed < 0:
+    if isinstance(plan.milestones_completed, bool) or not isinstance(plan.milestones_completed, int) or plan.milestones_completed < 0:
         raise TaxError("plan.milestones_completed must be a non-negative int")
-    if not isinstance(plan.total_milestones, int) or plan.total_milestones < 0:
+    if isinstance(plan.total_milestones, bool) or not isinstance(plan.total_milestones, int) or plan.total_milestones < 0:
         raise TaxError("plan.total_milestones must be a non-negative int")
     payload = {
         "schema": TAX_SCHEMA_VERSION,

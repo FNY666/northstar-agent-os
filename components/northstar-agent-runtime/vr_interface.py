@@ -338,7 +338,7 @@ class VRNode:
         if self.is_primary():
             raise VRError("primary does not receive prepares")
         op_number = body["op_number"]
-        if not isinstance(op_number, int) or op_number <= 0:
+        if isinstance(op_number, bool) or not isinstance(op_number, int) or op_number <= 0:
             raise VRError("bad op_number")
         if op_number == self._log_head_op():
             # Replay of an op we already logged: idempotent acknowledgement.
@@ -346,7 +346,7 @@ class VRNode:
         if op_number != self._log_head_op() + 1:
             raise VRError("prepare op-number gap")
         commit_number = body["commit_number"]
-        if not isinstance(commit_number, int) or commit_number < 0 or commit_number > op_number:
+        if isinstance(commit_number, bool) or not isinstance(commit_number, int) or commit_number < 0 or commit_number > op_number:
             raise VRError("bad commit_number")
         self._log.append(prepare)
         self._op_number = op_number
@@ -418,7 +418,7 @@ class VRNode:
         if body["view"] != self._view:
             raise VRError("commit from wrong view")
         commit_number = body["commit_number"]
-        if not isinstance(commit_number, int) or commit_number < 0:
+        if isinstance(commit_number, bool) or not isinstance(commit_number, int) or commit_number < 0:
             raise VRError("bad commit_number")
         if commit_number > self._op_number:
             raise VRError("commit beyond logged ops")
@@ -447,7 +447,7 @@ class VRNode:
         body = msg.body()
         new_view = body["new_view"]
         sender = body["node_id"]
-        if not isinstance(new_view, int) or new_view <= self._view:
+        if isinstance(new_view, bool) or not isinstance(new_view, int) or new_view <= self._view:
             raise VRError("start-view-change for stale view")
         if sender not in self._replicas:
             raise VRError("start-view-change from unknown replica")
@@ -484,7 +484,7 @@ class VRNode:
         body = dvc.body()
         new_view = body["new_view"]
         sender = body["node_id"]
-        if not isinstance(new_view, int) or new_view <= self._view:
+        if isinstance(new_view, bool) or not isinstance(new_view, int) or new_view <= self._view:
             raise VRError("do-view-change for stale view")
         if self.primary_id(new_view) != self._node_id:
             raise VRError("only the new primary collects do-view-changes")
@@ -523,7 +523,7 @@ class VRNode:
             raise VRError("start-view digest mismatch")
         body = sv.body()
         new_view = body["new_view"]
-        if not isinstance(new_view, int) or new_view <= self._view:
+        if isinstance(new_view, bool) or not isinstance(new_view, int) or new_view <= self._view:
             raise VRError("start-view for stale view")
         if self.primary_id(new_view) != self._node_id and body.get("commit_number", 0) > self._op_number:
             raise VRError("start-view commits beyond known ops")

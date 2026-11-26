@@ -51,7 +51,7 @@ def build_attack(attack_id: str, attack_prompt: str, n: int) -> ManyShotAttack:
     """Build an N-shot attack. n must be >= 0."""
     if not attack_prompt:
         raise MultiAttack02Error("attack_prompt required")
-    if not isinstance(n, int) or n < 0:
+    if isinstance(n, bool) or not isinstance(n, int) or n < 0:
         raise MultiAttack02Error("n must be non-negative int")
     shots = [
         Shot(

@@ -357,7 +357,7 @@ class IdentityIssuer:
             raise IdentityError(f"malformed delegator DID {delegator_did!r}")
         if parse_did(delegatee_did) is None:
             raise IdentityError(f"malformed delegatee DID {delegatee_did!r}")
-        if not isinstance(depth, int) or depth < 1:
+        if isinstance(depth, bool) or not isinstance(depth, int) or depth < 1:
             raise IdentityError("delegation depth must be a positive integer")
         record = DelegationRecord(
             delegator_did=delegator_did,

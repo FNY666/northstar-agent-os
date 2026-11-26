@@ -173,7 +173,7 @@ class TreeHead:
             raise ValueError("not a northstar signed tree head document")
         tree_size = doc.get("tree_size")
         root = doc.get("root")
-        if not isinstance(tree_size, int) or not isinstance(root, str) or not _HEX64_RE.match(root):
+        if isinstance(tree_size, bool) or not isinstance(tree_size, int) or not isinstance(root, str) or not _HEX64_RE.match(root):
             raise ValueError("malformed tree head (tree_size/root)")
         signature = doc.get("signature")
         sig_bytes: bytes | None = None
@@ -257,7 +257,7 @@ class InclusionProof:
         tree_size = doc.get("tree_size")
         leaf_index = doc.get("leaf_index")
         path = doc.get("path")
-        if not isinstance(tree_size, int) or not isinstance(leaf_index, int) or not isinstance(path, list):
+        if isinstance(tree_size, bool) or not isinstance(tree_size, int) or isinstance(leaf_index, bool) or not isinstance(leaf_index, int) or not isinstance(path, list):
             raise ValueError("malformed inclusion proof (tree_size/leaf_index/path)")
         return cls(
             tree_size=tree_size,
@@ -321,7 +321,7 @@ class ConsistencyProof:
         old_size = doc.get("old_size")
         new_size = doc.get("new_size")
         path = doc.get("path")
-        if not isinstance(old_size, int) or not isinstance(new_size, int) or not isinstance(path, list):
+        if isinstance(old_size, bool) or not isinstance(old_size, int) or isinstance(new_size, bool) or not isinstance(new_size, int) or not isinstance(path, list):
             raise ValueError("malformed consistency proof (old_size/new_size/path)")
         return cls(
             old_size=old_size,

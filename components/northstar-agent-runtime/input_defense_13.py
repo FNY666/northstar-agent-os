@@ -78,7 +78,7 @@ def check(text: str, max_scripts: int = 1) -> Tuple[bool, Set[str]]:
     scripts appear in the input. Fail-closed: non-str input raises
     :class:`InputDefense13Error`.
     """
-    if not isinstance(max_scripts, int) or max_scripts < 0:
+    if isinstance(max_scripts, bool) or not isinstance(max_scripts, int) or max_scripts < 0:
         raise InputDefense13Error("max_scripts must be a non-negative int")
     scripts = scripts_in(text)
     return (len(scripts) > max_scripts, scripts)

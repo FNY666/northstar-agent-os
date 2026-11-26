@@ -174,13 +174,13 @@ class RegistrationReceipt:
             raise DeploymentRegistryError("fria_digest must be sha256 hex")
         if not _is_hex64(self.data_record_digest):
             raise DeploymentRegistryError("data_record_digest must be sha256 hex")
-        if not isinstance(self.retention_floor_days, int) or self.retention_floor_days < 0:
+        if isinstance(self.retention_floor_days, bool) or not isinstance(self.retention_floor_days, int) or self.retention_floor_days < 0:
             raise DeploymentRegistryError("retention_floor_days must be a non-negative int")
         if not _is_hex64(self.registered_by):
             raise DeploymentRegistryError("registered_by must be ed25519 pubkey hex")
         if not _is_hex(self.authority_sig_hex, 128):
             raise DeploymentRegistryError("authority_sig_hex must be 128 hex chars")
-        if not isinstance(self.expires_at, int) or self.expires_at <= 0:
+        if isinstance(self.expires_at, bool) or not isinstance(self.expires_at, int) or self.expires_at <= 0:
             raise DeploymentRegistryError("expires_at must be a positive epoch")
         if self.risk_class == "high":
             missing = [k for k in ("decision", "grounds", "data_used", "appeal_path")
@@ -228,13 +228,13 @@ class RetentionChangeReceipt:
             raise DeploymentRegistryError("system_id must be 1..128 chars")
         for name in ("old_floor_days", "new_floor_days"):
             v = getattr(self, name)
-            if not isinstance(v, int) or v < 0:
+            if isinstance(v, bool) or not isinstance(v, int) or v < 0:
                 raise DeploymentRegistryError(f"{name} must be a non-negative int")
         if not _is_hex64(self.changed_by):
             raise DeploymentRegistryError("changed_by must be ed25519 pubkey hex")
         if not _is_hex(self.authority_sig_hex, 128):
             raise DeploymentRegistryError("authority_sig_hex must be 128 hex chars")
-        if not isinstance(self.changed_at, int) or self.changed_at <= 0:
+        if isinstance(self.changed_at, bool) or not isinstance(self.changed_at, int) or self.changed_at <= 0:
             raise DeploymentRegistryError("changed_at must be a positive epoch")
 
     def payload(self) -> dict[str, Any]:
@@ -358,7 +358,7 @@ class DeploymentRegistry:
         pubkey_hex = ed25519.public_key(authority_secret).hex()
         if self.authority_id(pubkey_hex) != authority_id:
             raise DeploymentRegistryError("unknown or mismatched authority")
-        if not isinstance(new_floor_days, int) or new_floor_days < 0:
+        if isinstance(new_floor_days, bool) or not isinstance(new_floor_days, int) or new_floor_days < 0:
             raise DeploymentRegistryError("new_floor_days must be a non-negative int")
         old = self._floor_by_system[system_id]
         prev = self._log[-1].receipt_digest if self._log else _GENESIS

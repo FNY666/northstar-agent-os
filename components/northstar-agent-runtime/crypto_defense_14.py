@@ -48,7 +48,7 @@ class MockPirClient:
         Trivial PIR: download all, pick locally.  Server sees only
         that a query happened, not which index.
         """
-        if not isinstance(index, int) or index < 0:
+        if isinstance(index, bool) or not isinstance(index, int) or index < 0:
             raise PirError("bad index")
         all_data = server.get_all()
         # Client-side selection (server doesn't know which).

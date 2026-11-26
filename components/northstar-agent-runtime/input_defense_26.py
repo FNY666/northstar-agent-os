@@ -39,7 +39,7 @@ def issue_challenge():
 
 def solve(challenge, bits, max_tries=1000000):
     """Find a nonce meeting the difficulty. Returns nonce."""
-    if not isinstance(bits, int) or not 1 <= bits <= 32:
+    if isinstance(bits, bool) or not isinstance(bits, int) or not 1 <= bits <= 32:
         raise InputDefenseError("bits must be int in [1,32]")
     nonce = 0
     while nonce < max_tries:
@@ -51,9 +51,9 @@ def solve(challenge, bits, max_tries=1000000):
 
 def verify(challenge, nonce, bits):
     """Verify a nonce. Returns True if valid."""
-    if not isinstance(bits, int) or not 1 <= bits <= 32:
+    if isinstance(bits, bool) or not isinstance(bits, int) or not 1 <= bits <= 32:
         raise InputDefenseError("bits must be int in [1,32]")
-    if not isinstance(nonce, int) or nonce < 0:
+    if isinstance(nonce, bool) or not isinstance(nonce, int) or nonce < 0:
         return False
     return _hash_meets(challenge, nonce, bits)
 

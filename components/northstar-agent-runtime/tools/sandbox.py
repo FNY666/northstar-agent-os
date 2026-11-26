@@ -339,7 +339,7 @@ def build_landlock_spec(
         rules.append({"path": path, "rights": list(_WORKSPACE_RIGHTS)})
     ports = []
     for port in tcp_ports:
-        if not isinstance(port, int) or not (0 <= port <= 65535):
+        if isinstance(port, bool) or not isinstance(port, int) or not (0 <= port <= 65535):
             raise LandlockError(f"tcp port must be an int in 0..65535, got {port!r}")
         ports.append(port)
     return {

@@ -154,7 +154,7 @@ class EscalationWindow:
             raise ValueError("agent_id must be a non-empty string")
         for field in ("window_start", "window_end", "actions_observed", "escalations"):
             value = getattr(self, field)
-            if not isinstance(value, int) or value < 0:
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise ValueError(f"{field} must be a non-negative int")
         if self.window_end < self.window_start:
             raise ValueError("window_end must not precede window_start")
@@ -353,7 +353,7 @@ class MonitorHealthSignal:
             "actions_observed_since_heartbeat",
         ):
             value = getattr(self, field)
-            if not isinstance(value, int) or value < 0:
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise ValueError(f"{field} must be a non-negative int")
         if not isinstance(self.last_canary_trip_age_seconds, int):
             raise ValueError("last_canary_trip_age_seconds must be an int")
@@ -489,7 +489,7 @@ class HealthLedger:
     def append(self, signal: MonitorHealthSignal, disposition: str, as_of: int) -> None:
         if disposition not in DISPOSITIONS:
             raise ValueError(f"disposition must be one of {DISPOSITIONS}")
-        if not isinstance(as_of, int) or as_of < 0:
+        if isinstance(as_of, bool) or not isinstance(as_of, int) or as_of < 0:
             raise ValueError("as_of must be a non-negative int")
         if not verify_signal(signal):
             raise ValueError("unverifiable signal")

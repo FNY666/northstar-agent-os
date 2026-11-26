@@ -270,7 +270,7 @@ class SplitLearning:
         seed: bytes = b"",
     ) -> None:
         _reject_bool(n_layers, "n_layers")
-        if not isinstance(n_layers, int) or n_layers < 2:
+        if isinstance(n_layers, bool) or not isinstance(n_layers, int) or n_layers < 2:
             raise SplitLearningError("n_layers must be an int >= 2")
         if not isinstance(dims, (list, tuple)) or len(dims) != n_layers + 1:
             raise SplitLearningError(
@@ -278,7 +278,7 @@ class SplitLearning:
             )
         dims = [_check_dim(d, f"dims[{i}]") for i, d in enumerate(dims)]
         _reject_bool(cut, "cut")
-        if not isinstance(cut, int) or cut < 1 or cut >= n_layers:
+        if isinstance(cut, bool) or not isinstance(cut, int) or cut < 1 or cut >= n_layers:
             raise SplitLearningError(
                 f"cut must be in [1, {n_layers - 1}] (never before the "
                 "first or after the last layer)"

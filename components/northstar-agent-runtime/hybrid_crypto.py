@@ -368,7 +368,7 @@ def _pq_verify(
     z, c = sig
     if not isinstance(c, bytes) or len(c) != 32:
         return False
-    if any(not isinstance(x, int) or abs(x) >= _PQ_GAMMA1 for x in z):
+    if any(isinstance(x, bool) or not isinstance(x, int) or abs(x) >= _PQ_GAMMA1 for x in z):
         return False
     # w' = A.z - t  (== w for an honest signature, by linearity)
     az = _mat_vec_mul(_PQ_A, tuple(x % _PQ_Q for x in z))

@@ -532,7 +532,7 @@ class ConsentChainRegistry:
             raise EldercareError("data_types must be non-empty")
         for dtype in data_types:
             _check_nonempty_str(dtype, "data_type")
-        if not isinstance(retention_days, int) or retention_days < 0:
+        if isinstance(retention_days, bool) or not isinstance(retention_days, int) or retention_days < 0:
             raise EldercareError("retention_days must be a non-negative int")
         _check_ts(consented_at, "consented_at")
         if not isinstance(proxy, bool):
@@ -934,7 +934,7 @@ class AudioRetentionRegistry:
     ) -> AudioRetentionReceipt:
         _check_nonempty_str(receipt_id, "receipt_id")
         _check_nonempty_str(resident_id, "resident_id")
-        if not isinstance(retention_days, int) or retention_days <= 0:
+        if isinstance(retention_days, bool) or not isinstance(retention_days, int) or retention_days <= 0:
             raise EldercareError("retention_days must be a positive int")
         _check_ts(consented_at, "consented_at")
         _check_ts(expires_at, "expires_at")
@@ -1300,7 +1300,7 @@ def check_contact_floor(
     _check_ts(report.week_start, "week_start")
     for field in ("human_visits", "visit_minutes", "companion_robot_minutes", "prior_human_visits"):
         _check_nonneg_int(getattr(report, field), field)
-    if not isinstance(min_visits_per_week, int) or min_visits_per_week < 0:
+    if isinstance(min_visits_per_week, bool) or not isinstance(min_visits_per_week, int) or min_visits_per_week < 0:
         raise EldercareError("min_visits_per_week must be a non-negative int")
     if report.human_visits < min_visits_per_week:
         return EldercareVerdict(

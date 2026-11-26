@@ -940,7 +940,7 @@ def mint_delegation_token(
                 f"delegation tools {tool_tuple} exceed parent scope {parent_token.tools}: "
                 "scope can only shrink"
             )
-        if not isinstance(parent_token.depth, int) or parent_token.depth < 0:
+        if isinstance(parent_token.depth, bool) or not isinstance(parent_token.depth, int) or parent_token.depth < 0:
             raise ValueError("parent token has malformed depth")
         parent_hash = parent_token.token_hash()
         depth = parent_token.depth + 1

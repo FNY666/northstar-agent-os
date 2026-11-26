@@ -201,7 +201,7 @@ def _check_pubkey_hex(value: Any, field_name: str) -> str:
 
 
 def _check_ts(value: Any, field_name: str) -> int:
-    if not isinstance(value, int) or value < 0:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise SyntheticCapError(f"{field_name} must be a non-negative int")
     return value
 
@@ -261,7 +261,7 @@ class DataSliceManifest:
         _check_nonempty_str(self.slice_id, "slice_id")
         _check_origin(self.origin)
         _check_hex64(self.slice_digest, "slice_digest")
-        if not isinstance(self.weight_units, int) or self.weight_units < 0:
+        if isinstance(self.weight_units, bool) or not isinstance(self.weight_units, int) or self.weight_units < 0:
             raise SyntheticCapError("weight_units must be a non-negative int")
         if self.origin == SLICE_ORIGIN_REAL:
             if self.generator_id != "":
@@ -272,7 +272,7 @@ class DataSliceManifest:
                 raise SyntheticCapError("real slices must have generation == 0")
         else:
             _check_nonempty_str(self.generator_id, "generator_id")
-            if not isinstance(self.generation, int) or self.generation < 1:
+            if isinstance(self.generation, bool) or not isinstance(self.generation, int) or self.generation < 1:
                 raise SyntheticCapError(
                     "synthetic slices must have generation >= 1"
                 )
@@ -720,7 +720,7 @@ def training_summary_receipt(
     """
     _check_nonempty_str(model_id, "model_id")
     _check_ts(issued_at, "issued_at")
-    if not isinstance(top_n, int) or top_n < 1:
+    if isinstance(top_n, bool) or not isinstance(top_n, int) or top_n < 1:
         raise SyntheticCapError("top_n must be a positive int")
     ranked = sorted(
         manifests, key=lambda m: (-m.weight_units, m.slice_id)

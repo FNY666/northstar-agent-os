@@ -38,7 +38,7 @@ class Turn:
 
 def build_script(benign_count: int) -> List[Turn]:
     """Build: benign_count benign turns, then one payload turn."""
-    if not isinstance(benign_count, int) or benign_count < 0:
+    if isinstance(benign_count, bool) or not isinstance(benign_count, int) or benign_count < 0:
         raise MultiAttack04Error("benign_count must be non-negative int")
     turns = [
         Turn(i + 1, f"Benign question {i + 1} about the weather.", False)

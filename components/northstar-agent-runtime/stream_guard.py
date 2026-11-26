@@ -158,15 +158,15 @@ class GuardPolicy:
             return DENY_MALFORMED_POLICY
         if not isinstance(self.version, str) or not self.version:
             return DENY_MALFORMED_POLICY
-        if not isinstance(self.max_chunk_risk, int) or self.max_chunk_risk < 0:
+        if isinstance(self.max_chunk_risk, bool) or not isinstance(self.max_chunk_risk, int) or self.max_chunk_risk < 0:
             return DENY_MALFORMED_POLICY
-        if not isinstance(self.overlap_bytes, int) or self.overlap_bytes < 0:
+        if isinstance(self.overlap_bytes, bool) or not isinstance(self.overlap_bytes, int) or self.overlap_bytes < 0:
             return DENY_MALFORMED_POLICY
         seen: set[str] = set()
         for pat in self.deny_patterns:
             if not isinstance(pat.pattern, str) or not pat.pattern:
                 return DENY_MALFORMED_POLICY
-            if not isinstance(pat.weight, int) or pat.weight <= 0:
+            if isinstance(pat.weight, bool) or not isinstance(pat.weight, int) or pat.weight <= 0:
                 return DENY_MALFORMED_POLICY
             if not isinstance(pat.reason, str) or not pat.reason:
                 return DENY_MALFORMED_POLICY

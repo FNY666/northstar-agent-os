@@ -238,7 +238,7 @@ def _check_nonempty_str(value: Any, field_name: str) -> str:
 
 
 def _check_ts(value: Any, field_name: str) -> int:
-    if not isinstance(value, int) or value < 0:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise GameAgentsError(f"{field_name} must be a non-negative integer epoch")
     return value
 

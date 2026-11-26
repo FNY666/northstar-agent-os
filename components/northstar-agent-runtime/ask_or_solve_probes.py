@@ -781,7 +781,7 @@ class AskPolicy:
                 "require abstain_below <= ask_below <= solve_at "
                 f"(got {self.abstain_below!r} / {self.ask_below!r} / {self.solve_at!r})"
             )
-        if not isinstance(self.max_questions, int) or self.max_questions < 1:
+        if isinstance(self.max_questions, bool) or not isinstance(self.max_questions, int) or self.max_questions < 1:
             raise ValueError(f"max_questions must be a positive int, got {self.max_questions!r}")
 
 

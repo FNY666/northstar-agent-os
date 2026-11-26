@@ -138,7 +138,7 @@ class LatenessReport:
             raise WatermarkError("event_time must be an int")
         if not isinstance(self.watermark, int):
             raise WatermarkError("watermark must be an int")
-        if not isinstance(self.lateness_ms, int) or self.lateness_ms < 0:
+        if isinstance(self.lateness_ms, bool) or not isinstance(self.lateness_ms, int) or self.lateness_ms < 0:
             raise WatermarkError("lateness_ms must be a non-negative int")
         if self.status not in (STATUS_ON_TIME, STATUS_LATE, STATUS_TOO_LATE):
             raise WatermarkError(f"unknown status: {self.status!r}")

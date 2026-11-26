@@ -46,7 +46,7 @@ def detect_context_overflow(
     """Return (flagged, reason). Fail-closed on bad inputs."""
     if not isinstance(text, str):
         raise ModelAttackError("text must be str")
-    if not isinstance(budget_tokens, int) or budget_tokens <= 0:
+    if isinstance(budget_tokens, bool) or not isinstance(budget_tokens, int) or budget_tokens <= 0:
         raise ModelAttackError("budget_tokens must be a positive int")
     tokens = _estimate_tokens(text)
     if tokens > budget_tokens:

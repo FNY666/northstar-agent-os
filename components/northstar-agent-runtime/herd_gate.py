@@ -193,9 +193,9 @@ class SignalDeclaration:
                 raise HerdGateError(f"feature family {f!r} not in closed vocabulary")
         for w in self.data_windows:
             _require_nonempty(w, "data window")
-        if not isinstance(self.declared_unix, int) or self.declared_unix < 0:
+        if isinstance(self.declared_unix, bool) or not isinstance(self.declared_unix, int) or self.declared_unix < 0:
             raise HerdGateError("declared_unix must be a non-negative int")
-        if not isinstance(self.notional_cents, int) or self.notional_cents <= 0:
+        if isinstance(self.notional_cents, bool) or not isinstance(self.notional_cents, int) or self.notional_cents <= 0:
             raise HerdGateError("notional_cents must be a positive int")
 
     def signal_tokens(self) -> frozenset[str]:
@@ -493,7 +493,7 @@ def authorize_trading(
     _require_nonempty(strategy_id, "strategy_id")
     if not isinstance(registry, StrategyRegistry):
         raise HerdGateError("registry must be a StrategyRegistry")
-    if not isinstance(exposure_cap_cents, int) or exposure_cap_cents <= 0:
+    if isinstance(exposure_cap_cents, bool) or not isinstance(exposure_cap_cents, int) or exposure_cap_cents <= 0:
         raise HerdGateError("exposure_cap_cents must be a positive int")
 
     declaration = registry.declaration(strategy_id)

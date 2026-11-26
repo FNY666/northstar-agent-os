@@ -304,7 +304,7 @@ def is_safe_cut(transcript: Sequence[Any], cut: int, *, spans: Sequence[Span] | 
     to one exchange - summarising the call alone says the tool ran when it did
     not, so the span rule refuses it.
     """
-    if not isinstance(cut, int) or cut < 0 or cut > len(transcript):
+    if isinstance(cut, bool) or not isinstance(cut, int) or cut < 0 or cut > len(transcript):
         return False
     prefix = transcript[:cut]
     suffix = transcript[cut:]
