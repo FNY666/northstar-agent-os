@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import struct
 import subprocess
 import sys
 import tempfile
@@ -9,8 +11,31 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from tools import ToolContext, ToolSandbox, build_code_registry, build_default_registry
+from tools import ToolContext, ToolInputError, ToolSandbox, build_code_registry, build_default_registry
 from code_task import CodePhaseMachine
+
+
+def forge_index(root: Path, *paths: str) -> None:
+    empty_blob = subprocess.run(
+        ["git", "-C", str(root), "hash-object", "-w", "--stdin"],
+        input=b"",
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    ).stdout.strip()
+    blob_id = bytes.fromhex(empty_blob.decode("ascii"))
+    body = bytearray()
+    for path in sorted(value.encode("utf-8") for value in paths):
+        entry = (
+            struct.pack(">10I", 0, 0, 0, 0, 0, 0, 0o100644, 0, 0, 0)
+            + blob_id
+            + struct.pack(">H", min(len(path), 0xFFF))
+            + path
+        )
+        body.extend(entry)
+        body.extend(b"\0" * (8 - len(entry) % 8))
+    data = b"DIRC" + struct.pack(">II", 2, len(paths)) + bytes(body)
+    (root / ".git" / "index").write_bytes(data + hashlib.sha1(data).digest())
 
 
 def git(root: Path, *arguments: str) -> str:
@@ -118,6 +143,26 @@ index 760a15b..87de0d4 100644
         )
         self.assertFalse(inspected.is_error, inspected.text())
         self.assertIn("+    return 2", inspected.text())
+
+
+    def test_git_inspect_refuses_index_paths_outside_repository(self):
+        outside = self.root.parent / f"{self.root.name}-outside.txt"
+        outside.write_text("OUTSIDE-REPOSITORY-CONTENT\n", encoding="utf-8")
+        try:
+            for index_path in (f"../{outside.name}", ".git/config"):
+                with self.subTest(index_path=index_path):
+                    forge_index(self.root, index_path)
+                    for action in ("status", "stat", "diff"):
+                        with self.subTest(action=action):
+                            with self.assertRaises(ToolInputError) as refused:
+                                self.registry.require("GitInspect").handler(
+                                    {"action": action}, self.context
+                                )
+                            self.assertNotIn(
+                                "OUTSIDE-REPOSITORY-CONTENT", str(refused.exception)
+                            )
+        finally:
+            outside.unlink(missing_ok=True)
 
     def test_git_inspect_does_not_run_repository_fsmonitor_command(self):
         marker = self.root / "fsmonitor-ran"

@@ -130,6 +130,7 @@ class CodeTaskError(ValueError):
 
 _GIT_COMMAND_CONFIG = (
     ("core.fsmonitor", "false"),
+    ("core.untrackedCache", "false"),
     ("core.hooksPath", os.devnull),
     ("diff.external", ""),
     ("commit.gpgSign", "false"),
@@ -197,6 +198,70 @@ def _git_environment_for_repository(root: str | Path) -> dict[str, str]:
             raise CodeTaskError("Git returned an unexpected filter configuration key")
         overrides.append((key, ""))
     return _git_environment(overrides)
+
+
+def _validate_repository_index_paths(
+    root: str | Path,
+    environment: dict[str, str],
+) -> None:
+    """Reject Git index paths that escape the repository before Git reads them."""
+    top = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=environment,
+        timeout=10,
+        check=False,
+    )
+    if top.returncode != 0:
+        raise CodeTaskError("cannot safely resolve the repository boundary")
+    try:
+        raw_top = top.stdout[:-1] if top.stdout.endswith(b"\n") else top.stdout
+        repository = Path(os.fsdecode(raw_top)).resolve(strict=True)
+    except (OSError, RuntimeError) as error:
+        raise CodeTaskError("cannot safely resolve the repository boundary") from error
+
+    index = subprocess.run(
+        ["git", "-C", str(repository), "ls-files", "--stage", "-z"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=environment,
+        timeout=30,
+        check=False,
+    )
+    if index.returncode != 0:
+        raise CodeTaskError("cannot safely inspect the repository Git index")
+    if len(index.stdout) > MAX_GIT_OUTPUT_BYTES:
+        raise CodeTaskError("repository Git index exceeds the safety limit")
+
+    for entry in index.stdout.split(b"\0"):
+        if not entry:
+            continue
+        try:
+            _, raw_path = entry.split(b"\t", 1)
+            path = raw_path.decode("utf-8", errors="strict")
+        except (UnicodeDecodeError, ValueError) as error:
+            raise CodeTaskError("repository Git index contains a malformed path") from error
+        if (
+            not path
+            or path.startswith(("/", "\\"))
+            or re.match(r"^[A-Za-z]:", path)
+            or "\\" in path
+        ):
+            raise CodeTaskError("repository Git index contains an absolute or ambiguous path")
+        parts = path.split("/")
+        if any(part in {"", ".", ".."} for part in parts):
+            raise CodeTaskError("repository Git index contains a path traversal")
+        if any(part.casefold() == ".git" for part in parts):
+            raise CodeTaskError("repository Git index may not reference Git metadata")
+        try:
+            candidate = (repository / Path(*parts)).resolve(strict=False)
+            candidate.relative_to(repository)
+        except (OSError, RuntimeError, ValueError) as error:
+            raise CodeTaskError("repository Git index path resolves outside the repository") from error
+
 
 CODE_PHASE_TERMINALS = frozenset(
     {
@@ -704,12 +769,15 @@ def _run_git(
     *arguments: str,
     check: bool = True,
 ) -> subprocess.CompletedProcess[bytes]:
+    environment = _git_environment_for_repository(root)
+    if arguments and arguments[0] in {"status", "diff", "add"}:
+        _validate_repository_index_paths(root, environment)
     process = subprocess.run(
         ["git", "-C", str(root), *arguments],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        env=_git_environment_for_repository(root),
+        env=environment,
         check=False,
     )
     if len(process.stdout) > MAX_GIT_OUTPUT_BYTES or len(process.stderr) > MAX_GIT_OUTPUT_BYTES:
