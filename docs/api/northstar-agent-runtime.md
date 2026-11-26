@@ -5375,6 +5375,10 @@ Agent-side client for the egress sidecar.
 
 A client-side configuration error. Fails before any socket opens.
 
+#### `EgressClientProtocolError`
+
+The sidecar peer violated the one-response JSONL framing contract.
+
 #### `EgressResult`
 
 One completed sidecar round-trip. Never raises for expected conditions.
@@ -52240,6 +52244,10 @@ Agent-side client for the egress sidecar.
 #### `EgressClientError`
 
 A client-side configuration error. Fails before any socket opens.
+
+#### `EgressClientProtocolError`
+
+The sidecar peer violated the one-response JSONL framing contract.
 
 #### `EgressResult`
 

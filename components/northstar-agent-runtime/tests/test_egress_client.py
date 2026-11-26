@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import socket
 import unittest
 from unittest.mock import patch
 
@@ -101,8 +102,66 @@ class EgressResponseBoundaryTests(unittest.TestCase):
                 agent_id="a", run_id="run", host="example.com", port=443,
                 method="GET", path="/", request_id="r",
             )
-        self.assertEqual(result.status, "transport_unavailable")
+        self.assertEqual(result.status, "protocol_error")
         self.assertIn("byte cap", result.errors[0])
+
+    def test_socket_response_requires_one_complete_utf8_line_through_eof(self):
+        valid = b'{"request_id":"r","status":"denied"}\n'
+        cases = (
+            ([b'{"request_id":"r","status":"denied"}'], "terminating newline"),
+            ([valid + b'{"request_id":"other","status":"ok"}\n'], "after the response line"),
+            ([valid, b"trailing"], "after the response line"),
+            ([b"{\xff}\n"], "valid UTF-8"),
+            ([], "without a response"),
+        )
+
+        class FakeSocket:
+            def __init__(self, chunks):
+                self.chunks = list(chunks)
+                self.shutdown_mode = None
+                self.closed = False
+
+            def settimeout(self, _value): pass
+            def connect(self, _path): pass
+            def sendall(self, _data): pass
+            def shutdown(self, how): self.shutdown_mode = how
+            def recv(self, _size): return self.chunks.pop(0) if self.chunks else b""
+            def close(self): self.closed = True
+
+        for chunks, expected in cases:
+            with self.subTest(chunks=chunks):
+                fake = FakeSocket(chunks)
+                client = EgressClient("/var/run/northstar-egress/egress.sock")
+                with patch("egress_client.socket.socket", return_value=fake):
+                    result = client.request(
+                        agent_id="a", run_id="run", host="example.com", port=443,
+                        method="GET", path="/", request_id="r",
+                    )
+                self.assertEqual(result.status, "protocol_error", result.errors)
+                self.assertIn(expected, result.errors[0])
+                self.assertEqual(fake.shutdown_mode, socket.SHUT_WR)
+                self.assertTrue(fake.closed)
+
+    def test_socket_response_deadline_is_absolute_across_slow_chunks(self):
+        clock = [0.0]
+
+        class DripSocket:
+            def settimeout(self, _value): pass
+            def connect(self, _path): pass
+            def sendall(self, _data): pass
+            def shutdown(self, _how): pass
+            def recv(self, _size):
+                clock[0] += 6.0
+                return b'{"request_id":"r",' if clock[0] < 10 else b'"status":"denied"}\n'
+            def close(self): pass
+
+        client = EgressClient("/var/run/northstar-egress/egress.sock", timeout_ms=1_000)
+        with (
+            patch("egress_client.socket.socket", return_value=DripSocket()),
+            patch("egress_client.time.monotonic", side_effect=lambda: clock[0]),
+        ):
+            with self.assertRaises(TimeoutError):
+                client._round_trip({"request_id": "r"})
 
 if __name__ == "__main__":
     unittest.main()

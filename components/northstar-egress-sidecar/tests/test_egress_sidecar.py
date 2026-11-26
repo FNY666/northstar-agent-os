@@ -231,6 +231,43 @@ class ValidationTests(unittest.TestCase):
             slots.release()
 
 
+    def test_socket_handler_applies_write_deadline_to_internal_error_response(self):
+        class BrokenHandlerConn:
+            def __init__(self):
+                self.timeouts = []
+                self.sent = b""
+                self.closed = False
+            def settimeout(self, value):
+                self.timeouts.append(value)
+            def recv(self, _size):
+                return b'{"request_id":"synthetic"}\n'
+            def sendall(self, value):
+                self.sent += value
+                self.send_timeout = self.timeouts[-1]
+            def close(self):
+                self.closed = True
+        conn = BrokenHandlerConn()
+        with (
+            mock.patch.object(egress_socket, "_peer_uid_for_connection", return_value=os.getuid(), create=True),
+            mock.patch.object(egress_socket, "handle_line", side_effect=RuntimeError("synthetic handler failure")),
+        ):
+            egress_socket.handle_connection(conn, None)
+        self.assertEqual(conn.send_timeout, 5.0)
+        self.assertEqual(json.loads(conn.sent.decode())["status"], "internal_error")
+        self.assertTrue(conn.closed)
+
+    def test_disconnected_client_releases_worker_socket_and_admission_slot(self):
+        slots = threading.BoundedSemaphore(1)
+        accepted, peer = socket.socketpair()
+        peer.close()
+        with ThreadPoolExecutor(max_workers=1) as pool, mock.patch.object(egress_socket, "run_one") as run:
+            self.assertTrue(egress_socket.submit_connection(pool, slots, accepted, None))
+            self.assertTrue(slots.acquire(timeout=1.0), "disconnected client must not leak its admission slot")
+            slots.release()
+        self.assertEqual(accepted.fileno(), -1, "the accepted socket must close on every path")
+        run.assert_not_called()
+
+
 class SidecarTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

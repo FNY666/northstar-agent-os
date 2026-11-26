@@ -78,6 +78,7 @@ def handle_connection(conn: socket.socket, ctx: SidecarContext) -> None:
         pass
     except Exception:
         try:
+            conn.settimeout(5.0)
             conn.sendall(
                 encode_response({"request_id": None, "status": "internal_error", "error": "sidecar request failed"}).encode(
                     "utf-8"

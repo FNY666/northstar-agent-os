@@ -100,6 +100,10 @@ class EgressClientError(ValueError):
     """A client-side configuration error. Fails before any socket opens."""
 
 
+class EgressClientProtocolError(RuntimeError):
+    """The sidecar peer violated the one-response JSONL framing contract."""
+
+
 @dataclass(frozen=True)
 class EgressResult:
     """One completed sidecar round-trip. Never raises for expected conditions."""
@@ -219,6 +223,8 @@ class EgressClient:
             wire["approval_receipt"] = approval_receipt
         try:
             line = self._round_trip(wire)
+        except EgressClientProtocolError as error:
+            return self._failure(rid, "protocol_error", str(error), started)
         except FileNotFoundError as error:
             return self._failure(rid, "transport_unavailable", f"egress socket is not present: {error}", started)
         except (TimeoutError, socket.timeout) as error:
@@ -331,23 +337,45 @@ class EgressClient:
             sock.settimeout(self.connect_timeout_s)
             sock.connect(self.socket_path)
             sock.sendall(data)
-            # The read deadline covers the sidecar's own timeout plus grace.
-            sock.settimeout(self.timeout_ms / 1000.0 + 10.0)
+            # One request occupies one connection. Signal that no more request
+            # bytes will follow, then require the peer to close after its reply.
+            try:
+                sock.shutdown(socket.SHUT_WR)
+            except (AttributeError, OSError):  # pragma: no cover - peer already gone / test seam
+                pass
+            # Recompute remaining time for every read: socket timeouts alone
+            # are per-operation and a slow drip must not extend this deadline.
+            read_deadline = time.monotonic() + self.timeout_ms / 1000.0 + 10.0
             chunks: list[bytes] = []
             total = 0
+            saw_newline = False
             while total <= self.max_response_bytes:
+                remaining = read_deadline - time.monotonic()
+                if remaining <= 0:
+                    raise socket.timeout("egress response read deadline exceeded")
+                sock.settimeout(remaining)
                 chunk = sock.recv(min(65536, self.max_response_bytes + 1 - total))
                 if not chunk:
                     break
+                if saw_newline:
+                    raise EgressClientProtocolError("sidecar sent bytes after the response line")
+                if total + len(chunk) > self.max_response_bytes:
+                    raise EgressClientProtocolError("sidecar response exceeded the byte cap")
                 newline = chunk.find(b"\n")
                 if newline >= 0:
-                    if total + newline + 1 > self.max_response_bytes:
-                        raise OSError("sidecar response exceeded the byte cap")
-                    chunks.append(chunk[:newline])
-                    return b"".join(chunks).decode("utf-8", "replace")
+                    if newline != len(chunk) - 1:
+                        raise EgressClientProtocolError("sidecar sent bytes after the response line")
+                    saw_newline = True
                 chunks.append(chunk)
                 total += len(chunk)
-            raise OSError("sidecar response exceeded the byte cap or never terminated")
+            if not chunks:
+                raise EgressClientProtocolError("sidecar closed the connection without a response")
+            if not saw_newline:
+                raise EgressClientProtocolError("sidecar response is missing its terminating newline")
+            try:
+                return b"".join(chunks)[:-1].decode("utf-8", "strict")
+            except UnicodeDecodeError as error:
+                raise EgressClientProtocolError("sidecar response is not valid UTF-8") from error
         finally:
             try:
                 sock.close()
