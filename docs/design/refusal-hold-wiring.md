@@ -6352,3 +6352,165 @@ BEHAVIOUR, not about a spelling.
   §34 both measured that re-pairing a row can move its score a long
   way -- and §30 also measured that it can move it NOT AT ALL.  Each
   row has to be measured on its own.
+
+---
+
+## 39. One guard shape, EIGHT copies: the `ai_*_auditing` family
+
+The `attack_extra_*` family (§35) was twenty modules that shared a
+SHAPE.  The `ai_*_auditing` family is eight modules that share not
+just a shape but a **byte-identical guard** -- and that makes the
+second level of the gap visible in a way the first family did not.
+
+### 39.1 The premise, measured
+
+Eight sibling modules carry the same four functions, and the four
+functions are the ones that carry every survivor:
+
+```
+ai_accountability_auditing   ai_compliance_auditing
+ai_contestability_auditing   ai_ethics_auditing
+ai_fairness_auditing         ai_safety_auditing
+ai_traceability_auditing     ai_transparency_auditing
+```
+
+MEASURED 2026-11-26 by hashing `ast.unparse` of each function:
+
+| function | hash | in all eight |
+|---|---|---|
+| `_valid_digest` | `edec9845` | yes |
+| `_check_mutation_seq` | `836a6c3d` | yes |
+| `_check_read_seq` | `5c8cca7a` | yes |
+| `stdlib_only` | `6e597f49` | yes |
+
+And every one of the eight scores **18/27** in the artifact.  Not
+"most of them" -- **all eight, with the same score**.
+
+So this is not eight coincidences.  It is ONE guard shape, replicated
+eight times, with the same blind spot replicated eight times.  And a
+blind spot replicated eight times is INVISIBLE to a per-module reading,
+because each module's own suite looks like a normal suite.
+
+> **A template hides TWO levels of gap.**
+>
+> §35's first level was the shared guard, never driven with the input
+> it rejects.  The SECOND level here is the REPLICATION: fixing one
+> module's copy teaches nothing about the other seven, so a slice that
+> covers one of the eight looks complete while leaving seven open --
+> and seven open copies read as seven unrelated gaps.
+
+The suite `tests/test_ai_auditing_family_surface.py` therefore
+asserts the premise itself (`test_the_family_modules_really_share_the_guard_shape`),
+so a sibling whose guard is refactored goes RED rather than being
+silently carried by the family's cases.
+
+### 39.2 The nine survivors, per module
+
+```
+or@271   `_valid_digest`: `not isinstance(value, str) or not value.startswith("sha256:")`
+eq@274   `_valid_digest`: `len(tail) == 64`
+and@274  `_valid_digest`: `and all(c in "0123456789abcdef" for c in tail)`
+retF@304 `AuditRecord.verify()`: `if not self.audit_digest: return False`
+or@397   `_check_mutation_seq`: `isinstance(seq, bool) or not isinstance(seq, int) or seq < 1`
+or@405   `_check_read_seq`: `isinstance(seq, bool) or not isinstance(seq, int) or seq < 0`
+eq@708   `stdlib_only()`: `if root == "canonical_json"`
+retF@711 `stdlib_only()`: the `ast.Import` branch's `return False`
+retF@717 `stdlib_only()`: the `ast.ImportFrom` branch's `return False`
+```
+
+Three of them needed a CRAFTED INPUT and the rest needed a crafted
+BOUNDARY, and the three that mattered most are worth naming:
+
+**`or@271` -- a non-STRING digest.**  The suites' only malformed digest
+is the STRING `"bad"`, and under BOTH spellings `"bad"` is rejected (it
+is a str AND does not start with `sha256:`), so it cannot tell them
+apart.  The crafted input is a NON-STRING: the original rejects it at
+the type half, while the mutant evaluates `value.startswith(...)` on an
+int and CRASHES with `AttributeError`.  The crash is the observable.
+
+**`or@397` -- a SECOND PATH reaches the same answer.**  The suites pass
+`True` to `audit()` and expect `BadSeqError` -- and they get one.  But
+under the mutant they get one TOO, because the mutation's audit event
+routes through `_check_read_seq`, whose guard raises FIRST.  So the
+exception is not the observable at all.
+
+The observable is the LEDGER: under the mutant the `True` seq is
+CONSUMED (`last_seq` becomes `True`) and an audit row is BOOKED -- the
+guard failed open, and the ledger now believes a `True` is a valid seq.
+The mutation guard decides whether a seq is CONSUMED; the read guard
+decides whether it is ACCEPTED.  A test that only reads the exception
+sees neither.
+
+**`or@556` -- the case that only ONE sibling covered.**  The family
+census closed SEVEN of the eight at 27/27 and left `ai_safety_auditing`
+at **26/27**.  The survivor was the read's own
+`not isinstance(audit_id, str) or not audit_id` guard.
+
+The reason is visible in the sibling suites: SEVEN of the eight already
+assert `verify("", 0)` raises `BadSystemError`, and
+`ai_safety_auditing`'s suite does not.  So the guard was covered seven
+times over and missed once -- and the miss was invisible precisely
+because the family suite did not drive it.
+
+> **A case that one sibling's suite happens to cover is NOT covered
+> until EVERY sibling's suite covers it.**  That is what a family suite
+> is for: it makes "every sibling" enforceable instead of accidental.
+
+### 39.3 What it measured
+
+```
+artifact 8 x 18/27  ->  union scope 8 x 18/27  ->  with these tests 8 x 27/27
+```
+
+Every one of the nine survivors was verified by planting ONE mutant at
+a time and naming the test that goes red:
+
+```
+or@271   KILLED -> test_a_non_string_digest_is_rejected
+eq@274   KILLED -> test_a_digest_of_the_wrong_length_is_rejected
+and@274  KILLED -> test_a_digest_of_the_wrong_length_is_rejected
+retF@304 KILLED -> test_a_record_with_an_empty_digest_does_not_verify
+or@397   KILLED -> test_a_boolean_mutation_seq_is_refused_without_consuming_the_ledger
+or@405   KILLED -> test_a_boolean_read_seq_is_refused
+eq@708   KILLED -> test_stdlib_only_allows_a_submodule_of_the_optional_dependency
+retF@711 KILLED -> test_stdlib_only_rejects_a_non_stdlib_import
+retF@717 KILLED -> test_stdlib_only_rejects_a_non_stdlib_import_from
+```
+
+**NO PRODUCT CODE CHANGED.**  All eight modules are byte-identical to
+their pre-slice state; the whole slice is in two test files.
+
+### 39.4 Three things the family suite had to be careful about
+
+* **The line numbers DIFFER.**  The digest guard is at 244 in
+  `ai_safety_auditing` and at 291 in `ai_contestability_auditing`, so
+  a suite that named a line number would pin one module and silently
+  skip the rest.  Every case here drives the module through its PUBLIC
+  API, and the family suite contains no line number anywhere.
+
+* **The vocabularies DIFFER.**  Each module has its own audit-kind
+  vocabulary (`internal-safety-audit` in one, `internal-fairness-audit`
+  in another), so the suite reads the vocabulary from the module rather
+  than hardcoding one.
+
+* **The MINTED IDS DIFFER.**  `ai_transparency_auditing` mints `aud-1`
+  and `ai_contestability_auditing` mints `cau-1`, so the control case
+  reads the id off the record the ledger minted rather than
+  hardcoding `aud-1`.  My first draft hardcoded it, and the failure
+  was `UnknownAuditError: unknown audit: 'aud-1'` -- a test failing
+  for a reason the author did not check.
+
+### 39.5 What this does NOT change
+
+* The census artifact is NOT edited.  Every row still reads 18/27.
+* No product code changed.
+* No version, schema, or audit kind is added or changed.
+* No digest changes.
+* The multi-suite pin DOES move: 156 -> 157 for the single-module
+  slice, then 157 -> 164 for the family suite (seven more modules
+  became multi-suite; the eighth was already counted).  Both moves are
+  pinned BY NAME, because a count that moves is a count that was
+  measured only if the reader can see WHICH rows moved.
+* The other ten `ai_*` rows are NOT closed by this slice.  They do not
+  carry this guard shape -- `ai_transparency_certification` has no
+  `_valid_digest` at all -- so they need their own measurement.

@@ -229,7 +229,7 @@ class CensusScopeScaleTests(unittest.TestCase):
             if len(MODULE.referencing_suites(runtime, stem)) > 1
         ]
         self.assertEqual(
-            len(multi), 156,
+            len(multi), 164,
             "the number of modules whose scope the single-suite pairing "
             "understated",
         )
@@ -260,6 +260,59 @@ class CensusScopeScaleTests(unittest.TestCase):
                 self.assertEqual(len(suites), 2, f"{stem} is not multi-suite")
                 self.assertIn(f"test_{stem}", suites)
                 self.assertIn(f"test_{stem}_surface", suites)
+
+    def test_the_ai_transparency_auditing_slice_is_multi_suite(self) -> None:
+        # Measured 2026-11-26: the `ai_transparency_auditing` slice
+        # added `tests/test_ai_transparency_auditing_surface.py`, which
+        # loads the module -- so the module's scope is now TWO suites and
+        # the count moved 156 -> 157.
+        #
+        # Pinned BY NAME, for the reason the twenty family modules are
+        # pinned by name: a count that moves is a count that was
+        # measured, but only if the reader can see WHICH rows moved.
+        suites = MODULE.referencing_suites(RUNTIME, "ai_transparency_auditing")
+        self.assertEqual(
+            suites,
+            ["test_ai_transparency_auditing",
+             "test_ai_auditing_family_surface",
+             "test_ai_transparency_auditing_surface"],
+            "ai_transparency_auditing is not multi-suite",
+        )
+
+    def test_the_ai_auditing_family_modules_are_multi_suite(self) -> None:
+        """The eight sibling modules, pinned by NAME.
+
+        MEASURED 2026-11-26: `tests/test_ai_auditing_family_surface.py`
+        loads all eight `ai_*_auditing` modules, so seven of them (the
+        eighth, `ai_transparency_auditing`, was already counted) became
+        multi-suite -- the count moved 157 -> 164.
+
+        Pinned by name because the count alone cannot say WHICH rows
+        moved, and a family suite that silently stops loading one of
+        them would be absorbed into the count.
+        """
+        family = (
+            "ai_accountability_auditing",
+            "ai_compliance_auditing",
+            "ai_contestability_auditing",
+            "ai_ethics_auditing",
+            "ai_fairness_auditing",
+            "ai_safety_auditing",
+            "ai_traceability_auditing",
+            "ai_transparency_auditing",
+        )
+        for stem in family:
+            with self.subTest(module=stem):
+                suites = MODULE.referencing_suites(RUNTIME, stem)
+                self.assertIn(f"test_{stem}", suites)
+                self.assertIn("test_ai_auditing_family_surface", suites)
+                # `ai_transparency_auditing` carries a THIRD suite: the
+                # single-module surface suite of the slice that found the
+                # family in the first place.
+                expected = 3 if stem == "ai_transparency_auditing" else 2
+                self.assertEqual(
+                    len(suites), expected, f"{stem} is not multi-suite"
+                )
 
     def test_agents_is_exercised_by_eleven_suites(self) -> None:
         # The clearest case: `agents.py` has ONE own suite and TEN
