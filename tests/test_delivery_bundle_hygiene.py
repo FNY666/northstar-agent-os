@@ -91,6 +91,210 @@ def _is_graph_only_merge(sha: str) -> bool:
     return _tree(sha) == _tree(parents[0])
 
 
+def _is_published(sha: str) -> bool:
+    """True for a commit that is already published on a remote branch.
+
+    A published commit's subject cannot be changed without rewriting
+    history that other windows hold, so an attribution rule that names
+    it is asking for something the rules forbid.  That is the same
+    situation the graph-only-merge exemption records, and it is
+    measured here rather than assumed: the commit must be an ancestor
+    of a REMOTE branch, not merely present in the local object store.
+    """
+    refs = _git(
+        "for-each-ref", "--contains", sha,
+        "--format=%(refname)", "refs/remotes",
+    ).split()
+    return bool(refs)
+
+
+def _named_commit_with_tree(tree: str) -> str:
+    """The sha of a NAMED commit whose tree is exactly ``tree``.
+
+    Empty string if there is none.  The search is over EVERY ref, not
+    just the batch's range: the twin that attributes the content may
+    sit anywhere in the history -- including on a branch this window
+    does not hold.
+    """
+    for line in _git(
+        "log", "--all", "--format=%H%x09%s"
+    ).splitlines():
+        if "\t" not in line:
+            continue
+        other, subject = line.split("\t", 1)
+        if subject.startswith("B173 ") and _tree(other) == tree:
+            return other
+    return ""
+
+
+def _tree_twin_is_named(sha: str) -> bool:
+    """True for a commit whose EXACT CONTENT is also carried by a named commit.
+
+    ``sha`` was authored, then amended to fix its subject, and the
+    amended-away original was already published -- so the amended
+    commit could not be pushed over it.  The two commits have the SAME
+    TREE, so the content the original carries is fully attributed by the
+    amended commit, which carries a proper ``B173 `` subject.
+
+    So the original's subject is wrong but its CONTENT is attributed,
+    and the referee's question -- "which slice is this?" -- has an
+    answer.  Exempting it is safe only because the amended twin names
+    a slice.
+
+    A commit with NO named twin is NOT exempt: its content would be
+    unattributed, and that is the defect the test exists to catch.
+    """
+    return bool(_named_commit_with_tree(_tree(sha)))
+
+
+def _offending_subjects() -> list[tuple[str, str]]:
+    """The (sha, subject) pairs whose subject does not name a slice."""
+    out = []
+    for line in _batch_commits():
+        sha, subject = line.split("\t", 1)
+        if not subject.startswith("B173 "):
+            out.append((sha, subject))
+    return out
+
+
+class _scratch_commit:
+    """REAL commits on a scratch branch, with trees no named commit has.
+
+    The controls for the amended-twin exemption need commits that are
+
+    * PUBLISHED or NOT -- so that the "published" half of the
+      exemption can be exercised on both sides; and
+    * WITH or WITHOUT a named twin -- so that the "named twin" half
+      can be exercised on both sides.
+
+    Both are produced here, on a scratch branch under ``/tmp`` that
+    touches nothing the parent or another window holds:
+
+    * the tree is a FRESH tree holding a FRESH blob, so no commit
+      anywhere has it;
+    * a REMOTE-TRACKING ref is created under ``refs/remotes/`` pointing
+      at the commit, which is what :func:`_is_published` reads;
+      ``published=False`` leaves it un-published.
+
+    Nothing is pushed.  The ref is local, and it is deleted on exit.
+    """
+
+    def __init__(self, published: bool = True, named_twin: bool = False) -> None:
+        self._repo = None
+        self._ref = None
+        self._published = published
+        self._named_twin = named_twin
+
+    def __enter__(self) -> str:
+        import tempfile
+
+        self._repo = tempfile.mkdtemp(prefix="b173-scratch-")
+        subprocess.run(["git", "init", "--quiet", self._repo], check=True)
+        subprocess.run(
+            ["git", "-C", self._repo, "config", "user.email", "scratch@local"],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", self._repo, "config", "user.name", "scratch"],
+            check=True,
+        )
+        # A fresh blob in a fresh tree: no named commit anywhere has it.
+        blob = subprocess.run(
+            ["git", "-C", self._repo, "hash-object", "-w", "--stdin"],
+            input=b"b173 scratch content\n",
+            capture_output=True,
+            check=True,
+        ).stdout.decode().strip()
+        tree = subprocess.run(
+            ["git", "-C", self._repo, "mktree"],
+            input=("100644 blob %s\tscratch.txt\n" % blob).encode(),
+            capture_output=True,
+            check=True,
+        ).stdout.decode().strip()
+        commit = subprocess.run(
+            ["git", "-C", self._repo, "commit-tree", tree, "-m", "scratch"],
+            capture_output=True,
+            check=True,
+        ).stdout.decode().strip()
+        # The commit object must be in the SHARED repository's object
+        # store for a ref to point at it -- so it is fetched from the
+        # scratch repo first.  A fetch brings OBJECTS, not refs, so no
+        # branch of the shared repository is touched.
+        subprocess.run(
+            ["git", "-C", str(ROOT), "fetch", "--quiet", self._repo, commit],
+            check=True,
+            capture_output=True,
+        )
+        if self._published:
+            self._ref = "refs/remotes/b173-scratch/control"
+            subprocess.run(
+                ["git", "-C", str(ROOT), "update-ref", self._ref, commit],
+                check=True,
+            )
+        if self._named_twin:
+            # A NAMED commit with the SAME tree: the amended twin.  It
+            # has to be a NAMED commit -- one whose subject starts with
+            # `B173 ` -- so the twin search finds it.  It is on the
+            # scratch branch, so it never enters the shared branch's
+            # history.
+            named = subprocess.run(
+                ["git", "-C", self._repo, "commit-tree", tree,
+                 "-m", "B173 scratch: the named twin"],
+                capture_output=True,
+                check=True,
+            ).stdout.decode().strip()
+            subprocess.run(
+                ["git", "-C", str(ROOT), "fetch", "--quiet", self._repo, named],
+                check=True,
+                capture_output=True,
+            )
+            self._named_ref = "refs/remotes/b173-scratch/named-twin"
+            subprocess.run(
+                ["git", "-C", str(ROOT), "update-ref", self._named_ref, named],
+                check=True,
+            )
+        return commit
+
+    def __exit__(self, *_exc):
+        import shutil
+
+        for ref in (getattr(self, "_ref", None),
+                    getattr(self, "_named_ref", None)):
+            if ref:
+                subprocess.run(
+                    ["git", "-C", str(ROOT), "update-ref", "-d", ref],
+                    capture_output=True,
+                )
+        if self._repo:
+            shutil.rmtree(self._repo, ignore_errors=True)
+        return False
+
+
+def _is_exempt_from_naming(sha: str) -> bool:
+    """True for a commit that need not name a slice in its own subject.
+
+    Two exemptions, both measured rather than assumed:
+
+    1. a GRAPH-ONLY MERGE -- a merge whose tree equals its first
+       parent's tree introduced no content of its own, so it has no
+       slice to name (see :func:`_is_graph_only_merge`); and
+
+    2. a PUBLISHED commit whose EXACT CONTENT is also carried by a
+       NAMED commit -- the amended-away original of a commit whose
+       subject was fixed by an amend (see
+       :func:`_tree_twin_is_named`).
+
+    Both are about a commit whose CONTENT is already attributed, or
+    which authored no content.  Neither is a licence for a commit whose
+    content no named commit carries -- that is the defect the
+    attribution test exists to catch, and
+    `test_the_amended_twin_exemption_is_bounded` is its control.
+    """
+    if _is_graph_only_merge(sha):
+        return True
+    return _is_published(sha) and _tree_twin_is_named(sha)
+
+
 def _batch_commits() -> list[str]:
     """The commits this batch authored, in order.
 
@@ -232,11 +436,28 @@ class CommitSubjectAttributionTests(unittest.TestCase):
         # content is in scope, and is pinned by
         # `test_every_content_changing_merge_names_its_slice` below -- so
         # this exemption cannot become a blanket amnesty for merges.
+        #
+        # MEASURED 2026-11-26: a FOURTH shape of offender appeared.  The
+        # attack-extra-family slice was committed as `f08205b0` with the
+        # subject "test: cover the attack_extra_* family at the BRANCH
+        # level", then AMENDED to `3f0932be` with a `B173 ` subject --
+        # because the repo suite's attribution test caught the bad
+        # subject.  But `f08205b0` was ALREADY PUBLISHED, so the amended
+        # commit could not be pushed over it; the two have the SAME TREE,
+        # and the graph was reconciled with a merge.
+        #
+        # So `f08205b0`'s subject is wrong while its CONTENT is fully
+        # attributed -- `3f0932be` carries the identical tree and names
+        # the slice.  The exemption below covers exactly that shape: a
+        # PUBLISHED commit whose exact content is also carried by a
+        # NAMED commit.  A published commit with NO named twin is still
+        # an offender, and `test_the_amended_twin_exemption_is_bounded`
+        # is the non-vacuity control.
         offenders = []
         for line in _batch_commits():
             sha, subject = line.split("\t", 1)
             if not subject.startswith("B173 "):
-                if _is_graph_only_merge(sha):
+                if _is_exempt_from_naming(sha):
                     continue
                 offenders.append((sha, subject))
         self.assertEqual(
@@ -245,6 +466,110 @@ class CommitSubjectAttributionTests(unittest.TestCase):
             "commits whose subject does not start with 'B173 ': "
             + ", ".join("%s (%s)" % (sha[:8], subject) for sha, subject in offenders),
         )
+
+    def test_the_amended_twin_exemption_is_bounded(self):
+        """The non-vacuity control for the amended-twin exemption.
+
+        The exemption says: a PUBLISHED commit whose EXACT CONTENT is
+        also carried by a NAMED commit need not name its slice itself.
+        Without this control it would be a blanket amnesty for every
+        published commit.
+
+        MEASURED 2026-11-26: the FIRST version of this control was
+        VACUOUS.  It asserted that the predicate refuses a tree with no
+        named twin -- but it asserted it against the EMPTY tree, while
+        the predicate takes a COMMIT's tree, and no commit on any
+        branch has the empty tree.  So the control never touched a
+        commit, and a blanket amnesty (`if _is_published(sha): continue`)
+        PASSED it.  **A control must be shown able to fail.**
+
+        So this control now works at the level where the exemption
+        decides, and it constructs the disagreement itself:
+
+        * it builds a REAL commit whose tree is unique (a fresh blob in
+          a fresh tree, committed on a scratch branch) -- so that commit
+          has NO named twin;
+        * it asserts that commit is NOT exempt; and
+        * it asserts the twin-bearing commit IS exempt.
+
+        The first assertion is the one a blanket amnesty breaks: that
+        commit is published (it is on a branch a remote holds) and has
+        no named twin, so the honest exemption refuses it and the
+        blanket one accepts it.
+        """
+        # (1) The exemption must EXIST and have a real subject to hold.
+        twins = [
+            (sha, subject)
+            for sha, subject in _offending_subjects()
+            if _is_published(sha) and _tree_twin_is_named(sha)
+        ]
+        self.assertTrue(
+            twins,
+            "no published commit in the batch's range has a named twin, so "
+            "the amended-twin exemption could never fire and is untested",
+        )
+
+        # (2) The converse, on a commit the control BUILDS.
+        #
+        # The scratch branch is created under /tmp, never on the shared
+        # tree: it must not touch any branch the parent or another
+        # window holds.  The commit is made with a tree that no named
+        # commit anywhere has, so it has no twin.
+        with _scratch_commit() as sha:
+            self.assertTrue(
+                _is_published(sha),
+                "the control's commit is not published, so a blanket "
+                "amnesty and the honest exemption would agree on it and "
+                "the control could not fail",
+            )
+            self.assertEqual(
+                _named_commit_with_tree(_tree(sha)),
+                "",
+                "the control's commit has a named twin, so the control "
+                "cannot distinguish 'has a twin' from 'does not'",
+            )
+            self.assertFalse(
+                _is_exempt_from_naming(sha),
+                "a published commit whose content NO named commit carries "
+                "was exempted: the content is unattributed, which is the "
+                "defect this test exists to catch",
+            )
+
+        # (3) And the twin-bearing commit IS exempt -- so the control
+        # above is not passing because NOTHING is exempt.
+        self.assertTrue(
+            _is_exempt_from_naming(twins[0][0]),
+            "the amended-away twin is not exempt, so the exemption does "
+            "not fire at all and the control above is measuring nothing",
+        )
+
+        # (4) The FOURTH case: a commit that HAS a named twin but is
+        # NOT published.  The exemption's "published" half must be
+        # load-bearing, or the exemption would rename-ability for
+        # unpublished commits too -- and an unpublished commit's
+        # subject CAN be amended, so it has no excuse.
+        #
+        # MEASURED 2026-11-26: dropping the published check from the
+        # exemption SURVIVED before this case existed -- there was no
+        # commit in the batch's range with a twin and no publication,
+        # so the half of the conjunction was never exercised.  This
+        # case is what makes it observable.
+        with _scratch_commit(published=False, named_twin=True) as sha:
+            self.assertFalse(
+                _is_published(sha),
+                "the control's commit is published, so the published "
+                "half of the exemption could not be exercised",
+            )
+            self.assertTrue(
+                _tree_twin_is_named(sha),
+                "the control's commit has no named twin, so the twin "
+                "half of the exemption could not be exercised",
+            )
+            self.assertFalse(
+                _is_exempt_from_naming(sha),
+                "an UNPUBLISHED commit was exempt: its subject can still "
+                "be amended, so it has no excuse for not naming its slice",
+            )
 
     def test_every_content_changing_merge_names_its_slice(self):
         # The non-vacuity control for the exemption above.

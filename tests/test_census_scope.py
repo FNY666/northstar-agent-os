@@ -517,15 +517,22 @@ class TheCensusArtifactIsMeasuredTests(unittest.TestCase):
 
     #: The rows that resolve to the EMPTY scope, and why that is right.
     #:
-    #: ``allowlist`` and ``ba_01``..``ba_04`` have no suite of their own
+    #: ``ba_01``..``ba_04`` have no suite of their own
     #: and are mentioned only in PROSE elsewhere:
     #:
-    #:   tests/test_action_card.py:52   # Auto-approve allowlisted and ...
     #:   tests/test_py_modules_list.py:21   "ba_01", "ba_02", ...
     #:
     #: So the census SKIPs them, and that is the correct answer: no
     #: suite exercises them.  Every OTHER row must resolve.
-    EXPECTED_EMPTY = {"allowlist", "ba_01", "ba_02", "ba_03", "ba_04"}
+    #:
+    #: MEASURED 2026-11-26: ``allowlist`` LEFT this set.  It was here
+    #: because the module had NO suite of its own -- only a prose
+    #: mention in ``tests/test_action_card.py:52``.  The slice that
+    #: gave ``allowlist`` a suite (``tests/test_allowlist_surface.py``)
+    #: changed that, and a row that now RESOLVES must not stay in the
+    #: exception set: an exception that no longer holds is a guard that
+    #: has stopped guarding.
+    EXPECTED_EMPTY = {"ba_01", "ba_02", "ba_03", "ba_04"}
 
     def _rows(self):
         import re
@@ -552,7 +559,7 @@ class TheCensusArtifactIsMeasuredTests(unittest.TestCase):
             "are stated against it",
         )
 
-    def test_every_row_but_the_five_resolves_to_a_scope(self) -> None:
+    def test_every_row_but_the_exceptions_resolves_to_a_scope(self) -> None:
         empty = []
         for module in self._rows():
             base = module[:-3] if module.endswith(".py") else module
@@ -570,8 +577,8 @@ class TheCensusArtifactIsMeasuredTests(unittest.TestCase):
             "row genuinely has no suite",
         )
 
-    def test_the_five_unresolved_rows_have_no_suite_of_their_own(self) -> None:
-        """The five exceptions must stay exceptions, for the stated reason."""
+    def test_the_unresolved_rows_have_no_suite_of_their_own(self) -> None:
+        """The exceptions must stay exceptions, for the stated reason."""
         for module in sorted(self.EXPECTED_EMPTY):
             own = RUNTIME / "tests" / f"test_{module}.py"
             self.assertFalse(
