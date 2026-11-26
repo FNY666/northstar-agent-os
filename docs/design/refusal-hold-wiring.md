@@ -5205,3 +5205,107 @@ file.
 * No product code changed.
 * No version, schema, or audit kind is added or changed.
 * No digest changes.
+
+---
+
+## 33. The 121 rows that carry NO number at all
+
+§29.2 corrected the artifact's shape: 391 lines, of which 270 carry a
+measurement and **121 carry none**.  This section takes those 121.
+
+### 33.1 What the 121 are
+
+| the 121 | count | what the row says |
+|---|---|---|
+| `SKIP no-test` | 50 | the module has no suite of its own |
+| `MUTANT SKIP: no mutable construct found` | 6 | the module has nothing the probe can mutate |
+| `MUTANT SKIP: the suite collected no tests` | 2 | the suite collected nothing on the pristine source |
+| `ERROR` | 63 | the census could not run the suite at all |
+
+The 50 `no-test` rows are the `ba_05`..`ba_50` scratch-utility family
+plus `_domain_base`, `b64_detect`, `bias_mock` and `bidi_remove`.  Those
+are correctly unmeasured: no suite exercises them.
+
+The other 71 are not.
+
+### 33.2 The 63 ERROR rows measure FINE today
+
+All 63 are `ai_*` modules, and all 63 of their suites pass on the
+pristine source right now -- 15 tests each, in under half a second:
+
+```
+ai_fairness_mitigation  15 passed in 0.35s
+ai_feature              15 passed in 0.36s
+ai_gating               15 passed in 0.27s
+```
+
+And the census, run today through the fixed script, measures them:
+
+```
+=== MODULE ai_fairness_mitigation.py ===
+MUTANT RESULT: killed 27/31
+=== MODULE ai_fairness_remediation.py ===
+MUTANT RESULT: killed 13/17
+=== MODULE ai_fairness_risk.py ===
+MUTANT RESULT: killed 25/34
+```
+
+So the `ERROR` rows are a **transient failure at artifact time**, not a
+property of these modules.  Whatever the census was doing when the
+artifact was taken -- a worktree that could not run the scope, a
+half-written tree, a collision with a concurrent run -- it affected all
+63 `ai_*` rows and none of the others.
+
+> **A SKIP is invisible; an ERROR is louder but equally unmeasured.**
+>
+> §29 says a SKIP leaves no trace in the artifact: the row carries a
+> number for every module and the reader cannot tell which ones were
+> measured.  An `ERROR` row is at least honest about carrying no
+> number -- but it is still **no measurement**, and 63 of them is a
+> quarter of the artifact's modules.  A reader who reads "ERROR" as
+> "the module has no mutants" is wrong 63 times over.
+
+### 33.3 The 2 "collected no tests" rows measure FINE today too
+
+`audit_chain` and `audit_export` both read `the suite collected no
+tests on the pristine source`.  Both suites pass today -- 92 tests for
+`test_audit_chain` alone -- and the census measures `audit_chain` at
+the union scope (19 suites).
+
+### 33.4 The 6 "no mutable construct" rows
+
+`_version`, `a2abreak_probes`, `asi04_probes`, `asi07_corpus`,
+`asi08_probes`, `asi09_probes` read `no mutable construct found in
+module`.  That is a TRUE statement about those modules: they are
+corpus and version-pin modules whose contents are data, not
+decisions.  Nothing to mutate is not a gap.
+
+So of the 121 unmeasured rows, **65 were measurable and simply were not
+measured**, and 56 were correctly unmeasurable.
+
+### 33.5 What this does NOT change
+
+* The census artifact is NOT edited.  The `ERROR` rows still read
+  `ERROR`, because that row is a snapshot of a measurement on a named
+  tree.  The re-measurement is here.
+* No product code changed.
+* No version, schema, or audit kind is added or changed.
+* No digest changes.
+
+### 33.6 The rule, added to §30.4's
+
+§30.4 stated:
+
+> **A measurement without its scope is not a measurement, and a scope
+> that cannot be resolved is not a scope.**
+
+This section adds the third term:
+
+> **A measurement that was never taken is not a measurement, and a row
+> that carries no number does not report one.**
+>
+> The census artifact has three kinds of row, and only one of them is a
+> measurement: 270 rows carry a count, 58 carry a SKIP reason, and 63
+> carry `ERROR`.  The artifact's shape does not distinguish them, so a
+> reader who counts rows counts 391 and believes 391 measurements were
+> taken.
