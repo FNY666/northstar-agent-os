@@ -52,14 +52,37 @@ class MeasurementRecordTests(unittest.TestCase):
         self.assertEqual(record["summary"]["failed"], 0)
         self.assertEqual(record["summary"]["resolved_rate"], 0.0)
 
-    def test_a_timeout_is_a_failure_and_not_a_pass(self):
+    def test_a_timeout_is_not_a_verdict_and_not_a_pass(self):
+        # The run did not finish, so there is no verdict on the model.  It is
+        # reported apart from the failures: counting it as one would blame
+        # the model for the harness taking too long.
         record = RECORDER_MODULE.build_record(
             _solve([{"instance_id": "a__b-1", "repo": "a/b", "patch_bytes": 10}]),
             _eval([{"instance_id": "a__b-1", "outcome": "evaluation_timeout", "resolved": False}]),
             ROOT / "benchmarks" / "swe-bench" / "verified-50.json",
         )
         self.assertEqual(record["summary"]["resolved_full"], 0)
+        self.assertEqual(record["summary"]["failed"], 0)
+        self.assertEqual(record["summary"]["not_a_verdict"], 1)
+        self.assertEqual(record["summary"]["resolved_rate_over_verdicts"], 0.0)
+
+    def test_an_inconclusive_run_is_reported_apart_from_the_failures(self):
+        record = RECORDER_MODULE.build_record(
+            _solve([{"instance_id": "a__b-1", "repo": "a/b", "patch_bytes": 10}]),
+            _eval([{"instance_id": "a__b-1", "outcome": "evaluation_inconclusive", "resolved": False}]),
+            ROOT / "benchmarks" / "swe-bench" / "verified-50.json",
+        )
+        self.assertEqual(record["summary"]["failed"], 0)
+        self.assertEqual(record["summary"]["not_a_verdict"], 1)
+
+    def test_a_real_failure_is_still_a_failure(self):
+        record = RECORDER_MODULE.build_record(
+            _solve([{"instance_id": "a__b-1", "repo": "a/b", "patch_bytes": 10}]),
+            _eval([{"instance_id": "a__b-1", "outcome": "RESOLVED_NO", "resolved": False}]),
+            ROOT / "benchmarks" / "swe-bench" / "verified-50.json",
+        )
         self.assertEqual(record["summary"]["failed"], 1)
+        self.assertEqual(record["summary"]["not_a_verdict"], 0)
 
     def test_the_conditions_of_both_halves_are_recorded(self):
         record = RECORDER_MODULE.build_record(

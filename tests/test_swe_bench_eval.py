@@ -143,6 +143,146 @@ class SweBenchEvalTests(unittest.TestCase):
         self.assertEqual(receipt["summary"]["passed"], 0)
         self.assertEqual(receipt["tasks"][0]["outcome"], "RESOLVED_NO")
 
+    def test_a_patch_that_applied_but_gave_no_test_result_is_inconclusive(self):
+        # The upstream grader sets "patch_successfully_applied" only after it
+        # has parsed the test output, so a patch that applied cleanly but made
+        # the tests error out comes back with the field false.  The runner's
+        # own log says what happened, and that is what the adapter reads.
+        import os
+        import tempfile
+        stub = _install_stub_upstream(resolved=False)
+        stub["swebench.harness.run_evaluation"].run_instance = (
+            lambda spec, pred, client, run_id, timeout=None: (
+                pred["instance_id"],
+                {pred["instance_id"]: {"tests_status": {}, "patch_successfully_applied": False}},
+            )
+        )
+        workdir = tempfile.mkdtemp()
+        previous = os.getcwd()
+        try:
+            os.chdir(workdir)
+            log = (
+                Path(workdir) / "logs" / "run_evaluation" / "t" / "northstar" / "x__y-1"
+            )
+            log.mkdir(parents=True, exist_ok=True)
+            (log / "test_output.txt").write_text(
+                ">>>>> Applied Patch\n>>>>> Start Test Output\nboom\n"
+                ">>>>> End Test Output\n",
+                encoding="utf-8",
+            )
+            sample = {"tasks": [_task("x__y-1")]}
+            receipt = self.module.evaluate(
+                sample, {"x__y-1": "diff --git a b\n"}, run_id="t", timeout=1,
+            )
+        finally:
+            os.chdir(previous)
+            _remove_stub_upstream(stub)
+        self.assertEqual(receipt["tasks"][0]["outcome"], "evaluation_inconclusive")
+        self.assertEqual(receipt["tasks"][0]["patch_apply_marker"], "pass")
+        self.assertEqual(receipt["summary"]["passed"], 0)
+
+    def test_a_patch_that_failed_to_apply_is_reported_as_such(self):
+        import os
+        import tempfile
+        stub = _install_stub_upstream(resolved=False)
+        stub["swebench.harness.run_evaluation"].run_instance = (
+            lambda spec, pred, client, run_id, timeout=None: (
+                pred["instance_id"],
+                {pred["instance_id"]: {"tests_status": {}, "patch_successfully_applied": False}},
+            )
+        )
+        workdir = tempfile.mkdtemp()
+        previous = os.getcwd()
+        try:
+            os.chdir(workdir)
+            log = (
+                Path(workdir) / "logs" / "run_evaluation" / "t" / "northstar" / "x__y-1"
+            )
+            log.mkdir(parents=True, exist_ok=True)
+            (log / "test_output.txt").write_text(
+                ">>>>> Patch Apply Failed\n", encoding="utf-8",
+            )
+            sample = {"tasks": [_task("x__y-1")]}
+            receipt = self.module.evaluate(
+                sample, {"x__y-1": "diff --git a b\n"}, run_id="t", timeout=1,
+            )
+        finally:
+            os.chdir(previous)
+            _remove_stub_upstream(stub)
+        self.assertEqual(receipt["tasks"][0]["outcome"], "patch_not_applied")
+        self.assertEqual(receipt["tasks"][0]["patch_apply_marker"], "fail")
+
+    def test_a_patch_that_applied_but_gave_no_test_result_is_inconclusive(self):
+        # The upstream grader sets "patch_successfully_applied" only after it
+        # has parsed the test output, so a patch that applied cleanly but made
+        # the tests error out comes back with the field false.  The runner's
+        # own log says what happened, and that is what the adapter reads.
+        import os
+        import tempfile
+        stub = _install_stub_upstream(resolved=False)
+        import sys as _sys
+        _sys.modules["swebench.harness.run_evaluation"].run_instance = (
+            lambda spec, pred, client, run_id, timeout=None: (
+                pred["instance_id"],
+                {pred["instance_id"]: {"tests_status": {}, "patch_successfully_applied": False}},
+            )
+        )
+        workdir = tempfile.mkdtemp()
+        previous = os.getcwd()
+        try:
+            os.chdir(workdir)
+            log = (
+                Path(workdir) / "logs" / "run_evaluation" / "t" / "northstar" / "x__y-1"
+            )
+            log.mkdir(parents=True, exist_ok=True)
+            (log / "test_output.txt").write_text(
+                ">>>>> Applied Patch\n>>>>> Start Test Output\nboom\n"
+                ">>>>> End Test Output\n",
+                encoding="utf-8",
+            )
+            sample = {"tasks": [_task("x__y-1")]}
+            receipt = self.module.evaluate(
+                sample, {"x__y-1": "diff --git a b\n"}, run_id="t", timeout=1,
+            )
+        finally:
+            os.chdir(previous)
+            _remove_stub_upstream(stub)
+        self.assertEqual(receipt["tasks"][0]["outcome"], "evaluation_inconclusive")
+        self.assertEqual(receipt["tasks"][0]["patch_apply_marker"], "pass")
+        self.assertEqual(receipt["summary"]["passed"], 0)
+
+    def test_a_patch_that_failed_to_apply_is_reported_as_such(self):
+        import os
+        import tempfile
+        stub = _install_stub_upstream(resolved=False)
+        import sys as _sys
+        _sys.modules["swebench.harness.run_evaluation"].run_instance = (
+            lambda spec, pred, client, run_id, timeout=None: (
+                pred["instance_id"],
+                {pred["instance_id"]: {"tests_status": {}, "patch_successfully_applied": False}},
+            )
+        )
+        workdir = tempfile.mkdtemp()
+        previous = os.getcwd()
+        try:
+            os.chdir(workdir)
+            log = (
+                Path(workdir) / "logs" / "run_evaluation" / "t" / "northstar" / "x__y-1"
+            )
+            log.mkdir(parents=True, exist_ok=True)
+            (log / "test_output.txt").write_text(
+                ">>>>> Patch Apply Failed\n", encoding="utf-8",
+            )
+            sample = {"tasks": [_task("x__y-1")]}
+            receipt = self.module.evaluate(
+                sample, {"x__y-1": "diff --git a b\n"}, run_id="t", timeout=1,
+            )
+        finally:
+            os.chdir(previous)
+            _remove_stub_upstream(stub)
+        self.assertEqual(receipt["tasks"][0]["outcome"], "patch_not_applied")
+        self.assertEqual(receipt["tasks"][0]["patch_apply_marker"], "fail")
+
     def test_the_verdicts_are_the_upstream_verdicts(self):
         self.assertEqual(self.module.RESOLVED_FULL, "RESOLVED_FULL")
         self.assertEqual(self.module.RESOLVED_PARTIAL, "RESOLVED_PARTIAL")
