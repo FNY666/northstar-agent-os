@@ -218,6 +218,25 @@ class CensusScopeScaleTests(unittest.TestCase):
     difference between "a second suite loads this" and "a second suite
     loads this", but a reader of this docstring can: the twenty rows
     listed below are the twenty that moved.
+
+    **AMENDED 2026-11-26 (the `ai_*` import-guard family slice).**
+    The new `components/northstar-agent-runtime/tests/
+    test_ai_import_guard_family.py` loads ONE HUNDRED AND SEVENTY
+    `ai_*` modules, so every one of them now has TWO referencing
+    suites -- its own, plus the family suite.  The count is **326**.
+
+    That the delta is EXACTLY 162 and not 170 is the check that
+    matters, and it has the same cause as the twenty above: EIGHT of
+    the family's modules -- the `ai_*_auditing` ones -- already had a
+    second suite, from the previous slice, so they were already
+    counted.  170 - 8 = 162.
+
+    The family modules are pinned BY NAME below, for the same reason
+    the twenty are: a count that moves is a count that was measured,
+    but only if the reader can see WHICH rows moved.  And the family
+    suite's own premise test asserts that every one of the 170 still
+    carries the template, so a module that leaves the family is caught
+    rather than silently carried by the cases.
     """
 
     def test_the_multi_suite_modules_are_counted(self) -> None:
@@ -229,7 +248,7 @@ class CensusScopeScaleTests(unittest.TestCase):
             if len(MODULE.referencing_suites(runtime, stem)) > 1
         ]
         self.assertEqual(
-            len(multi), 164,
+            len(multi), 326,
             "the number of modules whose scope the single-suite pairing "
             "understated",
         )
@@ -275,6 +294,7 @@ class CensusScopeScaleTests(unittest.TestCase):
             suites,
             ["test_ai_transparency_auditing",
              "test_ai_auditing_family_surface",
+             "test_ai_import_guard_family",
              "test_ai_transparency_auditing_surface"],
             "ai_transparency_auditing is not multi-suite",
         )
@@ -306,12 +326,243 @@ class CensusScopeScaleTests(unittest.TestCase):
                 suites = MODULE.referencing_suites(RUNTIME, stem)
                 self.assertIn(f"test_{stem}", suites)
                 self.assertIn("test_ai_auditing_family_surface", suites)
-                # `ai_transparency_auditing` carries a THIRD suite: the
-                # single-module surface suite of the slice that found the
-                # family in the first place.
-                expected = 3 if stem == "ai_transparency_auditing" else 2
+                # `ai_transparency_auditing` carries a FOURTH suite:
+                # the single-module surface suite of the slice that
+                # found the family in the first place.
+                #
+                # And every one of the eight now carries a THIRD: the
+                # `ai_*` import-guard family suite, because all eight
+                # are members of that family too (measured 2026-11-26).
+                expected = {
+                    "ai_transparency_auditing": 4,
+                }.get(stem, 3)
                 self.assertEqual(
                     len(suites), expected, f"{stem} is not multi-suite"
+                )
+
+    def test_the_ai_import_guard_family_modules_are_multi_suite(self):
+        """The 170 `ai_*` import-guard modules, pinned BY NAME.
+
+        MEASURED 2026-11-26: `tests/test_ai_import_guard_family.py`
+        loads all 170 of them, so 162 of them became multi-suite --
+        the count moved 164 -> 326.  The eight `ai_*_auditing` modules
+        already had a second suite, so they were already counted.
+
+        Pinned by name because the count alone cannot say WHICH rows
+        moved, and a family suite that silently stops loading one of
+        them would be absorbed into the count.
+
+        The list is the family's OWN membership: the modules whose
+        `stdlib_only()` structurally matches the template -- it reads
+        `__file__`, it has an `ast.Import` branch and an
+        `ast.ImportFrom` branch, and each branch has its own
+        `return False`.  A module that joins the family is expected to
+        be picked up; one that leaves it is expected to fail the
+        family's own premise test rather than this one.
+        """
+        family = (
+            "ai_accident",
+            "ai_accountability",
+            "ai_accountability_auditing",
+            "ai_accountability_incident",
+            "ai_accountability_mitigation",
+            "ai_accountability_monitoring",
+            "ai_accountability_remediation",
+            "ai_accountability_risk",
+            "ai_accountability_testing",
+            "ai_accountability_threat",
+            "ai_accountability_validation",
+            "ai_accountability_verification",
+            "ai_accountability_vulnerability",
+            "ai_adversarial",
+            "ai_assurance",
+            "ai_attack",
+            "ai_audit",
+            "ai_bias",
+            "ai_calibration",
+            "ai_charter",
+            "ai_compliance",
+            "ai_compliance_auditing",
+            "ai_compliance_incident",
+            "ai_compliance_mitigation",
+            "ai_compliance_monitoring",
+            "ai_compliance_remediation",
+            "ai_compliance_risk",
+            "ai_compliance_testing",
+            "ai_compliance_threat",
+            "ai_compliance_validation",
+            "ai_compliance_verification",
+            "ai_compliance_vulnerability",
+            "ai_concept",
+            "ai_containment",
+            "ai_contestability_auditing",
+            "ai_contestability_incident",
+            "ai_contestability_mitigation",
+            "ai_contestability_monitoring",
+            "ai_contestability_remediation",
+            "ai_contestability_risk",
+            "ai_contestability_testing",
+            "ai_contestability_threat",
+            "ai_contestability_validation",
+            "ai_contestability_verification",
+            "ai_contestability_vulnerability",
+            "ai_defense",
+            "ai_distillation",
+            "ai_distribution_shift",
+            "ai_ensemble",
+            "ai_ethics_auditing",
+            "ai_ethics_incident",
+            "ai_ethics_mitigation",
+            "ai_ethics_monitoring",
+            "ai_ethics_remediation",
+            "ai_ethics_risk",
+            "ai_ethics_testing",
+            "ai_ethics_threat",
+            "ai_ethics_validation",
+            "ai_ethics_verification",
+            "ai_ethics_vulnerability",
+            "ai_exploit",
+            "ai_failure",
+            "ai_fairness_auditing",
+            "ai_fairness_incident",
+            "ai_fairness_mitigation",
+            "ai_fairness_monitoring",
+            "ai_fairness_remediation",
+            "ai_fairness_risk",
+            "ai_fairness_testing",
+            "ai_fairness_threat",
+            "ai_fairness_validation",
+            "ai_fairness_verification",
+            "ai_fairness_vulnerability",
+            "ai_feature",
+            "ai_fuzzing",
+            "ai_governance",
+            "ai_harm",
+            "ai_incident",
+            "ai_isolation",
+            "ai_liability",
+            "ai_mitigation",
+            "ai_monitoring",
+            "ai_ood_detection",
+            "ai_oversight",
+            "ai_oversight_auditing",
+            "ai_oversight_incident",
+            "ai_oversight_mitigation",
+            "ai_oversight_monitoring",
+            "ai_oversight_remediation",
+            "ai_oversight_risk",
+            "ai_oversight_testing",
+            "ai_oversight_threat",
+            "ai_oversight_validation",
+            "ai_oversight_verification",
+            "ai_oversight_vulnerability",
+            "ai_pentesting",
+            "ai_policy",
+            "ai_prevention",
+            "ai_privacy",
+            "ai_probing",
+            "ai_pruning",
+            "ai_quarantine",
+            "ai_recourse",
+            "ai_recovery",
+            "ai_redress",
+            "ai_redteaming",
+            "ai_regulation",
+            "ai_remediation",
+            "ai_resilience",
+            "ai_risk",
+            "ai_robustness",
+            "ai_robustness_auditing",
+            "ai_robustness_incident",
+            "ai_robustness_mitigation",
+            "ai_robustness_monitoring",
+            "ai_robustness_remediation",
+            "ai_robustness_risk",
+            "ai_robustness_testing",
+            "ai_robustness_threat",
+            "ai_robustness_validation",
+            "ai_robustness_verification",
+            "ai_robustness_vulnerability",
+            "ai_safety",
+            "ai_safety_auditing",
+            "ai_safety_incident",
+            "ai_safety_mitigation",
+            "ai_safety_monitoring",
+            "ai_safety_remediation",
+            "ai_safety_risk",
+            "ai_safety_testing",
+            "ai_safety_threat",
+            "ai_safety_validation",
+            "ai_safety_verification",
+            "ai_safety_vulnerability",
+            "ai_saliency",
+            "ai_sandbox",
+            "ai_security",
+            "ai_stress_testing",
+            "ai_surveillance",
+            "ai_testing",
+            "ai_threat",
+            "ai_throttling",
+            "ai_traceability_auditing",
+            "ai_traceability_incident",
+            "ai_traceability_mitigation",
+            "ai_traceability_monitoring",
+            "ai_traceability_remediation",
+            "ai_traceability_risk",
+            "ai_traceability_testing",
+            "ai_traceability_threat",
+            "ai_traceability_validation",
+            "ai_traceability_verification",
+            "ai_traceability_vulnerability",
+            "ai_transparency",
+            "ai_transparency_auditing",
+            "ai_transparency_incident",
+            "ai_transparency_mitigation",
+            "ai_transparency_monitoring",
+            "ai_transparency_remediation",
+            "ai_transparency_risk",
+            "ai_transparency_testing",
+            "ai_transparency_threat",
+            "ai_transparency_validation",
+            "ai_transparency_verification",
+            "ai_transparency_vulnerability",
+            "ai_uncertainty",
+            "ai_validation",
+            "ai_verification",
+            "ai_visualization",
+            "ai_vulnerability",
+        )
+        self.assertEqual(len(family), 170)
+        for stem in family:
+            with self.subTest(module=stem):
+                suites = MODULE.referencing_suites(RUNTIME, stem)
+                self.assertIn(f"test_{stem}", suites)
+                self.assertIn("test_ai_import_guard_family", suites)
+                # A module that ALSO belongs to another family suite
+                # carries more than two.  The `ai_*_auditing` eight
+                # carry the auditing family suite as well, and
+                # `ai_transparency_auditing` carries a fourth.
+                # The eight that the AUDITING family suite loads carry
+                # a third suite -- but only the ones that suite really
+                # loads.  `ai_oversight_auditing` and
+                # `ai_robustness_auditing` are members of THIS family
+                # only, so they carry two.
+                auditing = (
+                    "ai_accountability_auditing",
+                    "ai_compliance_auditing",
+                    "ai_contestability_auditing",
+                    "ai_ethics_auditing",
+                    "ai_fairness_auditing",
+                    "ai_safety_auditing",
+                    "ai_traceability_auditing",
+                    "ai_transparency_auditing",
+                )
+                expected = 3 if stem in auditing else 2
+                if stem == "ai_transparency_auditing":
+                    expected = 4
+                self.assertEqual(
+                    len(suites), expected,
+                    f"{stem} is not multi-suite",
                 )
 
     def test_agents_is_exercised_by_eleven_suites(self) -> None:

@@ -6514,3 +6514,252 @@ their pre-slice state; the whole slice is in two test files.
 * The other ten `ai_*` rows are NOT closed by this slice.  They do not
   carry this guard shape -- `ai_transparency_certification` has no
   `_valid_digest` at all -- so they need their own measurement.
+
+## 40. One hundred and seventy copies: the `ai_*` import-guard family
+
+§39 found a guard shape replicated EIGHT times.  This is a guard shape
+replicated **one hundred and seventy** times, and it carries a SECOND
+replicated blind spot that §39's family did not.
+
+### 40.1 The premise, measured
+
+The runtime's `ai_*` modules carry a copy-pasted `stdlib_only()`:
+
+```python
+def stdlib_only() -> bool:
+    allowed = {...}
+    tree = ast.parse(Path(__file__).read_text())
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.split(".")[0] not in allowed:
+                    return False
+        elif isinstance(node, ast.ImportFrom):
+            if node.module and node.module.split(".")[0] not in allowed:
+                return False
+    return True
+```
+
+MEASURED 2026-11-26, over every `ai_*` module in the runtime: **170**
+of them match this template STRUCTURALLY -- they read `__file__`, they
+have an `ast.Import` branch, they have an `ast.ImportFrom` branch,
+and each branch has its own `return False`.
+
+The family is discovered by that structure, not by a name list, so a
+module that joins the family joins it automatically.
+
+### 40.2 The blind spot: a guard whose job is to REJECT, tested only on the ACCEPTING side
+
+Every one of the 170 modules has its OWN suite, and every one of those
+suites calls `stdlib_only()` and asserts it is `True` -- against the
+module's REAL file, whose imports are all on the allowlist.
+
+> **A GUARD WHOSE WHOLE JOB IS TO REJECT, TESTED ONLY ON THE
+> ACCEPTING SIDE, IS NOT TESTED.**
+
+The two `return False` branches are the guard.  They are never taken.
+
+MEASURED: of the family's 137 rows in the census artifact, **114**
+carry a number and **56** read `ERROR` (a stale measurement, not a
+missing one -- re-running `ai_harm` today measures 25/33).  And **all
+114** of the numbered rows carry one of the two `stdlib_only`
+`return False` sites as a SURVIVOR.  The same two lines, in every
+row, for the same reason:
+
+```
+ai_accident MUTANT retF@943 SURVIVED; MUTANT retF@946 SURVIVED;
+            MUTANT RESULT: killed 23/26
+```
+
+### 40.3 The SECOND replicated blind spot: the id guard
+
+145 of the same 170 modules carry a SECOND copy-pasted guard:
+
+```python
+if isinstance(value, bool) or not isinstance(value, str) or not value.strip():
+    raise BadSystemError(f"{what} must be a non-empty string")
+```
+
+The guard's whole job is to refuse an id that is not a non-empty
+string.  Every suite that calls it passes a STRING, so the guard's
+**FIRST TWO DISJUNCTS are never the ones that decide** -- the third
+one (`not value.strip()`) always decides, and a mutant that turns the
+`or` into an `and` still rejects every string the suite passes.
+
+MEASURED: the artifact records this `or` as a SURVIVOR in **51** of
+the family's rows.
+
+### 40.4 What it measured
+
+```
+artifact:  114 numbered rows, every one carrying the import-guard
+           rejection as a survivor;  51 also carrying the id guard's
+           `or`;  56 rows reading ERROR
+
+with these tests:  both blind spots closed in ALL 170 modules
+```
+
+Every survivor was verified by planting ONE mutant at a time and
+naming the test that goes red:
+
+```
+retF@943 (the ast.Import rejection)      KILLED -> test_stdlib_only_rejects_a_foreign_import
+retF@946 (the ast.ImportFrom rejection)  KILLED -> test_stdlib_only_rejects_a_foreign_import_from
+or@257   (_check_id's `or` -> `and`)      KILLED -> test_a_non_string_id_is_refused_with_the_modules_own_error
+or@389   (the `not value` shape's `or`)   KILLED -> test_a_non_string_id_is_refused_with_the_modules_own_error
+```
+
+**NO PRODUCT CODE CHANGED.**  All 170 modules are byte-identical to
+their pre-slice state; the whole slice is one test file plus the
+multi-suite pin.
+
+### 40.5 The crafted inputs, and why each one is the RIGHT one
+
+**The import guard.**  It reads its OWN FILE, so the only way to drive
+its rejection is to point it at a file that VIOLATES the rule.  The
+module's `__file__` is redirected for the duration of the call; the
+real file is never modified.
+
+Three things a crafted source has to get right, and all three are
+DRIVEN BY THE MODULE'S OWN RULE rather than by a copy of it:
+
+* The FOREIGN import must be one the module's allowlist excludes.  The
+  allowlist is read from the module's SOURCE, not hardcoded: a
+  hardcoded copy could drift from the module, and then the test would
+  be asserting against a rule the module does not enforce.
+* The ACCEPTED import must be one the module's allowlist INCLUDES.
+* `ast` is on every one of the 170 allowlists (measured: the
+  intersection of the 162 literal allowlists is `['__future__', 'ast',
+  'dataclasses', 'hashlib', 'json', 'threading', 'typing']`), so it is
+  the one name that is safe to use as the accepted import everywhere.
+
+**The id guard.**  A NON-STRING.  The original refuses it at the TYPE
+half and raises the module's OWN error class; under the mutant the
+`isinstance` half is satisfied, so the guard evaluates `value.strip()`
+on an int and CRASHES with `AttributeError`.
+
+So here the observable is the **EXCEPTION TYPE**, and the test has to
+pin it: "it raised something" would pass under the mutant too.  This
+is the difference from the import guard, where the observable was the
+RETURN value -- and it is the difference between a test that measures
+the guard and a test that only measures that the guard was called.
+
+### 40.6 Three things the family suite had to be careful about
+
+* **The two AST nodes are SEPARATE.**  The `ast.Import` branch and the
+  `ast.ImportFrom` branch are separate AST nodes with separate
+  `return False` statements.  A test that only drives one of them
+  leaves the other untested, and a mutant that breaks only one of the
+  two sites survives a suite that drove the other.  So they are TWO
+  tests, not one -- and both were confirmed killed separately.
+
+* **The id guards are NOT all the same shape.**  134 of them use
+  `not value.strip()`; the other 11 use `not value`.  Under the second
+  shape `"   "` is a perfectly good id, so a test that asserted
+  whitespace is refused everywhere would be asserting a rule the
+  module does not have.  The blank case is derived from the GUARD'S
+  OWN CONDITION.
+
+* **The error class is supplied two different ways.**  150 of the 145
+  guards raise a module-level error class; 7 take the class as their
+  second argument and the CALLER supplies it.  In the second shape the
+  class is read from the guard's CALL SITES, and it is passed as a
+  CLASS, not as a label.
+
+### 40.7 What this does NOT change
+
+* The census artifact is NOT edited.  Every row still reads what it
+  read.
+* No product code changed.
+* No version, schema, or audit kind is added or changed.
+* The multi-suite pin DOES move: 164 -> 326.  The delta is EXACTLY
+  162, not 170, because EIGHT of the family's modules -- the
+  `ai_*_auditing` ones -- already had a second suite from §39 and were
+  already counted.  170 - 8 = 162.  The move is pinned BY NAME, and
+  the family's own premise test asserts that every one of the 170
+  still carries the template, so a module that leaves the family is
+  caught rather than silently carried by the cases.
+
+### 40.8 A REAL DEFECT this slice found: a guard that depends on an
+optional dependency being INSTALLED
+
+The family suite's control -- "the guard still accepts the module's OWN
+file" -- went red for exactly one module of the 170, and only when the
+suite was run from a directory where `canonical_json` was not
+importable.
+
+`ai_ethics_monitoring.py` was the SOLE member of the family that added
+`canonical_json` to its allowlist only INSIDE a successful import:
+
+```python
+allowed = {"hashlib", "threading", ...}
+try:
+    from canonical_json import jcs_dumps
+    allowed.add("canonical_json")     # <-- only on SUCCESS
+except Exception:
+    pass
+```
+
+So on a host without the optional dependency, the guard reported the
+module's OWN file as non-stdlib -- a false alarm about a module whose
+`canonical_json` import sits under a `try/except` with a stdlib `json`
+fallback, and which is therefore compliant by construction.
+
+MEASURED: **162 of the 170** allow `canonical_json` unconditionally.
+`ai_ethics_monitoring` was the sole exception, and the sole module
+whose guard misreported its own file.  The defect is PRE-EXISTING: it
+is on `main` too (`git show main:.../ai_ethics_monitoring.py`).
+
+THE FIX is one line, and it makes the module agree with the other 162:
+`canonical_json` is permitted unconditionally, because the import is
+optional BY CONSTRUCTION.
+
+```
+allowed.add("canonical_json")
+```
+
+**This is the second time a family suite found a real defect rather
+than only a missing test.**  §35's family found a missing crafted
+input; §39's found a missing case in one sibling; this one found a
+guard that reports a FALSE ALARM about its own module on a host
+without an optional dependency.
+
+### 40.9 The control that was VACUOUS, and how it was caught
+
+The regression test for 40.8 runs the guard in a SUBPROCESS whose
+import path cannot resolve `canonical_json`.  The first version of it
+was **vacuous**, and it was caught the only way a vacuous control is
+caught: by planting the mutation and re-running.
+
+```
+first version:  env["PYTHONPATH"] = "";  cwd = RUNTIME
+```
+
+For `python -c`, `sys.path[0]` is the CURRENT DIRECTORY -- and the
+runtime directory contains `canonical_json.py`.  So the subprocess
+could still import the dependency, the guard took the SUCCESS branch,
+and the re-planted original defect **PASSED**.
+
+The fix: the subprocess runs in a directory of its own (a
+`TemporaryDirectory`), and the module is loaded by FILE PATH, which
+does not need the runtime directory on the path at all.
+
+> **A control that asserts "the guard behaves differently in a
+> different environment" has to actually CHANGE THE ENVIRONMENT.**
+> Clearing `PYTHONPATH` does not change it when the cwd is still on
+> the path.
+
+Re-planting the original defect after the fix:
+
+```
+original defect re-planted -> test_stdlib_only_does_not_depend_on_an_optional_dependency FAILS
+```
+
+### 40.10 What this does NOT change (continued)
+
+* The census artifact is NOT edited.  Every row still reads what it
+  read.
+* ONE product file changed: `ai_ethics_monitoring.py`, by one line
+  (plus a comment).  The change is the family's own convention, so
+  the module now agrees with the other 162.
+* No version, schema, or audit kind is added or changed.

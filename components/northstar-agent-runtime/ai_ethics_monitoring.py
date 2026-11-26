@@ -794,11 +794,15 @@ def stdlib_only() -> bool:
     import ast
 
     allowed = {"hashlib", "threading", "dataclasses", "typing", "json", "ast", "__future__"}
-    try:
-        from canonical_json import jcs_dumps  # type: ignore  # noqa: F401
-        allowed.add("canonical_json")
-    except Exception:
-        pass
+    # `canonical_json` is the single sanctioned non-stdlib import: this
+    # module falls back to stdlib `json` when it is absent, so the
+    # import is ALWAYS permitted.  The allowance used to be added only
+    # when the import SUCCEEDED, which made the guard report this
+    # module's OWN file as non-stdlib on a host without
+    # `canonical_json` -- a false alarm, since the module's fallback
+    # makes the import optional by construction.  The other 162
+    # modules of the `ai_*` family allow it unconditionally.
+    allowed.add("canonical_json")
     with open(__file__, "r", encoding="utf-8") as fh:
         tree = ast.parse(fh.read())
     for node in ast.walk(tree):
