@@ -1,0 +1,215 @@
+{
+  "conditions": {
+    "base_url": "https://www.inroi.shop/v1",
+    "harness": "",
+    "limits": {
+      "max_output_tokens": 8192,
+      "max_tool_calls": 120,
+      "max_turns": 40,
+      "wall_time_seconds": 1800
+    },
+    "model": "gpt-6-astra",
+    "provider": "openai",
+    "sample": {
+      "path": "benchmarks/swe-bench/verified-50.json",
+      "sample_sha256": "ae0513fc5949b619d70978de347b64dc57185d90c969b93f8755a14cc80bfaed",
+      "task_count": 1
+    },
+    "sample_sha256": "ae0513fc5949b619d70978de347b64dc57185d90c969b93f8755a14cc80bfaed",
+    "sandbox": {
+      "backend": "process",
+      "capdrop": "off",
+      "landlock": "off",
+      "memory": false,
+      "network": "disabled",
+      "plugins": false,
+      "policy_file": "none",
+      "seccomp": "off",
+      "skills": false,
+      "workspace_agents": false
+    },
+    "temperature": 0.0
+  },
+  "measurement": "swe_bench_verified_50",
+  "real_model_evaluated": true,
+  "schema": "northstar.swe-bench-measurement.v1",
+  "summary": {
+    "checked": 21,
+    "failed": 6,
+    "not_a_verdict": 4,
+    "resolved_full": 11,
+    "resolved_partial": 0,
+    "resolved_rate": 0.5238,
+    "resolved_rate_over_verdicts": 0.6471
+  },
+  "tasks": [
+    {
+      "instance_id": "astropy__astropy-13033",
+      "outcome": "RESOLVED_NO",
+      "patch_bytes": 1339,
+      "patch_sha256": "1da480846b5ad1c0f1edc0690c99c50d5a3ffe7e5a63b854a00d23b467006c87",
+      "repo": "astropy/astropy",
+      "resolved": false
+    },
+    {
+      "instance_id": "astropy__astropy-13398",
+      "outcome": "RESOLVED_NO",
+      "patch_bytes": 5506,
+      "patch_sha256": "7dcaedffa641ff999c39d329c92e2855e8412f70fefdbd1f683707a9785ea0fd",
+      "repo": "astropy/astropy",
+      "resolved": false
+    },
+    {
+      "instance_id": "django__django-10554",
+      "outcome": "evaluation_inconclusive",
+      "patch_bytes": 668,
+      "patch_sha256": "f458ba14445426f34e31663d55e588d9737273549aed5d0bc15d69bb118af425",
+      "repo": "django/django",
+      "resolved": false
+    },
+    {
+      "instance_id": "django__django-10914",
+      "outcome": "RESOLVED_FULL",
+      "patch_bytes": 3479,
+      "patch_sha256": "1df168c306f4a17f0bcd2f738a57992a45a327e7d741e798a720d0f4dec40028",
+      "repo": "django/django",
+      "resolved": true
+    },
+    {
+      "instance_id": "matplotlib__matplotlib-14623",
+      "outcome": "RESOLVED_FULL",
+      "patch_bytes": 1377,
+      "patch_sha256": "7ec28375012c8f5419a09d91ea6b23443441db01ee75a24ff838171e067df777",
+      "repo": "matplotlib/matplotlib",
+      "resolved": true
+    },
+    {
+      "instance_id": "matplotlib__matplotlib-20488",
+      "outcome": "RESOLVED_FULL",
+      "patch_bytes": 712,
+      "patch_sha256": "aa0b1841631bc9bbb113871f8e7c813aaa5a476dc3226c996438081b3f749242",
+      "repo": "matplotlib/matplotlib",
+      "resolved": true
+    },
+    {
+      "instance_id": "matplotlib__matplotlib-20676",
+      "outcome": "RESOLVED_FULL",
+      "patch_bytes": 862,
+      "patch_sha256": "b7e1cc7257c425141137c857c1374bf3d969431ee405769790294e8737c37079",
+      "repo": "matplotlib/matplotlib",
+      "resolved": true
+    },
+    {
+      "instance_id": "psf__requests-1766",
+      "outcome": "no_patch_delivered",
+      "patch_bytes": 0,
+      "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "repo": "psf/requests",
+      "resolved": false
+    },
+    {
+      "instance_id": "psf__requests-1921",
+      "outcome": "RESOLVED_NO",
+      "patch_bytes": 559,
+      "patch_sha256": "f8c5835d2a7a547654922619f336e8d7edc7202727b81f4de7331098bd3c15cd",
+      "repo": "psf/requests",
+      "resolved": false
+    },
+    {
+      "instance_id": "pydata__xarray-3151",
+      "outcome": "evaluation_infrastructure_failure",
+      "patch_bytes": 661,
+      "patch_sha256": "d35604d1b16151651e99a451a211403999ec9db7ea46e835df9e8ab41393d543",
+      "repo": "pydata/xarray",
+      "resolved": false
+    },
+    {
+      "instance_id": "pydata__xarray-3305",
+      "outcome": "evaluation_infrastructure_failure",
+      "patch_bytes": 1543,
+      "patch_sha256": "fbf927e6ea1e4311c8ff27def97857a0788fe1638ca3758b24a10d7d235d5ab4",
+      "repo": "pydata/xarray",
+      "resolved": false
+    },
+    {
+      "instance_id": "pylint-dev__pylint-4661",
+      "outcome": "RESOLVED_NO",
+      "patch_bytes": 2450,
+      "patch_sha256": "307636088cda7fe1fcf4ea61cf5f6aa716b05906f21f61507911202f8fa69089",
+      "repo": "pylint-dev/pylint",
+      "resolved": false
+    },
+    {
+      "instance_id": "pylint-dev__pylint-4970",
+      "outcome": "RESOLVED_NO",
+      "patch_bytes": 604,
+      "patch_sha256": "11ae82ba749e3de2430484a335b26682cef02de6bbf458f162d985b7d3b72330",
+      "repo": "pylint-dev/pylint",
+      "resolved": false
+    },
+    {
+      "instance_id": "pytest-dev__pytest-10356",
+      "outcome": "RESOLVED_NO",
+      "patch_bytes": 1893,
+      "patch_sha256": "7aab8f5476e7ca62143e0ae494e78d75bec98b69a042c90fe24535a110868dcf",
+      "repo": "pytest-dev/pytest",
+      "resolved": false
+    },
+    {
+      "instance_id": "pytest-dev__pytest-5262",
+      "outcome": "RESOLVED_FULL",
+      "patch_bytes": 467,
+      "patch_sha256": "466bfffe096c1596263e7e927c1d523e4d536dac49d62b213aabef50e2ae5922",
+      "repo": "pytest-dev/pytest",
+      "resolved": true
+    },
+    {
+      "instance_id": "scikit-learn__scikit-learn-10908",
+      "outcome": "RESOLVED_FULL",
+      "patch_bytes": 644,
+      "patch_sha256": "59a71ec452c1aa3ac66e4a3cf749584884ec28371b8ec9f9336deaeef71d194d",
+      "repo": "scikit-learn/scikit-learn",
+      "resolved": true
+    },
+    {
+      "instance_id": "scikit-learn__scikit-learn-11310",
+      "outcome": "RESOLVED_FULL",
+      "patch_bytes": 2033,
+      "patch_sha256": "d34fe5658ac9ccce313e9c0b06528b626d55c4dca342c0af188bccf9a05167e6",
+      "repo": "scikit-learn/scikit-learn",
+      "resolved": true
+    },
+    {
+      "instance_id": "sphinx-doc__sphinx-10449",
+      "outcome": "RESOLVED_FULL",
+      "patch_bytes": 805,
+      "patch_sha256": "679321c381e3faa5e8c9064fba64867c71ba855fee237e3187f810617bbcf090",
+      "repo": "sphinx-doc/sphinx",
+      "resolved": true
+    },
+    {
+      "instance_id": "sphinx-doc__sphinx-10466",
+      "outcome": "RESOLVED_FULL",
+      "patch_bytes": 548,
+      "patch_sha256": "9206620f44167427931b0ef56e5dbca5a7ffd865afb19c42d0b88216923cb871",
+      "repo": "sphinx-doc/sphinx",
+      "resolved": true
+    },
+    {
+      "instance_id": "sympy__sympy-12419",
+      "outcome": "RESOLVED_FULL",
+      "patch_bytes": 594,
+      "patch_sha256": "66a83a8170df57f752491734e099ae12b3f570488f10583836c95354adf00c0b",
+      "repo": "sympy/sympy",
+      "resolved": true
+    },
+    {
+      "instance_id": "sympy__sympy-12481",
+      "outcome": "RESOLVED_FULL",
+      "patch_bytes": 1220,
+      "patch_sha256": "704e4047ed8e91749e9e336e12a1142c5f1f5a551b8f240fa5a6c0fa16776c05",
+      "repo": "sympy/sympy",
+      "resolved": true
+    }
+  ]
+}
