@@ -22,6 +22,9 @@ from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from swebench_baseline import load_baseline, rejudge  # noqa: E402
 SAMPLE = REPO_ROOT / "benchmarks" / "swe-bench" / "verified-50.json"
 DIGESTS = REPO_ROOT / "benchmarks" / "swe-bench" / "verified-50.digests.json"
 
@@ -198,6 +201,7 @@ def evaluate(
     run_id: str,
     timeout: int,
     only: list[str] | None = None,
+    baseline_entries: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Evaluate every task that has a patch and return a receipt."""
     from swebench.harness.grading import get_resolution_status
@@ -213,6 +217,7 @@ def evaluate(
         wanted = set(only)
         tasks = [t for t in tasks if t["instance_id"] in wanted]
 
+    baseline = baseline_entries or {}
     rows: list[dict[str, Any]] = []
     dataset = {t["instance_id"]: _upstream_instance(t) for t in tasks}
     for task in tasks:
@@ -297,7 +302,16 @@ def evaluate(
                 # detail.  The upstream grader still knows how to judge the
                 # report it built, so let it speak.
                 detail = entry
-            status = get_resolution_status(detail)
+            baseline_entry = baseline.get(instance_id)
+            if baseline_entry is not None:
+                # A pass-to-pass test that already failed on the untouched
+                # checkout says something about the environment, not about
+                # the patch.  Take it out of the verdict and record it.
+                verdict = rejudge(detail, baseline_entry)
+                status = verdict["status"]
+                row["excluded_p2p"] = verdict["excluded_p2p"]
+            else:
+                status = get_resolution_status(detail)
             row["outcome"] = status
             row["resolved"] = status == RESOLVED_FULL
             row["fail_to_pass"] = list(detail.get(FAIL_TO_PASS, {}).get("success", []))
@@ -316,6 +330,11 @@ def evaluate(
             "passed": passed,
             "failed": len(rows) - passed,
             "failure_kinds": _kinds(rows),
+            "excluded_p2p": sorted({
+                name
+                for r in rows
+                for name in r.get("excluded_p2p", [])
+            }),
         },
         "tasks": rows,
     }
@@ -376,6 +395,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--task", action="append", help="limit to one instance; repeatable")
     parser.add_argument("--workdir", help="where the upstream harness writes its logs")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument(
+        "--baseline",
+        help="baseline report file: pass-to-pass tests that failed before "
+             "any patch was applied are left out of the verdict",
+    )
     args = parser.parse_args(argv)
 
     if not _upstream_available():
@@ -393,15 +417,20 @@ def main(argv: list[str] | None = None) -> int:
 
     sample = load_sample(Path(args.sample))
     patches = json.loads(Path(args.patches).read_text(encoding="utf-8"))
+    baseline_entries = {}
+    if args.baseline:
+        baseline_entries = load_baseline(args.baseline)
     receipt = evaluate(
         sample, patches,
         run_id=args.run_id, timeout=args.timeout, only=args.task,
+        baseline_entries=baseline_entries,
     )
     receipt["conditions"] = {
         "sample": Path(args.sample).name,
         "sample_tasks": len(sample["tasks"]),
         "docker_platform": _docker_platform(),
         "harness": "upstream swebench 5.0.2",
+        "baseline": Path(args.baseline).name if args.baseline else None,
     }
     Path(args.output).write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
     if args.json:
