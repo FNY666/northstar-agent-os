@@ -112,6 +112,31 @@ def _pull_image(client: Any, image: str) -> None:
 APPLY_PATCH_PASS = ">>>>> Applied Patch"
 APPLY_PATCH_FAIL = ">>>>> Patch Apply Failed"
 
+# Signs that the run broke the machine rather than the code under test.
+# A segmentation fault in the test process is not something the model can
+# be blamed for, and the receipt has to say so.
+INFRA_MARKERS = (
+    "Segmentation fault",
+    "Bus error",
+    "Killed",
+    "out of memory",
+    "Cannot allocate memory",
+)
+
+
+def _infra_failure(log_root: Path, run_id: str, instance_id: str) -> str:
+    """A sign that the run itself broke, or an empty string."""
+    base = log_root / "logs" / "run_evaluation" / run_id / "northstar" / instance_id
+    for name in ("run_instance.log", "test_output.txt"):
+        try:
+            text = base.joinpath(name).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for marker in INFRA_MARKERS:
+            if marker in text:
+                return marker
+    return ""
+
 
 def _apply_marker(log_root: Path, run_id: str, instance_id: str) -> str:
     """What the upstream runner recorded about applying the patch.
@@ -235,7 +260,12 @@ def evaluate(
                 # The patch applied, but the grader could not read the test
                 # results, so it has no verdict.  That is not the same as the
                 # patch failing to apply, and it is not a pass either.
-                row["outcome"] = "evaluation_inconclusive"
+                infra = _infra_failure(Path.cwd(), run_id, instance_id)
+                row["infra_failure_reason"] = infra
+                row["outcome"] = (
+                    "evaluation_infrastructure_failure" if infra
+                    else "evaluation_inconclusive"
+                )
                 row["resolved"] = False
                 rows.append(row)
                 continue

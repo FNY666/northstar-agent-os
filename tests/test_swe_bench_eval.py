@@ -181,6 +181,45 @@ class SweBenchEvalTests(unittest.TestCase):
         self.assertEqual(receipt["tasks"][0]["patch_apply_marker"], "pass")
         self.assertEqual(receipt["summary"]["passed"], 0)
 
+    def test_a_run_that_broke_the_machine_is_an_infrastructure_failure(self):
+        # A segmentation fault in the test process is not something the model
+        # did, and it must not be reported as if it were.
+        import os
+        import tempfile
+        stub = _install_stub_upstream(resolved=False)
+        import sys as _sys
+        _sys.modules["swebench.harness.run_evaluation"].run_instance = (
+            lambda spec, pred, client, run_id, timeout=None: (
+                pred["instance_id"],
+                {pred["instance_id"]: {"tests_status": {}, "patch_successfully_applied": False}},
+            )
+        )
+        workdir = tempfile.mkdtemp()
+        previous = os.getcwd()
+        try:
+            os.chdir(workdir)
+            log = (
+                Path(workdir) / "logs" / "run_evaluation" / "t" / "northstar" / "x__y-1"
+            )
+            log.mkdir(parents=True, exist_ok=True)
+            (log / "test_output.txt").write_text(
+                ">>>>> Applied Patch\nSegmentation fault (core dumped)\n",
+                encoding="utf-8",
+            )
+            sample = {"tasks": [_task("x__y-1")]}
+            receipt = self.module.evaluate(
+                sample, {"x__y-1": "diff --git a b\n"}, run_id="t", timeout=1,
+            )
+        finally:
+            os.chdir(previous)
+            _remove_stub_upstream(stub)
+        self.assertEqual(
+            receipt["tasks"][0]["outcome"], "evaluation_infrastructure_failure"
+        )
+        self.assertEqual(
+            receipt["tasks"][0]["infra_failure_reason"], "Segmentation fault"
+        )
+
     def test_a_patch_that_failed_to_apply_is_reported_as_such(self):
         import os
         import tempfile
