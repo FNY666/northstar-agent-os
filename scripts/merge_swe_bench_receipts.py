@@ -41,16 +41,20 @@ def collect(out: Path) -> tuple[dict[str, Any], dict[str, Any], dict[str, str]]:
     # The conditions of the first receipt describe the whole run: every
     # instance in a batch is solved with the same model and the same
     # settings.  They are checked rather than assumed.
-    conditions = {}
+    conditions = None
     for path in sorted(out.glob("solve-*.json")):
         if path.name.endswith("-patches.json"):
             continue
         data = _load(path)
         found = data.get("conditions", {})
-        if not conditions:
+        if conditions is None:
             conditions = found
-        elif found != conditions:
+            continue
+        shared = set(conditions) & set(found)
+        if any(conditions[key] != found[key] for key in shared):
             gaps[path.stem[len("solve-"):]] = "conditions differ from the rest of the batch"
+    if conditions is None:
+        conditions = {}
     if solve:
         solve["conditions"] = conditions
         solve["real_model_evaluated"] = all(
@@ -58,6 +62,30 @@ def collect(out: Path) -> tuple[dict[str, Any], dict[str, Any], dict[str, str]]:
             for path in out.glob("solve-*.json")
             if not path.name.endswith("-patches.json")
         )
+    # The evaluation half has its own conditions -- the harness version, the
+    # docker platform, the sample it ran.  They describe the whole run, so
+    # they are checked across the receipts and carried over.
+    eval_conditions = None
+    for path in sorted(out.glob("eval-*.json")):
+        found = _load(path).get("conditions", {})
+        if eval_conditions is None:
+            eval_conditions = found
+            continue
+        shared = set(eval_conditions) & set(found)
+        if any(eval_conditions[key] != found[key] for key in shared):
+            gaps[path.stem[len("eval-"):]] = "evaluation conditions differ from the rest of the batch"
+    if evaluate:
+        evaluate["conditions"] = eval_conditions or {}
+    # The per-instance solve receipts each count the one instance they
+    # solved.  The merged receipt describes all of them, so the count has
+    # to say so.
+    sample = conditions.get("sample")
+    if isinstance(sample, dict) and "task_count" in sample:
+        sample = dict(sample)
+        sample["task_count"] = len(solve.get("tasks", []))
+        conditions = dict(conditions)
+        conditions["sample"] = sample
+        solve["conditions"] = conditions
     return solve, evaluate, gaps
 
 
