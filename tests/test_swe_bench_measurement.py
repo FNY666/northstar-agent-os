@@ -39,6 +39,32 @@ class MeasurementRecordTests(unittest.TestCase):
         self.assertEqual(record["summary"]["resolved_full"], 1)
         self.assertEqual(record["summary"]["resolved_rate"], 1.0)
 
+    def test_the_tests_left_out_of_the_verdict_are_recorded(self):
+        """A narrowed verdict must say so, never hide it."""
+        record = RECORDER_MODULE.build_record(
+            _solve([{"instance_id": "a__b-1", "repo": "a/b", "patch_bytes": 10}]),
+            _eval([{
+                "instance_id": "a__b-1",
+                "outcome": "RESOLVED_FULL",
+                "resolved": True,
+                "excluded_p2p": ["t::needs_network"],
+            }]),
+            ROOT / "benchmarks" / "swe-bench" / "verified-50.json",
+        )
+        row = record["tasks"][0]
+        self.assertEqual(row["excluded_p2p"], ["t::needs_network"])
+        self.assertEqual(record["summary"]["excluded_p2p"], ["t::needs_network"])
+        self.assertEqual(record["summary"]["instances_with_exclusions"], 1)
+
+    def test_an_instance_without_exclusions_records_none(self):
+        record = RECORDER_MODULE.build_record(
+            _solve([{"instance_id": "a__b-1", "repo": "a/b", "patch_bytes": 10}]),
+            _eval([{"instance_id": "a__b-1", "outcome": "RESOLVED_FULL", "resolved": True}]),
+            ROOT / "benchmarks" / "swe-bench" / "verified-50.json",
+        )
+        self.assertNotIn("excluded_p2p", record["tasks"][0])
+        self.assertEqual(record["summary"]["instances_with_exclusions"], 0)
+
     def test_a_partial_resolution_is_not_a_pass(self):
         # RESOLVED_PARTIAL means the failing tests pass but something else
         # broke.  Counting it as a pass would overstate the result.

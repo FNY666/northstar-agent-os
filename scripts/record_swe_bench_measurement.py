@@ -62,14 +62,20 @@ def build_record(
     for instance_id in instances:
         solve_row = solved[instance_id]
         verdict = verdicts[instance_id]
-        rows.append({
+        row = {
             "instance_id": instance_id,
             "repo": solve_row.get("repo", ""),
             "patch_bytes": solve_row.get("patch_bytes", 0),
             "patch_sha256": solve_row.get("patch_sha256", ""),
             "outcome": verdict.get("outcome", "ERROR"),
             "resolved": verdict.get("resolved", False),
-        })
+        }
+        excluded = verdict.get("excluded_p2p") or []
+        if excluded:
+            # Say which tests were left out of the verdict, so the record
+            # never hides that a verdict was narrowed.
+            row["excluded_p2p"] = list(excluded)
+        rows.append(row)
 
     resolved = sum(1 for row in rows if row["outcome"] == RESOLVED_FULL)
     partial = sum(1 for row in rows if row["outcome"] == RESOLVED_PARTIAL)
@@ -79,6 +85,11 @@ def build_record(
     conditions["harness"] = eval_receipt.get("conditions", {}).get("harness", "")
     conditions["sample_sha256"] = _sha256(sample_path.read_bytes())
 
+    excluded_tests = sorted({
+        name
+        for row in rows
+        for name in row.get("excluded_p2p", [])
+    })
     return {
         "schema": SCHEMA,
         "measurement": "swe_bench_verified_50",
@@ -91,6 +102,10 @@ def build_record(
             "resolved_partial": partial,
             "failed": failed,
             "not_a_verdict": not_a_verdict,
+            "excluded_p2p": excluded_tests,
+            "instances_with_exclusions": sum(
+                1 for row in rows if row.get("excluded_p2p")
+            ),
             "resolved_rate": round(resolved / len(rows), 4) if rows else 0.0,
             # The rate over the instances that actually got a verdict.  The
             # rate over every instance counts an environment problem as a
