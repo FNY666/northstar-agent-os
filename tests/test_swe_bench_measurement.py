@@ -75,6 +75,25 @@ class MeasurementRecordTests(unittest.TestCase):
         self.assertEqual(record["summary"]["failed"], 0)
         self.assertEqual(record["summary"]["not_a_verdict"], 1)
 
+    def test_every_outcome_the_evaluator_can_produce_is_known(self):
+        # A new outcome that the record does not know about would silently
+        # be counted as a model failure.  The two halves have to agree.
+        outcomes = {
+            "RESOLVED_FULL", "RESOLVED_PARTIAL", "RESOLVED_NO",
+            "patch_not_applied", "no_patch_delivered",
+            "evaluation_inconclusive", "evaluation_infrastructure_failure",
+            "evaluation_timeout", "ERROR",
+        }
+        known = {
+            RECORDER_MODULE.RESOLVED_FULL,
+            RECORDER_MODULE.RESOLVED_PARTIAL,
+            "RESOLVED_NO",
+        } | set(RECORDER_MODULE.NOT_A_VERDICT)
+        self.assertEqual(outcomes - known, set())
+        # RESOLVED_NO is a verdict on the model, so it has to count as a
+        # failure rather than as a run that produced no verdict.
+        self.assertNotIn("RESOLVED_NO", RECORDER_MODULE.NOT_A_VERDICT)
+
     def test_a_real_failure_is_still_a_failure(self):
         record = RECORDER_MODULE.build_record(
             _solve([{"instance_id": "a__b-1", "repo": "a/b", "patch_bytes": 10}]),
