@@ -7156,3 +7156,497 @@ so both families are pinned BY NAME in `tests/test_census_scope.py`.
 * `ai_ethics_monitoring.py` (the §40 fix) is untouched.
 * No version, schema, or audit kind is added or changed.
 * The `ai_*` import-guard family suite is untouched.
+
+---
+
+## 42. The SAME shape, OUTSIDE the seq-parameter family: 87 targets in 37 modules
+
+§41 closed the bool/int blind spot for the `seq` PARAMETER.  The blind
+spot is not about `seq`.  It is about a GUARD SHAPE, and the shape is
+everywhere:
+
+```python
+if not isinstance(X, int) or X < 0:
+```
+
+`bool` is a subclass of `int`, so `isinstance(True, int)` is `True`.
+The guard's first half is therefore **False** for a bool, and the bool
+walks straight through.
+
+The repo does not use that shape.  **1,983** guards spelled the bool
+half out before this slice (**2,065** after it):
+
+```python
+if isinstance(X, bool) or not isinstance(X, int) or X < 0:
+```
+
+So the shape has a convention, and §41's six defect modules were simply
+the ones where it was missing **on the seq path**.
+
+### 42.1 The sweep, and how a candidate became a finding
+
+A sweep is a worklist, not a finding.  The sweep looked for the shape
+`not isinstance(X, int) or ...` -- an int guard with NO bool half --
+and found **91 sites in 40 modules**.
+
+Each was then asked two INDEPENDENT questions:
+
+* **Q1, SEMANTICS.**  Substitute `True` for the guarded target and
+  evaluate the guard expression.  Does it FIRE (reject) or PASS
+  (accept)?
+* **Q2, PATH.**  Does the enclosing function reject a bool **for that
+  same target** -- an inline `isinstance(target, bool)`, or a call to
+  a `_reject_bool*` helper naming it?
+
+**Q1 asks the well-formed-input question.**  The guard is split into its
+top-level `or` clauses; the clauses that mention the target are the
+target's own, and the rest are about OTHER fields.  The other fields
+are held at values that satisfy those other clauses -- the WELL-FORMED
+input -- so the only thing under test is the target.  A site is
+`ACCEPTS` when the target's own clause passes for a bool on every
+well-formed input, and `REJECTS` when it fires on every one.
+
+Three earlier evaluators answered this wrongly, in three different
+directions, and each error would have changed the count:
+
+* one GUESSED the value of every other free name, so a verdict could
+  flip on the guess (`commit_number > op_number` accepts a bool only
+  when `op_number >= 1`, and the guess was 0);
+* one swept ARBITRARY values for the other names, so a guard that fired
+  because a DIFFERENT field was malformed was scored as "REJECTS the
+  bool" -- the wrong question;
+* one scored the guard's PASS/FAIL the wrong way round, so 69 of 86
+  sites came back `REJECTS` when they accept.
+
+**Q2 must be TARGET-AWARE.**  The first Q2 asked "does this FUNCTION
+reject a bool anywhere?"  That is the wrong question, and it hid a
+real defect:
+
+```python
+# eldercare_agents.py:535
+if not isinstance(retention_days, int) or retention_days < 0:
+    raise EldercareError("retention_days must be a non-negative int")
+...
+if not isinstance(proxy, bool):        # a DIFFERENT variable
+    raise EldercareError("proxy must be a bool")
+```
+
+The function rejects a bool -- `proxy` -- so the first Q2 scored the
+site "the path already rejects a bool" and dropped it.  It does not: a
+bool in `retention_days` walks straight through.  A bool check on
+another variable does not count; only a check that names the TARGET
+does.
+
+**The two together, measured:** 91 sites -> 5 whose guard is not a
+plain `if` statement (all four `_reject_bool` modules, plus
+`tools/sandbox.py`, which lives outside the runtime component) -> 1
+that REJECTS the bool at the guard line itself (`split_learning.py:273`,
+which `_reject_bool`s `n_layers` on the line above) -> 1 whose path
+rejects the same target (`split_learning.py:281`, which `_reject_bool`s
+`cut`) -> **80 candidates in 35 modules** -- the sweep over the runtime
+component's TOP LEVEL.  The `tools/` site is the eighty-first, and it
+lives outside the component, so it is counted separately below.
+
+Then each candidate needed a CRAFTED INPUT: a call to the real
+function with `True` in place of the int, and an OBSERVABLE.  A
+candidate that could not be reached by a real call was not reported as
+a defect.
+
+### 42.1a The sweep itself had a hole, and the hole was a defect
+
+The sweep walked `os.listdir(RUNTIME)` -- the runtime component's TOP
+LEVEL -- and never descended into a SUBDIRECTORY.  The runtime has a
+`tools/` package, and `tools/sandbox.py:342` is in it:
+
+```python
+for port in tcp_ports:
+    if not isinstance(port, int) or not (0 <= port <= 65535):
+        raise LandlockError(f"tcp port must be an int in 0..65535, got {port!r}")
+```
+
+`build_landlock_spec` builds the Landlock policy that confines the
+sandboxed process.  `network=True` opens exactly `tcp_ports`, and a
+bool is a legal int:
+
+```
+build_landlock_spec(paths_read=[], paths_write=[], network=True,
+                    tcp_ports=[True])
+# -> {"tcp_ports": [True], ...}
+```
+
+`True == 1`, so the spec is BYTE-FOR-BYTE the spec for port 1, and it
+is written into a `c_uint16` in the Landlock rule struct.  The
+`tools/` tree holds the convention **12 times** in 5 files, so the
+convention applies there -- the sweep simply never looked.
+
+A sweep is a worklist, not a finding -- and a sweep over a SUBSET is
+a worklist over a subset.  Re-running the sweep over the WHOLE repo
+(minus the `research/` snapshot, which is a frozen synthetic artefact
+and not product code) leaves exactly **6** sites with the shape and no
+bool half:
+
+```
+components/northstar-agent-runtime/dp_interface.py               :388
+components/northstar-agent-runtime/enclave_interface.py          :171
+components/northstar-agent-runtime/federated_attack_detector.py :139
+components/northstar-agent-runtime/federated_attack_detector.py :391
+components/northstar-agent-runtime/tools/sandbox.py              :342
+research/.../harness.py                                          :38
+```
+
+The first four reject the bool on the same path (`_reject_bool`).  The
+fifth is `tools/sandbox.py`, fixed by this slice.  The sixth is in the
+frozen `research/` snapshot.
+
+### 42.2 What a bool actually does at these sites
+
+Not "it is stored as a bool".  It **ALIASES an int** (`True == 1`),
+and the aliasing changes behaviour.  Four measured shapes:
+
+**1. An ALLOW/DENY flips.**  `eldercare_agents.check_contact_floor` is
+the isolation-risk gate: a companion robot must not coincide with a
+collapse in human contact.
+
+```python
+report = ContactFloorReport(resident_id="r1", week_start=1_700_000_000,
+    human_visits=2, visit_minutes=10, companion_robot_minutes=0,
+    prior_human_visits=2)
+
+check_contact_floor(report=report, min_visits_per_week=3)
+# EldercareVerdict(allowed=False, reason='eldercare:contact_floor_breach:2/3')
+
+check_contact_floor(report=report, min_visits_per_week=True)
+# EldercareVerdict(allowed=True, reason='human-contact floor satisfied')
+```
+
+`True` is `1`, so the floor drops from 3 to 1 and the gate ALLOWS what
+it must deny.  This is the sharpest of the four: the outcome flips.
+
+**2. A SIGNED payload carries a JSON boolean.**
+`retail_agents.PriceDisclosureRegistry.issue` signs the receipt over
+its canonical JSON.  With an int the price is a JSON NUMBER:
+
+```
+{"authority_id":"auth1",...,"personalized_price_minor":100,...}
+```
+
+With a bool it would be the JSON LITERAL:
+
+```
+{"authority_id":"auth1",...,"personalized_price_minor":true,...}
+```
+
+`json.dumps(True)` is `true`, not `1`.  So the signed bytes carry a
+different JSON TYPE than the schema declares -- and the signature is
+computed over exactly those bytes, so the malformed receipt VERIFIES.
+
+**3. A RECORD carries the bool.**
+`vendor_chain.build_autonomous_action(quantity=True)` returns
+`AutonomousAction(quantity=True, ...)`.  `True == 1`, so every
+downstream `quantity * price` multiplies by one, and every `== 1`
+comparison is satisfied.
+
+**4. A THRESHOLD is silently lowered.**
+`input_defense_26.solve(challenge, bits=True)` solves a ONE-BIT proof
+of work instead of the requested difficulty.  `input_defense_13.check(
+text, max_scripts=True)` caps the script count at 1 instead of 0.
+`model_attack_18.detect_context_overflow(text, budget_tokens=True)`
+sets the budget to one token.
+
+### 42.3 The fix
+
+**Eighty-three sites in 37 files** (Eighty-seven guarded targets --
+four sites guard two fields each), ONE clause each.  The diff is 83
+insertions and 83 deletions -- the repo's own convention, applied:
+
+```python
+-        if not isinstance(personalized_price_minor, int) or personalized_price_minor < 0:
++        if isinstance(personalized_price_minor, bool) or not isinstance(personalized_price_minor, int) or personalized_price_minor < 0:
+             raise RetailError("personalized_price_minor must be a non-negative int")
+```
+
+Eighty-two of the eighty-three added lines carry the convention form
+exactly -- verified by a diff filter that parses each added line as
+an expression and looks for the ADJACENT pair
+`isinstance(<target>, bool) or not isinstance(<target>, int)`: **81**
+have it as the chain's first two clauses, and **1** -- `mfa_manager.py:497`
+-- has it as clauses two and three, because the guarded target is the
+chain's SECOND clause:
+
+```python
+if not isinstance(code, str) or isinstance(step, bool) or not isinstance(step, int):
+```
+
+Putting the bool half first would have changed the clause's order, so
+the bool half sits next to its own `isinstance(step, int)`.  It is the
+same shape and the same rule; it is not the same TEXT.
+
+The eighty-third line is a DIFFERENT spelling of the same rule, in
+`hybrid_crypto.py:371`:
+
+```python
+if any(isinstance(x, bool) or not isinstance(x, int) or abs(x) >= _PQ_GAMMA1 for x in z):
+```
+
+The pair is inside an `any()` comprehension rather than at the top of
+the chain, so it is not a chain of its own -- but it is the same rule,
+applied to each element of the signature vector.
+
+Four of the eighty-one carry TWO pairs on one line, because the line
+guards two fields: `audit_merkle.py` (twice), `offline_bundle.py:238`
+(`expiry_epoch` and `issued_at`) and `offline_bundle.py:317`
+(`now_epoch` and `min_version`).  That is why eighty-three LINES carry
+eighty-seven guarded TARGETS.
+
+The convention's own count moves with this: **1,983 -> 2,065**, the
+eighty-two added clauses and nothing else.  That is the check that the
+fix was the repo's shape and not a new one.
+
+(The count was **1,984 -> 2,066** in an earlier draft of this section.
+The numbers were WRONG by one in both places, and the metric that
+reproduces the doc's own description -- "an `or`-chain whose FIRST
+clause is `isinstance(<target>, bool) or not isinstance(<target>, int)`"
+-- measures **1,983 -> 2,065** over the same file set: the repo minus
+`research/`, `build/` and the egg-info.  The delta of eighty-two is
+unchanged, and it is the delta that carries the claim: eighty-two
+clauses were added and the convention grew by eighty-two.  An absolute
+count that cannot be reproduced is not a count.)
+
+The count is measured by an AST walk over the runtime tree, not by a
+grep: a grep's count depends on the directory set it sees -- the same
+search over `components/` and over the whole repo returns different
+numbers, and a count that moves with the search path is not a count.
+The metric is an `or`-chain whose FIRST clause is
+`isinstance(<target>, bool) or not isinstance(<target>, int)`, with the
+SAME target on both sides.
+
+Five modules were NOT touched: `dp_interface`,
+`enclave_interface` and `federated_attack_detector` call a
+`_reject_bool` helper on the same path, so the bool never reaches the
+int guard (Q2 above), and `split_learning.py` was already handled on
+both of its two sites.
+
+### 42.4 The regression suites, and their non-vacuity control
+
+There are now **FOUR** suites, because the first one proved less than it
+looked like it proved.
+
+`components/northstar-agent-runtime/tests/test_int_guard_bool_family.py`
+covers 22 modules with **27** shape-checked sites and **13**
+crafted-input calls.  It holds three things:
+
+* the SHAPE check -- every one of the sites carries the bool half,
+  read from the module's own source;
+* the CRAFTED-INPUT check -- every site refuses `True` with the
+  MODULE'S OWN error class;
+* the CONTROL -- the same call with a valid int still SUCCEEDS, so a
+  guard that refused everything could not pass.
+
+The control is the part that matters.  A test that asserts only "it
+raised SOMETHING" can be satisfied by an unrelated failure, and a
+guard that refuses everything passes every rejection test.  So each
+rejection asserts the module's own error class, and each is paired
+with a control that says the same call works with an int.
+
+**The coverage gap, and what it looked like.**  The first suite proved
+the SHAPE of all the sites it touched, but the CRAFTED INPUT of only 13
+of the 86 targets.  The other **73** had the bool half in the source
+and nothing that proved the guard REFUSES a bool.  That is the shape of
+a coverage gap that looks like coverage: the shape test reads the
+module's SOURCE, so it passes whether or not the guard works.
+
+`components/northstar-agent-runtime/tests/test_int_guard_bool_family_part2.py`
+closes part of it.  It loads **18** further modules -- the ones the
+first suite did not prove with a call -- and adds **29** crafted-input
+calls.
+
+`components/northstar-agent-runtime/tests/test_int_guard_bool_family_part3.py`
+closes the rest.  It loads **14** further modules and adds **44**
+crafted-input calls, including the sites that were the hardest to
+reach: `hybrid_crypto`'s post-quantum signature check, where a bool
+reaches the Fiat-Shamir challenge only for a signature whose `z[0]` is
+congruent to 1 modulo the field prime, and `offline_bundle`'s
+staleness window, where the control's epoch has to sit INSIDE the
+bundle's own validity window or the verifier refuses it as STALE --
+a different check, which would mask the guard under test.
+
+`components/northstar-agent-runtime/tests/test_landlock.py` proves the
+LAST site, `tools/sandbox.py:342`.  That site is in the `tools/`
+SUBPACKAGE, so it is outside the runtime's 1,620-module census
+universe and the three family suites cannot reach it at all.  It is
+proved in the suite that already owns `tools/sandbox.py`, with its own
+executable non-vacuity control.
+
+The four suites together cover **86 crafted-input calls over 86
+guarded targets in 36 top-level modules**, plus the one site in
+`tools/`: **87 targets in 37 modules**.  Measured against the slice's
+own diff, the mapping is EXACTLY one member per guarded target -- 86
+members over 82 distinct guard lines, because four lines guard two
+targets each (`offline_bundle:238` guards `expiry_epoch` and
+`issued_at`, `:317` guards `now_epoch` and `min_version`, and two
+more).  No site has no member and no member has no site.
+
+### 42.4a The non-vacuity control, and the direction it must assert
+
+All four suites carry an **EXECUTABLE** non-vacuity control: it plants
+the mutation the family exists to catch -- dropping the bool half, so
+the guard reads `not isinstance(X, int)` again -- in the module's own
+SOURCE, LOADS the mutated copy, and shows that the family then ACCEPTS
+the bool.  A control that only checks the text was rewritten proves
+the text changed and nothing else.
+
+Two things about the control's DIRECTION were got wrong, and each was
+a false failure rather than a false success:
+
+* **The mutant must not raise the module's OWN error class.**  The
+  first version asserted that the mutant does not raise AT ALL.  That
+  is too strict: a bool can be refused by a SECOND guard on the same
+  path, and the mutation leaves that second guard in force.  The
+  correct assertion is "the mutant does not raise the module's own
+  error class" -- a DIFFERENT error class is a real flip, because
+  `assertRaises` is class-sensitive and the member's own assertion
+  fails on it.
+
+* **The mutated module must supply the error class.**  The mutant
+  defines its OWN class object, so comparing against the ORIGINAL
+  module's class would never match, and every member would look
+  flipped -- a control that cannot fail.
+
+**A bool is refused by more than one guard on the same path** at five
+of the sites, and each was found by MEASUREMENT, not by reading:
+
+| site | the shadow |
+|---|---|
+| `split_learning.py:273`, `:281` | `_reject_bool` (line 102) |
+| `deployment_registry.py:231` | the receipt's own `__post_init__` |
+| `vr_interface.py:97` | `_check_int` |
+| `monitor_deafness_probes.py:157` | `EscalationWindow.__post_init__` |
+| `audit_merkle.py:228` | a NON-bool range check |
+
+The shadows are recorded in each suite's `MUTATIONS` table, so the
+control plants the minimal set that makes the member fail.
+
+**A coverage map keyed by FIELD NAME alone is a wrong answer.**  A
+module can guard the same field name in two places -- `audit_merkle`
+guards `tree_size` in BOTH `TreeHead.from_dict` and
+`InclusionProof.from_dict`, `passport` guards `trust_level` twice, and
+`monitor_deafness_probes` guards `value` in two different classes --
+so a lookup by field name picks the WRONG guard and the control proves
+nothing about the member.  The first suite's control finds the line by
+AST, from the member's own function and argument; the other two carry
+the line number in the member tuple, and a shape test asserts that the
+mutation starts at that exact line.
+
+Not every module reports a malformed input by RAISING, and the two
+shapes need different assertions:
+
+* **RAISE** -- the call raises the module's own error class.  The test
+  asserts the class, and that the message is non-empty, because a
+  guard that fails for the WRONG reason is deletable.
+* **RETURN** -- the module reports the problem in its RETURN VALUE: a
+  denial string (`stream_guard.validate` returns
+  `"malformed_guard_policy"`), a `False` (`compaction.is_safe_cut`),
+  a verdict.  The test asserts the value DIFFERS from the valid-int
+  call's, and the control asserts the valid-int call returns the
+  module's NORMAL value.
+* **REASON** -- the module names the malformed input in a field of the
+  returned record (`mfa_manager` returns
+  `VerifyResult(valid=False, reason="malformed")`).  The control is
+  that the valid int gets PAST the guard and reaches the code
+  comparison, which is a different reason.
+
+**Both suites are NOT VACUOUS.**  The `or -> and` mutant -- the
+mutation that turns the fixed guard back into `not isinstance(X, int)`
+-- was planted in a worktree that carries GIT HISTORY, and both suites
+killed it for the RIGHT reason.
+
+At `eldercare_agents.py:1303` (covered by the first suite):
+
+```
+E  AssertionError: EldercareError not raised
+1 failed, 3 passed, 38 subtests passed
+VERDICT: the suite KILLED the mutant
+```
+
+At `watermark_tracker.py:141` -- a site covered ONLY by the second
+suite, so the second suite's kill is independent of the first's:
+
+```
+E  AssertionError: WatermarkError not raised
+3 failed, 5 passed, 107 subtests passed
+```
+
+The failure is the right one: the mutant accepts `True`, so the guard
+does not fire.  A negative int still trips the mutant, so only a bool
+can see it.
+
+The mutant is planted in a WORKTREE, not in the shared tree, and the
+worktree carries git history because a copy without history breaks the
+git-reading suites -- a suite that fails for that reason kills every
+mutant, which is a perfect score that measures nothing.
+
+### 42.5 The census scope moved
+
+The first suite loads **22** modules.  Twenty of them became
+multi-suite; the count moved **341 -> 361**.
+
+```
+22 modules loaded
+- 2 that were ALREADY multi-suite (agent_identity, passport)
+= 20 new
+```
+
+The second suite loads **18** further modules.  All eighteen were
+single-suite before, so the count moved **361 -> 371**:
+
+```
+18 modules loaded
+- 0 that were ALREADY multi-suite
+= 18 new
+```
+
+The loader is the house shape -- `spec_from_file_location(name, RUNTIME
+/ f"{name}.py")` called with a **LITERAL** name.  That matters: the
+scope resolver finds suites by the LOADS they perform, and a module
+loaded from a dict literal is INVISIBLE to it.  The first draft of this
+suite used `importlib.import_module(name)` from a dict, and the
+resolver returned a scope with NO family suite in it -- the family would
+have measured nothing.
+
+The twenty and the eighteen are pinned BY NAME in
+`tests/test_census_scope.py`, for the reason the other families are: a
+count that moves is a count that was measured, but only if the reader
+can see WHICH rows moved.
+
+**The third suite moved the count by ZERO, and that is a fact about the
+family rather than an accident.**  The part-three suite loads **14**
+modules; the count stayed at **371**.  Twelve of the fourteen were
+already multi-suite -- part one moved twenty rows, part two moved
+eighteen, and between them they cover every part-three module except
+`agent_identity` and `passport`, which were multi-suite before either
+suite landed.
+
+So the count is **BLIND** to part three: a suite that silently stopped
+loading one of its fourteen modules would leave the count at 371, the
+scope pairing would fall back to the module's own suite, and NO count
+would say so.  That is exactly the case where the count cannot carry
+the claim, so the fourteen rows are pinned BY NAME and the family
+suite's presence is asserted directly.
+
+**The `tools/` site is outside the census universe altogether.**  The
+scope resolver indexes the runtime's TOP-LEVEL modules -- 1,620 of
+them -- and `tools/sandbox.py` is a subpackage module, so it is not one
+of the rows the count is about.  Its proof therefore lives in
+`tests/test_landlock.py`, the suite that already owns the module, and
+the family suites do not claim it.
+
+### 42.6 What this does NOT change
+
+* The census artifact is NOT edited.  `agent_identity` reads 7/21 in
+  the artifact (single-suite) and 9/21 at the union scope -- and §30.2
+  already records the 9/21, which is exactly what this slice
+  re-measures.
+* No version, schema, or audit kind is added or changed.
+* The `ai_*` seq-guard family and its 162-module suite are untouched.
+* `dp_interface`, `enclave_interface` and `federated_attack_detector`
+  are untouched: they already reject a bool on the same path.

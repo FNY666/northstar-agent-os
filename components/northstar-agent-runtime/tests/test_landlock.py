@@ -256,5 +256,136 @@ class TestLiveDegrade(RuntimeTestCase):
         self.assertNotEqual(result.returncode, 0)
 
 
+class TestTcpPortBoolGuard(RuntimeTestCase):
+    """The `tcp_ports` bool guard in `tools/sandbox.py`.
+
+    `build_landlock_spec` opens exactly the TCP ports it is handed, so a
+    bool in that list is a PORT NUMBER, not a flag: `True` is port 1.
+    `bool` is a subclass of `int`, so a guard written as
+    `not isinstance(port, int)` accepts it, and the spec is built with
+    a port nobody asked for.
+
+    This site lives in the `tools/` SUBPACKAGE, so it is outside the
+    1,620-module census universe -- the family suites, which cover the
+    runtime's top-level modules, cannot reach it.  It is proved here,
+    in the suite that already owns `tools/sandbox.py`.
+
+    The non-vacuity control below is EXECUTABLE: it plants the mutation
+    in the module's own SOURCE, loads the mutated copy, and shows the
+    mutated module then ACCEPTS the bool.  A control that only checked
+    the text was rewritten would prove the text changed and nothing
+    else; and a control that asserted the mutant still raises would be a
+    tautology, since it would pass on the UNMUTATED module too.
+    """
+
+    def _spec(self, ports):
+        return build_landlock_spec(
+            paths_read=["/usr"], paths_write=["/tmp"], tcp_ports=ports
+        )
+
+    def test_a_bool_port_is_refused(self):
+        """A bool is a port number here, and port 1 is not what was asked."""
+        for value in (True, False):
+            with self.subTest(port=value):
+                with self.assertRaises(LandlockError):
+                    self._spec([value])
+
+    def test_the_refusal_names_the_rule(self):
+        """A guard that fails for the WRONG reason is deletable.
+
+        The message says WHICH rule fired, so an edit that breaks the
+        guard for another reason is visible here rather than hiding
+        behind a bare "it raised".
+        """
+        with self.assertRaises(LandlockError) as caught:
+            self._spec([True])
+        self.assertTrue(str(caught.exception))
+        self.assertIn("tcp port", str(caught.exception))
+
+    def test_a_real_port_is_still_accepted(self):
+        """The control: the guard still accepts a plain int.
+
+        A guard that refused EVERYTHING would pass the two tests above.
+        """
+        self.assertEqual(self._spec([80])["tcp_ports"], [80])
+        self.assertEqual(self._spec([0, 65535])["tcp_ports"], [0, 65535])
+
+    def test_the_mutation_makes_the_crafted_input_accepted(self):
+        """THE CONTROL: with the bool half dropped, the bool gets through.
+
+        The mutation is applied in a COPY under a temp directory: the
+        shared tree is never touched.
+        """
+        import importlib.util
+        import shutil
+        from pathlib import Path
+
+        source = Path(sys.modules["tools.sandbox"].__file__)
+        with tempfile.TemporaryDirectory() as tmp:
+            copy = Path(tmp) / source.name
+            shutil.copy2(source, copy)
+            lines = copy.read_text().splitlines(keepends=True)
+            needle = "isinstance(port, bool) or not isinstance(port, int)"
+            hits = [i for i, line in enumerate(lines) if needle in line]
+            self.assertEqual(len(hits), 1,
+                             "the tcp_ports guard must appear exactly once")
+            index = hits[0]
+            lines[index] = lines[index].replace(
+                needle, "not isinstance(port, int)", 1)
+            copy.write_text("".join(lines))
+
+            mutant_name = "_mutant_tools_sandbox"
+            spec = importlib.util.spec_from_file_location(mutant_name, copy)
+            mutant = importlib.util.module_from_spec(spec)
+            sys.modules[mutant_name] = mutant
+            spec.loader.exec_module(mutant)
+
+            # the MUTATED module must ACCEPT the bool: the guard no
+            # longer fires.  Asserting that it raises would be a
+            # tautology -- it would pass on the UNMUTATED module too.
+            accepted = mutant.build_landlock_spec(
+                paths_read=["/usr"], paths_write=["/tmp"], tcp_ports=[True]
+            )
+            self.assertEqual(
+                accepted["tcp_ports"], [True],
+                "the MUTANT must ACCEPT the bool -- otherwise the control "
+                "cannot make the family fail",
+            )
+
+            # The MUTANT must not have replaced the module under test.
+            # The mutant is loaded under its own name, so the original
+            # must STILL refuse -- if it did not, the refusal test above
+            # would be measuring the mutant, and the whole family would
+            # be self-confirming.  This assertion is order-independent:
+            # it holds whatever order the tests run in.
+            with self.assertRaises(LandlockError):
+                self._spec([True])
+
+    def test_the_mutation_touches_exactly_one_line(self):
+        """The mutation must be unambiguous.
+
+        The control replaces the pair with `not isinstance(port, int)`
+        at ONE line.  If the needle appeared twice -- because the guard
+        were written in two places -- the control would be mutating an
+        ambiguous site, and the same could be true of the family
+        suites' `MUTATIONS` tables.  So the needle is asserted to
+        appear exactly once in the module's source.
+
+        The needle is also asserted to be PRESENT in the original: a
+        control that silently matched nothing would "pass" by mutating
+        nothing, and would then prove nothing.
+        """
+        from pathlib import Path
+
+        source = Path(sys.modules["tools.sandbox"].__file__)
+        needle = "isinstance(port, bool) or not isinstance(port, int)"
+        hits = [i for i, line in enumerate(source.read_text().splitlines())
+                if needle in line]
+        self.assertEqual(len(hits), 1,
+                         "the tcp_ports guard must appear exactly once in "
+                         "tools/sandbox.py")
+        self.assertIn("not isinstance(port, int)", source.read_text())
+
+
 if __name__ == "__main__":
     unittest.main()

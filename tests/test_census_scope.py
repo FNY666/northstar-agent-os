@@ -424,6 +424,62 @@ class CensusScopeScaleTests(unittest.TestCase):
       `privilege_at_recall_probes`, `evidence_compaction_probes`,
       `fraud_detector`, `tax_calculator`, `mfa_manager`).  The count
       moved 335 -> 341.
+
+    **AMENDED 2026-11-26 (the int-guard bool family, OUTSIDE the
+    `ai_*` seq-guard family).**  One more suite landed:
+
+    * `components/northstar-agent-runtime/tests/
+      test_int_guard_bool_family.py` loads TWENTY-TWO modules whose int
+      guards had no bool half.  The count moved 341 -> 361, and the
+      delta is EXACTLY TWENTY, not twenty-two: `agent_identity` and
+      `passport` were ALREADY multi-suite (their scopes were
+      `test_agent_identity,test_identity_e1,test_passport` and
+      `test_passport` respectively), so they were already counted.
+
+    The delta is twenty because the family suite loads the modules by
+    FILE PATH with an EXPLICIT LITERAL call -- the house loader shape
+    the resolver recognises.  A module loaded from a dict literal is
+    INVISIBLE to the resolver, and the family would then measure
+    nothing.
+
+    **AMENDED 2026-11-26 (the int-guard bool family, PART TWO).**  A
+    second suite landed:
+
+    * `components/northstar-agent-runtime/tests/
+      test_int_guard_bool_family_part2.py` loads the EIGHTEEN modules
+      whose int guards had no bool half and that the first family suite
+      did not prove with a crafted input.  The count moved 361 -> 371,
+      and the delta is EXACTLY EIGHTEEN: every one of the eighteen was
+      single-suite before, so every one of them moved.
+
+    The two suites do not overlap in what they LOAD: the first loads
+    twenty-two modules, the second eighteen, and `vr_interface` is the
+    only module in both -- it was already multi-suite when the first
+    suite landed, so the first suite's delta did not include it, and
+    the second suite's eighteen are all single-suite.
+
+    **AMENDED 2026-11-26 (the int-guard bool family, PART THREE).**  A
+    third suite landed:
+
+    * `components/northstar-agent-runtime/tests/
+      test_int_guard_bool_family_part3.py` loads the FOURTEEN modules
+      that hold the LAST of the int-guard sites no crafted input had
+      proved.  The count did NOT move: it is STILL 371, and the delta
+      is EXACTLY ZERO.
+
+    The zero is a fact about the family, not an accident.  Twelve of
+    the fourteen were already multi-suite -- PART ONE moved twenty
+    rows, PART TWO moved eighteen, and between them they cover every
+    part-three module except `agent_identity` and `passport`, which
+    were multi-suite before either suite landed.  So the count is
+    BLIND to PART THREE: a suite that silently stopped loading one of
+    its fourteen modules would leave the count at 371 and the scope
+    pairing would fall back to the module's own suite, and NO count
+    would say so.
+
+    That is why the fourteen rows are pinned BY NAME, with the family
+    suite's presence asserted directly.  A zero delta is exactly the
+    case where the count cannot carry the claim and the names must.
     """
 
     def test_the_multi_suite_modules_are_counted(self) -> None:
@@ -435,7 +491,7 @@ class CensusScopeScaleTests(unittest.TestCase):
             if len(MODULE.referencing_suites(runtime, stem)) > 1
         ]
         self.assertEqual(
-            len(multi), 341,
+            len(multi), 371,
             "the number of modules whose scope the single-suite pairing "
             "understated",
         )
@@ -455,6 +511,149 @@ class CensusScopeScaleTests(unittest.TestCase):
                              "test_attack_extra_family"],
                     f"{stem} is not multi-suite",
                 )
+
+    def test_the_int_guard_bool_family_modules_are_multi_suite(self) -> None:
+        """The twenty newly-multi-suite rows, pinned by NAME.
+
+        MEASURED 2026-11-26: `tests/test_int_guard_bool_family.py`
+        loads TWENTY-TWO modules -- the ones whose int guards had no
+        bool half.  Twenty of them became multi-suite (the count moved
+        341 -> 361); `agent_identity` and `passport` were already
+        multi-suite and were already counted.
+
+        Pinned by name because the count alone cannot say WHICH rows
+        moved, and a family suite that silently stops loading one of
+        them would be absorbed into the count.  The expected scope is
+        the module's own suite PLUS the family suite, read from the
+        resolver, so a module that grows a third suite is still
+        reported (and the assertion is on the family suite's PRESENCE,
+        not on the exact list).
+
+        The two that were ALREADY multi-suite are pinned separately:
+        their count did not move, so a silent drop would show up as a
+        count that does not move when it should.
+        """
+        newly = [
+            "command_registry", "confidence_gate", "crypto_defense_14",
+            "deployment_registry", "eldercare_agents", "evaluator_access",
+            "game_agents", "herd_gate", "incident_receipts",
+            "input_defense_13", "input_defense_26", "model_attack_18",
+            "monitor_deafness_probes", "multi_attack_02", "multi_attack_04",
+            "offline_bundle", "retail_agents", "synthetic_cap",
+            "vendor_chain", "vr_interface",
+        ]
+        self.assertEqual(len(newly), 20, "the delta was exactly twenty")
+        for stem in newly:
+            suites = MODULE.referencing_suites(RUNTIME, stem)
+            with self.subTest(module=stem):
+                self.assertIn("test_int_guard_bool_family", suites)
+                # The module's OWN suite, by NAME -- except where the
+                # runtime's own suite is not named after the module:
+                # `crypto_defense_14` is exercised by
+                # `test_crypto_defenses` (plural), which is a fact
+                # about the repo, not a guess.
+                own = (
+                    "test_crypto_defenses"
+                    if stem == "crypto_defense_14"
+                    else f"test_{stem}"
+                )
+                self.assertIn(own, suites)
+                self.assertGreaterEqual(len(suites), 2)
+
+    def test_the_two_already_multi_suite_family_modules_are_still_multi_suite(self) -> None:
+        """The two the count did NOT move for.
+
+        `agent_identity` and `passport` already had a second suite, so
+        the family suite did not change their count.  If the family
+        suite silently stopped loading them, the count would stay at
+        361 and nothing would catch it -- so they are pinned by name.
+        """
+        for stem in ("agent_identity", "passport"):
+            suites = MODULE.referencing_suites(RUNTIME, stem)
+            with self.subTest(module=stem):
+                self.assertIn("test_int_guard_bool_family", suites)
+                self.assertIn(f"test_{stem}", suites)
+                self.assertGreaterEqual(len(suites), 2)
+
+    def test_the_int_guard_bool_family_part_two_modules_are_multi_suite(self) -> None:
+        """The eighteen newly-multi-suite rows from PART TWO, by NAME.
+
+        MEASURED 2026-11-26: `tests/test_int_guard_bool_family_part2.py`
+        loads EIGHTEEN modules -- the ones whose int guards had no bool
+        half and that the first family suite did not prove with a
+        crafted input.  All eighteen were single-suite before, so the
+        count moved 361 -> 371 and the delta is EXACTLY EIGHTEEN.
+
+        Pinned by name for the same reason as the twenty above: the
+        count alone cannot say WHICH rows moved, and a family suite that
+        silently stops loading one of them would be absorbed into the
+        count.
+
+        The assertion is on the family suite's PRESENCE, not on the
+        exact list, so a module that grows a third suite is still
+        reported.  The module's OWN suite is checked by NAME, except
+        where the runtime's own suite is not named after the module.
+        """
+        newly = [
+            "ask_or_solve_probes", "audit_merkle", "compaction",
+            "deployment_registry", "evaluator_access", "herd_gate",
+            "hybrid_crypto", "mfa_manager", "model_lineage", "permissions",
+            "permit_agents", "remote_attestation", "runtime_defense_05",
+            "split_learning", "stream_guard", "tax_agents", "vr_interface",
+            "watermark_tracker",
+        ]
+        self.assertEqual(len(newly), 18, "the delta was exactly eighteen")
+        for stem in newly:
+            suites = MODULE.referencing_suites(RUNTIME, stem)
+            with self.subTest(module=stem):
+                self.assertIn("test_int_guard_bool_family_part2", suites)
+                own = (
+                    "test_crypto_defenses"
+                    if stem == "crypto_defense_14"
+                    else f"test_{stem}"
+                )
+                self.assertIn(own, suites)
+                self.assertGreaterEqual(len(suites), 2)
+
+    def test_the_int_guard_bool_family_part_three_modules_are_multi_suite(self) -> None:
+        """The PART THREE modules, pinned by NAME -- and the delta is ZERO.
+
+        MEASURED 2026-11-26: `tests/test_int_guard_bool_family_part3.py`
+        loads FOURTEEN modules -- the last of the int-guard sites that
+        no crafted input had proved.  The count did NOT move: it is
+        still 371.  The delta is EXACTLY ZERO, because all fourteen
+        were ALREADY multi-suite -- twelve of them through PART ONE and
+        PART TWO, and `agent_identity` and `passport` were multi-suite
+        before either.
+
+        That is exactly why the rows are pinned by NAME.  With a zero
+        delta the count is BLIND to this suite: if it silently stopped
+        loading a module, the count would stay 371 and the scope
+        pairing would quietly fall back to the module's own suite --
+        the family would measure nothing and no count would say so.
+
+        So this test asserts the family suite's PRESENCE in each
+        module's scope, not the count.
+        """
+        modules = [
+            "agent_identity", "crypto_defense_14", "deployment_registry",
+            "eldercare_agents", "evaluator_access", "incident_receipts",
+            "input_defense_26", "monitor_deafness_probes", "offline_bundle",
+            "passport", "retail_agents", "synthetic_cap", "vendor_chain",
+            "vr_interface",
+        ]
+        self.assertEqual(len(modules), 14, "the family loads fourteen modules")
+        for stem in modules:
+            suites = MODULE.referencing_suites(RUNTIME, stem)
+            with self.subTest(module=stem):
+                self.assertIn("test_int_guard_bool_family_part3", suites)
+                own = (
+                    "test_crypto_defenses"
+                    if stem == "crypto_defense_14"
+                    else f"test_{stem}"
+                )
+                self.assertIn(own, suites)
+                self.assertGreaterEqual(len(suites), 2)
 
     def test_the_two_single_module_slices_are_multi_suite(self) -> None:
         # The same discipline as the twenty family modules: pin the
