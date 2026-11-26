@@ -210,6 +210,18 @@ findings; a clean result still means only that no known tripwire fired.
 Known lexical rules are also checked against an NFKC compatibility-normalized
 view, closing fullwidth and presentation-form variants without normalizing
 clean content unnecessarily.
+Encoding is not meaning: the checkpoint also screens bounded, reversible views
+of the same input — percent-decoded runs, HTML entities, `\xNN`/`\uNNNN`
+escapes, decodable base64/base32 runs, a Latin-skeleton fold for Cyrillic/Greek
+homoglyphs, and a separator fold for punctuation or emoji spliced inside a
+word. A short base64 blob that used to slip under the injection detector's
+40-character carrier rule, `%69gnore`, `&#105;gnore`, `іgnore`, and `ig❤nore`
+all reach `review` now instead of `allow`. Bounds are per assessment (8 views,
+8,192 chars each, 6 decode runs) and the added cost is ~1 ms on a typical tool
+result. An encoded hit is reported as `D-INJ-003` at review severity unless the
+decoded view raises a jailbreak, and a fold that only weakens a signal is
+`D-INJ-004` — the heuristic never blocks on its own, and findings name the
+transform, never the decoded payload.
 The same high-confidence input gate applies to read-only tools: a reader cannot
 be used as a transcript return channel for a literal credential or jailbreak.
 High-confidence payloads are refused before `PreToolUse` hooks receive them, so
