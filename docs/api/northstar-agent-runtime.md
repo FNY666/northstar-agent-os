@@ -10498,6 +10498,51 @@ Run one programming task in an isolated Git worktree.
 
 Classify an interrupted code run; never replay an unreceipted effect.
 
+### `acp_server`
+
+Source: `components/northstar-agent-runtime/acp_server.py`
+
+Thin Agent Client Protocol (ACP v1) stdio adapter for Northstar Agent OS.
+
+#### `AcpProtocolError`
+
+Structured JSON-RPC error returned to the ACP client.
+
+- `to_rpc_error()`
+#### `AcpServerConfig`
+
+Host-operator configuration bounding every ACP session.
+
+- `resolved_dataflow_policy()`
+  - Resolve a DataflowPolicy instance or named preset (default|camel|camel-strict|path).
+- `effective_ceiling_mode()`
+  - Tightest operator-imposed permission mode ceiling.
+- `resolved_workspace_root()`
+- `resolved_model()`
+- `available_modes()`
+#### `AcpSessionState`
+
+Per-session governed runtime binding inside an ACP connection.
+
+- `execution_cwd` (property)
+#### `AcpServer`
+
+Stateful ACP v1 JSON-RPC 2.0 server wrapping Northstar's governed runtime.
+
+- `close_sessions()`
+  - Clean up or preserve isolated git worktrees owned by active ACP sessions.
+- `cancel_all_pending(reason: str='ACP transport closed')`
+  - Fail-close every pending Agent -> Client request (e.g., on stdin EOF).
+- `handle_message(message: Any)`
+  - Process one parsed JSON-RPC 2.0 message; return a response dict or None.
+#### `serve_stdio(config: AcpServerConfig, *, stdin: TextIO | None=None, stdout: TextIO | None=None)`
+
+Run the ACP v1 NDJSON stdio server until EOF.
+
+#### `format_dry_run(config: AcpServerConfig)`
+
+Human-readable summary printed by ``northstar acp --dry-run``.
+
 ### `scaffold`
 
 Source: `components/northstar-agent-runtime/scaffold.py`
@@ -13144,10 +13189,21 @@ A destination that may only receive data up to a sensitivity.
 - `expand_audience(arguments: Mapping[str, Any])`
 #### `SinkVerdict`
 
+#### `UntrustedSourceRule`
+
+A tool or provenance trust level that introduces untrusted data (CaMeL).
+
+- `matches(tool_name: str, arguments: Mapping[str, Any] | None=None, *, trust: str='')`
+#### `PrivilegedSinkRule`
+
+A privileged control-plane or exfiltration sink guarded against untrusted taint.
+
+- `matches(tool_name: str, arguments: Mapping[str, Any] | None=None)`
 #### `DataflowPolicy`
 
 A compiled, deterministic dataflow policy.
 
+- `has_integrity_rules` (property)
 - `rank_index(rank: str)`
 - `rank_name(index: int)`
 - `from_toml(text: str, *, source: str='<string>')`
@@ -13155,14 +13211,24 @@ A compiled, deterministic dataflow policy.
 - `from_toml_file(path: str | Path)`
 - `default()`
   - The versioned, auditable policy shipped with the runtime.
+- `camel_default()`
+  - Default confidentiality policy plus CaMeL external-untrusted integrity taint.
+- `camel_strict()`
+  - Strict CaMeL preset: treats workspace reads/searches as untrusted data too.
 #### `SessionDataflow`
 
 Per-session trajectory: the sensitivity of data the agent has handled.
 
 - `from_memory_audience(policy: DataflowPolicy, audience: tuple[str, ...] | list[str])`
   - Start a trajectory with the recipient boundary of injected memory.
+- `mark_resumed_untrusted()`
+  - Conservatively mark a resumed session as untrusted-tainted.
 - `observe(tool_name: str, arguments: Mapping[str, Any])`
-  - Attach the first matching source rule's label to the trajectory. Returns the rule applied, or None.
+  - Attach the first matching source rule's label to the trajectory. Returns the confidentiality SourceRule applied, or None.
+- `observe_provenance(tool_name: str, *, source: str='', trust: str='', agent: str='main', depth: int=0, arguments: Mapping[str, Any] | None=None)`
+  - Observe a completed tool result's runtime provenance (CaMeL integrity).
+- `integrity_summary()`
+  - Content-free summary suitable for audit logs and ACP metadata.
 - `check_sink(tool_name: str, arguments: Mapping[str, Any])`
   - Decide whether this sink call must escalate given the trajectory.
 ### `plugin_trust`
@@ -13455,6 +13521,10 @@ Host-owned phase gate with a durable, atomic transition journal.
 
 Check the final patch against a temporary index seeded from start_commit.
 
+#### `classify_repository_surface(relative_path: str)`
+
+Classify an untrusted repository path without reading or executing it.
+
 #### `audit_delivery_patch(worktree: str | Path, *, evidence_dir: str | Path)`
 
 Reject high-confidence delivery hazards after every model tool has stopped.
@@ -13486,6 +13556,8 @@ Lifecycle of a detached task worktree and its durable evidence directory.
 - `session_dir` (property)
 - `record_repository_snapshot()`
   - Persist a bounded map of the exact clean tree handed to the agent.
+- `record_admission_receipt()`
+  - Persist a non-executing untrusted-repository admission preflight receipt.
 - `record_task(task: CodeTask)`
   - Persist the immutable host task beside the run manifest.
 - `record_verification(summaries: Sequence[dict[str, Any]])`
@@ -48248,10 +48320,21 @@ A destination that may only receive data up to a sensitivity.
 - `expand_audience(arguments: Mapping[str, Any])`
 #### `SinkVerdict`
 
+#### `UntrustedSourceRule`
+
+A tool or provenance trust level that introduces untrusted data (CaMeL).
+
+- `matches(tool_name: str, arguments: Mapping[str, Any] | None=None, *, trust: str='')`
+#### `PrivilegedSinkRule`
+
+A privileged control-plane or exfiltration sink guarded against untrusted taint.
+
+- `matches(tool_name: str, arguments: Mapping[str, Any] | None=None)`
 #### `DataflowPolicy`
 
 A compiled, deterministic dataflow policy.
 
+- `has_integrity_rules` (property)
 - `rank_index(rank: str)`
 - `rank_name(index: int)`
 - `from_toml(text: str, *, source: str='<string>')`
@@ -48259,14 +48342,24 @@ A compiled, deterministic dataflow policy.
 - `from_toml_file(path: str | Path)`
 - `default()`
   - The versioned, auditable policy shipped with the runtime.
+- `camel_default()`
+  - Default confidentiality policy plus CaMeL external-untrusted integrity taint.
+- `camel_strict()`
+  - Strict CaMeL preset: treats workspace reads/searches as untrusted data too.
 #### `SessionDataflow`
 
 Per-session trajectory: the sensitivity of data the agent has handled.
 
 - `from_memory_audience(policy: DataflowPolicy, audience: tuple[str, ...] | list[str])`
   - Start a trajectory with the recipient boundary of injected memory.
+- `mark_resumed_untrusted()`
+  - Conservatively mark a resumed session as untrusted-tainted.
 - `observe(tool_name: str, arguments: Mapping[str, Any])`
-  - Attach the first matching source rule's label to the trajectory. Returns the rule applied, or None.
+  - Attach the first matching source rule's label to the trajectory. Returns the confidentiality SourceRule applied, or None.
+- `observe_provenance(tool_name: str, *, source: str='', trust: str='', agent: str='main', depth: int=0, arguments: Mapping[str, Any] | None=None)`
+  - Observe a completed tool result's runtime provenance (CaMeL integrity).
+- `integrity_summary()`
+  - Content-free summary suitable for audit logs and ACP metadata.
 - `check_sink(tool_name: str, arguments: Mapping[str, Any])`
   - Decide whether this sink call must escalate given the trajectory.
 ### `dataset_version`

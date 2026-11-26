@@ -223,6 +223,94 @@ def build_parser() -> argparse.ArgumentParser:
     )
     code_reconcile.add_argument("evidence_dir", help="one northstar code run evidence directory")
 
+    acp = sub.add_parser(
+        "acp",
+        help="serve Northstar as a governed Agent Client Protocol (ACP v1) stdio agent",
+        description=(
+            "Expose Northstar over JSON-RPC 2.0 NDJSON stdin/stdout following ACP v1 "
+            "(for Zed, JetBrains IDEs, and other ACP hosts) while strictly enforcing "
+            "Northstar's host permission ceiling, tool budgets, workspace confinement, "
+            "and fail-closed rejection of client-supplied MCP servers."
+        ),
+    )
+    acp.add_argument(
+        "--workspace",
+        default="",
+        help="pin an outer workspace root; every ACP session cwd must stay inside this directory",
+    )
+    acp.add_argument("--provider", choices=("scripted", "anthropic", "openai"), default="scripted")
+    acp.add_argument("--model", default="", help="model name; empty selects the provider default")
+    acp.add_argument("--base-url", default="", help="custom OpenAI-compatible base URL (openai provider)")
+    acp.add_argument("--temperature", type=float, default=None, help="sampling temperature")
+    acp.add_argument("--script", default="", help="JSON file of scripted turns (scripted provider only)")
+    acp.add_argument("--scripted-text", default="", help="single scripted reply (scripted provider only)")
+    acp.add_argument(
+        "--permission-mode",
+        choices=("plan", "default", "acceptEdits"),
+        default="default",
+        help="operator permission ceiling exposed over ACP (policy may only tighten; bypassPermissions is never exposed)",
+    )
+    acp.add_argument(
+        "--interactive-permissions",
+        action="store_true",
+        help=(
+            "opt-in: route per-call host approvals (mutating tools in default mode and dataflow "
+            "escalations) to ACP session/request_permission instead of denying immediately; "
+            "hard denials (plan/--read-only/--deny-tool/path bounds) still never ask"
+        ),
+    )
+    acp.add_argument(
+        "--permission-timeout-seconds",
+        type=float,
+        default=60.0,
+        help="seconds to wait for a client response to session/request_permission before failing closed",
+    )
+    acp.add_argument(
+        "--dataflow-policy",
+        default="",
+        metavar="PRESET_OR_PATH",
+        help="enable deterministic dataflow / CaMeL taint policy: default, camel, camel-strict, or a TOML path",
+    )
+    acp.add_argument("--read-only", action="store_true", help="lock ACP sessions to plan (read-only) mode")
+    acp.add_argument("--allow-tool", dest="allowed_tools", action="append", default=[], metavar="SPEC")
+    acp.add_argument("--deny-tool", dest="disallowed_tools", action="append", default=[], metavar="SPEC")
+    acp.add_argument("--max-turns", type=int, default=25, help="turn ceiling per session/prompt")
+    acp.add_argument("--max-tool-calls", type=int, default=50, help="tool call ceiling per session/prompt (0 disables)")
+    acp.add_argument("--max-budget-usd", type=float, default=None, help="USD ceiling per session/prompt")
+    acp.add_argument("--max-output-tokens", type=int, default=4096)
+    acp.add_argument("--sandbox", choices=("auto", "bwrap", "process"), default="auto")
+    acp.add_argument("--seccomp", choices=("auto", "on", "off"), default="auto")
+    acp.add_argument("--capdrop", default="on")
+    acp.add_argument("--session-dir", default="", help="override transcript directory (default: <cwd>/.northstar/sessions)")
+    acp.add_argument("--no-session", action="store_true", help="do not persist ACP session transcripts")
+    acp.add_argument(
+        "--run-evidence-dir",
+        default="",
+        metavar="PATH",
+        help="write a sealed digest-first evidence bundle per ACP turn under <PATH>/<sessionId>/turn-NNNN",
+    )
+    acp.add_argument(
+        "--evidence-required",
+        action="store_true",
+        help="fail a turn if evidence bundle capture fails (requires --run-evidence-dir)",
+    )
+    acp.add_argument(
+        "--code-worktree",
+        action="store_true",
+        help=(
+            "isolate each ACP session inside a detached Git worktree with an admission.json "
+            "preflight receipt and per-turn delivery patch audit (leaves main checkout clean)"
+        ),
+    )
+    acp.add_argument(
+        "--keep-worktree",
+        action="store_true",
+        help="preserve isolated ACP worktrees after server exit for manual review (requires --code-worktree)",
+    )
+    acp.add_argument("--no-workspace-agents", action="store_true", help="ignore .northstar/agents/*.md in the session cwd")
+    acp.add_argument("--no-code-tools", action="store_true", help="disable the structured code tool profile")
+    acp.add_argument("--dry-run", action="store_true", help="validate configuration, print the ACP governance stance, and exit")
+
     resume = sub.add_parser(
         "resume",
         help="product path: fork from a prior session's checkpoint (budget/turns inherited)",
@@ -1258,6 +1346,70 @@ def _run_sessions_ui(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_acp(args: argparse.Namespace) -> int:
+    """Validate host operator bounds and run the ACP v1 stdio adapter."""
+    from acp_server import AcpServerConfig, format_dry_run, serve_stdio
+
+    if args.script and args.scripted_text:
+        raise ValueError("--script and --scripted-text are mutually exclusive")
+    if args.max_turns < 1:
+        raise ValueError("--max-turns must be >= 1")
+    if args.max_tool_calls < 0:
+        raise ValueError("--max-tool-calls must be >= 0")
+    if args.max_budget_usd is not None and args.max_budget_usd <= 0:
+        raise ValueError("--max-budget-usd must be > 0")
+    if args.evidence_required and not args.run_evidence_dir:
+        raise ValueError("--evidence-required needs --run-evidence-dir")
+    if args.permission_timeout_seconds <= 0:
+        raise ValueError("--permission-timeout-seconds must be > 0")
+    if args.keep_worktree and not args.code_worktree:
+        raise ValueError("--keep-worktree requires --code-worktree")
+
+    scripted_turns: tuple[Any, ...] | None = None
+    if args.provider == "scripted":
+        from providers.scripted import ScriptedTurn
+
+        if args.script:
+            scripted_turns = tuple(_load_script(args.script))
+        elif args.scripted_text:
+            scripted_turns = (ScriptedTurn.text(args.scripted_text),)
+
+    config = AcpServerConfig(
+        workspace=args.workspace or None,
+        provider=args.provider,
+        model=args.model,
+        base_url=args.base_url,
+        temperature=args.temperature,
+        permission_mode=args.permission_mode,
+        read_only=bool(args.read_only),
+        allowed_tools=tuple(args.allowed_tools),
+        disallowed_tools=tuple(args.disallowed_tools),
+        max_turns=args.max_turns,
+        max_tool_calls=args.max_tool_calls if args.max_tool_calls > 0 else None,
+        max_budget_usd=args.max_budget_usd,
+        max_output_tokens=args.max_output_tokens,
+        shell_backend=args.sandbox,
+        shell_seccomp=args.seccomp,
+        shell_capdrop=args.capdrop,
+        session_dir=args.session_dir or None,
+        persist_sessions=not bool(args.no_session),
+        evidence_dir=args.run_evidence_dir or None,
+        evidence_required=bool(args.evidence_required),
+        code_worktree=bool(args.code_worktree),
+        keep_worktree=bool(args.keep_worktree),
+        dataflow_policy=args.dataflow_policy or None,
+        interactive_permissions=bool(args.interactive_permissions),
+        permission_timeout_seconds=float(args.permission_timeout_seconds),
+        workspace_agents=not bool(args.no_workspace_agents),
+        code_tools=not bool(args.no_code_tools),
+        scripted_turns=scripted_turns,
+    )
+    if args.dry_run:
+        print(format_dry_run(config))
+        return 0
+    return serve_stdio(config)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     raw = list(argv) if argv is not None else None
     # Product verbs are rewritten before argparse so the rest of the CLI only
@@ -1313,6 +1465,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"created {path}")
         print(f"governed project scaffolded; start with `{PROG_NAME} doctor --workspace <dir>`")
         return 0
+    if args.command == "acp":
+        try:
+            return _run_acp(args)
+        except ValueError as error:
+            print(f"configuration error: {error}", file=sys.stderr)
+            return USAGE_ERROR
     if args.command == "code-resume":
         return _run_code_resume(args)
     if args.command == "code":
@@ -1959,11 +2117,14 @@ def _run(args: argparse.Namespace) -> int:
         try:
             from dataflow_policy import DataflowPolicy, DataflowPolicyError
 
-            config_kwargs["dataflow_policy"] = (
-                DataflowPolicy.default()
-                if args.dataflow_policy == "default"
-                else DataflowPolicy.from_toml_file(args.dataflow_policy)
-            )
+            if args.dataflow_policy == "default":
+                config_kwargs["dataflow_policy"] = DataflowPolicy.default()
+            elif args.dataflow_policy == "camel":
+                config_kwargs["dataflow_policy"] = DataflowPolicy.camel_default()
+            elif args.dataflow_policy == "camel-strict":
+                config_kwargs["dataflow_policy"] = DataflowPolicy.camel_strict()
+            else:
+                config_kwargs["dataflow_policy"] = DataflowPolicy.from_toml_file(args.dataflow_policy)
         except (DataflowPolicyError, OSError) as error:
             raise RunConfigurationError(f"invalid dataflow policy: {error}") from error
     if postconditions:

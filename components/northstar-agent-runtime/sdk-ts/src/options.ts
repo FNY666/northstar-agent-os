@@ -17,6 +17,10 @@
 export const PERMISSION_MODES = ["default", "acceptEdits", "plan", "bypassPermissions"] as const;
 export type PermissionMode = (typeof PERMISSION_MODES)[number];
 
+/** Built-in named dataflow presets; callers may also pass a path to a custom TOML policy file. */
+export const DATAFLOW_POLICIES = ["default", "camel", "camel-strict"] as const;
+export type DataflowPolicyPreset = (typeof DATAFLOW_POLICIES)[number];
+
 export const PROVIDERS = ["scripted", "anthropic", "openai"] as const;
 export type ProviderName = (typeof PROVIDERS)[number];
 
@@ -97,6 +101,8 @@ export type RunOptions = {
   compactionThresholdTokens?: number;
   compactionKeepMessages?: number;
   permissionMode?: PermissionMode;
+  /** Built-in preset (`"default"`, `"camel"`, `"camel-strict"`) or path to a TOML dataflow policy. */
+  dataflowPolicy?: DataflowPolicyPreset | (string & {});
   allowTool?: string[];
   denyTool?: string[];
   readOnly?: boolean;
@@ -164,6 +170,7 @@ const OPTION_FLAGS: Record<Exclude<keyof RunOptions, "retry" | "mcp" | "sidecar"
   compactionThresholdTokens: "--compaction-threshold-tokens",
   compactionKeepMessages: "--compaction-keep-messages",
   permissionMode: "--permission-mode",
+  dataflowPolicy: "--dataflow-policy",
   allowTool: "--allow-tool",
   denyTool: "--deny-tool",
   readOnly: "--read-only",
@@ -323,6 +330,11 @@ export function toArgv(options: RunOptions): string[] {
     if (value !== undefined) push(checkString(value, OPTION_FLAGS[key]), OPTION_FLAGS[key], argv);
   }
   if (options.workspace !== undefined) push(checkString(options.workspace, "--workspace"), "--workspace", argv);
+  if (options.dataflowPolicy !== undefined) {
+    const value = checkString(options.dataflowPolicy, "--dataflow-policy").trim();
+    if (!value) fail("--dataflow-policy expects a non-empty preset name (default, camel, camel-strict) or TOML path");
+    push(value, "--dataflow-policy", argv);
+  }
   if (options.provider !== undefined) {
     const value = checkString(options.provider, "--provider");
     if (!(PROVIDERS as readonly string[]).includes(value)) fail(`--provider must be one of ${PROVIDERS.join(", ")}`);

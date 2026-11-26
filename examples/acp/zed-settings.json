@@ -1,0 +1,47 @@
+{
+  "agent_servers": {
+    "Northstar (Governed Worktree)": {
+      "command": "/path/to/northstar-agent-os/bin/northstar",
+      "args": [
+        "acp",
+        "--provider",
+        "anthropic",
+        "--permission-mode",
+        "acceptEdits",
+        "--interactive-permissions",
+        "--permission-timeout-seconds",
+        "60",
+        "--code-worktree",
+        "--dataflow-policy",
+        "camel",
+        "--max-turns",
+        "25",
+        "--max-tool-calls",
+        "50"
+      ],
+      "env": {}
+    },
+    "Northstar (Untrusted Repo Strict)": {
+      "command": "/path/to/northstar-agent-os/bin/northstar",
+      "args": [
+        "acp",
+        "--provider",
+        "anthropic",
+        "--permission-mode",
+        "default",
+        "--interactive-permissions",
+        "--permission-timeout-seconds",
+        "45",
+        "--code-worktree",
+        "--dataflow-policy",
+        "camel-strict",
+        "--no-workspace-agents",
+        "--max-turns",
+        "15",
+        "--max-tool-calls",
+        "30"
+      ],
+      "env": {}
+    }
+  }
+}

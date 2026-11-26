@@ -19,12 +19,15 @@ export {
 export type {
   AssistantEvent,
   ContentBlock,
+  DataflowPermissionDetails,
   Denial,
+  PermissionDetails,
   ResultEvent,
   ResultSubtype,
   RunEvent,
   StreamDeltaEvent,
   SystemEvent,
+  ToolCallReport,
   UnknownEvent,
   UserEvent,
   Usage,
@@ -32,6 +35,7 @@ export type {
 
 export {
   ConfigurationError,
+  DATAFLOW_POLICIES,
   MCP_PROTOCOLS,
   PERMISSION_MODES,
   POLICY_ONLY_RETRY_KEYS,
@@ -41,7 +45,16 @@ export {
   toArgv,
   VERIFY_KINDS,
 } from "./options.ts";
-export type { McpOptions, McpProtocol, PermissionMode, ProviderName, RetryOptions, RunOptions, SidecarOptions } from "./options.ts";
+export type {
+  DataflowPolicyPreset,
+  McpOptions,
+  McpProtocol,
+  PermissionMode,
+  ProviderName,
+  RetryOptions,
+  RunOptions,
+  SidecarOptions,
+} from "./options.ts";
 
 export { defaultCwd, preview, run, streamRun, UsageError, RunFailedError } from "./run.ts";
 export type { RunReport, Runner, RunTrace } from "./run.ts";

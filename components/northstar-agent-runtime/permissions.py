@@ -1818,6 +1818,9 @@ class PermissionEngine:
             "audience_unknown": dataflow.audience_unknown,
             "audience_count": len(dataflow.audience),
         }
+        if dataflow.untrusted_tainted:
+            dataflow_evidence["untrusted_tainted"] = True
+            dataflow_evidence["untrusted_source_count"] = len(dataflow.untrusted_sources)
         if source_rule is not None:
             dataflow_evidence["source_rule"] = source_rule.tool
         if (
@@ -1944,8 +1947,15 @@ class PermissionEngine:
             mode=self.config.mode,
             reason_hint=f"{tool_name} carries labelled data to a restricted sink",
         )
+        request_updates: dict[str, Any] = {}
         if not request.arguments_digest:
-            request = replace(request, arguments_digest=digest_arguments(payload))
+            request_updates["arguments_digest"] = digest_arguments(payload)
+        if not request.reason_hint:
+            request_updates["reason_hint"] = sink_verdict.reason
+        merged_data = dict(request.data)
+        merged_data.setdefault("dataflow_escalation", sink_verdict.reason)
+        request_updates["data"] = merged_data
+        request = replace(request, **request_updates)
         try:
             verdict = self.config.can_use_tool(tool_name, copy.deepcopy(payload), request)
         except Exception as error:  # noqa: BLE001 - a broken approver must not grant access

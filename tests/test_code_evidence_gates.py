@@ -459,6 +459,21 @@ class CodeEvidenceGateTests(unittest.TestCase):
         self.assertTrue(report["layers"]["trajectory"]["passed"])
         self.assertEqual(report["classification"], "invalid_or_incomplete_evidence")
 
+    def test_34_admission_receipt_is_verified_and_tampering_fails_closed(self):
+        good_report = GATES.inspect(self.good)
+        gate_names = [g["name"] for g in good_report["hard_gates"]]
+        self.assertIn("admission_contract", gate_names)
+        self.assertTrue(good_report["verified_success"])
+
+        run = self.fresh()
+        admission = read_json(run / "admission.json")
+        admission["secrets_content_read"] = True
+        write_json(run / "admission.json", admission)
+        reseal(run, "admission", "admission.json")
+        report = GATES.inspect(run)
+        self.assertFalse(report["layers"]["evidence_integrity"]["passed"])
+        self.assertIn("secrets_content_read", " ".join(report["layers"]["evidence_integrity"]["reasons"]))
+
 
 if __name__ == "__main__":
     unittest.main()
