@@ -6907,6 +6907,52 @@ REQUIRED third parameter, `details`; the parameter is read from the
 signature and an empty dict is passed, so the list is not
 hand-maintained.
 
+### 41.6a The suite is NOT VACUOUS: 162 of 162
+
+A suite that never fails proves nothing, and a family suite over 162
+modules is exactly the shape where a vacuous pass is easy: one
+member's guard can stop carrying the shape, the suite can keep
+asserting against a rule no module enforces any more, and every test
+still passes.
+
+So the suite was measured against the mutant it exists to catch.  The
+`or -> and` mutant was planted in ONE module at a time, in a COPY of
+the runtime, and the family suite was re-run:
+
+```
+162 modules planted
+162 KILLED
+  0 SURVIVED
+```
+
+Every member is killed by the mutant, so the suite really is looking
+at each module's own guard.
+
+Three things made this measurement possible, and each of them is a
+trap that had already been paid for elsewhere in this batch:
+
+* **The copy is made ONCE, and the mutated line is restored IN
+  PLACE.**  Copying the runtime per mutant leaked 21,292 `/tmp`
+  directories and filled the 12 GB tmpfs to 83% -- see
+  [[b173-a-probe-that-copies-the-runtime-leaks-tmp]].  A bounded copy
+  (the family suite, the 162 family modules, and the runtime's other
+  top-level modules -- NOT the 1600 test files) is ~100x smaller.
+* **The cached `.pyc` is dropped before each plant and after each
+  restore.**  The mutation is length-preserving (`" or "` ->
+  `" and "`) and the plants land within the same wall-clock second, so
+  Python's bytecode validation would reuse the previous run's `.pyc`
+  and the MUTANT WOULD NEVER BE LOADED -- a false KILL.  This is the
+  third time this has bitten in B173; see
+  [[stale-bytecode-fakes-a-mutant-kill]].
+* **The copy has GIT HISTORY.**  A plain copy breaks any suite that
+  reads the repo root or runs `git rev-parse` on a named commit: it
+  fails on the PRISTINE source for an unrelated reason, and every
+  mutant in its scope reads as killed.  See
+  [[b173-the-census-worktree-needs-git-history]].
+
+> **A family suite is measured the same way a single guard is.**  A
+> count of subtests is not evidence; a count of mutants KILLED is.
+
 ### 41.7 The six REAL defects this family exposed
 
 The family is 162 modules that DO spell the bool half out.  The
