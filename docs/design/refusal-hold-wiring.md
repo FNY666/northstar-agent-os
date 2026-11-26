@@ -3353,6 +3353,13 @@ rows** in the census artifact the static-only resolver returned the
 EMPTY scope -- so the census **SKIPped** those rows, and a SKIP is
 invisible.
 
+**AMENDED 2026-11-26 (§34):** the figure is now **134**.  The new
+`tests/test_audit_cli_surface.py` drives `audit_cli.py`'s
+`verify-archive` command, so `audit_archive` has a SECOND referencing
+suite and is itself multi-suite.  The count moved because a second
+suite started loading the module -- a real change, not a loosened
+guard.
+
 `tests/test_census_scope.py` pins the resolver's definition -- both
 import shapes, prose-mention-is-not-a-reference, own-suite-first,
 determinism, and the empty scope (which must SKIP rather than fall back
@@ -4759,7 +4766,7 @@ Two details that each cost a round:
 |---|---|---|
 | census rows that resolve to a scope | 149 of 270 | **265 of 270** |
 | rows that resolve to the EMPTY scope | 121 | **5** |
-| modules whose scope is multi-suite | 123 | **133** |
+| modules whose scope is multi-suite | 123 | **133** (134 after §34) |
 
 The five that remain are correct: `allowlist` and `ba_01`..`ba_04` have
 no suite of their own and are mentioned only in PROSE elsewhere --
@@ -4799,6 +4806,10 @@ row.  `active_learning` measures at **17/22**.
 The pinned count of multi-suite modules moved from **123** to
 **133**.  A count that moves is a count that was measured, and the
 guard is what says so -- the number is a measurement, not a target.
+
+§34 moved it once more, to **134**, for the same kind of reason: the
+`audit_cli` CLI-surface suite added a second loader of
+`audit_archive`.
 
 ### 29.6 What this does NOT change
 
@@ -5309,3 +5320,268 @@ This section adds the third term:
 > carry `ERROR`.  The artifact's shape does not distinguish them, so a
 > reader who counts rows counts 391 and believes 391 measurements were
 > taken.
+
+---
+
+## 34. The command line is the crafted input: `audit_cli` at 6/31, and eight commands nobody drove
+
+§31's crafted input was a MALFORMED RESPONSE.  §32's was the EXACT
+BOUNDARY.  This slice's is a **COMMAND LINE**.
+
+`audit_cli.py` is the `northstar audit` CLI's dispatch layer: it turns
+a command line into a decision -- which subcommand, which option, what
+exit code.  The artifact measured it at **6/31**, and its row names
+`tests/test_akf_export.py` -- ONE suite, exercising ONE of the CLI's
+nine commands, on its happy path.
+
+### 34.1 The 25 survivors, and what they have in common
+
+Every survivor is a decision about what an OPTION MEANS:
+
+```
+or@520  anchor:        args.anchored_at or None
+lt@536  verify:        args.clock_skew < 0
+or@542  verify:        args.expect_session_id or None
+or@543  verify:        args.expect_run_id or None
+and@549 verify:        args.anchor and result.ok
+and@566 verify:        args.external_anchor and result.ok
+or@585  verify:        args.rekor_url or None
+or@603  verify:        anchor_failed or result.broken_at is not None
+and@628 verify:        args.anchor and result.anchor_ok is not None
+eq@639  verify:        status == "INVALID"
+or@659  anchor-ext:    args.rekor_url or REKOR_V1_DEFAULT
+or@677  verify-arch:   args.rekor_url or None
+eq@715  dispatch:      command == "seal-head"     (union-killed)
+eq@717  dispatch:      command == "check-head"    (union-killed)
+or@744  export --akf:  args.subject or None
+or@745  export --akf:  args.model_id or None
+and@795 export --trace: seed is not None and len(seed) != 32
+or@801  export --trace: args.policy_bundle_hash or None
+or@802  export --trace: args.data_class or None
+or@803  export --trace: args.subject or None
+or@804  export --trace: args.model_provider or None
+or@805  export --trace: args.model_id or None
+and@848 export --scitt: seed is not None and len(seed) != 32
+or@851  export --scitt: args.key_id or ""
+and@852 export --scitt: not key_id and seed is not None
+```
+
+The `or None` family is the largest single shape in the file, and it is
+the shape that a happy-path test cannot see at all.  `None` means "not
+specified"; `""` means "specified, and empty".  Those two are
+DIFFERENT to the code that receives them:
+
+* `trace_export.build_trace_record` writes `policy["bundle_hash"]` only
+  when the hash is not None, and REFUSES a value that is not
+  `sha256:<hex>` -- so `""` is a refusal and `None` is an absence;
+* `build_trace_record` writes `record["data_class"]` only when it is
+  not None, and validates it against `DATA_CLASSES` -- so `""` would
+  be refused and `None` omitted;
+* `build_trace_record` writes `record["model"]` only when the provider
+  OR the id is not None -- so `""` would create an EMPTY `model` dict
+  where `None` leaves the key out entirely.
+
+A CLI that is only ever exercised on its happy path has an untested
+decision at every one of those `or`s, and the decision is precisely
+"does an empty option mean absent, or mean empty?".
+
+The commands nobody drove were `keygen`, `anchor`, `verify`,
+`anchor-external`, `verify-archive`, `seal-head`, `check-head` and the
+`--scitt` export shape -- eight of the CLI's nine surfaces.  The one
+that WAS driven was `export --akf`, and only on its happy path.
+
+### 34.2 The new test file, and the rule in its third form
+
+`components/northstar-agent-runtime/tests/test_audit_cli_surface.py` is
+new: 51 tests, all of them driving `run_audit` with a constructed
+`argparse.Namespace` and asserting the exit code AND the output.
+
+The rule is §31's and §32's, in its third form:
+
+> **A guard needs a crafted input.**
+>
+> §31: the input is a MALFORMED RESPONSE.
+> §32: the input is the EXACT BOUNDARY.
+> §34: the input is a COMMAND LINE -- the option that decides what a
+> value MEANS.
+
+A COMMAND LINE is the only way to deliver an EMPTY option value.  A
+direct call to `build_trace_record(data_class="")` would prove the same
+thing about `trace_export`, but it would prove NOTHING about
+`audit_cli`: the whole question is what the CLI does with the empty
+string before it reaches the builder.
+
+### 34.3 What each survivor needed
+
+| survivor | the crafted input | what distinguishes it |
+|---|---|---|
+| `or@520` | `--anchored-at ""` vs a given timestamp | an empty option is ABSENT, not empty |
+| `lt@536` | `--clock-skew -1` and `--clock-skew 0` | the bound is `< 0`, so ZERO is legal |
+| `or@542`/`or@543` | `--expect-session-id ""` vs a wrong one | an empty option must not MATCH |
+| `and@549` | `--anchor` with a missing file | the anchor is read only after the feed verifies |
+| `or@585` | `--rekor-url` given vs absent | the url the client is HANDED |
+| `or@603` | a rewritten feed against its anchor | `anchor_failed` is a SEPARATE operand from `broken_at` |
+| `and@628` | a BROKEN feed with an anchor given | the anchor never ran, so there is no note |
+| `eq@639` | four different damaged feeds | OK / UNPROTECTED / BROKEN / INVALID are four statuses |
+| `or@659`/`or@677` | `--rekor-url` given vs absent | the DEFAULT and the OVERRIDE are different urls |
+| `or@801`..`or@805` | `--trace` with each option empty vs given | absent vs empty is a real difference |
+| `eq@715`/`eq@717` | `seal-head` and `check-head` dispatched | killed by the UNION, not by this file -- `test_audit_head_holder` drives both |
+| `and@795` | a short seed, a non-hex seed, a 32-byte seed | the conjunction has two halves |
+| `and@848` | the same, on the `--scitt` path | the same guard, in the other export shape |
+| `or@851` | `--key-id` given | a given key id is USED, not derived |
+| `and@852` | a seed with no key id | the key id is DERIVED from the seed's pubkey |
+
+Measured, with the union scope
+(`test_akf_export,test_audit_cli_surface,test_audit_head_holder,test_trace_export`):
+
+```
+artifact 6/31  ->  union scope 11/31  ->  with these tests 31/31
+```
+
+The union scope alone was 11/31: the two `seal-head`/`check-head`
+dispatch comparisons were already killed by `test_audit_head_holder`,
+which the artifact's single-suite pairing never reached.
+
+The `or@603` case is the one worth naming: `anchor_failed or
+result.broken_at is not None` has TWO operands, and a suite that only
+ever breaks a feed's CHAIN exercises only the second.  The first is
+reached by a feed whose chain is still INTACT but whose BYTES differ
+from an anchored snapshot -- a wholesale rewrite the bare chain cannot
+see.  Feeding a rewritten feed with a stale anchor reaches it.
+
+### 34.4 The four statuses, and why INVALID needed its own feed
+
+`run_audit` picks one of four statuses, and each is chosen by a
+DIFFERENT condition:
+
+| status | condition | exit |
+|---|---|---|
+| `OK` | `result.ok` | 0 |
+| `UNPROTECTED` | `result.unprotected` | 2 |
+| `BROKEN` | `anchor_failed or result.broken_at is not None` | 1 |
+| `INVALID` | none of the above | 3 |
+
+`INVALID` is the residual, so it is reached by a feed that is neither
+unprotected nor broken -- a file that is not JSON at all.  A test that
+asserts "the status is not OK" would pass for the wrong reason on three
+of the four; each status needed its OWN damaged feed.
+
+### 34.5 The network, and a side effect I caused
+
+Three of the survivors (`or@585`, `or@659`, `or@677`) decide WHICH
+log the transparency-log client is handed.  The observable is the url
+the client receives.
+
+The first draft of these tests let the command actually try to reach
+`rekor.sigstore.dev`, and the public log was REACHABLE from this host.
+One of those tests therefore submitted a real entry to a THIRD PARTY'S
+public transparency log as a side effect of running the test suite.
+That is an outward side effect a test suite has no business causing,
+and it also made the tests non-hermetic: they would pass or fail
+depending on the network.
+
+The fix is `_StubbedRekor`, which replaces `audit_rekor._post_json`
+with a stub that RECORDS the url and then raises `RekorError` --
+exactly what an unreachable network produces.  The stub makes the url
+the observable, which is a stronger assertion than the error message's
+wording, and it makes the tests hermetic.
+
+> **A test that reaches the network is a test whose result depends on
+> something the test does not control** -- and, if the network is a
+> third party's service, a test that WRITES to it.
+
+### 34.6 A second module's scope changed, and its pinned count with it
+
+The new suite does not only reach `audit_cli.py`.  It drives
+`audit_cli.py`'s `verify-archive` command, and `audit_cli.py` calls
+`audit_archive.verify_archive` -- so the new suite LOADS
+`audit_archive` too.
+
+`audit_archive` therefore goes from ONE referencing suite to TWO, and
+`tests/test_census_scope.py`'s pinned count of multi-suite modules
+moves from **133** to **134**.  The guard was RED until it was
+re-measured:
+
+```
+AssertionError: 134 != 133 : the number of modules whose scope the
+single-suite pairing understated
+```
+
+This is the same rule §29.5 stated -- "a count that moves is a count
+that was measured" -- pointed at the guard from the other side.  The
+count moved because a SECOND suite started loading a module, which is
+a real change in the tree, not a loosened guard.  A count that moves
+for a real reason is fine; a count that moves because somebody edited
+the number is not, and the difference is whether the MEASUREMENT
+changed.
+
+The same table's other rows did not move: the module count is still
+**1620** (the new file is a TEST file, not a module), and the five
+empty-scope rows are still the same five.
+
+**A wider scope is not a better score.**  `audit_archive` at its new
+two-suite union scope still measures **1/8** -- the same as the
+artifact's row:
+
+```
+=== MODULE audit_archive.py ===
+--- module=audit_archive.py test=test_audit_archive,test_audit_cli_surface ---
+MUTANT gt@54 SURVIVED   MUTANT eq@64 SURVIVED   MUTANT eq@66 SURVIVED
+MUTANT eq@69 SURVIVED   MUTANT gt@73 SURVIVED   MUTANT or@171 SURVIVED
+MUTANT or@174 SURVIVED  MUTANT or@240 KILLED
+MUTANT RESULT: killed 1/8
+```
+
+The new suite loads `audit_archive` but exercises almost none of it --
+it calls `verify_archive` on one intact and one unreachable package,
+which is the same happy path `test_audit_archive` already covered.  So
+the scope moved and the score did not, and the honest reading is that
+`audit_archive`'s seven survivors are still open debt.
+
+> **A wider scope is not a better score.**  The two move together only
+> when the new suite exercises the module DIFFERENTLY.  A second
+> suite that loads a module and runs the same path widens the scope
+> and leaves the number where it was -- which is exactly what the
+> union-scope re-measurement in §30 found for `a2a_gates` too.
+
+A third consequence is worth recording because it is a MEASUREMENT
+hazard rather than a defect.  The census harness copies the runtime
+into a throwaway worktree with `rsync`, and the `audit_archive` census
+first ran against a worktree in which
+`tests/test_audit_cli_surface.py` was **ZERO BYTES** -- the copy raced
+a file move in the source tree, and the worktree's resolver therefore
+saw a suite that referenced `audit_archive` but did not load it:
+
+```
+audit_archive: test_audit_archive          <- the worktree's resolver
+audit_archive: test_audit_archive,test_audit_cli_surface   <- the real tree
+MUTANT SKIP: the suite collected no tests on the pristine source
+```
+
+The census reported a SKIP, which is §29's invisible failure mode: a
+row with no number reads the same as a row that was never measured.
+The re-run against a stable tree is the one that counts.
+
+> **A measurement taken while the tree is moving is a measurement of
+> the move.**  Every census run should check that the worktree's copy
+> is byte-identical to the source's before the verdict is read, because
+> the harness's own copy step is the one thing between the reader and
+> the tree that was measured.
+
+### 34.7 What this does NOT change
+
+* The census artifact is NOT edited.  `audit_cli`'s row still reads
+  `killed 6/31`, because that row is a snapshot of a measurement on a
+  named tree.  The re-measurements are here.
+* No product code changed.  `audit_cli.py` and `audit_archive.py` are
+  byte-identical to their pre-slice states; the whole slice is in the
+  test file.
+* No version, schema, or audit kind is added or changed.
+* No digest changes.
+* The census artifact under `docs/baseline/mutant-census/` is **not**
+  edited.  Its `audit_cli` row still reads `killed 6/31` and its
+  `audit_archive` row still reads `killed 1/8`.
+* The one number that DID change is
+  `tests/test_census_scope.py`'s pinned count of multi-suite modules,
+  from **133** to **134**, and it changed because a second suite
+  started loading `audit_archive`.

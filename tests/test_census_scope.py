@@ -183,6 +183,17 @@ class CensusScopeScaleTests(unittest.TestCase):
     With the dynamic loads read as well, the count is **133**.  The
     number is a measurement, so it moved; what did not move is the
     guard, which is what says so.
+
+    **AMENDED 2026-11-26 (the `audit_cli` CLI-surface slice).**  The
+    new `components/northstar-agent-runtime/tests/test_audit_cli_surface.py`
+    drives `audit_cli.py`'s `verify-archive` command, so `audit_archive`
+    now has TWO referencing suites and is itself multi-suite.  The
+    count is **134**.
+
+    The count moved for a REAL reason and not because the guard is
+    loose: a module becomes multi-suite when a SECOND suite loads it,
+    and this is a second suite loading it.  A count that moves is a
+    count that was measured.
     """
 
     def test_the_multi_suite_modules_are_counted(self) -> None:
@@ -194,7 +205,7 @@ class CensusScopeScaleTests(unittest.TestCase):
             if len(MODULE.referencing_suites(runtime, stem)) > 1
         ]
         self.assertEqual(
-            len(multi), 133,
+            len(multi), 134,
             "the number of modules whose scope the single-suite pairing "
             "understated",
         )
