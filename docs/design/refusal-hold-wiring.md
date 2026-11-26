@@ -5293,6 +5293,31 @@ at all for any of them).
 
 This is §33's point, made with a number.
 
+**The 1267/1640 was re-measured independently, and it reproduces.**
+A second run, on a different day and by a different instrument (the
+rows were re-measured at the **module's own suite** -- the scope the
+artifact's own rows name -- rather than at the union scope, and the
+rows were run through a hard-linked shared tree rather than a per-row
+copy), covered 29 of the 63 rows before it was stopped:
+
+```
+rows re-measured independently:           29 of 63
+aggregate:                          killed 604/782  = 77.2%
+the amendment above says:            killed 1267/1640 = 77.3%
+```
+
+The two agree on the rate, and they agree on the rows that decide it.
+The three lowest rows the amendment names -- `ai_liability` 25/40,
+`ai_governance` 20/31, `ai_oversight_auditing` 18/27 -- came out at
+**exactly** those three figures, and the independent run's next three
+lowest are `ai_oversight` 27/38, `ai_interpretability` 20/28 and
+`ai_fuzzing` 13/18.
+
+> **A number in a doc that nobody re-measured is a claim; a number
+> that a SECOND instrument reproduces is evidence.**  The rate matched
+> to a tenth of a point and the three decisive rows matched to the
+> mutant, so the 77.3% is not an artifact of one script and one run.
+
 > **A SKIP is invisible; an ERROR is louder but equally unmeasured.**
 >
 > §29 says a SKIP leaves no trace in the artifact: the row carries a
