@@ -123,5 +123,53 @@ class EvaluationTimeoutTests(unittest.TestCase):
         self.assertEqual(receipt["summary"]["passed"], 0)
 
 
+class MissingTestResultsTests(unittest.TestCase):
+    """The upstream runner reports no test results when it never ran them."""
+
+    def _evaluate_with_entry(self, entry: dict) -> dict:
+        if not EVALUATOR._upstream_available():
+            self.skipTest("the upstream harness is not installed here")
+        import swebench.harness.run_evaluation as upstream
+
+        real = SOLVER.load_sample(ROOT / "benchmarks" / "swe-bench" / "verified-50.json")
+        sample = {"tasks": [real["tasks"][0]]}
+        instance_id = real["tasks"][0]["instance_id"]
+        original = upstream.run_instance
+        upstream.run_instance = lambda *arguments, **keywords: (None, {instance_id: entry})
+        try:
+            return EVALUATOR.evaluate(
+                sample, {instance_id: "diff --git a/x b/x\n"},
+                run_id="missing-tests", timeout=1,
+            )
+        finally:
+            upstream.run_instance = original
+
+    def test_a_patch_that_does_not_apply_is_reported_as_such(self):
+        receipt = self._evaluate_with_entry({
+            "patch_exists": True,
+            "patch_is_None": False,
+            "patch_successfully_applied": False,
+            "infra_failure": False,
+            "resolved": False,
+        })
+        row = receipt["tasks"][0]
+        self.assertEqual(row["outcome"], "patch_not_applied")
+        self.assertFalse(row["resolved"])
+        self.assertEqual(receipt["summary"]["passed"], 0)
+
+    def test_a_run_without_test_results_is_not_reported_as_a_verdict(self):
+        receipt = self._evaluate_with_entry({
+            "patch_exists": True,
+            "patch_is_None": False,
+            "patch_successfully_applied": True,
+            "infra_failure": True,
+            "resolved": False,
+        })
+        row = receipt["tasks"][0]
+        self.assertEqual(row["outcome"], "no_test_results")
+        self.assertFalse(row["resolved"])
+        self.assertTrue(row["infra_failure"])
+
+
 if __name__ == "__main__":
     unittest.main()
