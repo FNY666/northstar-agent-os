@@ -7426,6 +7426,32 @@ Five modules were NOT touched: `dp_interface`,
 int guard (Q2 above), and `split_learning.py` was already handled on
 both of its two sites.
 
+**That leaves the int-guard family CLOSED, and the closure is
+measured rather than read.**  An AST walk over the runtime's top level
+for any `or`-chain that mentions `isinstance(..., int)` and does NOT
+name `bool` now returns exactly **four** sites in **three** modules --
+`dp_interface.py:388`, `enclave_interface.py:171`,
+`federated_attack_detector.py:139` and `:391` -- and each of the four
+refuses a bool, verified by a crafted input:
+
+| site | the call | the refusal |
+|---|---|---|
+| `dp_interface.py:388` | `DPComposer.audit_event(seq)` | `DPError: seq must not be a bool` |
+| `enclave_interface.py:171` | `EnclaveConfig(..., max_data_bytes)` | `TypeError: max_data_bytes must not be bool` |
+| `federated_attack_detector.py:139` | `ClientUpdate(..., round_seq)` | `TypeError: round_seq must not be a bool` |
+| `federated_attack_detector.py:391` | `byzantine_audit_event(report, seq)` | `TypeError: seq must not be a bool` |
+
+So there is no int guard left in the runtime's top level that lets a
+bool through.
+
+**A guard that reads `isinstance(X, (int, float))` is a DIFFERENT
+shape and is out of scope here.**  There are 340 of them in 206
+modules, and a bool IS an `int`, so they refuse a bool already -- the
+blind spot this slice closed is the guard that accepts a bool, not the
+one that rejects one.  The `(int, float)` family's own question is
+whether a float should be accepted at all, and that is a different
+slice.
+
 ### 42.4 The regression suites, and their non-vacuity control
 
 There are now **FOUR** suites, because the first one proved less than it
