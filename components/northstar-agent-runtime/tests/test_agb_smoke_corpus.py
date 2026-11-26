@@ -73,3 +73,96 @@ class AgbSmokeCorpusWiredTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CategoryPayloadContractTests(unittest.TestCase):
+    """Each attack category's payload must CARRY the scenario it names.
+
+    WHY THIS CLASS EXISTS (measured 2026-11-25)
+    --------------------------------------------
+    The mutant census scores `agb_smoke_corpus.py` at **0/2**: both of
+    its mutants SURVIVE, and they are the two category dispatch
+    comparisons in `_build_specs`:
+
+        if category == "tool_misuse":        -> the payload's
+                                                 `recipients`/`draft_approved`
+        if category == "privilege_abuse":    -> the payload's
+                                                 `requester_role`
+
+    The corpus DID carry the right values -- `recipients: "external"`,
+    `draft_approved: False`, `requester_role: "analyst_read_only"` --
+    but no test asserted them.  The suite checked the COUNT of specs,
+    their IDS, their ATTRIBUTION, and their allow/deny anchors, and none
+    of that can see whether the payload says what the category means.
+
+    That is the §31 rule again: **a guard needs a crafted input**, and
+    here the thing that needed the input was the ASSERTION.  A corpus
+    whose payloads are wrong still passes every other test in the file,
+    because the wrong payload is still a payload, still has the right
+    number of keys, and still carries the right id.
+
+    So these tests assert the CONTRACT between a category and the
+    scenario fields it must carry -- which is the only thing the two
+    comparisons in `_build_specs` decide.
+    """
+
+    def _by_category(self, category):
+        return [
+            s for s in AGB_SMOKE_SPECS
+            if s["payload"]["agb_category"] == category
+        ]
+
+    def test_tool_misuse_specs_carry_the_external_draft_scenario(self):
+        # A tool-misuse probe is "an unreviewed draft to all external
+        # recipients".  If the payload drops those two fields, the probe
+        # is a SendEmail with no scenario attached -- and it still
+        # counts as a tool_misuse spec to every other test in the file.
+        specs = self._by_category("tool_misuse")
+        self.assertEqual(len(specs), 5)
+        for s in specs:
+            payload = s["payload"]
+            self.assertEqual(
+                payload.get("recipients"), "external",
+                f"{s['id']} lost the external-recipients scenario",
+            )
+            self.assertIs(
+                payload.get("draft_approved"), False,
+                f"{s['id']} lost the unreviewed-draft scenario",
+            )
+
+    def test_privilege_abuse_specs_carry_the_read_only_requester(self):
+        # A privilege-abuse probe is "a read-only role reaching for a
+        # destructive tool".  The `requester_role` field is what makes
+        # it that probe rather than a bare DeleteRecord.
+        specs = self._by_category("privilege_abuse")
+        self.assertEqual(len(specs), 5)
+        for s in specs:
+            self.assertEqual(
+                s["payload"].get("requester_role"), "analyst_read_only",
+                f"{s['id']} lost the read-only-requester scenario",
+            )
+
+    def test_the_scenario_fields_belong_to_no_other_category(self):
+        # The other side of the same contract: the scenario fields are
+        # CATEGORY-SPECIFIC.  If the `tool_misuse` branch fired for
+        # every category, then every spec would carry `recipients`, and
+        # the corpus would claim a dozen or so exfiltration probes it
+        # does not have.
+        for category in (
+            "prompt_injection", "privacy_leakage", "memory_safety",
+            "benign_control",
+        ):
+            for s in self._by_category(category):
+                payload = s["payload"]
+                self.assertNotIn(
+                    "recipients", payload,
+                    f"{s['id']} carries a tool-misuse scenario it does not own",
+                )
+                self.assertNotIn(
+                    "draft_approved", payload,
+                    f"{s['id']} carries a tool-misuse scenario it does not own",
+                )
+                self.assertNotIn(
+                    "requester_role", payload,
+                    f"{s['id']} carries a privilege-abuse scenario it does not own",
+                )
