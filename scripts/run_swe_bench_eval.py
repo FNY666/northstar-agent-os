@@ -57,6 +57,58 @@ def _docker_platform() -> str:
     return {"x86_64": "linux/amd64", "aarch64": "linux/arm64"}.get(out, out)
 
 
+def _image_platform(image: str) -> str:
+    """The platform the published image is actually built for.
+
+    The environment images are published for one architecture only.  A host
+    of a different architecture has to pull that one and let the kernel's
+    emulation run it, and asking the registry for the host's own
+    architecture fails with a confusing 404.
+    """
+    try:
+        out = subprocess.run(
+            ["docker", "manifest", "inspect", image],
+            capture_output=True, text=True, timeout=300, check=False,
+        )
+        manifest = json.loads(out.stdout)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return ""
+    for entry in manifest.get("manifests", []):
+        platform = entry.get("platform") or {}
+        architecture = platform.get("architecture")
+        operating_system = platform.get("os")
+        if architecture and operating_system and architecture != "unknown":
+            return f"{operating_system}/{architecture}"
+    return ""
+
+
+def _pull_image(client: Any, image: str) -> None:
+    """Make sure the instance's image is present, for the right platform.
+
+    The upstream runner pulls an image that is missing locally, and it
+    pulls it for the host's own platform.  On a host that is not the
+    architecture the images are published for, that pull fails even
+    though the image exists.  Pulling it here, for the platform the
+    evaluation actually runs on, keeps the upstream runner on its normal
+    path: it finds the image locally and uses it.
+    """
+    images = getattr(client, "images", None)
+    if images is None:
+        return
+    try:
+        images.get(image)
+        return
+    except Exception:  # noqa: BLE001 - not present yet, keep going
+        pass
+    platform = _image_platform(image) or _docker_platform()
+    if not platform:
+        return
+    try:
+        images.pull(image, platform=platform)
+    except Exception:  # noqa: BLE001 - the upstream runner pulls it too
+        pass
+
+
 def evaluate(
     sample: dict[str, Any],
     patches: dict[str, str],
@@ -96,6 +148,13 @@ def evaluate(
             row["outcome"] = "no_patch_delivered"
             rows.append(row)
             continue
+        try:
+            _pull_image(client, dataset[instance_id]["image"])
+        except Exception as exc:  # noqa: BLE001 - report it, do not stop the run
+            row["outcome"] = ERROR
+            row["detail"] = f"could not obtain the environment image: {exc}"[:600]
+            rows.append(row)
+            continue
         spec = make_test_spec(dataset[instance_id])
         pred = {
             "model_name_or_path": "northstar",
@@ -120,15 +179,28 @@ def evaluate(
             # The upstream runner returns a report keyed by instance id;
             # the grading detail sits under "tests_status".
             entry = report.get(instance_id, report)
-            status = get_resolution_status(entry.get("tests_status", entry))
+            detail = entry.get("tests_status")
+            row["patch_successfully_applied"] = bool(entry.get("patch_successfully_applied"))
+            row["infra_failure"] = bool(entry.get("infra_failure"))
+            if not row["patch_successfully_applied"]:
+                # The upstream runner reports no test results when the patch
+                # never applied, so it never got as far as running the tests.
+                # That is not a verdict about the model, and it may not be
+                # reported as one.
+                row["outcome"] = "patch_not_applied"
+                row["resolved"] = False
+                rows.append(row)
+                continue
+            if not isinstance(detail, dict) or FAIL_TO_PASS not in detail:
+                # The patch applied but the upstream produced no per-test
+                # detail.  The upstream grader still knows how to judge the
+                # report it built, so let it speak.
+                detail = entry
+            status = get_resolution_status(detail)
             row["outcome"] = status
             row["resolved"] = status == RESOLVED_FULL
-            detail = entry.get("tests_status", {})
             row["fail_to_pass"] = list(detail.get(FAIL_TO_PASS, {}).get("success", []))
             row["pass_to_pass"] = list(detail.get(PASS_TO_PASS, {}).get("success", []))
-            if not row["resolved"]:
-                row["patch_successfully_applied"] = bool(entry.get("patch_successfully_applied"))
-                row["infra_failure"] = bool(entry.get("infra_failure"))
         except Exception as exc:  # noqa: BLE001 - a broken instance must not stop the run
             import traceback
             row["outcome"] = ERROR
