@@ -34,7 +34,12 @@ Solving and evaluating are two separate steps.
    checkout the model edits is the checkout the evaluation will run
    against.  The model works through the normal `northstar code` path, and
    the patch it delivers is read from the run's evidence bundle.
-2. `scripts/run_swe_bench_eval.py` hands the patch to the upstream
+2. `scripts/run_swe_bench_batch.py` drives both of them over the whole
+   sample, one instance at a time.  It keeps the receipts, removes each
+   environment image once it has been used, and can be started again after
+   an interruption: an instance whose evaluation receipt already exists is
+   skipped and the patch file is never truncated.
+3. `scripts/run_swe_bench_eval.py` hands the patch to the upstream
    `swebench.harness` and records its verdict.  The verdict is the
    upstream one; this repository does not reimplement the grading.
 
