@@ -224,18 +224,27 @@ class BatchCredentialTests(unittest.TestCase):
         self.assertEqual(code, 2)
 
     def test_an_instance_without_credentials_is_never_evaluated(self):
+        # The solver runs during this batch and reports that the model was
+        # never evaluated.  Evaluating that would put "no patch delivered"
+        # into the results, which reads as a verdict on the model.
         import json
         import tempfile
         out = Path(tempfile.mkdtemp())
         instance = "acme__acme-1"
-        (out / f"solve-{instance}.json").write_text(
-            json.dumps({"tasks": [], "real_model_evaluated": False}),
-            encoding="utf-8",
-        )
         sample = {"tasks": [{"instance_id": instance}]}
 
         commands = []
-        self.module._run = lambda command, log: commands.append(command) or 0
+
+        def fake_run(command, log):
+            commands.append(command)
+            if "solve_swe_bench.py" in " ".join(command):
+                Path(out, f"solve-{instance}.json").write_text(
+                    json.dumps({"tasks": [], "real_model_evaluated": False}),
+                    encoding="utf-8",
+                )
+            return 0
+
+        self.module._run = fake_run
         self.module._ensure_image = lambda *a, **k: True
         self.module._image_for = lambda *a: ""
         self.module._docker_rmi = lambda *a: None
@@ -252,12 +261,56 @@ class BatchCredentialTests(unittest.TestCase):
             eval_python="python",
             log=lambda *a: None,
         )
-        self.assertFalse(commands, "no program should run for an instance with no credentials")
+        self.assertFalse(
+            [c for c in commands if "run_swe_bench_eval.py" in " ".join(c)],
+            "no evaluation should run for an instance with no credentials",
+        )
         self.assertFalse((out / f"eval-{instance}.json").exists())
         self.assertEqual(
             [f["code"] for f in result["failed"]],
             ["no_credentials"],
         )
+
+    def test_a_receipt_from_a_run_without_credentials_is_solved_again(self):
+        # Such a receipt says the model was never evaluated.  Keeping it
+        # would leave the instance without an answer forever, so the batch
+        # removes it and solves the instance again.
+        import json
+        import tempfile
+        out = Path(tempfile.mkdtemp())
+        instance = "acme__acme-3"
+        stale = out / f"solve-{instance}.json"
+        stale.write_text(
+            json.dumps({
+                "tasks": [],
+                "real_model_evaluated": False,
+                "summary": {"reason": "no_provider_credentials"},
+            }),
+            encoding="utf-8",
+        )
+        sample = {"tasks": [{"instance_id": instance}]}
+
+        commands = []
+        self.module._run = lambda command, log: commands.append(command) or 0
+        self.module._ensure_image = lambda *a, **k: True
+        self.module._image_for = lambda *a: ""
+        self.module._docker_rmi = lambda *a: None
+
+        self.module.run_batch(
+            sample=sample,
+            out=out,
+            provider="openai",
+            model="m",
+            base_url="",
+            temperature=None,
+            timeout=1,
+            python="python",
+            eval_python="python",
+            log=lambda *a: None,
+        )
+        solved = [c for c in commands if "solve_swe_bench.py" in " ".join(c)]
+        self.assertTrue(solved, "the instance should be solved again")
+        self.assertFalse(stale.exists(), "the stale receipt should be gone")
 
     def test_an_instance_with_a_patch_is_evaluated(self):
         import json

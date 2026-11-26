@@ -122,6 +122,22 @@ def run_batch(
     skipped: list[str] = []
     failed: list[dict[str, str]] = []
 
+    # Receipts that were already there when this run started, and that say
+    # the model was never evaluated.  They come from a run without
+    # credentials, and they are worth another try now.
+    stale_receipts: set[str] = set()
+    for task in sample["tasks"]:
+        instance_id = task["instance_id"]
+        receipt = out / f"solve-{instance_id}.json"
+        if not receipt.exists():
+            continue
+        try:
+            data = _load(receipt)
+        except (OSError, ValueError):
+            continue
+        if data.get("real_model_evaluated") is False:
+            stale_receipts.add(instance_id)
+
     for instance_id in _instance_ids(sample):
         eval_receipt = out / f"eval-{instance_id}.json"
         if eval_receipt.exists():
@@ -140,6 +156,14 @@ def run_batch(
             continue
 
         solve_receipt = out / f"solve-{instance_id}.json"
+        # A receipt left by an earlier run that never had credentials is not
+        # a result: it says the model was not evaluated.  This run does have
+        # credentials, so that instance is solved again.  A receipt from this
+        # run is left alone: it is the answer to the question just asked.
+        if solve_receipt.exists() and instance_id in stale_receipts:
+            log(f"STALE_NO_CREDENTIALS {instance_id}, solving again")
+            solve_receipt.unlink(missing_ok=True)
+            (out / f"solve-{instance_id}-patches.json").unlink(missing_ok=True)
         if not solve_receipt.exists():
             command = [
                 python, str(SOLVE),
