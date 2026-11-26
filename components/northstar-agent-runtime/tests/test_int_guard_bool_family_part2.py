@@ -437,11 +437,19 @@ def _members(modules=None):
 MEMBERS = _members()
 
 
-def _bool_half_present(module_name, argument):
+def _bool_half_present(module_name, argument, line=None):
     """Does the module's source carry the bool half for THIS argument?
 
     Read from the module's own source, so a module that grows or drops a
     guard is handled without this file being edited.
+
+    `line` narrows the search to the member's OWN guard line.  That
+    matters: a module can guard the same argument name in two places
+    -- `audit_merkle` guards `tree_size` in BOTH `TreeHead.from_dict`
+    and `InclusionProof.from_dict` -- and a whole-module search would
+    report the shape for a member whose own guard had lost it.  A
+    shape test that passes on a SIBLING's guard is a shape test that
+    measures nothing.
     """
     import ast
 
@@ -449,6 +457,8 @@ def _bool_half_present(module_name, argument):
     tree = ast.parse(path.read_text(errors="ignore"))
     for node in ast.walk(tree):
         if isinstance(node, ast.BoolOp) and isinstance(node.op, ast.Or):
+            if line is not None and node.lineno != line:
+                continue
             text = ast.unparse(node)
             if f"isinstance({argument}, bool)" in text:
                 return True
@@ -461,14 +471,18 @@ class IntGuardPartTwoShapeTest(unittest.TestCase):
     def test_every_member_carries_the_bool_half(self) -> None:
         """The guard must spell the bool half out.
 
-        The repo holds this convention 1,984 times.  These sites were
+        The repo holds this convention 1,983 times.  These sites were
         the exceptions, and each one is now the same shape as the rest.
         """
         for label, module, argument, _call, _valid, _kind, _expected in MEMBERS:
             with self.subTest(call=label):
+                # the member's OWN guard line, as recorded by the
+                # non-vacuity control's MEASURED mutation table
+                line = MUTATIONS[label][0][0]
                 self.assertTrue(
-                    _bool_half_present(module, argument),
-                    f"{module}: the guard for {argument!r} does not refuse a bool",
+                    _bool_half_present(module, argument, line),
+                    f"{module}:{line}: the guard for {argument!r} does not "
+                    "refuse a bool",
                 )
 
     def test_the_members_are_still_int_guards(self) -> None:
