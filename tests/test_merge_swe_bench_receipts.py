@@ -56,6 +56,57 @@ class MergeReceiptsTests(unittest.TestCase):
         self.assertEqual(solve["conditions"]["model"], "m")
         self.assertTrue(solve["real_model_evaluated"])
 
+    def test_the_evaluation_conditions_are_carried_over(self):
+        """The harness version belongs in the measurement record."""
+        out = self._batch(2)
+        for index in range(2):
+            path = out / f"eval-repo__repo-{index}.json"
+            data = json.loads(path.read_text(encoding="utf-8"))
+            data["conditions"] = {"harness": "upstream swebench 5.0.2"}
+            path.write_text(json.dumps(data), encoding="utf-8")
+        _, evaluate, _ = self.module.collect(out)
+        self.assertEqual(
+            evaluate["conditions"]["harness"], "upstream swebench 5.0.2"
+        )
+
+    def test_a_receipt_without_a_newer_field_is_not_a_different_condition(self):
+        """A field added later is absent from the older receipts."""
+        out = self._batch(2)
+        first = out / "eval-repo__repo-0.json"
+        data = json.loads(first.read_text(encoding="utf-8"))
+        data["conditions"] = {"harness": "upstream swebench 5.0.2"}
+        first.write_text(json.dumps(data), encoding="utf-8")
+        second = out / "eval-repo__repo-1.json"
+        data = json.loads(second.read_text(encoding="utf-8"))
+        data["conditions"] = {
+            "harness": "upstream swebench 5.0.2",
+            "baseline": None,
+        }
+        second.write_text(json.dumps(data), encoding="utf-8")
+        _, _, gaps = self.module.collect(out)
+        self.assertEqual(gaps, {})
+
+    def test_a_really_different_condition_is_reported(self):
+        out = self._batch(2)
+        for index, harness in ((0, "upstream swebench 5.0.2"), (1, "another harness")):
+            path = out / f"eval-repo__repo-{index}.json"
+            data = json.loads(path.read_text(encoding="utf-8"))
+            data["conditions"] = {"harness": harness}
+            path.write_text(json.dumps(data), encoding="utf-8")
+        _, _, gaps = self.module.collect(out)
+        self.assertIn("repo__repo-1", gaps)
+
+    def test_the_sample_count_describes_the_merged_batch(self):
+        """Each per-instance receipt counts one instance; the merged one does not."""
+        out = self._batch(3)
+        for index in range(3):
+            path = out / f"solve-repo__repo-{index}.json"
+            data = json.loads(path.read_text(encoding="utf-8"))
+            data["conditions"] = {"model": "m", "sample": {"task_count": 1}}
+            path.write_text(json.dumps(data), encoding="utf-8")
+        solve, _, _ = self.module.collect(out)
+        self.assertEqual(solve["conditions"]["sample"]["task_count"], 3)
+
     def test_a_batch_with_nothing_complete_is_refused(self):
         out = Path(tempfile.mkdtemp())
         code = self.module.main([
