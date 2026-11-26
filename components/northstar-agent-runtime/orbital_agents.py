@@ -388,7 +388,7 @@ def conjunction_receipt(
     _check_nonempty_str(receipt_id, "receipt_id")
     _check_nonempty_str(warning_id, "warning_id")
     _check_hex64(conjunction_digest, "conjunction_digest")
-    if not isinstance(uncertainty_km, (int, float)) or uncertainty_km < 0:
+    if isinstance(uncertainty_km, bool) or not isinstance(uncertainty_km, (int, float)) or uncertainty_km < 0:
         raise OrbitalError("uncertainty_km must be a non-negative number")
     _check_ts(warned_at, "warned_at")
     _check_pos_int(ttl_s, "ttl_s")
@@ -467,7 +467,7 @@ class ConjunctionRegistry:
     ) -> OrbitalVerdict:
         """Check an automated maneuver against a warning pin."""
         _check_nonempty_str(warning_id, "warning_id")
-        if not isinstance(dv_ms, (int, float)) or dv_ms < 0:
+        if isinstance(dv_ms, bool) or not isinstance(dv_ms, (int, float)) or dv_ms < 0:
             raise OrbitalError("dv_ms must be a non-negative number")
         _check_ts(maneuver_at, "maneuver_at")
         _check_ts(now, "now")
@@ -587,7 +587,7 @@ def maneuver_authorization_envelope(
 ) -> ManeuverEnvelope:
     """Issue a Δv authorization envelope."""
     _check_nonempty_str(envelope_id, "envelope_id")
-    if not isinstance(max_dv_ms, (int, float)) or max_dv_ms <= 0:
+    if isinstance(max_dv_ms, bool) or not isinstance(max_dv_ms, (int, float)) or max_dv_ms <= 0:
         raise OrbitalError("max_dv_ms must be a positive number")
     _check_ts(valid_from, "valid_from")
     _check_ts(valid_to, "valid_to")
@@ -621,7 +621,7 @@ def check_maneuver(
     """Check a maneuver against its authorization envelope."""
     if not isinstance(envelope, ManeuverEnvelope):
         raise OrbitalError("envelope must be a ManeuverEnvelope")
-    if not isinstance(dv_ms, (int, float)) or dv_ms < 0:
+    if isinstance(dv_ms, bool) or not isinstance(dv_ms, (int, float)) or dv_ms < 0:
         raise OrbitalError("dv_ms must be a non-negative number")
     _check_ts(at, "at")
     _check_ts(now, "now")
@@ -738,7 +738,7 @@ def stm_data_receipt(
     _check_nonempty_str(receipt_id, "receipt_id")
     _check_nonempty_str(data_id, "data_id")
     _check_hex64(data_digest, "data_digest")
-    if not isinstance(uncertainty_km, (int, float)) or uncertainty_km < 0:
+    if isinstance(uncertainty_km, bool) or not isinstance(uncertainty_km, (int, float)) or uncertainty_km < 0:
         raise OrbitalError("uncertainty_km must be a non-negative number")
     _check_ts(observed_at, "observed_at")
     _check_pos_int(ttl_s, "ttl_s")

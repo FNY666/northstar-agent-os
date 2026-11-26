@@ -491,7 +491,7 @@ def synthesize_constraints(schema: Mapping[str, Any]) -> "ConstraintSet":
             bounds: dict[str, Any] = {}
             for key in ("minimum", "maximum", "minLength", "maxLength",
                         "minItems", "maxItems"):
-                if key in decl and isinstance(decl[key], (int, float)):
+                if key in decl and not isinstance(decl[key], bool) and isinstance(decl[key], (int, float)):
                     bounds[key] = decl[key]
             if bounds:
                 constraints.append(
@@ -636,7 +636,7 @@ def _decl_names(props: Mapping[str, Any], namespace: str) -> list[str]:
         if isinstance(decl.get("enum"), list) and decl["enum"]:
             names.append(f"enum:{pname}")
         if any(
-            k in decl and isinstance(decl[k], (int, float))
+            k in decl and not isinstance(decl[k], bool) and isinstance(decl[k], (int, float))
             for k in ("minimum", "maximum", "minLength", "maxLength",
                       "minItems", "maxItems")
         ):

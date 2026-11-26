@@ -50,7 +50,7 @@ def detect_gradient_anomaly(
         if (
             not isinstance(u, dict)
             or not isinstance(u.get("gradient"), list)
-            or not all(isinstance(v, (int, float)) for v in u["gradient"])
+            or not all(not isinstance(v, bool) and isinstance(v, (int, float)) for v in u["gradient"])
         ):
             raise ModelAttackError("each update needs a numeric gradient list")
     for u in updates:

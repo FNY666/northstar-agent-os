@@ -707,7 +707,7 @@ class AskDecision:
     def __post_init__(self) -> None:
         if self.action not in ASK_ACTIONS:
             raise ValueError(f"action must be one of {ASK_ACTIONS}, got {self.action!r}")
-        if not isinstance(self.confidence, (int, float)) or not 0.0 <= self.confidence <= 1.0:
+        if isinstance(self.confidence, bool) or not isinstance(self.confidence, (int, float)) or not 0.0 <= self.confidence <= 1.0:
             raise ValueError(f"confidence must be within [0, 1], got {self.confidence!r}")
         if self.digest:
             object.__setattr__(self, "digest", self.digest)
@@ -774,7 +774,7 @@ class AskPolicy:
             ("ask_below", self.ask_below),
             ("solve_at", self.solve_at),
         ):
-            if not isinstance(value, (int, float)) or not 0.0 <= value <= 1.0:
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0.0 <= value <= 1.0:
                 raise ValueError(f"{label} must be within [0, 1], got {value!r}")
         if not self.abstain_below <= self.ask_below <= self.solve_at:
             raise ValueError(
@@ -802,7 +802,7 @@ def decide_next(
     the caller gets abstain, never a laundered solve.
     """
     policy = policy or AskPolicy()
-    if not isinstance(confidence, (int, float)) or not 0.0 <= confidence <= 1.0:
+    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)) or not 0.0 <= confidence <= 1.0:
         return AskDecision(
             decision_id=decision_id,
             action="abstain",

@@ -480,6 +480,19 @@ class CensusScopeScaleTests(unittest.TestCase):
     That is why the fourteen rows are pinned BY NAME, with the family
     suite's presence asserted directly.  A zero delta is exactly the
     case where the count cannot carry the claim and the names must.
+
+    **AMENDED 2026-11-26 (the NUMERIC-guard bool family).**  A fourth
+    suite landed:
+
+    * `components/northstar-agent-runtime/tests/
+      test_numeric_guard_bool_family.py` loads the EIGHT modules whose
+      `isinstance(X, (int, float))` guards had no bool half.  The count
+      moved 371 -> 378, and the delta is EXACTLY SEVEN.
+
+    The seven are the eight minus `ask_or_solve_probes`, which was
+    already multi-suite -- PART TWO loads it -- so the numeric suite's
+    presence does not change its scope.  Every one of the other SEVEN
+    was single-suite before, so every one of them moved.
     """
 
     def test_the_multi_suite_modules_are_counted(self) -> None:
@@ -491,7 +504,7 @@ class CensusScopeScaleTests(unittest.TestCase):
             if len(MODULE.referencing_suites(runtime, stem)) > 1
         ]
         self.assertEqual(
-            len(multi), 371,
+            len(multi), 378,
             "the number of modules whose scope the single-suite pairing "
             "understated",
         )
@@ -654,6 +667,47 @@ class CensusScopeScaleTests(unittest.TestCase):
                 )
                 self.assertIn(own, suites)
                 self.assertGreaterEqual(len(suites), 2)
+
+    def test_the_numeric_guard_family_modules_are_multi_suite(self) -> None:
+        """The NUMERIC family's seven new rows, pinned by NAME.
+
+        MEASURED 2026-11-26: `tests/test_numeric_guard_bool_family.py`
+        loads EIGHT modules -- the ones whose `isinstance(X, (int, float))`
+        guards had no bool half.  The count moved 371 -> 378, and the
+        delta is EXACTLY SEVEN: `ask_or_solve_probes` was already
+        multi-suite through PART TWO, so the numeric suite's presence
+        does not change its scope.
+
+        The seven rows are pinned by NAME for the same reason the
+        others are: a count that moves can carry the claim, but only
+        if the reader can see WHICH rows moved.
+        """
+        moved = [
+            "benchmark_retirement_probes", "constraint_synthesis_probes",
+            "decision_model", "harness_binding", "model_attack_09",
+            "moderation_agents", "orbital_agents",
+        ]
+        self.assertEqual(len(moved), 7, "the delta is exactly seven")
+        for stem in moved:
+            suites = MODULE.referencing_suites(RUNTIME, stem)
+            with self.subTest(module=stem):
+                self.assertIn("test_numeric_guard_bool_family", suites)
+                self.assertIn(f"test_{stem}", suites)
+                self.assertGreaterEqual(len(suites), 2)
+
+    def test_the_numeric_family_loads_the_eighth_module_too(self) -> None:
+        """The EIGHTH module the family loads is already multi-suite.
+
+        `ask_or_solve_probes` is loaded by PART TWO as well, so its
+        scope does not change -- but the family suite's presence in it
+        is still asserted, because a suite that silently stopped
+        loading a module would leave the count unmoved and the scope
+        pairing quietly degraded.
+        """
+        suites = MODULE.referencing_suites(RUNTIME, "ask_or_solve_probes")
+        with self.subTest(module="ask_or_solve_probes"):
+            self.assertIn("test_numeric_guard_bool_family", suites)
+            self.assertIn("test_int_guard_bool_family_part2", suites)
 
     def test_the_two_single_module_slices_are_multi_suite(self) -> None:
         # The same discipline as the twenty family modules: pin the

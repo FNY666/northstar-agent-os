@@ -189,9 +189,9 @@ def validate_quad(result: ScoredResult) -> None:
         raise HarnessBindingError(
             f"quad effort must be one of {sorted(_VALID_EFFORTS)}, not {effort!r}"
         )
-    if not isinstance(cost, (int, float)) or cost < 0:
+    if isinstance(cost, bool) or not isinstance(cost, (int, float)) or cost < 0:
         raise HarnessBindingError("quad $/task must be a non-negative number")
-    if not isinstance(result.score, (int, float)) or not 0.0 <= result.score <= 1.0:
+    if isinstance(result.score, bool) or not isinstance(result.score, (int, float)) or not 0.0 <= result.score <= 1.0:
         raise HarnessBindingError("score must be a number in [0, 1]")
 
 

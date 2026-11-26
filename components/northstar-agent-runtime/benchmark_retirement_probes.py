@@ -368,7 +368,7 @@ def check_saturation(
     cannot be checked cannot be claimed live.
     """
     benchmark_id = _non_empty_str(benchmark_id, "benchmark_id")
-    if not (isinstance(ceiling, (int, float)) and 0.0 < ceiling <= 1.0):
+    if not (not isinstance(ceiling, bool) and isinstance(ceiling, (int, float)) and 0.0 < ceiling <= 1.0):
         raise ValueError("ceiling must be in (0, 1]")
     clean: tuple[float, ...]
     if isinstance(scores, (list, tuple)) and scores:

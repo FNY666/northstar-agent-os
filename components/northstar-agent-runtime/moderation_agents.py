@@ -531,7 +531,7 @@ def check_dialect_parity(
         rates[dialect] = fp / total
     if report.baseline_dialect not in rates:
         raise ModerationError("baseline_dialect not in fp_counts")
-    if not isinstance(max_disparity, (int, float)) or max_disparity < 0 or max_disparity >= 1:
+    if isinstance(max_disparity, bool) or not isinstance(max_disparity, (int, float)) or max_disparity < 0 or max_disparity >= 1:
         raise ModerationError("max_disparity must be in [0, 1)")
     baseline_rate = rates[report.baseline_dialect]
     worst_dialect = max(rates, key=lambda d: rates[d])

@@ -70,7 +70,33 @@ def _load(name: str):
     from a dict literal is INVISIBLE to the resolver, so the census
     would pair each module with its own suite alone and never run these
     tests at all -- the family would measure nothing.
+
+    **A module already in `sys.modules` is REUSED, not re-loaded.**
+    Re-loading a module under its own name builds a SECOND set of class
+    objects, and every other module that imported a class from it keeps
+    the FIRST set.  An `isinstance` check across the two then fails for
+    no reason at all, and the failure surfaces in a suite that has
+    nothing to do with this one.
+
+    That is not hypothetical: `permissions.py` does `from
+    decision_model import DecisionPolicy` at import time, and
+    `decision_model` is loaded by the NUMERIC family suite.  With the
+    re-load, the `isinstance(decision_policy, DecisionPolicy)` check in
+    `permissions.py` failed and two unrelated tests in
+    `test_audit_fixes.py` went red in a full-suite run while passing
+    in isolation.  Reusing the already-imported module keeps ONE class
+    object per module for the whole process.
     """
+    existing = sys.modules.get(name)
+    if existing is not None:
+        path = getattr(existing, "__file__", None)
+        if path is not None:
+            try:
+                same = Path(path).resolve() == (RUNTIME_DIR / f"{name}.py").resolve()
+            except OSError:  # pragma: no cover - defensive
+                same = False
+            if same:
+                return existing
     spec = importlib.util.spec_from_file_location(name, RUNTIME_DIR / f"{name}.py")
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module

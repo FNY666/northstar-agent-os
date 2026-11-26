@@ -234,7 +234,7 @@ def _check_probabilities(probabilities: dict[str, float], options: tuple[str, ..
         return f"probabilities cover {sorted(probabilities)} but options are {list(options)}"
     total = 0.0
     for option, prob in probabilities.items():
-        if not isinstance(prob, (int, float)) or prob < 0.0 or prob > 1.0:
+        if isinstance(prob, bool) or not isinstance(prob, (int, float)) or prob < 0.0 or prob > 1.0:
             return f"probability for {option!r} is not within [0, 1]: {prob!r}"
         total += float(prob)
     if abs(total - 1.0) > 1e-6:
@@ -273,7 +273,7 @@ def adjudicate(
     approval = result.answers.get("approval")
     if approval is not None and approval.type == "noul":
         yes = approval.probabilities.get("yes")
-        if not isinstance(yes, (int, float)) or not 0.0 <= yes <= 1.0:
+        if isinstance(yes, bool) or not isinstance(yes, (int, float)) or not 0.0 <= yes <= 1.0:
             return "escalate", "malformed approval probability; escalating"
         if yes >= policy.approve_threshold:
             return "allow", f"P(approve)={yes:.3f} >= {policy.approve_threshold:.2f}"
@@ -330,7 +330,7 @@ class StaticDecisionModel:
                 )
             elif question.type == "noul":
                 yes = spec.get(name, 0.5)
-                if not isinstance(yes, (int, float)) or not 0.0 <= yes <= 1.0:
+                if isinstance(yes, bool) or not isinstance(yes, (int, float)) or not 0.0 <= yes <= 1.0:
                     raise ValueError(f"static profile for {name!r}: bad P(yes) {yes!r}")
                 answers[name] = QuestionAnswer(
                     name=name,

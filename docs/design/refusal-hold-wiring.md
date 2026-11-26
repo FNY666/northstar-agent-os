@@ -7666,6 +7666,238 @@ of the rows the count is about.  Its proof therefore lives in
 `tests/test_landlock.py`, the suite that already owns the module, and
 the family suites do not claim it.
 
+## 43. The SAME defect, in the OTHER numeric spelling: 18 sites in 8 modules
+
+§42 closed the int-guard family: every `or`-chain that mentions
+`isinstance(..., int)` now names `bool`.  But there is a SECOND numeric
+spelling, and it had the same blind spot:
+
+    isinstance(True, (int, float))   ->  True
+
+`bool` is a SUBCLASS of `int`, so `True` is also a member of the
+`(int, float)` tuple.  A guard written
+
+    if not isinstance(x, (int, float)) or x < 0:
+        raise ValueError(...)
+
+therefore does NOT fire for `True`: the first clause is False, and
+`True < 0` is False.  The bool walks straight through.
+
+### 43.1 How the candidate list was built, and why it is not 340
+
+The runtime holds **340** `isinstance(X, (int, float))` calls.  A
+naive count would have been a guess.  The list was built in two
+steps, and the SECOND step is where the count collapsed:
+
+1. An AST walk found every `isinstance(X, (int, float))` whose
+   enclosing function holds NO bool check for the SAME target.  That
+   is **23 candidates in 11 modules** -- but the walk counted
+   `constraint_synthesis_probes`' NESTED `_compile_props` separately
+   from its enclosing `synthesize_constraints`, so the real number of
+   distinct SITES is **22**.
+2. Each candidate was then PROBED with a crafted input -- `True` and
+   `False` separately -- and the verdict came from the probe, not
+   from the source.
+
+**The probe had to test BOTH bools, and that is not a detail.**  A
+RANGE check can refuse one bool and let the other through: `True == 1`
+fails a `< 1` bound, but `False == 0` PASSES a `< 0` bound.  A probe
+that tested only `True` would have called `moderation_agents`'
+`tolerance` a defect when its range check already refuses both, and
+would have called `benchmark_retirement_probes`' `ceiling` safe when
+`True` walks straight past its `0.0 < ceiling` bound.
+
+The four sites the probe cleared were `dp_interface` and
+`federated_attack_detector` (a `_reject_bool` helper on the same
+path) and `moderation_agents`' `tolerance` (its range check refuses
+both bools).  The other **18 were defects**, in **8 modules**.  (18 + the four
+cleared is 22, the corrected site count.)
+
+### 43.2 The fix, in the repo's own convention
+
+The repo already holds the corrected shape in **279** places --
+
+    if isinstance(x, bool) or not isinstance(x, (int, float)):
+
+-- and the mirrored PERMISSIVE shape in **27** places --
+
+    if isinstance(x, (int, float)) and (not isinstance(x, bool)):
+
+**These two counts are measured, and the metric is stated so it can be
+re-measured.**  For every `isinstance(X, (int, float))` CALL in the
+runtime's top-level modules, look at the ENCLOSING `BoolOp`; if that
+`BoolOp` also holds an `isinstance(X, bool)` check for the SAME target
+`X` (possibly under a `not`), the site is PAIRED -- `or` makes it
+NEGATIVE, `and` makes it PERMISSIVE.  Targets are compared by their
+source text, so `decl[key]` and `self.weight` are handled.  A site is
+counted once per CALL.
+
+**An earlier draft of this section said 241 and 27.  The 241 did not
+reproduce under this metric or under any of the four other metrics
+tried against it, so it was wrong; 279 is the measured value.**  The
+baseline tree (`14468df8`) measures **265 NEGATIVE / 23 PERMISSIVE**,
+and this slice's eighteen edits move it by exactly **+14 NEGATIVE**
+and **+4 PERMISSIVE** -- which is the eighteen sites, counted in the
+form each site already used.  A number in a document is a claim, and
+this one had to be re-measured before it could be believed.
+
+Each of the 18 sites now spells the bool half out, using the form its
+own neighbourhood already uses.  One edit was **reverted**: the
+`moderation_agents` `tolerance` site was changed first and then put
+back, because the probe showed its range check already refuses both
+bools, and a change that fixes nothing is noise.
+
+**The family is now CLOSED, and the closure is measured.**  The same
+AST walk that found the 23 candidates now returns exactly **FOUR**
+sites in **four** modules, and each of the four refuses a bool:
+
+| site | why it needs no change |
+|---|---|
+| `dp_interface.py:101` | `_reject_bool` refuses it on the same path |
+| `federated_attack_detector.py:148` | `_reject_bool` refuses it on the same path |
+| `moderation_agents.py:472` | its range check refuses BOTH bools |
+| `template_engine.py:345` | `_truthy` is not a numeric validator -- it answers "is this truthy", and `True` IS truthy |
+
+The last one is worth naming: `_truthy` is not a defect.  It is not
+checking that a value is a number, so "a bool reaches it" is not a
+bug.  Listing it as a candidate and then clearing it is the point of
+measuring rather than reading.
+
+### 43.3 The suite, and the control that can fail
+
+`tests/test_numeric_guard_bool_family.py` carries **31 members** over
+**18 distinct guard sites** (a site is a `(module, line, target)`
+triple; the suite's recorded mutations name exactly the eighteen sites
+the source edits touch).  A site gets a second member only when its
+bool has an in-range numeric EQUAL to use as the control -- five sites
+have only one -- but the refusal test loops over **BOTH** bools for
+**EVERY** member, so all eighteen sites are checked against `True` and
+`False` independently.  The three observable kinds are:
+
+  RAISE   the call raises the module's OWN error class.
+  REASON  the call REPORTS the refusal in its return value: a denial
+          string, or a record whose `reason` names the malformed
+          input.
+  RETURN  the call returns a value that DIFFERS from the valid
+          call's -- `constraint_synthesis_probes` DROPS the range
+          constraint instead of raising.
+
+**The control is the equal number, not an arbitrary one.**  Every
+member's valid control is the number that EQUALS its bool -- `1` for a
+`True` member, `0` for a `False` member.  A guard that refused
+everything would otherwise pass every rejection test, and a control
+that used a number OUT of range would be refused for the wrong
+reason.
+
+**The non-vacuity control was MEASURED, both ways.**  It plants the
+mutation this family exists to catch -- dropping the bool half -- in
+a COPY of the tree, loads the mutant, and requires the member then to
+ACCEPT the bool.  Three measurements back it:
+
+* With the mutation DISABLED -- the "mutant" is the original -- **all
+  31 members FAIL**.  The control can fail on every member, not on one
+  convenient example.
+* With the fix REVERTED in the source -- the pre-fix tree -- the suite
+  reports **166 failures**.  The suite measures the fix.
+* With the mutation applied and the fix in place, the suite is GREEN.
+
+**One defect in the control was found and fixed by those
+measurements.**  The control first compared the MUTANT against the
+ORIGINAL's error class.  The mutant defines its OWN class object, so
+the original's class could never match it -- and a refusal predicate
+that can never match is VACUOUS: the control would have passed
+against a mutant that still refused the bool for any reason.  The
+predicate now uses the mutant's own expected value, and the class
+names are asserted equal.
+
+### 43.3a The suite's loader had to change, and the reason is a defect
+
+The FIRST version of this suite re-loaded every family module with the
+house loader:
+
+    spec = importlib.util.spec_from_file_location(name, ...)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+
+That is the same shape the three int-family suites use, and it is
+correct for them.  It is WRONG here, and the failure it caused is
+worth recording because it does not look like the cause at all.
+
+**The symptom:** a full-suite run reported two failures in
+`tests/test_audit_fixes.py` --
+`test_child_inherits_decision_model_and_multisig` and
+`test_child_inherits_pretrade_and_audit_sink`.  The suite passed in
+isolation, and neither failing test touches a module this slice
+changed.
+
+**The mechanism:** `permissions.py` does
+
+    from decision_model import (DecisionModel, ..., DecisionPolicy, ...)
+
+at import time, so it holds a reference to the class object that was
+live when IT was imported.  A SECOND load of `decision_model` builds a
+NEW `DecisionPolicy` class and installs it in `sys.modules` --
+`permissions` still holds the OLD one.  Its
+`isinstance(decision_policy, DecisionPolicy)` check then fails for a
+policy built from either class, and `permissions.py` raises
+`TypeError: decision_policy must be a DecisionPolicy`.
+
+**How it was found, and how the cause was isolated.**  The failures
+were NOT dismissed as flaky and NOT blamed on the source edits.  The
+bisect was:
+
+* the suite passes in isolation;
+* the BASELINE worktree (`14468df8`) passes the same selection;
+* each of the EIGHT changed source files, applied alone to the
+  baseline, still passes -- so no source edit caused it;
+* the NEW TEST FILE, added alone to the baseline, reproduces both
+  failures exactly.
+
+That last step names the cause.  The loader now REUSES a module
+already in `sys.modules` -- after checking that its `__file__` is the
+same path -- so there is ONE class object per module for the whole
+process and `isinstance` means what it says.
+
+**The general rule this exposes:** a suite that re-loads a module
+under its own name breaks any OTHER module that imported a class from
+it.  The int-family suites do not hit it today because none of their
+twenty-odd modules is imported by `permissions` -- they are LUCKY, not
+safe.  So the same reuse rule was applied to ALL THREE int-family
+suites (`test_int_guard_bool_family.py`, `..._part2.py`,
+`..._part3.py`), each of which now reuses an already-imported module
+after checking that its `__file__` resolves to the same path.
+
+The modules those suites load ARE importers' targets -- `permissions`
+imports from `decision_model`, `loop` imports `compaction`, and
+`governance_bench` imports `agent_identity` and `passport` -- so the
+hazard was one module-load away from biting there too.  No
+`isinstance` consumer was found for them today, which is why the
+change is a hardening and not a bug fix.
+
+### 43.4 The census scope moved: 371 -> 378
+
+The family suite loads EIGHT modules.  The count moved **371 -> 378**
+and the delta is EXACTLY **SEVEN**: `ask_or_solve_probes` was already
+multi-suite through PART TWO, so the numeric suite's presence does not
+change its scope.  The seven moved rows are pinned BY NAME in
+`tests/test_census_scope.py`, and the eighth module's continued
+presence in its scope is asserted separately -- because a suite that
+silently stopped loading a module would leave the count unmoved and
+the scope pairing quietly degraded.
+
+### 43.5 What this does NOT change
+
+* The census artifact is NOT edited.
+* No version, schema, or audit kind is added or changed.
+* The int-guard family of §42 is untouched: its 87 sites and its four
+  suites are unaffected.
+* `dp_interface`, `enclave_interface` and `federated_attack_detector`
+  are untouched: they already reject a bool on the same path.
+* A `isinstance(X, (int, float))` guard is NOT wrong because it
+  accepts a float.  Whether a float should be accepted at all is a
+  different question, and this slice does not answer it.
+
 ### 42.6 What this does NOT change
 
 * The census artifact is NOT edited.  `agent_identity` reads 7/21 in
