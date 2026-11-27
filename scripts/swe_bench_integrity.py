@@ -117,6 +117,9 @@ class CheckStore:
         self.path = Path(path)
         self.raw: dict[str, Any] = {}
         self.items: list[InstanceIntegrity] = []
+        #: The conditions the probes were graded under. A verdict without
+        #: them cannot be compared with another verdict.
+        self.conditions: dict[str, Any] = {}
         if self.path.exists():
             self._load()
 
@@ -126,6 +129,7 @@ class CheckStore:
         except (OSError, json.JSONDecodeError):
             return
         self.raw = payload.get("raw", {}) or {}
+        self.conditions = payload.get("conditions", {}) or {}
         for entry in payload.get("instances", []) or []:
             self.items.append(
                 InstanceIntegrity(
@@ -164,6 +168,7 @@ class CheckStore:
         report = self.report()
         return {
             "sample": sample,
+            "conditions": self.conditions,
             "summary": report.summary(),
             "instances": [item.to_json() for item in self.items],
             "raw": self.raw,

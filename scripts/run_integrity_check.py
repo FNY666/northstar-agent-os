@@ -32,6 +32,34 @@ from scripts.run_swe_bench_eval import (  # noqa: E402
 from scripts.swe_bench_integrity import CheckStore, _test_lists, judge_instance  # noqa: E402
 
 
+def _conditions(arguments) -> dict:
+    """The conditions the probes are graded under.
+
+    The harness version decides how a patch is graded, so a verdict cannot
+    be read without it. The platform matters as well: the evaluation images
+    are built for one architecture, and on another one they run under
+    emulation, which is a different environment in every way that shows.
+    """
+    import platform
+
+    conditions = {
+        "harness": "swebench",
+        "timeout": arguments.timeout,
+        "probes": ["gold", "empty"],
+        "run_id": arguments.run_id,
+        "host_platform": platform.machine(),
+    }
+    try:
+        import swebench
+
+        version = getattr(swebench, "__version__", None)
+        if version:
+            conditions["harness_version"] = version
+    except Exception:  # noqa: BLE001
+        pass
+    return conditions
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sample", required=True)
@@ -50,6 +78,10 @@ def main(argv: list[str] | None = None) -> int:
 
     client = docker.from_env()
     sample = load_sample(Path(arguments.sample))
+
+    # The conditions under which the probes are graded. They go into the
+    # payload so that the stored verdicts say which harness produced them.
+    conditions = _conditions(arguments)
     gold_patches = {}
     if arguments.gold_patches:
         gold_patches = json.loads(Path(arguments.gold_patches).read_text(encoding="utf-8"))
@@ -64,6 +96,7 @@ def main(argv: list[str] | None = None) -> int:
     # The store keeps the verdicts on disk as they arrive, so a run that
     # takes days can be resumed and a machine that dies loses nothing.
     store = CheckStore(arguments.output)
+    store.conditions = conditions
     raw: dict[str, dict] = store.raw
 
     for task in tasks:
@@ -128,6 +161,7 @@ def main(argv: list[str] | None = None) -> int:
     report = store.report()
     payload = {
         "sample": arguments.sample,
+        "conditions": store.conditions,
         "summary": report.summary(),
         "instances": [
             {
