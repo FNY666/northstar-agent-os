@@ -844,6 +844,7 @@ REGISTRY = (
     _registration("experiment_tracker", "runtime", "2026-10-07", "Experiment tracking interface (MLflow / Weights & Biases shape, simulated)."),
     _registration("experiment_tracking", "runtime", "2026-10-08", "Experiment tracking — simulated W&B-style run bookkeeping (thirty-third batch)."),
     _registration("exploit_difficulty", "runtime", "2026-10-07", "Exploit-difficulty recalibration from observed model attempts."),
+    _registration("exploration_graph", "wsartex-dual-graph-lineage", "2026-11-27", "Dual-graph lineage: an exploration chain and a shared asset truth joined by anchors, with program-computed asset dedup keys."),
     _registration("face_detector", "runtime", "2026-10-08", "Face detection interface (deterministic boxes, landmarks, attributes)."),
     _registration("factuality_mock", "factuality-mock", "2026-10-09", "Factuality checking mock (D-OUT-012), Simulated."),
     _registration("failure_budget_combo", "runtime", "2026-10-07", "Failure bundles for budget exhaustion: incident records with budget detail."),

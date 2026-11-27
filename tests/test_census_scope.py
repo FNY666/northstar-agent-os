@@ -498,7 +498,7 @@ class CensusScopeScaleTests(unittest.TestCase):
     def test_the_multi_suite_modules_are_counted(self) -> None:
         runtime = RUNTIME
         modules = sorted(p.stem for p in runtime.glob("*.py"))
-        self.assertEqual(len(modules), 1620)
+        self.assertEqual(len(modules), 1621)
         multi = [
             stem for stem in modules
             if len(MODULE.referencing_suites(runtime, stem)) > 1

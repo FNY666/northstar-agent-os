@@ -322,7 +322,7 @@ Every fix was proved by planting the fault and re-running the suite.
 ## 7. The general lesson, and the scope it leaves open
 
 **A house pattern without a house guard is a defect in every house.**
-The runtime has **1619** top-level modules (the helper `canonical_json.py`
+The runtime has **1620** top-level modules (the helper `canonical_json.py`
 excluded). **687** of them call one of its three canonicalizers
 (`jcs_dumps`, `jcs_canonical_json`, `jcs_sha256_hex`), and **629** of
 those import the sibling helper behind a `try/except` fallback — the

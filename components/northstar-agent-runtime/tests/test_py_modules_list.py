@@ -247,7 +247,7 @@ class InstalledSurfaceTests(unittest.TestCase):
             "the wheel ships no package members; the flat list is only "
             "part of the surface",
         )
-        self.assertEqual(len(entries), 1642, sorted(entries)[:5])
+        self.assertEqual(len(entries), 1643, sorted(entries)[:5])
 
     def test_the_wheel_has_no_duplicated_entries(self):
         with tempfile.TemporaryDirectory(prefix="b173-pymod-dup-") as tmp:

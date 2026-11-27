@@ -202,7 +202,7 @@ MANIFEST: dict[str, tuple[str, ...]] = {
         "evaluation_harness", "evaluator_access", "evasion_corpus", "evasion_defense",
         "event_bridge", "event_catalog", "event_sourcing", "events",
         "evidence_tiers", "exactly_once", "excel_handler", "experiment_tracker",
-        "experiment_tracking", "exploit_difficulty", "face_detector", "failure_budget_combo",
+        "experiment_tracking", "exploit_difficulty", "exploration_graph", "face_detector", "failure_budget_combo",
         "failure_bundle", "failure_detector", "fairness_eval", "fe_interface",
         "feature_engineering", "feature_flags", "feature_store", "feature_viz",
         "federated_attack_detector", "federated_learning", "fedramp", "few_shot_learning",

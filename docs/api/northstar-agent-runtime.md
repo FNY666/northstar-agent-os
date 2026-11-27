@@ -41618,6 +41618,122 @@ Stateful one-way-ratchet tracker over exploit attempts.
 
 Replay the Hacktron datum as a self-check.
 
+### `exploration_graph`
+
+Source: `components/northstar-agent-runtime/exploration_graph.py`
+
+Dual-graph lineage: an exploration chain and a shared asset truth, joined by anchors.
+
+#### `ExplorationGraphError`
+
+Raised when an observation, a node, an edge or an anchor is not well formed.
+
+#### `NodeKind`
+
+The kinds of node the exploration graph holds.
+
+#### `AssetKind`
+
+The kinds of node the asset graph holds.
+
+#### `Relation`
+
+The edges the exploration graph holds.
+
+#### `AssetNode`
+
+One node of the asset graph.
+
+- `to_dict()`
+  - Return the node as a plain dict.
+#### `Node`
+
+One node of the exploration graph.
+
+- `to_dict()`
+  - Return the node as a plain dict.
+#### `Lineage`
+
+The chain that produced a finding.
+
+- `to_dict()`
+  - Return the lineage as a plain dict.
+#### `KindCoverage`
+
+The coverage of one asset kind.
+
+- `to_dict()`
+  - Return the row as a plain dict.
+#### `CoverageReport`
+
+The coverage of a scope: which in-scope assets were tested.
+
+- `tested_count` (property)
+  - How many in-scope assets were tested.
+- `tested_keys()`
+  - The keys of the in-scope assets that were tested.
+- `untested_keys()`
+  - The keys of the in-scope assets that were not tested.
+- `pct` (property)
+  - The fraction of the scope that was tested, or ``None`` if empty.
+- `by_kind(kind: AssetKind)`
+  - The coverage row for one asset kind.
+- `to_dict()`
+  - Return the report as a plain dict.
+#### `AssetGraph`
+
+The shared truth about what was touched.
+
+- `upsert_asset(raw: Mapping[str, Any])`
+  - Record a raw observation and return the node it belongs to.
+- `lookup_key(kind: AssetKind, value: str, **detail: Any)`
+  - The key the program would compute for an observation.
+- `get(key: str)`
+  - The node with this key, or ``None``.
+- `nodes()`
+  - Every node, in insertion order.
+- `children(key: str)`
+  - The nodes directly under this one.
+- `parents(key: str)`
+  - The nodes directly above this one.
+#### `ExplorationGraph`
+
+The chain of how a run thought, joined to the assets it touched.
+
+- `add_node(kind: NodeKind, text: str)`
+  - Add a node to the chain and return it.
+- `has_node(key: str)`
+  - Whether the graph holds a node with this key.
+- `node(key: str)`
+  - The node with this key, or ``None``.
+- `nodes()`
+  - Every node, in insertion order.
+- `link(src: str, relation: Relation, dst: str)`
+  - Join two nodes with a relation.
+- `has_edge(src: str, relation: Relation, dst: str)`
+  - Whether the graph holds this edge.
+- `children(key: str)`
+  - The nodes directly downstream of this one.
+- `parents(key: str)`
+  - The nodes directly upstream of this one.
+- `anchor(node_key: str, asset_key: str)`
+  - Say that this exploration node is about this asset.
+- `anchors_for(node_key: str)`
+  - The asset keys this node is anchored to.
+- `nodes_for_asset(asset_key: str)`
+  - The exploration node keys anchored to this asset.
+- `lineage(finding_key: str)`
+  - The chain that produced a finding.
+- `coverage(scope: Sequence[str])`
+  - Which of the in-scope assets were tested.
+#### `stdlib_only()`
+
+Whether this module imports nothing outside the standard library.
+
+#### `uses_clock()`
+
+Whether this module reads a clock.
+
 ### `face_detector`
 
 Source: `components/northstar-agent-runtime/face_detector.py`

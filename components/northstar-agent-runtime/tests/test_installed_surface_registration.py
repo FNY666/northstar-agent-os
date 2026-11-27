@@ -234,9 +234,9 @@ class InstalledSurfaceRegistrationTests(unittest.TestCase):
         installed = flat | members
         # RE-MEASURED 2026-11-16: `policy` joined the package members
         # (the `runtime-data-files` slice), so 22 -> 23 and 1635 -> 1636.
-        self.assertEqual(len(flat), 1619)
+        self.assertEqual(len(flat), 1620)
         self.assertEqual(len(members), 23)
-        self.assertEqual(len(installed), 1642)
+        self.assertEqual(len(installed), 1643)
         registered = set(rr.registered_module_names())
         self.assertEqual(
             registered,

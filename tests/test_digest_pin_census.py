@@ -54,7 +54,7 @@ class DigestPinCensusTests(unittest.TestCase):
         # The runtime's top-level modules, the helper excluded.  The repo
         # suite pins the same number twice (tests/test_package_member_
         # publication.py and tests/test_component_packaging_closure.py).
-        self.assertEqual(self.report["modules"], 1619)
+        self.assertEqual(self.report["modules"], 1620)
 
     def test_the_canonicalizer_user_count_is_pinned(self) -> None:
         self.assertEqual(self.report["canonicalizer_users"], 687)
@@ -161,6 +161,9 @@ class DigestPinCensusTests(unittest.TestCase):
             report = MODULE.census(target)
         self.assertEqual(report["candidate_sites"], 611)
         self.assertEqual(report["candidate_modules"], 200)
+        # The PRE-FIX tree's own module count.  This number describes the
+        # tree at 66e6ccd4~1 and does not move when the working tree
+        # gains a module -- the working tree's count is pinned above.
         self.assertEqual(report["modules"], 1619)
         self.assertEqual(report["canonicalizer_users"], 687)
         self.assertEqual(report["fallback_importers"], 629)

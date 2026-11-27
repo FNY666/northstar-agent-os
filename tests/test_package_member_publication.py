@@ -188,8 +188,8 @@ class PackageMemberPublicationTests(unittest.TestCase):
             "the installed surface is the flat modules plus the package members",
         )
         self.assertEqual(len(docbuild.package_members(RUNTIME)), 23)
-        self.assertEqual(len(docbuild.flat_modules(RUNTIME)), 1619)
-        self.assertEqual(len(installed), 1642)
+        self.assertEqual(len(docbuild.flat_modules(RUNTIME)), 1620)
+        self.assertEqual(len(installed), 1643)
         # A package member is in the installed surface and is not a flat
         # module -- that is the whole reason it needs a separate path.
         self.assertNotIn("tools.shell", docbuild.flat_modules(RUNTIME))
