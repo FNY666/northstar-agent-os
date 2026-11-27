@@ -85,6 +85,7 @@ def build_record(
     conditions["harness"] = eval_receipt.get("conditions", {}).get("harness", "")
     conditions["sample_sha256"] = _sha256(sample_path.read_bytes())
 
+    cost = solve_receipt.get("cost") or {}
     excluded_tests = sorted({
         name
         for row in rows
@@ -96,10 +97,19 @@ def build_record(
         "real_model_evaluated": bool(solve_receipt.get("real_model_evaluated")),
         "conditions": conditions,
         "tasks": rows,
+        "cost": cost,
         "summary": {
             "checked": len(rows),
             "resolved_full": resolved,
             "resolved_partial": partial,
+            # What the run cost, and what a resolved instance cost.
+            "cost_usd": cost.get("cost_usd"),
+            "input_tokens": (cost.get("usage") or {}).get("input_tokens"),
+            "output_tokens": (cost.get("usage") or {}).get("output_tokens"),
+            "tool_calls": cost.get("tool_calls"),
+            "num_turns": cost.get("num_turns"),
+            "instances_with_cost": cost.get("instances_with_cost"),
+            "instances_without_cost": cost.get("instances_without_cost"),
             "failed": failed,
             "not_a_verdict": not_a_verdict,
             "excluded_p2p": excluded_tests,
