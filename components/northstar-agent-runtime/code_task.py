@@ -166,7 +166,7 @@ def _git_environment(overrides: Sequence[tuple[str, str]]) -> dict[str, str]:
 
 
 _GIT_VERSION = re.compile(
-    rb"git version ([0-9]+)\\.([0-9]+)(?:\\.[0-9]+)?(?:[^\\r\\n]*)?\\r?\\n?\\Z"
+    rb"git version ([0-9]+)\.([0-9]+)(?:\.[0-9]+)?(?:[^\r\n]*)?\r?\n?\Z"
 )
 
 
