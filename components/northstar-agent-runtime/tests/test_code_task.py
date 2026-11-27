@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import struct
 import subprocess
 import sys
 import tempfile
@@ -16,6 +18,7 @@ from code_task import (
     CodeTask,
     CodeTaskError,
     IsolatedCodeWorkspace,
+    _run_git,
     audit_delivery_patch,
     classify_repository_surface,
     reconcile_code_evidence,
@@ -108,6 +111,34 @@ class IsolatedCodeWorkspaceTests(unittest.TestCase):
                 self.assertFalse(marker.exists(), "repository smudge filter executed")
             finally:
                 isolated.cleanup()
+
+
+    def test_git_status_refuses_index_paths_outside_repository(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary)
+            source = self.make_repository(parent)
+            outside = parent / "outside.txt"
+            outside.write_text("OUTSIDE-REPOSITORY-CONTENT\n", encoding="utf-8")
+            empty_blob = subprocess.run(
+                ["git", "-C", str(source), "hash-object", "-w", "--stdin"],
+                input=b"",
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            ).stdout.strip()
+            path = b"../outside.txt"
+            entry = (
+                struct.pack(">10I", 0, 0, 0, 0, 0, 0, 0o100644, 0, 0, 0)
+                + bytes.fromhex(empty_blob.decode("ascii"))
+                + struct.pack(">H", len(path))
+                + path
+            )
+            entry += b"\0" * (8 - len(entry) % 8)
+            data = b"DIRC" + struct.pack(">II", 2, 1) + entry
+            (source / ".git" / "index").write_bytes(data + hashlib.sha1(data).digest())
+
+            with self.assertRaisesRegex(CodeTaskError, "path traversal"):
+                _run_git(source, "status", "--short")
 
     def test_failed_run_can_preserve_worktree(self):
         with tempfile.TemporaryDirectory() as temporary:

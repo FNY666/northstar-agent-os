@@ -18,7 +18,11 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from tools import ToolAccessError, ToolContext, ToolInputError, ToolResult, ToolSpec, grep_files
-from code_task import CodeTaskError, _git_environment_for_repository
+from code_task import (
+    CodeTaskError,
+    _git_environment_for_repository,
+    _validate_repository_index_paths,
+)
 
 MAX_REPOSITORY_FILES = 8_000
 MAX_PATCH_BYTES = 256 * 1024
@@ -48,8 +52,9 @@ def _run_git(
         raise ToolAccessError("repository tools need a workspace sandbox")
     try:
         environment = _git_environment_for_repository(ctx.sandbox.root_real)
+        _validate_repository_index_paths(ctx.sandbox.root_real, environment)
     except CodeTaskError as error:
-        raise ToolInputError(f"Git configuration was refused: {error}") from error
+        raise ToolInputError(f"Git configuration or index was refused: {error}") from error
     process = subprocess.run(
         ["git", "-C", str(ctx.sandbox.root_real), *arguments],
         input=stdin,
