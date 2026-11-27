@@ -63,6 +63,10 @@ def _read_parquet(path: Path) -> list[dict[str, Any]]:
                 "fail_to_pass": list(record["FAIL_TO_PASS"] or []),
                 "pass_to_pass": list(record["PASS_TO_PASS"] or []),
                 "problem_statement_sha256": _sha256_text(record["problem_statement"] or ""),
+                # The integrity check runs the reference patch and the empty
+                # patch through the same grader; without its fingerprint the
+                # check could not prove which patch it graded.
+                "gold_patch_sha256": _sha256_text(record.get("patch") or ""),
                 # The upstream harness needs these to build a test spec and
                 # to grade the run; the sample carries them so that the
                 # evaluation needs nothing but the frozen file.
@@ -244,6 +248,8 @@ def main(argv: list[str]) -> int:
                 "fail_to_pass_sha256": _sha256_text("\n".join(row["fail_to_pass"])),
                 "pass_to_pass_sha256": _sha256_text("\n".join(row["pass_to_pass"])),
                 "problem_statement_sha256": row["problem_statement_sha256"],
+                "gold_patch_sha256": row.get("gold_patch_sha256")
+                or _sha256_text(""),
                 "environment_image": name,
                 "environment_digest": digest,
                 "image": row.get("image") or name,

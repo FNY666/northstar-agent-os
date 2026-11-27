@@ -30,6 +30,31 @@ def _eval(rows: list[dict]) -> dict:
 
 
 class MeasurementRecordTests(unittest.TestCase):
+    def test_the_rate_carries_the_uncertainty_that_belongs_to_it(self):
+        """A point estimate alone invites reading noise as a difference."""
+        record = RECORDER_MODULE.build_record(
+            _solve([
+                {"instance_id": "a__b-1", "repo": "a/b", "patch_bytes": 10},
+                {"instance_id": "a__b-2", "repo": "a/b", "patch_bytes": 10},
+                {"instance_id": "a__b-3", "repo": "a/b", "patch_bytes": 10},
+            ]),
+            _eval([
+                {"instance_id": "a__b-1", "outcome": "RESOLVED_FULL", "resolved": True},
+                {"instance_id": "a__b-2", "outcome": "RESOLVED_FULL", "resolved": True},
+                {"instance_id": "a__b-3", "outcome": "RESOLVED_NO", "resolved": False},
+            ]),
+            ROOT / "benchmarks" / "swe-bench" / "verified-50.json",
+        )
+        interval = record["summary"]["resolved_rate_ci95"]
+        self.assertEqual(interval["trials"], 3)
+        self.assertEqual(interval["successes"], 2)
+        self.assertEqual(interval["interval_method"], "wilson")
+        self.assertLess(interval["ci95_low"], interval["rate"])
+        self.assertGreater(interval["ci95_high"], interval["rate"])
+        self.assertEqual(
+            record["summary"]["resolved_rate_over_verdicts_ci95"]["trials"], 3
+        )
+
     def test_a_resolved_instance_is_counted_as_a_pass(self):
         record = RECORDER_MODULE.build_record(
             _solve([{"instance_id": "a__b-1", "repo": "a/b", "patch_bytes": 10}]),

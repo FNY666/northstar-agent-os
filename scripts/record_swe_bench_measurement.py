@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,9 @@ RESOLVED_PARTIAL = "RESOLVED_PARTIAL"
 # Outcomes that say something about the run, not about the model.  They are
 # reported separately: counting them as failures would blame the model for
 # an environment or harness problem.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from swe_bench_confidence import summarise as _confidence  # noqa: E402
+
 NOT_A_VERDICT = (
     "patch_not_applied",
     "no_patch_delivered",
@@ -117,12 +121,19 @@ def build_record(
                 1 for row in rows if row.get("excluded_p2p")
             ),
             "resolved_rate": round(resolved / len(rows), 4) if rows else 0.0,
+            # A point estimate on fifty tasks carries about seven points of
+            # standard error; the interval says how much of a difference
+            # between two runs is noise.
+            "resolved_rate_ci95": _confidence(resolved, len(rows)),
             # The rate over the instances that actually got a verdict.  The
             # rate over every instance counts an environment problem as a
             # model failure, which is the opposite of what it looks like.
             "resolved_rate_over_verdicts": (
                 round(resolved / (len(rows) - not_a_verdict), 4)
                 if len(rows) - not_a_verdict else 0.0
+            ),
+            "resolved_rate_over_verdicts_ci95": _confidence(
+                resolved, len(rows) - not_a_verdict
             ),
         },
     }
