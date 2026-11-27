@@ -28,6 +28,10 @@ import time
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from swe_bench_cost import read_usage  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 CLI = ROOT / "components" / "northstar-agent-runtime" / "cli.py"
 SAMPLE = ROOT / "benchmarks" / "swe-bench" / "verified-50.json"
@@ -261,6 +265,10 @@ def solve_one(
     elapsed = time.monotonic() - started
 
     patch = _read_patch(evidence_root) or b""
+    # What the run cost.  The runtime accounts for it in the session
+    # transcript; without it a measurement cannot say what a resolved
+    # instance cost.
+    cost = read_usage(evidence_root)
     return {
         "instance_id": task["instance_id"],
         "repo": task.get("repo", ""),
@@ -272,6 +280,11 @@ def solve_one(
         "patch": patch.decode("utf-8", errors="replace"),
         "stdout_tail": stdout.decode("utf-8", errors="replace")[-600:],
         "stderr_tail": stderr.decode("utf-8", errors="replace")[-600:],
+        "usage": cost["usage"],
+        "cost_usd": cost["cost_usd"],
+        "duration_ms": cost["duration_ms"],
+        "tool_calls": cost["tool_calls"],
+        "num_turns": cost["num_turns"],
     }
 
 
