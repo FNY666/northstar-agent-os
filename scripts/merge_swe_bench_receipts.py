@@ -76,6 +76,11 @@ def collect(out: Path) -> tuple[dict[str, Any], dict[str, Any], dict[str, str]]:
             gaps[path.stem[len("eval-"):]] = "evaluation conditions differ from the rest of the batch"
     if evaluate:
         evaluate["conditions"] = eval_conditions or {}
+    # What the instances cost.  The per-instance receipts carry it; the
+    # merged receipt says what the whole run cost.
+    from swe_bench_cost import total_usage
+
+    solve["cost"] = total_usage(solve.get("tasks", []))
     # The per-instance solve receipts each count the one instance they
     # solved.  The merged receipt describes all of them, so the count has
     # to say so.
