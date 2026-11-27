@@ -29,7 +29,7 @@ from scripts.run_swe_bench_eval import (  # noqa: E402
     _upstream_instance,
     load_sample,
 )
-from scripts.swe_bench_integrity import report_from_probes  # noqa: E402
+from scripts.swe_bench_integrity import _test_lists, report_from_probes  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -61,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
     workdir.mkdir(parents=True, exist_ok=True)
     os.chdir(workdir)
 
-    probes: list[tuple[str, str | None, str | None]] = []
+    probes: list[tuple] = []
     raw: dict[str, dict] = {}
 
     for task in tasks:
@@ -76,6 +76,7 @@ def main(argv: list[str] | None = None) -> int:
         spec = make_test_spec(upstream)
 
         outcomes: dict[str, str | None] = {}
+        test_lists: dict[str, object] = {}
         for name, patch in (("gold", gold_patches.get(instance_id, "")), ("empty", "")):
             pred = {
                 "model_name_or_path": f"integrity-{name}",
@@ -98,9 +99,18 @@ def main(argv: list[str] | None = None) -> int:
             _, entry = result
             report = entry.get(instance_id, entry)
             raw.setdefault(instance_id, {})[name] = report
-            outcomes[name] = _outcome_of(report, get_resolution_status)
+            outcomes[name] = _outcome_of(report, get_resolution_status, instance_id)
+            test_lists[name] = _test_lists(report)
 
-        probes.append((instance_id, outcomes.get("gold"), outcomes.get("empty")))
+        probes.append(
+            (
+                instance_id,
+                outcomes.get("gold"),
+                outcomes.get("empty"),
+                test_lists.get("gold"),
+                test_lists.get("empty"),
+            )
+        )
 
     report = report_from_probes(probes)
     payload = {
@@ -113,6 +123,9 @@ def main(argv: list[str] | None = None) -> int:
                 "gold_outcome": item.gold_outcome,
                 "empty_outcome": item.empty_outcome,
                 "detail": item.detail,
+                "fail_to_pass_passing_when_empty": item.fail_to_pass_passing_when_empty,
+                "gold_failures_also_passing_when_empty": item.gold_failures_also_passing_when_empty,
+                "failures_under_both": item.failures_under_both,
             }
             for item in report.instances
         ],
@@ -126,18 +139,32 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _outcome_of(report: dict, get_resolution_status) -> str | None:
-    """The resolution status of one probe, or None when there is no verdict."""
+def _outcome_of(report: dict, get_resolution_status, instance_id: str) -> str | None:
+    """The resolution status of one probe, or None when there is no verdict.
+
+    ``resolved`` is False for a probe that ran and did not fix the issue, and
+    that False is a verdict. Treating it as "no verdict" turns every failing
+    probe into an inconclusive one.
+    """
     if not isinstance(report, dict):
         return None
-    status = report.get("resolved")
+    # The upstream helper reads FAIL_TO_PASS and PASS_TO_PASS at the top level
+    # of the report; run_instance nests them under "tests_status".
+    graded = dict(report)
+    tests_status = graded.pop("tests_status", None)
+    if isinstance(tests_status, dict):
+        graded.update(tests_status)
+    try:
+        # The upstream helper reads one report, not a mapping of ids.
+        status = get_resolution_status(graded)
+    except Exception:  # noqa: BLE001
+        status = None
     if status:
         return str(status)
-    try:
-        # The upstream helper takes a mapping of instance id to the report.
-        return get_resolution_status({"instance": report})
-    except Exception:  # noqa: BLE001
-        return None
+    resolved = report.get("resolved")
+    if resolved is not None:
+        return "True" if resolved else "False"
+    return None
 
 
 if __name__ == "__main__":

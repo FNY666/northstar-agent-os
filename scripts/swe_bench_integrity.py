@@ -13,6 +13,13 @@ Both checks run through the same grader as the real evaluation, so a
 passing check says something about the grader, not about a re-implementation
 of it. The verdicts are kept per instance: a task that fails the check is
 reported as untrustworthy rather than silently dropped.
+
+The upstream grader reports one status per instance (RESOLVED_FULL /
+RESOLVED_PARTIAL / RESOLVED_NO). That status hides which tests failed, and
+two different failure modes look identical in it: a task whose fail-to-pass
+list is too wide, and a task whose pass-to-pass list contains a test that
+cannot pass in this environment. The verdicts below are computed from the
+test lists themselves, so the two are told apart.
 """
 
 from __future__ import annotations
@@ -24,6 +31,7 @@ from typing import Any, Iterable
 TRUSTWORTHY = "trustworthy"
 GOLD_REJECTED = "gold_patch_rejected"
 EMPTY_ACCEPTED = "empty_patch_accepted"
+GOLD_PARTIAL = "gold_patch_partial"
 INCONCLUSIVE = "inconclusive"
 
 
@@ -36,6 +44,14 @@ class InstanceIntegrity:
     gold_outcome: str | None = None
     empty_outcome: str | None = None
     detail: str = ""
+    #: Fail-to-pass tests that already pass without any patch. The task
+    #: cannot tell a fix from a no-op on them.
+    fail_to_pass_passing_when_empty: list[str] = field(default_factory=list)
+    #: Tests that failed under the reference patch but passed under the empty
+    #: patch. These are the tests that made the reference patch look wrong.
+    gold_failures_also_passing_when_empty: list[str] = field(default_factory=list)
+    #: Tests that failed under both probes. They cannot distinguish the two.
+    failures_under_both: list[str] = field(default_factory=list)
 
     @property
     def is_trustworthy(self) -> bool:
@@ -74,16 +90,57 @@ class IntegrityReport:
         return [i.instance_id for i in self.trustworthy]
 
 
+def _test_lists(report: Any) -> dict[str, dict[str, list[str]]] | None:
+    """The failed and passed test names in one grader report.
+
+    ``run_instance`` returns the grader's report with the test lists under
+    ``tests_status``; the lists themselves live under FAIL_TO_PASS and
+    PASS_TO_PASS. The failed and the passed names are kept apart, because
+    which set a test is in is what tells the failure modes apart.
+    """
+    if not isinstance(report, dict):
+        return None
+    status = report.get("tests_status")
+    if not isinstance(status, dict):
+        return None
+    out: dict[str, dict[str, list[str]]] = {}
+    for key in ("FAIL_TO_PASS", "PASS_TO_PASS"):
+        entry = status.get(key)
+        if not isinstance(entry, dict):
+            return None
+        failed = entry.get("failure") or []
+        passed = entry.get("success") or []
+        if not isinstance(failed, list) or not isinstance(passed, list):
+            return None
+        out[key] = {"failed": [str(x) for x in failed], "passed": [str(x) for x in passed]}
+    return out
+
+
+def _all(tests: dict[str, dict[str, list[str]]]) -> set[str]:
+    names: set[str] = set()
+    for entry in tests.values():
+        names.update(entry["failed"])
+        names.update(entry["passed"])
+    return names
+
+
 def judge_instance(
     instance_id: str,
     gold_outcome: str | None,
     empty_outcome: str | None,
+    gold_tests: dict[str, dict[str, list[str]]] | None = None,
+    empty_tests: dict[str, dict[str, list[str]]] | None = None,
 ) -> InstanceIntegrity:
     """Classify one task from the two probe verdicts.
 
     ``None`` means the grader produced no verdict -- the machine crashed or
     the run timed out. That is not evidence of a broken task, so the task is
     reported as inconclusive rather than counted against the sample.
+
+    When the test lists are available the verdict is computed from them
+    rather than from the upstream status, because the status cannot tell a
+    task with a broken fail-to-pass list from a task whose pass-to-pass list
+    contains a test that cannot pass here.
     """
     if gold_outcome is None or empty_outcome is None:
         missing = "gold" if gold_outcome is None else "empty"
@@ -94,6 +151,10 @@ def judge_instance(
             empty_outcome=empty_outcome,
             detail=f"no verdict for the {missing} patch",
         )
+
+    if gold_tests is not None and empty_tests is not None:
+        return _judge_by_tests(instance_id, gold_outcome, empty_outcome, gold_tests, empty_tests)
+
     if not _is_pass(gold_outcome):
         return InstanceIntegrity(
             instance_id=instance_id,
@@ -115,6 +176,93 @@ def judge_instance(
         verdict=TRUSTWORTHY,
         gold_outcome=gold_outcome,
         empty_outcome=empty_outcome,
+        detail="the reference patch passes and the empty patch does not",
+    )
+
+
+def _judge_by_tests(
+    instance_id: str,
+    gold_outcome: str,
+    empty_outcome: str,
+    gold_tests: dict[str, dict[str, list[str]]],
+    empty_tests: dict[str, dict[str, list[str]]],
+) -> InstanceIntegrity:
+    """Judge from the test lists, which say more than the upstream status."""
+    gold_names = _all(gold_tests)
+    empty_names = _all(empty_tests)
+
+    # The fail-to-pass set must actually fail without a patch. If it passes
+    # with no patch, the task cannot tell a fix from a no-op.
+    f2p = set(gold_tests["FAIL_TO_PASS"]["failed"]) | set(gold_tests["FAIL_TO_PASS"]["passed"])
+    f2p_passed_when_empty = sorted(f2p & empty_names - set(empty_tests["FAIL_TO_PASS"]["failed"]))
+
+    # Tests that failed under the reference patch but passed with no patch at
+    # all cannot have been broken by the patch.
+    gold_failed = set(gold_tests["FAIL_TO_PASS"]["failed"]) | set(gold_tests["PASS_TO_PASS"]["failed"])
+    empty_failed = set(empty_tests["FAIL_TO_PASS"]["failed"]) | set(empty_tests["PASS_TO_PASS"]["failed"])
+    also_passing = sorted(gold_failed & empty_names - empty_failed)
+    failed_under_both = sorted(gold_failed & empty_failed)
+
+    if _is_pass(gold_outcome) and not _is_pass(empty_outcome):
+        return InstanceIntegrity(
+            instance_id=instance_id,
+            verdict=TRUSTWORTHY,
+            gold_outcome=gold_outcome,
+            empty_outcome=empty_outcome,
+            detail="the reference patch passes and the empty patch does not",
+            gold_failures_also_passing_when_empty=also_passing,
+            failures_under_both=failed_under_both,
+        )
+
+    if f2p_passed_when_empty:
+        return InstanceIntegrity(
+            instance_id=instance_id,
+            verdict=EMPTY_ACCEPTED,
+            gold_outcome=gold_outcome,
+            empty_outcome=empty_outcome,
+            detail=(
+                "the fail-to-pass tests already pass without a patch: "
+                f"{len(f2p_passed_when_empty)} of them"
+            ),
+            fail_to_pass_passing_when_empty=f2p_passed_when_empty,
+            gold_failures_also_passing_when_empty=also_passing,
+            failures_under_both=failed_under_both,
+        )
+
+    if also_passing:
+        # The reference patch fails only on tests that pass without any
+        # patch. The task's own fail-to-pass list disagrees with the
+        # reference solution.
+        return InstanceIntegrity(
+            instance_id=instance_id,
+            verdict=GOLD_PARTIAL,
+            gold_outcome=gold_outcome,
+            empty_outcome=empty_outcome,
+            detail=(
+                "the reference patch fails on tests that pass without a patch: "
+                f"{len(also_passing)} of them"
+            ),
+            gold_failures_also_passing_when_empty=also_passing,
+            failures_under_both=failed_under_both,
+        )
+
+    if not _is_pass(gold_outcome):
+        return InstanceIntegrity(
+            instance_id=instance_id,
+            verdict=GOLD_REJECTED,
+            gold_outcome=gold_outcome,
+            empty_outcome=empty_outcome,
+            detail="the reference patch was rejected",
+            failures_under_both=failed_under_both,
+        )
+
+    return InstanceIntegrity(
+        instance_id=instance_id,
+        verdict=EMPTY_ACCEPTED,
+        gold_outcome=gold_outcome,
+        empty_outcome=empty_outcome,
+        detail="the empty patch was accepted",
+        failures_under_both=failed_under_both,
     )
 
 
@@ -130,10 +278,18 @@ def _is_pass(outcome: str) -> bool:
 
 
 def report_from_probes(
-    probes: Iterable[tuple[str, str | None, str | None]],
+    probes: Iterable[tuple],
 ) -> IntegrityReport:
-    """Build a report from ``(instance_id, gold_outcome, empty_outcome)``."""
+    """Build a report from the probe verdicts.
+
+    Each probe is ``(instance_id, gold_outcome, empty_outcome)``, optionally
+    followed by the two test lists. The lists are used when they are there,
+    because they say which tests failed, not just whether the task passed.
+    """
     report = IntegrityReport()
-    for instance_id, gold, empty in probes:
-        report.add(judge_instance(instance_id, gold, empty))
+    for probe in probes:
+        instance_id, gold, empty = probe[0], probe[1], probe[2]
+        gold_tests = probe[3] if len(probe) > 3 else None
+        empty_tests = probe[4] if len(probe) > 4 else None
+        report.add(judge_instance(instance_id, gold, empty, gold_tests, empty_tests))
     return report
