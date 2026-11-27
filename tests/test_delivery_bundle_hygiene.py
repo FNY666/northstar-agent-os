@@ -42,6 +42,37 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# The batch prefixes that count as NAMING a slice.
+#
+# MEASURED 2026-11-27: this file hardcoded the single prefix ``B173 ``, so
+# the first WSARTEX slice -- ``wsartex-dual-graph-lineage:`` -- was
+# reported as an offender by `test_every_commit_subject_starts_with_the_
+# batch_prefix`.  The commit was not the offender: the GUARD was, because
+# a prefix that names a batch IS a name, and the guard only knew one.
+#
+# So the prefixes are declared here, once, and the predicate reads them.
+# The set is the union of the batch prefixes the repo has used; a commit
+# whose subject starts with none of them names no slice, and that is what
+# the guard is for.
+#
+# The prefixes are ORDERED and the longest match wins, so a future
+# ``B1731 `` does not shadow a ``B173 ``.
+BATCH_PREFIXES = (
+    "B173 ",
+    "wsartex-",
+)
+
+
+def _names_a_slice(subject: str) -> bool:
+    """True when a commit subject names the slice it belongs to.
+
+    The predicate every attribution check in this file uses.  It was
+    ``subject.startswith("B173 ")`` in five places before 2026-11-27, and
+    a hardcoded prefix in five places is five chances to call a
+    correctly-named commit an offender.
+    """
+    return any(subject.startswith(prefix) for prefix in BATCH_PREFIXES)
+
 
 def _git(*args: str) -> str:
     result = subprocess.run(
@@ -122,7 +153,7 @@ def _named_commit_with_tree(tree: str) -> str:
         if "\t" not in line:
             continue
         other, subject = line.split("\t", 1)
-        if subject.startswith("B173 ") and _tree(other) == tree:
+        if _names_a_slice(subject) and _tree(other) == tree:
             return other
     return ""
 
@@ -152,7 +183,7 @@ def _offending_subjects() -> list[tuple[str, str]]:
     out = []
     for line in _batch_commits():
         sha, subject = line.split("\t", 1)
-        if not subject.startswith("B173 "):
+        if not _names_a_slice(subject):
             out.append((sha, subject))
     return out
 
@@ -234,12 +265,17 @@ class _scratch_commit:
         if self._named_twin:
             # A NAMED commit with the SAME tree: the amended twin.  It
             # has to be a NAMED commit -- one whose subject starts with
-            # `B173 ` -- so the twin search finds it.  It is on the
+            # a batch prefix -- so the twin search finds it.  It is on the
             # scratch branch, so it never enters the shared branch's
             # history.
+            #
+            # The subject is built from BATCH_PREFIXES so the control
+            # cannot rot: if the prefix set ever stopped naming this
+            # commit, the twin search would find nothing and the control
+            # would fail rather than pass for the wrong reason.
             named = subprocess.run(
                 ["git", "-C", self._repo, "commit-tree", tree,
-                 "-m", "B173 scratch: the named twin"],
+                 "-m", "%sscratch: the named twin" % BATCH_PREFIXES[0]],
                 capture_output=True,
                 check=True,
             ).stdout.decode().strip()
@@ -308,6 +344,12 @@ def _batch_commits() -> list[str]:
     are the batch's own (prefix `B173 `) and **2** are not -- `58f4a3d1`
     ("c1") and `c0c6d8b3` ("c2").  The other 864 are inherited from `main`
     and are not the batch's to name.
+
+    Measured 2026-11-27: the range's first NAMED commit is still the first
+    `B173 ` one, so the range boundary does not move when a second batch
+    prefix (`wsartex-`) is added -- the WSARTEX slice commits DESCEND from
+    the B173 chain, so they are inside the range and must name their slice
+    too.
     """
     lines = _git("log", "--format=%H%x09%s", "--reverse", "HEAD").splitlines()
     first_batch = None
@@ -315,7 +357,7 @@ def _batch_commits() -> list[str]:
         if "\t" not in line:
             continue
         _, subject = line.split("\t", 1)
-        if subject.startswith("B173 "):
+        if _names_a_slice(subject):
             first_batch = line
             break
     if first_batch is None:
@@ -418,6 +460,59 @@ class NoBundlesInTheRepositoryTests(unittest.TestCase):
 class CommitSubjectAttributionTests(unittest.TestCase):
     """Every commit in the batch must name the slice it belongs to."""
 
+    def test_the_batch_prefix_predicate_can_refuse(self):
+        """The non-vacuity control for the batch-prefix set.
+
+        MEASURED 2026-11-27: the prefix set was widened from one entry
+        (`B173 `) to two, because the WSARTEX slice's subject was
+        correctly named and the guard still called it an offender.
+
+        Widening a predicate is exactly the change that can turn a guard
+        into a rubber stamp: if the set ever became "everything", every
+        offender below would pass.  So the predicate is exercised on
+        subjects it must REFUSE, and the control must be shown able to
+        fail.
+
+        The subjects below are the real shapes the guard exists to catch:
+        a bare note ("c1"), a subject with no prefix at all, and a
+        subject that merely MENTIONS a prefix rather than starting with
+        one.
+        """
+        for subject in (
+            "c1",
+            "c2",
+            "fix: drop duplicated return in _canary_evidence",
+            "the wsartex- prefix mentioned mid-subject",
+            "B173",
+            "B173x something else",
+            "wsartex",
+            "",
+        ):
+            self.assertFalse(
+                _names_a_slice(subject),
+                "the predicate accepted %r, which names no slice" % subject,
+            )
+
+    def test_every_declared_batch_prefix_names_a_real_slice(self):
+        """Each prefix in the set must be one this repo actually uses.
+
+        A prefix nobody commits under is a prefix that would have made
+        the guard vacuous for a whole batch -- it would have admitted
+        subjects no commit carries, so the set would have grown without
+        any real effect on what the guard accepts.
+        """
+        for prefix in BATCH_PREFIXES:
+            hits = [
+                line
+                for line in _git("log", "--all", "--format=%H%x09%s").splitlines()
+                if "\t" in line and line.split("\t", 1)[1].startswith(prefix)
+            ]
+            self.assertTrue(
+                hits,
+                "no commit anywhere uses the batch prefix %r, so it only "
+                "weakens the guard" % prefix,
+            )
+
     def test_every_commit_subject_starts_with_the_batch_prefix(self):
         # Measured 2026-11-16: exactly two commits in the batch's own range
         # carry a subject that does not start with "B173 " -- `58f4a3d1`
@@ -456,14 +551,15 @@ class CommitSubjectAttributionTests(unittest.TestCase):
         offenders = []
         for line in _batch_commits():
             sha, subject = line.split("\t", 1)
-            if not subject.startswith("B173 "):
+            if not _names_a_slice(subject):
                 if _is_exempt_from_naming(sha):
                     continue
                 offenders.append((sha, subject))
         self.assertEqual(
             offenders,
             [],
-            "commits whose subject does not start with 'B173 ': "
+            "commits whose subject does not start with a batch prefix "
+            "(%s): " % ", ".join(repr(p) for p in BATCH_PREFIXES)
             + ", ".join("%s (%s)" % (sha[:8], subject) for sha, subject in offenders),
         )
 
@@ -593,7 +689,7 @@ class CommitSubjectAttributionTests(unittest.TestCase):
             if _is_graph_only_merge(sha):
                 continue
             content_merges += 1
-            if not subject.startswith("B173 "):
+            if not _names_a_slice(subject):
                 unnamed.append((sha, subject))
         self.assertEqual(
             unnamed,

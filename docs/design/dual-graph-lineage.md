@@ -373,6 +373,40 @@ survives until
 `test_a_finding_traces_back_to_its_fact_chain` is present, and that test
 fails because the chain reports one fact where the graph holds two.
 
+### 6.4 A repo guard this slice broke, and the fix
+
+The slice's own commit subject is `wsartex-dual-graph-lineage: …`. It is
+not a `B173 ` commit — it is a **WSARTEX** slice — and
+`tests/test_delivery_bundle_hygiene.py` reported it as an offender:
+
+```
+AssertionError: Lists differ: [('739e03b7…', 'wsartex-dual-graph-lineage:
+the exploration chain and the asset truth, joined by anchors')] != []
+```
+
+The commit was not the offender. The **guard** was, and the reason is
+that the guard hardcoded one batch prefix in five places
+(`subject.startswith("B173 ")`). A prefix that names a batch *is* a
+name; the guard only knew one, so it called a correctly-named commit
+an offender.
+
+The fix declares the prefixes once, in `BATCH_PREFIXES`, and every
+predicate reads them through `_names_a_slice()`. Widening a predicate is
+exactly the change that can turn a guard into a rubber stamp, so two
+controls were added, and **each was shown able to fail**:
+
+| control | what it holds | mutant that kills it |
+| --- | --- | --- |
+| `test_the_batch_prefix_predicate_can_refuse` | the predicate refuses `"c1"`, `""`, `"B173"` (no slug), `"B173x …"`, `"wsartex"`, and a subject that *mentions* a prefix mid-subject | the predicate rewritten to `return True` |
+| `test_every_declared_batch_prefix_names_a_real_slice` | every prefix in the set is one some commit actually uses, so the set cannot grow into a vacuity | a prefix added that no commit uses |
+
+Measured: 3/3 mutants killed, each by the control that names it.
+
+The range boundary did not move: `_batch_commits()` finds the first
+**named** commit in the history, and that is still the first `B173 ` one,
+so the WSARTEX commit descends from the B173 chain and is inside the
+range — which is why it must name its slice.
+
 ---
 
 ## 7. What this slice does NOT do

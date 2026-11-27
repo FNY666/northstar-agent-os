@@ -250,6 +250,18 @@ the branch carries 1053 commits, of which 189 are the batch's own
 which exist precisely to keep the pre-rewrite objects alive; they are not
 part of the branch the parent receives.  The test now uses `HEAD`.
 
+**The batch prefixes (2026-11-27).**  The subject test originally hardcoded
+one prefix, `B173 `, in five places.  The first **WSARTEX** slice
+(`wsartex-dual-graph-lineage:`) is not a `B173 ` commit, and the guard
+reported it as an offender — the commit was correctly named, and the guard
+only knew one batch.  The prefixes are now declared once, in
+`BATCH_PREFIXES`, and read through `_names_a_slice()`.  Two controls pin
+that change: one shows the predicate can still refuse (`"c1"`, `""`,
+`"B173"` with no slug, a prefix mentioned mid-subject), and one shows
+every declared prefix is a prefix some commit actually uses.  The range
+boundary does not move: the range still starts at the first **named**
+commit, which is the first `B173 ` one.
+
 ## 4. Verification
 
 See the slice report (`b173-delivery-bundle-hygiene-cc-final.txt`) for the
