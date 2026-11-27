@@ -41,6 +41,22 @@ def build_record(
     }
 
 
+def _stored_path(sample_path: Path) -> str:
+    """The path as it is written into the record.
+
+    The same sample reached through an absolute path and through a relative
+    one is the same sample, and the record should not depend on where the
+    command was run from. The repository root is the reference: a path
+    inside it is stored relative to it, whatever the working directory was.
+    """
+    root = Path(__file__).resolve().parent.parent
+    try:
+        inside = sample_path.resolve().relative_to(root)
+        return inside.as_posix()
+    except ValueError:
+        return sample_path.as_posix()
+
+
 def main() -> int:
     import argparse
 
@@ -68,7 +84,7 @@ def main() -> int:
     if arguments.conditions:
         conditions = json.loads(Path(arguments.conditions).read_text(encoding="utf-8"))
 
-    record = build_record(payload, str(sample_path), sample_sha256, conditions=conditions)
+    record = build_record(payload, _stored_path(sample_path), sample_sha256, conditions=conditions)
     Path(arguments.output).write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(record["summary"], indent=2))
     return 0
