@@ -18,6 +18,7 @@ import argparse
 import json
 import os
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -29,6 +30,7 @@ from scripts.run_swe_bench_eval import (  # noqa: E402
     _upstream_instance,
     load_sample,
 )
+from scripts.swe_bench_infra import probe_infra_failure  # noqa: E402
 from scripts.swe_bench_integrity import CheckStore, _test_lists, judge_instance  # noqa: E402
 
 
@@ -119,6 +121,7 @@ def main(argv: list[str] | None = None) -> int:
             continue
         outcomes: dict[str, str | None] = {}
         test_lists: dict[str, object] = {}
+        infra_failures: dict[str, str] = {}
         for name, patch in (("gold", gold_patches.get(instance_id, "")), ("empty", "")):
             pred = {
                 "model_name_or_path": f"integrity-{name}",
@@ -143,14 +146,34 @@ def main(argv: list[str] | None = None) -> int:
             raw.setdefault(instance_id, {})[name] = report
             outcomes[name] = _outcome_of(report, get_resolution_status, instance_id)
             test_lists[name] = _test_lists(report)
+            # A probe that died of a segmentation fault says nothing about
+            # the task. The evaluation images run under emulation on this
+            # architecture, and the compiled extensions of numpy and pandas
+            # crash the test process there.
+            broken = probe_infra_failure(
+                workdir, arguments.run_id, f"integrity-{name}", instance_id
+            )
+            if broken:
+                infra_failures[name] = broken
+                outcomes[name] = None
 
-        item = judge_instance(
-            instance_id,
-            outcomes.get("gold"),
-            outcomes.get("empty"),
-            test_lists.get("gold"),
-            test_lists.get("empty"),
-        )
+        if infra_failures:
+            # The run broke, not the task. Recording it as a rejected
+            # reference patch would condemn a sound task.
+            item = replace(
+                judge_instance(instance_id, None, None),
+                detail="the run broke -- "
+                + "; ".join(f"{k}: {v}" for k, v in sorted(infra_failures.items())),
+            )
+            raw.setdefault(instance_id, {})["infra_failure"] = infra_failures
+        else:
+            item = judge_instance(
+                instance_id,
+                outcomes.get("gold"),
+                outcomes.get("empty"),
+                test_lists.get("gold"),
+                test_lists.get("empty"),
+            )
         store.add(item, raw.get(instance_id))
         # The verdicts are written after every instance: a full run takes
         # days, and a machine that dies must not throw away the work that
