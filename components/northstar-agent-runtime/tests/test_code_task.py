@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -45,6 +46,30 @@ class IsolatedCodeWorkspaceTests(unittest.TestCase):
         git(root, "add", "app.py")
         git(root, "commit", "-m", "initial")
         return root
+
+    def test_workspace_refuses_gitfile_pointing_at_an_external_repository(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary)
+            source = self.make_repository(parent)
+            external = parent / "external"
+            external.mkdir()
+            git(external, "init")
+            git(external, "config", "user.email", "northstar-tests@example.invalid")
+            git(external, "config", "user.name", "Northstar Tests")
+            (external / "private.py").write_text("PRIVATE = True\n", encoding="utf-8")
+            git(external, "add", "private.py")
+            git(external, "commit", "-m", "private repository")
+
+            shutil.rmtree(source / ".git")
+            (source / ".git").write_text(
+                f"gitdir: {external / '.git'}\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(CodeTaskError, "pointer files"):
+                IsolatedCodeWorkspace(
+                    source, evidence_root=parent / "evidence"
+                ).prepare()
+            self.assertFalse((parent / "evidence").exists())
 
     def test_task_requires_a_goal(self):
         with self.assertRaises(CodeTaskError):

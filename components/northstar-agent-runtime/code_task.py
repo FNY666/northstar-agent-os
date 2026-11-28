@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import subprocess
 import tempfile
 import threading
@@ -1328,6 +1329,29 @@ def validate_check_inputs(inputs: Iterable[str]) -> tuple[str, ...]:
     return values
 
 
+def _find_real_git_directory_root(source: Path) -> Path:
+    """Find a conventional repository root without following a .git pointer."""
+    current = source
+    while True:
+        marker = current / ".git"
+        try:
+            marker_stat = marker.lstat()
+        except FileNotFoundError:
+            pass
+        except OSError as error:
+            raise CodeTaskError("cannot safely inspect workspace Git metadata") from error
+        else:
+            if not stat.S_ISDIR(marker_stat.st_mode):
+                raise CodeTaskError(
+                    "code workspace requires a real .git directory; pointer files and symlinks are refused"
+                )
+            return current
+        if current.parent == current:
+            break
+        current = current.parent
+    raise CodeTaskError("code workspace is not inside a repository with a real .git directory")
+
+
 @dataclass
 class IsolatedCodeWorkspace:
     """Lifecycle of a detached task worktree and its durable evidence directory."""
@@ -1348,8 +1372,11 @@ class IsolatedCodeWorkspace:
         source = Path(self.source).expanduser().resolve()
         if not source.is_dir():
             raise CodeTaskError(f"code workspace is not a directory: {source}")
+        repository_root = _find_real_git_directory_root(source)
         top = _run_git(source, "rev-parse", "--show-toplevel").stdout.decode().strip()
         repository = Path(top).resolve()
+        if repository != repository_root:
+            raise CodeTaskError("Git resolved a repository root outside its real .git directory")
         try:
             source_relative = source.relative_to(repository)
         except ValueError as error:
