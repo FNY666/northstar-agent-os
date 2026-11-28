@@ -120,6 +120,23 @@ class TrustScoreTests(unittest.TestCase):
         note = check_sample(_measurement([], sha="a"), _integrity({}, sha="b"))
         self.assertIn("different samples", note)
 
+    def test_the_fingerprint_is_found_in_the_conditions(self):
+        # The measurement record keeps the fingerprint next to the other
+        # conditions of the run, not at the top level.
+        measurement = _measurement([("a", "RESOLVED_FULL")], sha="")
+        measurement["conditions"] = {
+            "sample": {"path": "benchmarks/swe-bench/verified-50.json",
+                       "sample_sha256": "abc123"}
+        }
+        result = score(measurement, _integrity({"a": "trustworthy"}, sha="abc123"))
+        self.assertEqual(result.sample_sha256, "abc123")
+        self.assertEqual(check_sample(measurement, _integrity({}, sha="abc123")), "")
+
+    def test_the_fingerprint_at_the_top_level_is_still_read(self):
+        measurement = _measurement([("a", "RESOLVED_FULL")], sha="top")
+        result = score(measurement, _integrity({"a": "trustworthy"}, sha="top"))
+        self.assertEqual(result.sample_sha256, "top")
+
     def test_the_same_sample_is_not_reported(self):
         self.assertEqual(check_sample(_measurement([], sha="a"), _integrity({}, sha="a")), "")
 
