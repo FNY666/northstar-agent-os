@@ -1,0 +1,32 @@
+{
+  "probes_completed": 98,
+  "test_seconds_total": 46463.3,
+  "test_hours_total": 12.91,
+  "mean_seconds_per_probe": 474.1,
+  "by_probe": {
+    "integrity-empty": 472.6,
+    "integrity-gold": 475.6
+  },
+  "slowest_tasks": [
+    {
+      "instance_id": "django__django-10097",
+      "seconds": 9452.8
+    },
+    {
+      "instance_id": "astropy__astropy-13236",
+      "seconds": 3713.4
+    },
+    {
+      "instance_id": "astropy__astropy-13398",
+      "seconds": 3550.3
+    },
+    {
+      "instance_id": "astropy__astropy-13453",
+      "seconds": 3527.4
+    },
+    {
+      "instance_id": "astropy__astropy-13033",
+      "seconds": 3515.2
+    }
+  ]
+}
