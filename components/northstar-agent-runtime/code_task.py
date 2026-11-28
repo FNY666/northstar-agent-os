@@ -17,6 +17,7 @@ import time
 import uuid
 from collections import Counter
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -152,6 +153,7 @@ def _git_environment(overrides: Sequence[tuple[str, str]]) -> dict[str, str]:
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
         "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_NO_LAZY_FETCH": "1",
         "GIT_TERMINAL_PROMPT": "0",
         "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_CONFIG_GLOBAL": os.devnull,
@@ -163,6 +165,40 @@ def _git_environment(overrides: Sequence[tuple[str, str]]) -> dict[str, str]:
     return environment
 
 
+_GIT_VERSION = re.compile(
+    rb"git version ([0-9]+)\.([0-9]+)(?:\.[0-9]+)?(?:[^\r\n]*)?\r?\n?\Z"
+)
+
+
+@lru_cache(maxsize=8)
+def _ensure_git_config_count_support(path: str) -> None:
+    """Refuse Git versions that ignore the environment config hardening."""
+    environment = _git_environment(())
+    environment["PATH"] = path
+    try:
+        version = subprocess.run(
+            ["git", "--version"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=os.sep,
+            env=environment,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        raise CodeTaskError("cannot verify the Git version for safe repository tools") from error
+    match = _GIT_VERSION.fullmatch(version.stdout)
+    if version.returncode != 0 or match is None:
+        raise CodeTaskError("cannot verify the Git version for safe repository tools")
+    # GIT_CONFIG_COUNT arrived in 2.31; older Git silently ignores the
+    # command-scope overrides that neutralize repository-controlled config.
+    if (int(match.group(1)), int(match.group(2))) < (2, 31):
+        raise CodeTaskError(
+            "Git 2.31 or newer is required for safe repository configuration overrides"
+        )
+
+
 def _git_environment_for_repository(root: str | Path) -> dict[str, str]:
     """Neutralize repo-controlled Git commands and filters for every invocation.
 
@@ -170,8 +206,11 @@ def _git_environment_for_repository(root: str | Path) -> dict[str, str]:
     settings. Filter drivers are enumerated under the already-safe environment
     and then explicitly blanked before the caller's Git command runs.
     """
+    path = os.environ.get("PATH", "/usr/bin:/bin")
+    _ensure_git_config_count_support(path)
     overrides = list(_GIT_COMMAND_CONFIG)
     environment = _git_environment(overrides)
+    environment["PATH"] = path
     filters = subprocess.run(
         [
             "git", "-C", str(root), "config", "--local", "--name-only",

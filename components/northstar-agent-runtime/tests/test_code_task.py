@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -20,6 +21,9 @@ from code_task import (
     classify_repository_surface,
     reconcile_code_evidence,
     validate_check_inputs,
+    _ensure_git_config_count_support,
+    _git_environment_for_repository,
+    _run_git,
 )
 
 
@@ -45,6 +49,39 @@ class IsolatedCodeWorkspaceTests(unittest.TestCase):
         git(root, "add", "app.py")
         git(root, "commit", "-m", "initial")
         return root
+
+    def test_repository_tools_refuse_git_without_config_environment_support(self):
+        old_git = subprocess.CompletedProcess(
+            ["git", "--version"], 0, b"git version 2.30.9\n", b""
+        )
+        with patch("code_task.subprocess.run", return_value=old_git):
+            with self.assertRaisesRegex(CodeTaskError, "Git 2.31 or newer"):
+                _ensure_git_config_count_support("/northstar-test-git-2.30")
+
+    def test_repository_git_disables_promisor_lazy_fetch_commands(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary)
+            source = self.make_repository(parent)
+            marker = parent / "ssh-command-ran"
+            ssh_command = parent / "ssh-command"
+            ssh_command.write_text(
+                "#!/bin/sh\n"
+                f": > {shlex.quote(str(marker))}\n"
+                "exit 0\n",
+                encoding="utf-8",
+            )
+            ssh_command.chmod(0o700)
+            git(source, "config", "remote.origin.promisor", "true")
+            git(source, "config", "remote.origin.url", "ssh://example.invalid/repository.git")
+            git(source, "config", "core.sshCommand", shlex.quote(str(ssh_command)))
+
+            environment = _git_environment_for_repository(source)
+            self.assertEqual(environment["GIT_NO_LAZY_FETCH"], "1")
+            # This asks Git to compare against a missing object. The repository
+            # config names a command for a lazy fetch, but safe wrapper calls
+            # must fail locally without starting it.
+            _run_git(source, "diff", "HEAD", "d" * 40, check=False)
+            self.assertFalse(marker.exists(), "promisor remote command executed")
 
     def test_task_requires_a_goal(self):
         with self.assertRaises(CodeTaskError):
