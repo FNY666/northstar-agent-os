@@ -75,7 +75,7 @@ def score(
     }
 
     result = TrustWeightedScore(
-        sample_sha256=measurement.get("sample_sha256", "") or "",
+        sample_sha256=_sample_sha256(measurement),
     )
 
     # The rate is over the tasks that carry a verdict at all. A task that
@@ -124,9 +124,27 @@ def score(
     return result
 
 
+def _sample_sha256(measurement: dict[str, Any]) -> str:
+    """The fingerprint of the sample a measurement was taken on.
+
+    The measurement record keeps the fingerprint under its conditions, next
+    to the other things that were true when the measurement was taken. Older
+    records kept it at the top level, so both places are read.
+    """
+    top = measurement.get("sample_sha256", "") or ""
+    if top:
+        return top
+    conditions = measurement.get("conditions") or {}
+    direct = conditions.get("sample_sha256", "") or ""
+    if direct:
+        return direct
+    sample = conditions.get("sample") or {}
+    return sample.get("sample_sha256", "") or ""
+
+
 def check_sample(measurement: dict[str, Any], integrity: dict[str, Any]) -> str:
     """A note when the two sides do not describe the same sample."""
-    a = measurement.get("sample_sha256", "") or ""
+    a = _sample_sha256(measurement)
     b = integrity.get("sample_sha256", "") or ""
     if a and b and a != b:
         return (

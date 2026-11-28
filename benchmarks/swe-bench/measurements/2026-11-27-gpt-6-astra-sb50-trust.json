@@ -1,0 +1,30 @@
+{
+  "overall_resolved_rate": 0.7560975609756098,
+  "overall_resolved_pool": 41,
+  "overall_unjudged": 9,
+  "trusted_resolved_rate": 0.7631578947368421,
+  "trusted_tasks": 38,
+  "breakdown": {
+    "trustworthy": {
+      "RESOLVED_FULL": 29,
+      "RESOLVED_NO": 9,
+      "no_patch_delivered": 1,
+      "evaluation_inconclusive": 1
+    },
+    "empty_patch_accepted": {
+      "RESOLVED_PARTIAL": 1,
+      "RESOLVED_FULL": 2,
+      "no_patch_delivered": 2
+    },
+    "inconclusive": {
+      "evaluation_infrastructure_failure": 5
+    }
+  },
+  "tainted_tasks": [
+    "django__django-10097",
+    "psf__requests-1724",
+    "psf__requests-1921"
+  ],
+  "sample_sha256": "ae0513fc5949b619d70978de347b64dc57185d90c969b93f8755a14cc80bfaed",
+  "measurement_sha256": ""
+}
